@@ -4,6 +4,7 @@
 - `http.ts`: the only HTTP client. JSON in and out; RFC 9457 problem+json errors become `ApiError` (OQ-15).
 - `endpoints.ts`: one typed function per endpoint. Feature hooks call these.
 - `mocks/`: the MSW fake backend: a stateful in-memory store (`db.ts`) seeded from one coherent scenario (`fixtures.ts`), with the documented validations, dirty markers and a job that advances one step per poll.
+  - A finished job publishes the scenario's precomputed results for its days, replaces the range's Pendências and moves the dirty markers inside the range to end + 1 (OQ-12). The fake does not calculate: once a write touches a day, any job whose range reaches that day ends **Falhou** with a "Backend simulado" message and publishes nothing.
 
 At Wave 5 the hand-written types are replaced by types generated from the backend's OpenAPI (`npm run gen:api`).
 
