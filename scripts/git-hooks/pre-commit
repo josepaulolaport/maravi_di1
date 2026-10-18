@@ -76,9 +76,29 @@ if [[ $fe_any -eq 1 ]]; then
       if [[ ${#fe[@]} -gt 0 ]]; then
         npx --no eslint -- "${fe[@]}" || exit 1
       fi
-      npx --no tsc --noEmit || exit 1
+      # `--` stops npx from reading --noEmit as an npm config flag.
+      npx --no -- tsc --noEmit || exit 1
       if [[ ${#fe[@]} -gt 0 ]]; then
-        npx --no vitest related --run -- "${fe[@]}" || exit 1
+        # No `--` before the paths: vitest's CLI parser would set them aside and run nothing.
+        # Paths always start with src/, so none can be read as an option.
+        npx --no vitest related --run "${fe[@]}" || exit 1
+        # vitest skips files its config does not include, so every staged test file must be
+        # one it collects; otherwise a staged test would never run and the commit would pass.
+        tests=()
+        for f in "${fe[@]}"; do [[ $f =~ \.(test|spec)\.tsx?$ ]] && tests+=("$f"); done
+        if [[ ${#tests[@]} -gt 0 ]]; then
+          listed=$(npx --no vitest list --filesOnly "${tests[@]}") || exit 1
+          declare -A collected=()
+          while IFS= read -r line; do [[ -n $line ]] && collected["$line"]=1; done <<<"$listed"
+          missing=0
+          for f in "${tests[@]}"; do
+            if [[ -z ${collected["$f"]:-} ]]; then
+              echo "pre-commit: staged test file is not run by vitest: frontend/$f" >&2
+              missing=1
+            fi
+          done
+          [[ $missing -eq 0 ]] || exit 1
+        fi
       else
         npx --no vitest run || exit 1
       fi
