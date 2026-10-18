@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# pre-commit hook: checks exactly what is being committed (CLAUDE.md §5).
+# The staged content is copied to a temporary folder and checked there, so a partial `git add -p`
+# is tested as it will be committed, and unstaged or untracked files never affect the result.
+# Never bypass with --no-verify.
+set -uo pipefail
+export LC_ALL=C.UTF-8
+root=$(git rev-parse --show-toplevel)
+cd "$root" || exit 1
+
+mapfile -d '' -t staged < <(git diff --cached --name-only -z --diff-filter=ACMRD)
+[[ ${#staged[@]} -eq 0 ]] && exit 0
+
+# Check a copy of exactly what is staged, in a temporary folder that reuses the installed
+# dependencies. The working tree is never modified.
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/di1-precommit.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+git checkout-index --all --prefix="$tmp/"
+[[ -d "$root/backend/.venv" ]] && ln -s "$root/backend/.venv" "$tmp/backend/.venv" 2>/dev/null
+[[ -d "$root/frontend/node_modules" ]] && ln -s "$root/frontend/node_modules" "$tmp/frontend/node_modules" 2>/dev/null
+cd "$tmp" || exit 1
+
+status=0
+fail() { echo "pre-commit: $1" >&2; status=1; }
+
+py=(); fe=(); fe_any=0
+for f in "${staged[@]}"; do
+  case "$f" in
+    backend/*.py) [[ -e "$f" ]] && py+=("${f#backend/}") ;;
+  esac
+  case "$f" in
+    frontend/src/*.ts|frontend/src/*.tsx) fe_any=1; [[ -e "$f" ]] && fe+=("${f#frontend/}") ;;
+    frontend/*) fe_any=1 ;;
+  esac
+done
+backend_any=0
+for f in "${staged[@]}"; do case "$f" in backend/*) backend_any=1 ;; esac; done
+
+if [[ $backend_any -eq 1 ]]; then
+  if [[ ! -f backend/pyproject.toml ]]; then
+    echo "pre-commit: backend scaffold not created yet; backend checks skipped"
+  elif [[ ! -d "$root/backend/.venv" ]] || ! command -v uv >/dev/null 2>&1; then
+    fail "backend dependencies missing: run 'cd backend && uv sync --frozen'"
+  else
+    (
+      cd backend || exit 1
+      if [[ ${#py[@]} -gt 0 ]]; then
+        uv run --frozen --quiet ruff format --check -- "${py[@]}" || exit 1
+        uv run --frozen --quiet ruff check -- "${py[@]}" || exit 1
+      fi
+      if [[ -d src ]]; then uv run --frozen --quiet mypy src tests || exit 1; fi
+      if [[ -d tests/unit ]]; then
+        uv run --frozen --quiet pytest tests/unit -q -x -p no:cacheprovider; rc=$?
+        [[ $rc -eq 0 || $rc -eq 5 ]] || exit 1
+      fi
+    ) || fail "backend checks failed (ruff / mypy / unit tests)"
+  fi
+fi
+
+if [[ $fe_any -eq 1 ]]; then
+  if [[ ! -f frontend/package.json ]]; then
+    echo "pre-commit: frontend scaffold not created yet; frontend checks skipped"
+  elif [[ ! -d "$root/frontend/node_modules" ]]; then
+    fail "frontend dependencies missing: run 'cd frontend && npm ci'"
+  else
+    (
+      cd frontend || exit 1
+      if [[ ${#fe[@]} -gt 0 ]]; then
+        npx --no eslint -- "${fe[@]}" || exit 1
+      fi
+      npx --no tsc --noEmit || exit 1
+      if [[ ${#fe[@]} -gt 0 ]]; then
+        npx --no vitest related --run -- "${fe[@]}" || exit 1
+      else
+        npx --no vitest run || exit 1
+      fi
+    ) || fail "frontend checks failed (eslint / tsc / vitest)"
+  fi
+fi
+
+exit $status

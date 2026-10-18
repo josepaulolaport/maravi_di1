@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# commit-msg hook: enforces the Conventional Commits rules of .claude/skills/commit/SKILL.md.
+# Installed with: git config core.hooksPath scripts/git-hooks
+set -euo pipefail
+export LC_ALL=C.UTF-8
+msg_file="$1"
+# First non-comment line is the subject.
+subject=$(grep -v '^#' "$msg_file" | sed -n '1p')
+
+# Allowed exceptions: fixup!/squash! (squashed before the PR) and git's own revert subjects.
+case "$subject" in
+  "fixup! "*|"squash! "*|"Revert \""*) exit 0 ;;
+esac
+
+types='feat|fix|test|refactor|perf|docs|build|ci|chore|contract'
+scopes='asset|pricing|ledger|prices|portfolio|pnl|processing|platform|workers|composition|contracts|db|web|web-[a-z0-9-]+|infra|ci|docs|agents'
+pattern="^(${types})\((${scopes})\): [a-z0-9\`].*[^.]$"
+fail() { printf 'commit-msg: %s\n  subject: "%s"\n  see .claude/skills/commit/SKILL.md\n' "$1" "$subject" >&2; exit 1; }
+
+# No merge subjects: nobody merges locally; PRs are merged by a human on GitHub.
+[[ "$subject" =~ $pattern ]] || fail "subject must be '<type>(<scope>): <summary>' (types: ${types//|/, }; scopes: ${scopes//|/, }), summary lower case, no final period"
+(( ${#subject} <= 72 )) || fail "subject longer than 72 characters (${#subject})"
+
+# Line 2, if present, must be blank.
+second=$(grep -v '^#' "$msg_file" | sed -n '2p')
+[[ -z "$second" ]] || fail "leave a blank line between the subject and the body"
+
+# feat and fix must cite the spec.
+if [[ "$subject" =~ ^(feat|fix) ]]; then
+  grep -v '^#' "$msg_file" | grep -Eq '^Refs: .*(§[0-9]+|interfaces|schema|OQ-[0-9]+)' || fail "feat/fix commits need a 'Refs: spec §…' line"
+fi
+exit 0

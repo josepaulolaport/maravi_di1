@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+frontend/test-results/
+frontend/playwright-report/
+
+# Environment and local settings
+.env
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Agent worktrees
+.claude/worktrees/
+
+# OS
+.DS_Store
+
+# CodeDB
+codedb.snapshot
+
+# AI conversation history: handed in separately, not through git
+ai-history/
+
+# Local design exports: the designs live in Figma
+frontend/page_designs/
