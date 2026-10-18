@@ -16,6 +16,7 @@ on its lines when they are in the diff, otherwise in the review body. Standard l
 from __future__ import annotations
 
 import copy
+import http.client
 import json
 import os
 import subprocess
@@ -34,6 +35,8 @@ ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/complet
 MODEL = "gemini-3.8-flash"
 CHUNK_CHARS = 300_000  # about 75k tokens of diff per request
 MAX_REQUESTS = 6
+REQUEST_TIMEOUT = 180  # seconds; a slower answer is dropped and retried
+ATTEMPTS = 3
 EXCLUDE = ["backend/uv.lock", "frontend/package-lock.json", "docs"]
 # Keywords Gemini's structured output does not document; they are still checked locally.
 _UNSUPPORTED = {"$schema", "minLength"}
@@ -142,25 +145,38 @@ def request_schema(schema: Any) -> Any:
     return copy.deepcopy(schema)
 
 
-def http_json(url: str, payload: dict[str, Any], headers: dict[str, str]) -> Any:
-    """POST JSON; retry 429 and 5xx with Retry-After or a growing wait, then fail loudly."""
+def http_json(
+    url: str, payload: dict[str, Any], headers: dict[str, str], *, idempotent: bool = False
+) -> Any:
+    """POST JSON; retry 429 and 5xx with Retry-After or a growing wait, then fail loudly.
+
+    An idempotent call (the Gemini request) is also retried when the connection drops or times
+    out; posting the review is not, since a lost response may still have created it.
+    """
     body = json.dumps(payload).encode()
-    for attempt in range(1, 5):
+    for attempt in range(1, ATTEMPTS + 1):
         request = urllib.request.Request(
             url, body, {"Content-Type": "application/json", **headers}, method="POST"
         )
+        started = time.monotonic()
         try:
-            with urllib.request.urlopen(request, timeout=300) as response:
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             detail = error.read().decode(errors="replace")[:2000]
-            if (error.code == 429 or error.code >= 500) and attempt < 4:
+            if (error.code == 429 or error.code >= 500) and attempt < ATTEMPTS:
                 retry_after = error.headers.get("Retry-After", "")
                 wait = int(retry_after) if retry_after.isdigit() else 30 * attempt
                 sys.stderr.write(f"HTTP {error.code}, retry {attempt} in {wait}s: {detail}\n")
                 time.sleep(wait)
                 continue
             raise RuntimeError(f"HTTP {error.code} from {url}: {detail}") from error
+        except (http.client.HTTPException, urllib.error.URLError, OSError) as error:
+            elapsed = time.monotonic() - started
+            if not idempotent or attempt == ATTEMPTS:
+                raise RuntimeError(f"{url}: {error!r} after {elapsed:.0f}s") from error
+            sys.stderr.write(f"{error!r} after {elapsed:.0f}s, retry {attempt} in 10s\n")
+            time.sleep(10)
     raise AssertionError("unreachable")
 
 
@@ -168,6 +184,9 @@ def ask_gemini(prompt: str, diff_text: str, part: str, schema: dict[str, Any]) -
     payload = {
         "model": MODEL,
         "temperature": 0,
+        # Gemini 3 cannot turn thinking off; its default level kept a ~10k-token diff waiting
+        # until the connection was dropped after 280 s.
+        "reasoning_effort": "low",
         "messages": [
             {"role": "system", "content": prompt},
             {"role": "user", "content": f"Pull request diff ({part}):\n\n{diff_text}"},
@@ -178,7 +197,13 @@ def ask_gemini(prompt: str, diff_text: str, part: str, schema: dict[str, Any]) -
         },
     }
     key = os.environ["GEMINI_API_KEY"]
-    answer = http_json(ENDPOINT, payload, {"Authorization": f"Bearer {key}"})
+    started = time.monotonic()
+    answer = http_json(ENDPOINT, payload, {"Authorization": f"Bearer {key}"}, idempotent=True)
+    usage = answer.get("usage", {})
+    sys.stdout.write(
+        f"{part}: {len(diff_text)} chars, {time.monotonic() - started:.0f}s, "
+        f"tokens in={usage.get('prompt_tokens')} out={usage.get('completion_tokens')}\n"
+    )
     return json.loads(answer["choices"][0]["message"]["content"])
 
 
