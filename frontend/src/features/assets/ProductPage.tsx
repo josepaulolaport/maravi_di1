@@ -1,11 +1,10 @@
-import { Button, Paper, SimpleGrid, Skeleton, Stack, Text, TextInput, Title } from '@mantine/core';
+import { Button, Paper, Skeleton, Stack, Text, TextInput, Title } from '@mantine/core';
 import { IconPlus, IconSearch } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useParams } from 'react-router';
 
 import type { Product } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
-import { formatMoney, UNAVAILABLE } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
@@ -16,8 +15,8 @@ import { PageHeader } from './components/PageHeader';
 import { useInstruments, useProduct, useSearchParam } from './hooks/useAssets';
 
 /**
- * A product (spec §11.2, design 2:165): its shared futures specification (§3) and its
- * contracts, each with its latest reference observation next to its own date (OQ-19 item 5).
+ * A product (spec §11.2, design 2:165): its contracts, each with its latest reference
+ * observation next to its own date (OQ-19 item 5). No specification card (user, 2026-10-18).
  */
 export function ProductPage() {
   const { productId = '' } = useParams();
@@ -55,7 +54,6 @@ function ProductBody({ product }: { product: Product }) {
           </Button>
         }
       />
-      <SpecCard product={product} />
       <Paper>
         <Stack gap={0}>
           <Title order={2} size="h4" fw={500} p="md" pb={0}>
@@ -91,33 +89,5 @@ function ProductBody({ product }: { product: Product }) {
         }}
       />
     </Stack>
-  );
-}
-
-/** The product's shared specification (`asset.futures`, §3) and its pricing convention (§4.1). */
-function SpecCard({ product }: { product: Product }) {
-  const futures = product.futures;
-  const specs = [
-    {
-      label: 'Valor de referência',
-      value: futures ? formatMoney(futures.face_value) : UNAVAILABLE,
-    },
-    // DC/365 is the only convention (§4.1): no API field, fixed text.
-    { label: 'Contagem de dias', value: 'Dias corridos / 365' },
-    { label: 'Precificação', value: 'PU e taxa anual' },
-  ];
-  return (
-    <Paper p="lg" role="region" aria-label="Especificações">
-      <SimpleGrid cols={3}>
-        {specs.map((spec) => (
-          <Stack key={spec.label} gap={4}>
-            <Text size="sm" c="dimmed">
-              {spec.label}
-            </Text>
-            <Text fw={500}>{spec.value}</Text>
-          </Stack>
-        ))}
-      </SimpleGrid>
-    </Paper>
   );
 }

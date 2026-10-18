@@ -43,16 +43,13 @@ describe('Ativos: produto (§11.2)', () => {
     ).toBeInTheDocument();
   });
 
-  it('§3 §4.1 shows the shared futures specification', async () => {
+  it('§11.2 shows no specification card (user, 2026-10-18)', async () => {
     await openProduct();
 
-    const specs = within(screen.getByRole('region', { name: 'Especificações' }));
-    expect(specs.getByText('Valor de referência')).toBeInTheDocument();
-    expect(specs.getByText('R$ 100.000,00')).toBeInTheDocument();
-    expect(specs.getByText('Contagem de dias')).toBeInTheDocument();
-    expect(specs.getByText('Dias corridos / 365')).toBeInTheDocument();
-    expect(specs.getByText('Precificação')).toBeInTheDocument();
-    expect(specs.getByText('PU e taxa anual')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Especificações' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Valor de referência')).not.toBeInTheDocument();
+    expect(screen.queryByText('Contagem de dias')).not.toBeInTheDocument();
+    expect(screen.queryByText('Precificação')).not.toBeInTheDocument();
   });
 
   it('§11.2 §5 lists each contract with its latest observation next to its own date', async () => {
