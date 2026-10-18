@@ -4,7 +4,7 @@
 
 ## Scope and structural rules
 
-Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pricing`, `prices`, `portfolio`, `pnl`, `processing`. HTTP/API service methods may be async; calculation engines are deterministic synchronous pure Python. `platform` owns database session/UoW, RabbitMQ/outbox/inbox, tracing. Cross-module access only through `public.py` contracts. No service imports another module's repositories/ORM. `Depends` only in FastAPI adapters/dependency providers. SQL lives in `infrastructure/persistence/queries`. One shared Unit of Work for operations that must save both a business mutation and financial-result invalidation.
+Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pricing`, `prices`, `portfolio`, `pnl`, `processing`. HTTP/API service methods may be async; calculation engines are deterministic synchronous pure Python. `platform` owns database session/UoW, RabbitMQ/outbox/inbox, tracing. Cross-module access only through `public.py` contracts. A value read by more than one module is defined once in `di1.shared` and exposed by its owner's `public.py`; consumers never redeclare it (see "Shared values"). No service imports another module's repositories/ORM. `Depends` only in FastAPI adapters/dependency providers. SQL lives in `infrastructure/persistence/queries`. One shared Unit of Work for operations that must save both a business mutation and financial-result invalidation.
 
 ## Contract catalog
 
@@ -20,12 +20,16 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 - `PricingInput` has exactly one authoritative input: rate or PU. `PricingResult` returns PU, rate where derivable, methodology (`CHALLENGE_DC_365`), version, input_kind.
 - `DI1Calculator` is pure and returns a value. Calculators never publish messages or persist results. `PriceService` and `LedgerService` can both call Pricing's public interface; P&L does **not** belong here.
 
+### Shared values
+- `di1.shared.trades.Trade`: the economic facts of a trade — `asset_id`, `trade_date`, `trade_time`, `seq`, `signed_quantity` (buys positive), `execution_pu`, `execution_rate`, and `order_key` = `(trade_date, trade_time, seq)` (OQ-13). Owned by Ledger, read by Portfolio, PnL and Processing. No module declares its own trade type.
+- `di1.shared.decimals` (precision, OQ-3) and `di1.shared.clock` (injected clock).
+
 ### Ledger
-- `LedgerService.create_trade(request, *, uow) -> Trade`
+- `LedgerService.create_trade(request, *, uow) -> TradeRecord` (`TradeRecord` carries the shared `Trade` plus Ledger's metadata: id, input kind, created_at, deletion audit)
 - `LedgerService.delete_trade(trade_id, reason, *, uow) -> None` (soft delete)
 - `LedgerService.create_cash_movement(request, *, uow) -> CashMovement`
 - `LedgerService.delete_cash_movement(id, reason, *, uow) -> None`
-- `LedgerReader.get_trades(start_date, end_date) -> ordered list[Trade]`
+- `LedgerReader.get_trades(start_date, end_date) -> list[Trade]` (shared `Trade`, active only, ordered by `order_key`)
 - `LedgerReader.get_cash_movements(start_date, end_date) -> ordered list[CashMovement]`
 - Writes validate Asset and use Pricing when entry is rate-only or PU-only. Validation (OQ-1, OQ-13, OQ-14): `trade_time` required; nothing dated after today (São Paulo, injected clock); a trade may be dated up to the maturity date inclusive (on it the PU is typed and the rate stored as 0), never after; bounds are only the schema CHECKs. Execution PU/rate are stored on the immutable trade. Ledger never creates reference prices. Input writes synchronously invalidate accounting from effective date in the same DB transaction, but never enqueue P&L work.
 
@@ -39,7 +43,7 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 - Preferred current source order: MANUAL, then B3. Exactly the requested calendar date; no carry-forward. One current observation per (asset, date, source), superseded rows retained. Reference price IDs are returned to consumers for reproducibility. Price writes invalidate valuation/P&L dependencies but not quantities, in the same transaction; never automatically enqueue processing. Future bulk import can call the same PriceService via a separate RabbitMQ adapter.
 
 ### Portfolio
-- `PortfolioAccounting.calculate_day(previous_state, trades, cash_movements, date) -> AccountingDay`
+- `PortfolioAccounting.calculate_day(previous_state, trades: Sequence[Trade], deposits: Decimal, withdrawals: Decimal, date) -> AccountingDay`. Cash movements are Ledger facts: Portfolio receives only the day's deposit and withdrawal totals (`0` when none, never negative), summed by the caller from `LedgerReader.get_cash_movements`.
 - `PortfolioReader.get_previous_valid_accounting_state(before_date) -> AccountingState`
 - `PortfolioReader.get_positions(date) -> list[Position]`
 - `PortfolioQueryService.get_position_table(date) -> PositionTableView`
@@ -48,7 +52,7 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 - Portfolio owns published `positions`, `position_metrics`, `portfolio_metrics` and their staging representations; daily quantities and average costs remain calculable with missing reference prices. AUM = cash + sum signed position market values, nullable when required prices missing. No exposure or `total_equity` fields. Rows exist for D exactly for expected assets: Q[D−1] ≠ 0 or a trade on D, including quantity 0 (OQ-10). The D−1 reference PU is read from D−1's `position_metrics` row (OQ-9). Published read models join documented read surfaces by date and asset; never recombine latest Prices observations with older P&L.
 
 ### PnL
-- `AssetPnLCalculator.calculate(previous_position, day_trades, previous_reference_pu, current_reference_pu) -> AssetPnLResult`
+- `AssetPnLCalculator.calculate(previous_position, day_trades: Sequence[Trade], previous_reference_pu, current_reference_pu) -> AssetPnLResult` (shared `Trade`)
 - `PortfolioPnLCalculator.aggregate(expected_assets, asset_results, previous_cumulative) -> PortfolioPnLResult`
 - Pure functions; no persistence or messaging adapters required initially.
 - First day: when Q[D−1] = 0, `position_pnl` is exactly 0 and needs no D−1 price (OQ-4). After maturity the current reference PU is 0 (OQ-1). Precision: 34-digit `Decimal`, `ROUND_HALF_UP` (OQ-3). The multiplier is not applied (OQ-2).
