@@ -28,6 +28,8 @@ class ResizeObserverStub {
 }
 window.ResizeObserver = ResizeObserverStub;
 window.HTMLElement.prototype.scrollIntoView = () => undefined;
+// jsdom does not implement it; the router's ScrollRestoration calls it on every navigation.
+window.scrollTo = () => undefined;
 
 // Every request in a test must be mocked explicitly.
 beforeAll(() => {
