@@ -28,7 +28,7 @@ describe('AppLayout', () => {
 
     await user.click(screen.getByRole('link', { name: 'Carteira' }));
 
-    expect(await screen.findByRole('heading', { name: 'Carteira' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Data de avaliação/ })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Carteira' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Ativos' })).not.toHaveAttribute('aria-current');
   });
