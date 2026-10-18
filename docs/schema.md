@@ -83,4 +83,5 @@
 - **Multiplier semantics:** decided (OQ-2) — stored, not applied now; a future calculator module will apply it.
 - **Price input details:** `rate` can be nullable for official PU-only observations. Source-specific provider identifiers, raw data payloads, correction reasons and publication timestamps can be added when B3 ingestion is implemented.
 - **Historical publication at larger scale:** this schema uses one transaction to publish a processed range. That is reasonable for the technical challenge; should workloads become extremely large, consider an atomic generation pointer without exposing snapshot IDs in user-facing APIs.
+- **Downgrade:** `alembic downgrade base` drops the six schemas and is meant for fresh or throwaway databases only. It refuses while trades, cash movements, reference prices, instruments or processing requests exist, unless `-x allow_data_loss=true` is given.
 - **Physical DB verification:** the DDL applies on PostgreSQL 16 (see Status); it still needs Alembic migration generation and comprehensive constraint/integration tests before treating it as production-ready.
