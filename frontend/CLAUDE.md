@@ -6,13 +6,32 @@ These rules add to the root CLAUDE.md. The authorities are:
 
 ## Designs
 
-The Aura Build designs are the visual base, and the screens implement them; they are not rebuilt as a separate demo (spec §11). The designs live in **Figma**; the file link is added here once it exists. Nothing is in the repository.
+The Aura Build designs are the visual base, and the screens implement them; they are not rebuilt as a separate demo (spec §11). The designs live in **Figma**; nothing is in the repository.
 
-When a screen has no design in Figma, raise a `spec-gap` and do not invent one.
+- **Access** is through Figma's official Claude Code plugin (`figma@claude-plugins-official`, installed at user scope, remote server `https://mcp.figma.com/mcp`). Before the first use, run `/mcp` in the session, select figma and authenticate in the browser; `/mcp` again confirms the connection.
+- **The file link is given in the session prompt.** Read frames, components and variables through the MCP tools, and take spacing, colours and typography from the design, mapped onto Mantine theme tokens.
+- When a screen has no design in Figma, raise a `spec-gap` and do not invent one. When the design and the spec disagree (a column, a figure or a state), the **spec wins**: raise a `spec-gap` and do not follow the design silently.
 
-## Stack and layout (plan §1)
+## Stack and layout (plan §0–§1)
 
-React + TypeScript, Mantine, TanStack Query and MSW.
+The toolchain is locked (user, 2026-10-18). Do not add other libraries without the integrator's approval:
+
+| Need | Choice |
+|---|---|
+| Build and dev server | Vite (React + TypeScript template) |
+| Language | TypeScript, `strict: true` |
+| Routing | React Router |
+| UI components | Mantine: `@mantine/core`, `hooks`, `form` (forms and validation), `dates` (with `dayjs`), `notifications`, `charts` (the cumulative P&L chart) |
+| Icons | `@tabler/icons-react` |
+| Server state | TanStack Query |
+| API mocks | MSW, in the browser during development and in the tests |
+| Tests | Vitest, Testing Library (`react`, `user-event`), jsdom |
+| Lint and format | ESLint (flat config, typescript-eslint, react-hooks) and Prettier |
+| Runtime | Node 24 LTS with npm. `package-lock.json` is committed; `npm ci` installs it |
+
+Each package is the current stable major published before 2026-10-04, the same cut-off as the backend.
+
+**API types.** Until the backend serves them, `frontend/src/api/` holds hand-written response types and MSW fixtures: a **draft contract** derived from the spec and the Figma. Every field not named in the docs is listed as a contract proposal in the PR. The integrator reconciles the draft with the backend when the endpoint is built. At integration (Wave 5) the hand-written types are replaced by types generated from the backend's OpenAPI with `openapi-typescript` (`npm run gen:api`).
 
 ```text
 frontend/src/
@@ -65,13 +84,26 @@ frontend/src/
 - Vitest + Testing Library + MSW. Cover every state above for each screen.
 - The test title cites the spec section, e.g. `it('§11.4 shows null P&L as unavailable', …)`.
 
+## Working rules for the frontend lane
+
+- **Commits are batched.** The user approves every commit, and so does another session at the same time. Make one commit per screen or feature: the scaffold, the API draft, then Carteira, Lançamentos, Ativos and Central de Controle. Each commit is still green and one logical change. Show the user the staged diff before committing.
+- **You own `frontend/**` only.** Changes elsewhere go to the integrator, in your report and the PR description:
+  - Docker Compose and CI;
+  - the docs and `CLAUDE.md`;
+  - the backend;
+  - a spec gap.
+
+  Never edit those paths, even "just one line".
+- **Worktree setup.** Run `npm ci` once in your worktree before the first commit. The pre-commit hook runs eslint, tsc and vitest on staged frontend files as soon as `frontend/package.json` exists, and fails without `node_modules`. Development runs `npm run dev` against MSW; the backend is not needed. The integrator adds the frontend to Docker Compose in W0.6.
+
 ## Commands (from `frontend/`)
 
-The scaffold fixes these commands. Until it exists, they are the expected set:
+The scaffold creates these scripts:
 
 ```bash
-npm ci
-npm run dev
-npm test
+npm ci                 # once per worktree
+npm run dev            # Vite dev server, API mocked by MSW
+npm test               # Vitest
 npm run lint && npm run typecheck
+npm run gen:api        # Wave 5: types from the backend OpenAPI (openapi-typescript)
 ```

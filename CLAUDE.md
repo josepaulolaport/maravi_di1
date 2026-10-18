@@ -95,7 +95,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 
 **Stack:**
 - Backend: Python 3.12, FastAPI, SQLAlchemy 2 **async**, PostgreSQL 16, Alembic, `uv`, RabbitMQ via **aio-pika**.
-- Frontend: React + TypeScript + Mantine + TanStack Query, with **MSW** mocks.
+- Frontend: Vite, React with TypeScript (`strict`), React Router, Mantine (`core`, `hooks`, `form`, `dates` with dayjs, `notifications`, `charts`), Tabler icons, TanStack Query, MSW, Vitest with Testing Library and jsdom, ESLint (typescript-eslint, react-hooks) and Prettier; Node 24 LTS with npm. The designs live in Figma, read through the Figma MCP server. Details are in `frontend/CLAUDE.md`.
 - Docker Compose runs the API, PostgreSQL, RabbitMQ, the worker, the dispatcher and the outbox relay.
 
 **Modular monolith:** the modules are `asset`, `pricing`, `ledger`, `prices`, `portfolio`, `pnl` and `processing`; `platform` holds the shared technical infrastructure. The layout is in `docs/maravi_implementation_plan.md` §1:
@@ -131,6 +131,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - One logical change per commit. Every commit is green: it builds, passes lint and types, and every test passes.
   - Test and code go in the same commit.
 - **Tests first** for every rule, using the cases in spec §13 (skill `tdd`). Expected values come from the docs, never from running the code. Never delete, weaken or skip a test to make a change pass.
+- **A new worktree needs its dependencies once** before its first commit: `cd backend && uv sync --frozen`, and `cd frontend && npm ci` once the frontend exists. The pre-commit hook runs the backend checks (ruff, mypy, unit and architecture tests) and, once `frontend/package.json` exists, the frontend checks (eslint, tsc, vitest), and it fails if those dependencies are missing.
 - **Integration tests use PostgreSQL**, never SQLite. Each worktree has its own database or schema namespace; never share one mutable dev database.
 
 ## 5. Definition of done (skill `pr-ready`)
