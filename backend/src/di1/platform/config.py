@@ -41,3 +41,40 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Read the settings from the environment now (never at import time)."""
     return Settings()
+
+
+BROKER_SCHEMES = ("amqp", "amqps")
+
+
+class BrokerSettings(BaseSettings):
+    """RabbitMQ settings, read only by the processes that use the broker (the outbox relay and
+    the workers): an HTTP write never publishes, so the API does not need them."""
+
+    model_config = SettingsConfigDict(frozen=True, extra="ignore", hide_input_in_errors=True)
+
+    rabbitmq_url: SecretStr
+    """``amqp://user:password@host:port/vhost``."""
+    rabbitmq_prefetch_count: int = Field(default=1, ge=1)
+    """Unacknowledged deliveries per consumer."""
+    rabbitmq_delivery_limit: int = Field(default=5, ge=1)
+    """Redeliveries of a failing message before the broker dead-letters it."""
+    rabbitmq_retry_base_delay_seconds: float = Field(default=1.0, gt=0)
+    """Pause before a failed delivery returns to the queue, doubled on each redelivery, so a
+    short outage (a database restart) does not exhaust the delivery limit."""
+    rabbitmq_retry_max_delay_seconds: float = Field(default=30.0, gt=0)
+    rabbitmq_publish_timeout_seconds: float = Field(default=10.0, gt=0)
+    outbox_relay_batch_size: int = Field(default=100, ge=1)
+    outbox_relay_poll_interval_seconds: float = Field(default=1.0, gt=0)
+
+    @field_validator("rabbitmq_url")
+    @classmethod
+    def _amqp_scheme(cls, value: SecretStr) -> SecretStr:
+        scheme, separator, _ = value.get_secret_value().partition("://")
+        if not separator or scheme not in BROKER_SCHEMES:
+            raise ValueError("must be an amqp:// or amqps:// URL")
+        return value
+
+
+def get_broker_settings() -> BrokerSettings:
+    """Read the broker settings from the environment now (never at import time)."""
+    return BrokerSettings()
