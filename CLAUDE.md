@@ -13,7 +13,7 @@ Everything is in [docs/](docs/README.md). **Build what they say; do not redesign
 
 Order of authority:
 
-1. The challenge text. Discrepancies are recorded, never hidden.
+1. The challenge text, `docs/desafio_tecnico_di1_1.pdf`, except the deliberate deviations D1–D4 in spec §15.
 2. `docs/maravi_business_specification.md`, for behaviour.
 3. `docs/schema.md` / `schema.sql`, `docs/interfaces.md` and `docs/maravi_implementation_plan.md`, for execution.
 4. Code comments, chat history and your assumptions: never authoritative.

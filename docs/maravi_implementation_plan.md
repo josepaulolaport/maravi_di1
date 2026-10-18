@@ -210,7 +210,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 - Include fixtures for weekends, missing prices, reversals and backdated corrections. Use deterministic clocks to test queue ordering/lease expiry.
 - Tests: unit for calculators, integration on Postgres (not only SQLite), RabbitMQ e2e including retries, schema constraints, architecture import boundaries, frontend API contracts. `uv run pytest`, lint/type checks and Docker smoke instructions.
 - Reviewer agent independently checks *financial math*, *transaction atomicity*, *race/cancellation/recovery*, *interface hygiene*, *migration quality*, *frontend pt-BR*. Reviews must point to failing tests or concrete violated contracts; implementer fixes then reviewer repeats until green.
-- Document design rationale, nonrequirements, Docker local setup, demo script, future CSV/B3 import TODO and explicitly deferred settlement/multiplier rules.
+- Document design rationale, nonrequirements, Docker local setup, demo script (the challenge example dated today, D4), the interpretations and deviations of spec §15, and the future CSV/B3 import TODO.
 
 ## 9. Integration and merge gates
 
