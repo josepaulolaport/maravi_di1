@@ -63,10 +63,16 @@ Create only the files and packages that are used. Only Processing has a messagin
 
 - Calculators and accounting are written test first (skill `tdd`), from the cases in spec §13 and the formulas in spec §4, §7 and §8.
 - Integration tests run against PostgreSQL 16, in your worktree's own database. Concurrency, outbox and dispatch tests use real connections.
-- `tests/architecture/` enforces the module boundaries:
-  - only `public.py` is imported across modules;
-  - no FastAPI outside `presentation` and `composition`;
-  - no DB or messaging in `domain`.
+- `tests/architecture/` enforces the module boundaries. The full rule list is in `tests/architecture/boundaries.py`:
+  - only `public.py` is imported across modules, and also by `workers/`. A module's `__init__.py` imports nothing;
+  - `domain/` uses only the standard library (no I/O, concurrency or clock modules), `di1.contracts` and its own domain;
+  - layers point inwards: `application/` never imports its `infrastructure/` or `presentation/`, and `public.py` exposes neither;
+  - FastAPI only in `presentation/`, the module's `dependencies.py` (its dependency providers), `composition/` and `main.py`;
+  - SQL only in `infrastructure/`, `dependencies.py`, `platform/` and `composition/`;
+  - Pydantic only in `presentation/` and `platform/`;
+  - modules use only the outbox, inbox and envelope parts of `platform.messaging`. aio-pika appears only in `platform/` and `workers/`;
+  - no dynamic imports, and every file sits in the plan §1 layout.
+- API tests use FastAPI's `TestClient`, which needs `httpx2`. Async tests run under pytest-asyncio in `auto` mode; do not use the `anyio` marker.
 - Time-based behaviour (leases, queue order) uses an injected clock, never the wall clock.
 
 ## Commands (from `backend/`)
