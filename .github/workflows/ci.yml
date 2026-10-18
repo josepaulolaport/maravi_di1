@@ -161,11 +161,12 @@ jobs:
             exit 1
           fi
 
-  # AI review (alibaba/open-code-review) with Gemini's OpenAI-compatible endpoint (free tier;
-  # Google may use the prompts, here the diff of a public repository, to improve its products).
-  # It starts only once ci-ok has passed and is deliberately not part of ci-ok: an LLM outage or
-  # a missing key must not block a merge. Secrets are unavailable on fork PRs, so it runs only
-  # for branches of this repository; pull_request_target is never used.
+  # AI review: scripts/ai_review.py sends the PR diff to Gemini (free tier; Google may use the
+  # prompts, here the diff of a public repository, to improve its products) in one request, or a
+  # few for a large diff, and posts one review with an inline comment per finding. It starts only
+  # once ci-ok has passed and is deliberately not part of ci-ok: an LLM outage or a missing key
+  # must not block a merge. Secrets are unavailable on fork PRs, so it runs only for branches of
+  # this repository; pull_request_target is never used.
   ai-review:
     name: ai-review
     needs: ci-ok
@@ -176,88 +177,33 @@ jobs:
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     permissions:
       contents: read
-      pull-requests: write # inline comments and the summary comment
+      pull-requests: write # the review and its inline comments
     steps:
-      # The action checks the PR out again itself; this copy provides the schema and the script.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0 # the merge base with the PR base
           persist-credentials: false
-      - name: Check the review key
+      - name: Review the diff and post the findings
         env:
-          OCR_TOKEN: ${{ secrets.OPEN_CODE_REVIEW_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          if [[ -z "$OCR_TOKEN" ]]; then
-            echo "::error title=ai-review::secret OPEN_CODE_REVIEW_API_KEY is not set (a Google AI Studio key; see README)"
+          if [[ -z "$GEMINI_API_KEY" ]]; then
+            echo "::error title=ai-review::secret GEMINI_API_KEY is not set (a Google AI Studio key; see README)"
             exit 1
           fi
-      - uses: alibaba/open-code-review@a758d9cbfb689937c7857ad64b2dd66adb58c0c2 # v1.12.11
-        with:
-          llm_url: https://generativelanguage.googleapis.com/v1beta/openai/ # OCR appends chat/completions
-          llm_auth_token: ${{ secrets.OPEN_CODE_REVIEW_API_KEY }}
-          llm_model: gemini-3.8-flash
-          llm_protocol: openai
-          llm_use_anthropic: "false"
-          # The default '{"thinking": {"type": "disabled"}}' is an Anthropic-style field.
-          llm_extra_body: "{}"
-          ocr_version: "1.12.11" # the npm CLI, pinned with the action instead of "latest"
-          # Path-specific project rules (instead of OCR's default .opencodereview/rule.json).
-          rule: .github/ai-review/rule.json
-          # The reviewer's role.
-          background: >-
-            You are a principal software engineer and architect, expert in Python 3.12, FastAPI,
-            async SQLAlchemy 2, PostgreSQL 16, Alembic, RabbitMQ (aio-pika), React with
-            TypeScript, Mantine and TanStack Query, testing, and GitHub Actions. You are reviewing
-            a pull request of a modular-monolith web application; its conventions are in
-            CLAUDE.md, backend/CLAUDE.md and frontend/CLAUDE.md. Your job: find incorrect code
-            and logic, bugs, bad practices, security issues and architecture violations. Report
-            only concrete issues, each with the scenario that breaks and the fix; no praise, no
-            style nits that ruff, mypy or eslint already catch. Write in English. Begin every
-            comment with [SEVERITY confidence=C], where SEVERITY is INFO, LOW, MEDIUM or HIGH and
-            C is your confidence from 0 to 1, for example: [HIGH confidence=0.9].
-          # Large PRs: OCR reviews files in groups capped at 200k prompt tokens and splits any
-          # group over the cap; a single file diff over ~160k tokens is skipped (reported below).
-          checkpoint_range: "true" # after the first full review, review only the new commits
-          review_concurrency: "2" # stay within the Gemini free-tier rate limits
-          max_tokens_budget: "3000000" # hard cap per run; past it, partial results are posted
-      # The action posts each finding as one inline review comment on its lines. This step also
-      # turns the result into review.json ({summary, findings[]}) and validates it against the
-      # schema; a finding without a severity or confidence fails it.
-      - name: Build review.json and validate it against .github/ai-review/review.schema.json
-        if: always()
-        run: |
-          set -euo pipefail
-          if [[ ! -s /tmp/ocr-result.json ]]; then
-            echo "no review result to validate (see the report step)"
-            exit 0
-          fi
-          python3 -I scripts/ai_review.py /tmp/ocr-result.json \
-            .github/ai-review/review.schema.json "$RUNNER_TEMP/ai-review/review.json"
+          python3 -I scripts/ai_review.py "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/ai-review"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: ai-review
           path: ${{ runner.temp }}/ai-review/review.json
-          if-no-files-found: ignore # absent only when the review produced no result (reported below)
-      - name: Report what the review did not cover
-        if: always()
-        run: |
-          set -euo pipefail
-          result=/tmp/ocr-result.json
-          if [[ ! -s "$result" ]]; then
-            echo "::warning title=ai-review::no review result was produced"
-            exit 0
-          fi
-          status=$(jq -r '.status // "unknown"' "$result")
-          {
-            echo "### AI review: $status"
-            jq -r '.summary // {} | to_entries[] | "- \(.key): \(.value)"' "$result"
-          } >> "$GITHUB_STEP_SUMMARY"
-          jq -r '.warnings[]? | if type == "string" then . else tojson end' "$result" \
-            | while IFS= read -r w; do
-                echo "::warning title=ai-review not covered::$w"
-                echo "- not covered: $w" >> "$GITHUB_STEP_SUMMARY"
-              done
+          if-no-files-found: ignore # absent only when the review failed before answering

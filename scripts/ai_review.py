@@ -1,25 +1,42 @@
-"""Turn open-code-review's result into review.json and validate it against the review schema.
+"""Single-shot AI review of a pull request (CI job ai-review).
 
-Usage: python3 scripts/ai_review.py <ocr-result.json> <review.schema.json> <review.json>
+Usage: python3 scripts/ai_review.py <base_sha> <head_sha> <out_dir>
 
-Each entry of ``comments`` in the result is one finding (one inline PR comment). The reviewer is
-told to begin each comment with ``[SEVERITY confidence=C]``; that prefix becomes ``severity`` and
-``confidence``, the rest becomes ``issue``. A finding without the prefix gets ``null`` for both,
-which the schema rejects, so the run fails visibly instead of inventing a value. The checker
-covers the keywords the schema uses (type, enum, required, properties, additionalProperties,
-items, minimum, maximum, minLength) with the standard library only. Exit 1 if review.json is
-invalid.
+Environment: GEMINI_API_KEY; GITHUB_TOKEN, GITHUB_REPOSITORY and PR_NUMBER to post the review;
+AI_REVIEW_DRY_RUN=1 writes review.json without posting.
+
+The diff (merge base to head) is sent to Gemini with .github/ai-review/prompt.md, normally in one
+request. A diff larger than one request is split by file, then by hunk, into at most
+MAX_REQUESTS requests; whatever does not fit is listed as not reviewed. Gemini answers in strict
+JSON-schema mode. The merged answer is validated against .github/ai-review/review.schema.json,
+written to <out_dir>/review.json and posted as one GitHub review: one inline comment per finding,
+on its lines when they are in the diff, otherwise in the review body. Standard library only.
 """
 
 from __future__ import annotations
 
+import copy
 import json
-import re
+import os
+import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_PREFIX = re.compile(r"^\s*\[(INFO|LOW|MEDIUM|HIGH)\s+confidence=([0-9]*\.?[0-9]+)\]\s*", re.I)
+ROOT = Path(__file__).resolve().parent.parent
+PROMPT = ROOT / ".github/ai-review/prompt.md"
+SCHEMA = ROOT / ".github/ai-review/review.schema.json"
+ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+MODEL = "gemini-3.8-flash"
+CHUNK_CHARS = 300_000  # about 75k tokens of diff per request
+MAX_REQUESTS = 6
+EXCLUDE = ["backend/uv.lock", "frontend/package-lock.json", "docs"]
+# Keywords Gemini's structured output does not document; they are still checked locally.
+_UNSUPPORTED = {"$schema", "minLength"}
 _TYPES: dict[str, tuple[type, ...]] = {
     "object": (dict,),
     "array": (list,),
@@ -30,7 +47,62 @@ _TYPES: dict[str, tuple[type, ...]] = {
 }
 
 
+@dataclass
+class FileDiff:
+    path: str
+    header: str
+    hunks: list[str] = field(default_factory=list)
+    lines: list[set[int]] = field(default_factory=list)  # commentable new lines, per hunk
+
+
+def parse_diff(diff: str) -> list[FileDiff]:
+    """Split a unified diff by file and prefix every new-file line with its line number."""
+    files: list[FileDiff] = []
+    current: FileDiff | None = None
+    new_line = 0
+    for raw in diff.splitlines():
+        if raw.startswith("diff --git "):
+            current = None
+        elif raw.startswith("+++ "):
+            target = raw[4:]
+            current = None if target == "/dev/null" else FileDiff(target.removeprefix("b/"), "")
+            if current is not None:
+                current.header = f"+++ b/{current.path}"
+                files.append(current)
+        elif current is None:
+            continue
+        elif raw.startswith("@@"):
+            new_line = int(raw.split("+", 1)[1].split(" ", 1)[0].split(",", 1)[0])
+            current.hunks.append(raw + "\n")
+            current.lines.append(set())
+        elif current.hunks and raw[:1] in (" ", "+"):
+            current.hunks[-1] += f"{new_line:>6} {raw}\n"
+            current.lines[-1].add(new_line)
+            new_line += 1
+        elif current.hunks and raw[:1] == "-":
+            current.hunks[-1] += f"{'':>6} {raw}\n"
+    return [f for f in files if f.hunks]
+
+
+def chunk(files: list[FileDiff], limit: int) -> list[str]:
+    """Pack file pieces into request-sized texts; a piece is a hunk, or a slice of a huge one."""
+    pieces: list[str] = []
+    for f in files:
+        room = limit - len(f.header) - 1
+        for hunk in f.hunks:
+            for start in range(0, len(hunk), room):
+                pieces.append(f"{f.header}\n{hunk[start : start + room]}")
+    chunks: list[str] = []
+    for piece in pieces:
+        if chunks and len(chunks[-1]) + len(piece) <= limit:
+            chunks[-1] += piece
+        else:
+            chunks.append(piece)
+    return chunks
+
+
 def violations(value: Any, schema: dict[str, Any], where: str = "$") -> list[str]:
+    """Check the keywords review.schema.json uses."""
     expected = schema.get("type")
     if expected is not None:
         ok = isinstance(value, _TYPES[expected])
@@ -62,36 +134,156 @@ def violations(value: Any, schema: dict[str, Any], where: str = "$") -> list[str
     return found
 
 
-def to_finding(comment: dict[str, Any]) -> dict[str, Any]:
-    content = str(comment.get("content", ""))
-    match = _PREFIX.match(content)
-    return {
-        "file": comment.get("path", ""),
-        "start_line": comment.get("start_line", 0),
-        "end_line": comment.get("end_line", 0),
-        "issue": content[match.end() :] if match else content,
-        "severity": match.group(1).upper() if match else None,
-        "confidence": float(match.group(2)) if match else None,
-        "suggestion": comment.get("suggestion_code") or "",
+def request_schema(schema: Any) -> Any:
+    if isinstance(schema, dict):
+        return {k: request_schema(v) for k, v in schema.items() if k not in _UNSUPPORTED}
+    if isinstance(schema, list):
+        return [request_schema(v) for v in schema]
+    return copy.deepcopy(schema)
+
+
+def http_json(url: str, payload: dict[str, Any], headers: dict[str, str]) -> Any:
+    """POST JSON; retry 429 and 5xx with Retry-After or a growing wait, then fail loudly."""
+    body = json.dumps(payload).encode()
+    for attempt in range(1, 5):
+        request = urllib.request.Request(
+            url, body, {"Content-Type": "application/json", **headers}, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=300) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode(errors="replace")[:2000]
+            if (error.code == 429 or error.code >= 500) and attempt < 4:
+                retry_after = error.headers.get("Retry-After", "")
+                wait = int(retry_after) if retry_after.isdigit() else 30 * attempt
+                sys.stderr.write(f"HTTP {error.code}, retry {attempt} in {wait}s: {detail}\n")
+                time.sleep(wait)
+                continue
+            raise RuntimeError(f"HTTP {error.code} from {url}: {detail}") from error
+    raise AssertionError("unreachable")
+
+
+def ask_gemini(prompt: str, diff_text: str, part: str, schema: dict[str, Any]) -> Any:
+    payload = {
+        "model": MODEL,
+        "temperature": 0,
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": f"Pull request diff ({part}):\n\n{diff_text}"},
+        ],
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "review", "schema": request_schema(schema), "strict": True},
+        },
     }
+    key = os.environ["GEMINI_API_KEY"]
+    answer = http_json(ENDPOINT, payload, {"Authorization": f"Bearer {key}"})
+    return json.loads(answer["choices"][0]["message"]["content"])
 
 
-def main(result_path: str, schema_path: str, review_path: str) -> int:
-    result = json.loads(Path(result_path).read_text(encoding="utf-8"))
-    schema = json.loads(Path(schema_path).read_text(encoding="utf-8"))
-    findings = [to_finding(c) for c in result.get("comments", [])]
+def anchor(finding: dict[str, Any], files: dict[str, FileDiff]) -> dict[str, Any] | None:
+    """GitHub accepts a comment only on lines of one hunk of the diff."""
+    diff = files.get(finding["file"])
+    if diff is None:
+        return None
+    start, end = finding["start_line"], finding["end_line"]
+    for lines in diff.lines:
+        if end in lines:
+            comment: dict[str, Any] = {"path": diff.path, "line": end, "side": "RIGHT"}
+            if start < end and start in lines:
+                comment |= {"start_line": start, "start_side": "RIGHT"}
+            return comment
+    return None
+
+
+def comment_body(finding: dict[str, Any]) -> str:
+    severity, confidence = finding["severity"], finding["confidence"]
+    text = f"**{severity}** · confidence {confidence:.2f}\n\n{finding['issue']}"
+    if finding["suggestion"]:
+        fence = "````" if "```" in finding["suggestion"] else "```"
+        text += f"\n\n**Suggestion**\n\n{fence}\n{finding['suggestion']}\n{fence}"
+    return text
+
+
+def post_review(review: dict[str, Any], files: dict[str, FileDiff], head: str, notes: str) -> None:
+    comments, loose = [], []
+    for finding in review["findings"]:
+        place = anchor(finding, files)
+        if place:
+            comments.append(place | {"body": comment_body(finding)})
+        else:
+            where = f"`{finding['file']}` lines {finding['start_line']}-{finding['end_line']}"
+            loose.append(f"- {where}: {comment_body(finding)}")
+    body = f"### AI review ({MODEL})\n\n{review['summary']}\n\n{notes}" + "\n".join(loose)
+    url = (
+        f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}"
+        f"/pulls/{os.environ['PR_NUMBER']}/reviews"
+    )
+    headers = {
+        "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    payload = {"commit_id": head, "event": "COMMENT", "body": body, "comments": comments}
+    http_json(url, payload, headers)
+    sys.stdout.write(f"posted {len(comments)} inline comment(s), {len(loose)} in the body\n")
+
+
+def main(base: str, head: str, out_dir: str) -> int:
+    pathspec = [".", *(f":(exclude){p}" for p in EXCLUDE)]
+    diff = subprocess.run(
+        ["git", "diff", "--no-color", "--unified=3", "-M", f"{base}...{head}", "--", *pathspec],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    files = parse_diff(diff)
+    chunks = chunk(files, CHUNK_CHARS)
+    reviewed, skipped = chunks[:MAX_REQUESTS], chunks[MAX_REQUESTS:]
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    prompt = PROMPT.read_text(encoding="utf-8")
+
+    summaries: list[str] = []
+    findings: list[Any] = []
+    for n, text in enumerate(reviewed, start=1):
+        answer = ask_gemini(prompt, text, f"part {n} of {len(reviewed)}", schema)
+        summaries.append(str(answer.get("summary", "")))
+        findings += answer.get("findings") or []
     review = {
-        "summary": result.get("message") or f"{len(findings)} finding(s)",
+        "summary": summaries[0] if len(summaries) == 1 else " ".join(summaries),
         "findings": findings,
     }
-    out = Path(review_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(review, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if not reviewed:
+        review["summary"] = "No reviewable changes."
+    notes = ""
+    if skipped:
+        names = sorted({ln[6:] for c in skipped for ln in c.splitlines() if ln[:6] == "+++ b/"})
+        missed = ", ".join(names)
+        notes = f"**Not reviewed, in whole or in part** (diff too large): {missed}\n\n"
+        sys.stderr.write(
+            f"::warning title=ai-review::not reviewed, in whole or in part: {missed}\n"
+        )
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "review.json").write_text(json.dumps(review, indent=2) + "\n", encoding="utf-8")
     problems = violations(review, schema)
     for problem in problems:
         sys.stderr.write(f"::error title=ai-review schema::{problem}\n")
-    sys.stdout.write(f"{len(findings)} finding(s), {len(problems)} schema violation(s): {out}\n")
-    return 1 if problems else 0
+    sys.stdout.write(
+        f"{len(files)} file(s) in {len(reviewed)} request(s); {len(findings)} finding(s); "
+        f"{len(problems)} schema violation(s)\n"
+    )
+    if summary_file := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(summary_file, "a", encoding="utf-8") as handle:
+            handle.write(f"### AI review\n\n{review['summary']}\n\n{notes}")
+            handle.write(f"{len(findings)} finding(s); review.json is in the ai-review artifact\n")
+    if problems:
+        return 1
+    if os.environ.get("AI_REVIEW_DRY_RUN") != "1" and (findings or skipped):
+        post_review(review, {f.path: f for f in files}, head, notes)
+    return 0
 
 
 if __name__ == "__main__":
