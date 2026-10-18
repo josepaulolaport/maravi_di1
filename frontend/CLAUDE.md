@@ -6,11 +6,15 @@ These rules add to the root CLAUDE.md. The authorities are:
 
 ## Designs
 
-The Aura Build designs are the visual base, and the screens implement them; they are not rebuilt as a separate demo (spec §11). The designs live in **Figma**; nothing is in the repository.
+The Aura Build designs are the visual base, and the screens implement them; they are not rebuilt as a separate demo (spec §11). They are **preliminary**: data and behaviour come from the spec, and the look is polished during development. Nothing is in the repository.
 
+- **Figma file:** `https://www.figma.com/design/U1Ob49zAEXWiH9n8XMo1Mz/` (file key `U1Ob49zAEXWiH9n8XMo1Mz`), one page with six frames: Carteira, Ativos − 1 (catalogue), Ativos − 2 (DI1 product), Ativos − 3 (contract DI1F28), Lancamentos, Central de controle (Pendências tab only).
+- **Processamentos** has no Figma frame. Its design is the clickable Aura Build HTML of Central de Controle, which the user supplies when asked.
 - **Access** is through Figma's official Claude Code plugin (`figma@claude-plugins-official`, installed at user scope, remote server `https://mcp.figma.com/mcp`). Before the first use, run `/mcp` in the session, select figma and authenticate in the browser; `/mcp` again confirms the connection.
-- **The file link is given in the session prompt.** Read frames, components and variables through the MCP tools, and take spacing, colours and typography from the design, mapped onto Mantine theme tokens.
-- When a screen has no design in Figma, raise a `spec-gap` and do not invent one. When the design and the spec disagree (a column, a figure or a state), **the user decides which is right**. Follow neither silently: stop that part, raise a `spec-gap` that quotes both (spec section and Figma frame) with your recommendation, and keep building the parts that do not depend on it.
+- **Calls are limited.** The user's Figma seat has a small monthly MCP quota. Prefer one `get_metadata` and one high-resolution `get_screenshot` of the page, cropped locally per frame, over many per-node calls. The text layers are named "Text", so labels come from screenshots, not metadata.
+- Read frames, components and variables through the MCP tools, and take spacing, colours and typography from the design, mapped onto Mantine theme tokens.
+- **Design-vs-spec decisions already taken:** OQ-19 and OQ-20 in `docs/open-questions.md`. Follow them; do not re-ask.
+- When a screen has no design in Figma or in the Aura Build HTML, raise a `spec-gap` and do not invent one. Drawers and modals without a design are the exception: they are built in the same visual language (OQ-19 item 8). When the design and the spec disagree (a column, a figure or a state), **the user decides which is right**. Follow neither silently: stop that part, raise a `spec-gap` that quotes both (spec section and Figma frame) with your recommendation, and keep building the parts that do not depend on it.
 
 ## Stack and layout (plan §0–§1)
 
@@ -29,33 +33,52 @@ The toolchain is locked (user, 2026-10-18). Do not add other libraries without t
 | Lint and format | ESLint (flat config, typescript-eslint, react-hooks) and Prettier |
 | Runtime | Node 24 LTS with npm. `package-lock.json` is committed; `npm ci` installs it |
 
-Each package is the current stable major published before 2026-10-04, the same cut-off as the backend.
+Each package is the current stable major published before 2026-10-04, the same cut-off as the backend, pinned to an exact version. One exception: **TypeScript is 6.0.x**, not 7, because typescript-eslint 8.71 supports only `typescript <6.1.0`. Supporting packages of the locked tools are allowed: `@eslint/js`, `globals`, `eslint-config-prettier`, `@testing-library/dom` and `@testing-library/jest-dom`, and `recharts` (peer of `@mantine/charts`).
 
 **API types.** Until the backend serves them, `frontend/src/api/` holds hand-written response types and MSW fixtures: a **draft contract** derived from the spec and the Figma. Every field not named in the docs is listed as a contract proposal in the PR. The integrator reconciles the draft with the backend when the endpoint is built. At integration (Wave 5) the hand-written types are replaced by types generated from the backend's OpenAPI with `openapi-typescript` (`npm run gen:api`).
 
 ```text
 frontend/src/
-  features/{assets, ledger, prices, portfolio, processing}/
-  api/          # typed client + MSW handlers and fixtures
-  shared/       # formatting, layout, common components
+  app/          # composition only: providers, theme, routes, paths
+  api/          # typed HTTP client, draft contract types, MSW handlers and fixtures (mocks/)
+  features/<f>/ # one folder per screen: assets, ledger, prices, portfolio, processing
+    <F>Page.tsx #   the route component (lazy-loaded)
+    components/ #   components used only by this feature
+    hooks/      #   TanStack Query hooks (queries, mutations) and the feature's query keys
+  shared/       # cross-feature code: layout/, ui/ (common components), format/ (pt-BR formatting)
+  test/         # Vitest setup and render helpers
 ```
+
+## Architecture
+
+- **Dependencies point inward.** `app` composes `features` and `shared`; a feature may import `api` and `shared`, never another feature. Something two features need moves to `shared`. Import with the `@/` alias across folders, and with relative paths inside one folder.
+- **Server state lives in TanStack Query**, nowhere else: no copies in `useState`, no global store. Each feature owns its query keys (a `<feature>Keys` factory in `hooks/`), and every key includes its parameters (date, range, id). Mutations invalidate the keys they affect. React state is only for UI state (open drawer, selected rows, form input); URL state (selected date, range, tab, search) lives in the query string, so a screen can be linked and reloaded.
+- **Components are thin.** A page composes; data fetching sits in hooks; formatting sits in `shared/format`. Components receive typed props, not raw responses, when that keeps them reusable.
+- **One HTTP client** in `api/` (`fetch`, JSON, problem+json errors turned into a typed error). Components never call `fetch`.
+- **Mantine first.** Use Mantine components and props before writing CSS. When CSS is needed, use a CSS module beside the component and Mantine CSS variables (`var(--mantine-color-navy-9)`, `var(--app-…)`). Colours and tokens live only in `app/theme.ts`; no hex value elsewhere.
+- **Every screen is lazy-loaded** (`app/routes.tsx`), and vendor code is split into cached chunks (`vite.config.ts`). A route error boundary (`RouteErrorPage`) keeps the app usable when a screen throws.
+- **Accessibility:** every control has a pt-BR accessible name; tests query by role and name, as a user would. Colour is never the only signal.
+- **Tests** render through `test/render.tsx` (`renderApp(route)`), which uses the real providers and routes, with MSW answering every request (an unmocked request fails the test).
 
 ## Screens (spec §11)
 
 - **Central de Controle**, with two tabs:
-  - **Pendências:** actionable issues only, with "Definir preço".
-  - **Processamentos:**
-    - pick a date range and preview it, including the warning when the state before it is stale (OQ-11);
-    - queue the job, then follow its progress and status;
+  - **Pendências:** actionable issues only, with "Definir preço". Only the three issue types of spec §10.3; a `FAILED` job is shown in Processamentos, not here (OQ-19).
+  - **Processamentos** (OQ-20):
+    - pick a date range and preview exactly [A, B] (days to process), with the warning when the state before it is stale (OQ-11); no "período efetivo";
+    - queue the job, then follow its progress ("x / y dias") and status;
     - cancel a job, or cancel and replace it;
-    - finished and cancelled jobs stay in the history.
+    - a cancelled, failed or superseded job says that no day was published, and offers "Solicitar novo processamento" with its full original range;
+    - finished and cancelled jobs stay in the history; no "Motivo" column, no duplicate blocking.
   - No financial KPIs on this screen.
 - **Ativos:**
-  - Browse type → class → product → instrument.
-  - The contract page has the rate ↔ PU calculator and lets you enter, inspect and correct a reference price for a date.
-  - The price calendar shows days without an observation as such; it never interpolates.
+  - Browse type → class → product → instrument, with API data only (OQ-19).
+  - The product page lists contracts with their latest reference observation, always next to its date.
+  - The contract page lets you enter, inspect and correct a reference price for a date. **There is no rate ↔ PU calculator** (OQ-19).
+  - The price calendar shows days without an observation as such; it never interpolates. It has a "Fonte" column (Manual/B3), and the row menu offers Corrigir, Remover and Ver revisões.
 - **Lançamentos:**
-  - The history of trades and cash movements, with an inclusive date range and search.
+  - The history of trades and cash movements, with an inclusive date range and search. Trades show both PU and rate.
+  - A cash strip: Caixa D0 = published cash on the range's end date, Caixa D−1 = the day before, each with its stale or unprocessed marker (OQ-19).
   - Drawers for compra, venda, aporte and retirada.
   - Delete one or many entries, with confirmation. No editing.
   - Instrument type and entry type are distinct.
@@ -69,11 +92,11 @@ frontend/src/
 
 ## Rules
 
-- **The backend is the only calculator.** The browser never computes PU, rate, P&L, cash or averages. Calculator previews call the pricing endpoint.
+- **The backend is the only calculator.** The browser never computes PU, rate, P&L, cash or averages. Forms take PU **or** rate (a toggle and one input); there is no preview for now, and the complementary value appears once the entry is saved (OQ-19). A future preview would call the pricing endpoint.
 - **Decimals are strings end to end.** Format them with `Intl.NumberFormat('pt-BR', …)` from the string. Never use `parseFloat` or `Math.round` on money.
 - **`null` means unavailable.** Show it as unavailable ("—"), never as `0`.
 - **Distinguish the states:** valid, missing/incomplete, stale, unprocessed and `COMPLETED_WITH_ISSUES` (plan §6).
-- **Job statuses** are shown in Portuguese: QUEUED, DISPATCHED, RUNNING, CANCELLING, CANCELLED, COMPLETED, COMPLETED_WITH_ISSUES, FAILED, SUPERSEDED.
+- **Job statuses** are shown in Portuguese (spec §10.3, OQ-20): QUEUED Na fila, DISPATCHED Enviado, RUNNING Processando, CANCELLING Cancelando, CANCELLED Cancelado, COMPLETED Concluído, COMPLETED_WITH_ISSUES Concluído com pendências, FAILED Falhou, SUPERSEDED Obsoleto. There is no "Bloqueado".
 - **Polling:** status is polled only while a job is queued or running.
 - **All visible text is pt-BR**, with Brazilian number and date formats. Identifiers are English.
 - **Mocks:** MSW handlers follow the API contracts in `docs/interfaces.md`. When a contract is wrong, raise it to the integrator; do not freeze a wrong API to keep the mocks (spec §12).

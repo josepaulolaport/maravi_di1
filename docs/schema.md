@@ -74,7 +74,7 @@
 - `GET /portfolio/positions?date=YYYY-MM-DD` returns one combined Portfolio read model from dated position/metrics/asset data. It must surface stale and incomplete states, and must not mix newly corrected reference prices with previously computed P&L.
 - `GET /portfolio/summary?date=...` uses `portfolio_metrics`.
 - `POST /processing/requests`, `GET /processing/requests`, `GET /processing/requests/{id}` and `POST /processing/requests/{id}/cancel` expose durable processing state.
-- The optional `Cancel and Replace` UI operation can atomically request cancellation of an active job and queue a replacement (still no automatic job from input mutation).
+- The `Cancel and Replace` UI operation (offered, OQ-20) can atomically request cancellation of an active job and queue a replacement (still no automatic job from input mutation).
 - React/Mantine receives consolidated responses. PostgreSQL is responsible for efficient joins; application services and public interfaces remain separate for writes and calculations.
 
 ## Items intentionally not invented or silently finalized
