@@ -10,7 +10,8 @@ Needs [uv](https://docs.astral.sh/uv/) 0.13+, Docker and GNU Make (Node 24 once 
 
 ```bash
 make install   # cd backend && uv sync --frozen; npm ci once frontend/package.json exists
-make lint      # uv lock --check, ruff check, ruff format --check, mypy (strict)
+make lint      # uv lock --check, ruff check, ruff format --check, mypy (strict);
+               # frontend: eslint, tsc --noEmit, prettier --check
 make test      # one Alembic head, alembic upgrade head, pytest with coverage on PostgreSQL 16
 git config core.hooksPath scripts/git-hooks   # pre-commit and commit-msg hooks
 ```

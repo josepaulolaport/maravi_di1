@@ -2,7 +2,7 @@
 #
 #   make install   backend dependencies (uv sync --frozen), plus npm ci once frontend/ exists
 #   make lint      uv lock --check, ruff check and ruff format --check (backend/, scripts/), mypy
-#                  (+ frontend lint and typecheck)
+#                  (+ frontend eslint, tsc and prettier --check)
 #   make test      Alembic head and migration smoke, then pytest with coverage against PostgreSQL 16
 #                  (a throwaway container unless TEST_DATABASE_URL is set) (+ frontend tests)
 #
@@ -39,7 +39,7 @@ lint-backend:
 	cd backend && uv run --frozen mypy src tests migrations ../scripts/scratch_database.py ../scripts/ai_review.py
 
 lint-frontend:
-	@if [[ -f frontend/package.json ]]; then cd frontend && npm run lint && npm run typecheck; else $(FRONTEND_MISSING); fi
+	@if [[ -f frontend/package.json ]]; then cd frontend && npm run lint && npm run typecheck && npm run format:check; else $(FRONTEND_MISSING); fi
 
 test: test-backend test-frontend
 

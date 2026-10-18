@@ -127,7 +127,7 @@ jobs:
       - name: make install-frontend
         if: steps.scaffold.outputs.present == 'true'
         run: make install-frontend
-      - name: make lint-frontend (lint, typecheck)
+      - name: make lint-frontend (lint, typecheck, format:check)
         if: steps.scaffold.outputs.present == 'true'
         run: make lint-frontend
       - name: make test-frontend
