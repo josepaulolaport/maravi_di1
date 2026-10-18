@@ -106,6 +106,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 **Rules:**
 - Cross-module access goes **only** through `public.py` DTOs and services. Never import another module's ORM or repositories.
 - Domain code, including the calculators (`pricing`, `pnl`, portfolio accounting), is deterministic, synchronous and free of I/O and side effects: no filesystem, network, database, messaging, environment or system-clock access, and no FastAPI. Pure standard-library utilities (`datetime` arithmetic, `Decimal`, `Enum`, `dataclasses`) are allowed.
+- Domain code does not log: logging belongs in the application, infrastructure or presentation layers, and the domain reports failures through exceptions and explicit results. It never generates randomness internally: a calculation that needs it (e.g. Monte Carlo) takes an explicit seed or an injected random-number generator.
 - SQL lives in `infrastructure/persistence/queries`.
 - FastAPI `Depends` is used only in HTTP adapters and dependency providers. Workers use plain factories.
 - One Unit of Work per operation that must save a fact and its invalidation together.

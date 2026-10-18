@@ -43,7 +43,9 @@ Create only the files and packages that are used. Initially only Processing has 
   - no filesystem, network, database, messaging, environment or system-clock access;
   - no session, broker or FastAPI dependency;
   - "today" arrives as an argument, never from `datetime.now()` or `date.today()`;
-  - pure standard-library utilities are fine: `datetime` arithmetic, `Decimal`, `Enum`, `dataclasses`, `uuid.UUID`.
+  - pure standard-library utilities are fine: `datetime` arithmetic, `Decimal`, `Enum`, `dataclasses`, `uuid.UUID`;
+  - no logging: log in `application/`, `infrastructure/` or `presentation/`; the domain reports failures through exceptions and explicit results;
+  - no internal randomness: a calculation that needs it takes an explicit seed or an injected generator (`rng: random.Random`, or `random.Random(seed)`); the module-level `random` functions, `random.seed`, `SystemRandom` and an unseeded `random.Random()` are rejected.
 - **Services:**
   - Services and HTTP may be `async`.
   - A write receives the Unit of Work (`*, uow`) and saves the fact and the invalidation (`FinancialResultInvalidator`) in the same session, then commits once.
@@ -71,7 +73,7 @@ Create only the files and packages that are used. Initially only Processing has 
 - Integration tests run against PostgreSQL 16, in your worktree's own database. Concurrency, outbox and dispatch tests use real connections.
 - `tests/architecture/` enforces the module boundaries. The full rule list is in `tests/architecture/boundaries.py`:
   - only `public.py` is imported across modules, and also by `workers/`. A module's `__init__.py` imports nothing;
-  - `domain/` uses only the standard library, `di1.contracts` and its own domain. It imports no side-effect module (filesystem, network, database, environment, process, concurrency, logging, randomness) and calls no clock, random-id or I/O builtin;
+  - `domain/` uses only the standard library, `di1.contracts` and its own domain. It imports no side-effect module (filesystem, network, database, environment, process, concurrency, logging, OS entropy) and calls no clock, random-id, I/O builtin or hidden-generator function. Only seeded or injected random generators are allowed;
   - layers point inwards: `application/` never imports its `infrastructure/` or `presentation/`; `presentation/` never imports `infrastructure/`; `public.py` exposes neither;
   - FastAPI only in `presentation/`, the module's `dependencies.py` (its dependency providers), `composition/` and `main.py`;
   - SQL only in `infrastructure/`, `dependencies.py`, `platform/` and `composition/`;

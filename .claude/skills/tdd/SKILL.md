@@ -45,7 +45,7 @@ Run them, and **see them fail for the right reason**.
 
 ## 3. Implement
 
-- Domain code is pure functions or frozen dataclasses: deterministic, no I/O or side effects (no filesystem, network, DB, broker, environment or system clock; "today" is an argument). `datetime` arithmetic, `Decimal`, `Enum` and `dataclasses` are fine.
+- Domain code is pure functions or frozen dataclasses: deterministic, no I/O or side effects (no filesystem, network, DB, broker, environment or system clock; "today" is an argument). `datetime` arithmetic, `Decimal`, `Enum` and `dataclasses` are fine. No logging: failures are exceptions or explicit results. Randomness only through an explicit seed or an injected generator, so tests are reproducible.
 - Use `Decimal` built from `str`. Fractional powers use `Decimal ** Decimal`.
 - Quantize only on storage, as OQ-3 says: a calculated PU to 10 dp, a calculated rate to 12 dp, `ROUND_HALF_UP`; reject typed values with more decimals.
 
