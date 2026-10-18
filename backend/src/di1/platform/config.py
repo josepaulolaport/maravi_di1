@@ -65,6 +65,10 @@ class BrokerSettings(BaseSettings):
     rabbitmq_publish_timeout_seconds: float = Field(default=10.0, gt=0)
     outbox_relay_batch_size: int = Field(default=100, ge=1)
     outbox_relay_poll_interval_seconds: float = Field(default=1.0, gt=0)
+    outbox_relay_retry_base_delay_seconds: float = Field(default=1.0, gt=0)
+    """Pause before the relay retries a row it failed to publish, doubled on each attempt, so a
+    failing row is not retried on every poll."""
+    outbox_relay_retry_max_delay_seconds: float = Field(default=60.0, gt=0)
 
     @field_validator("rabbitmq_url")
     @classmethod

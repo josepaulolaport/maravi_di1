@@ -8,6 +8,7 @@ interfaces.md "Transaction boundaries" 3 (outbox relay publishes with confirms) 
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 
 import pytest
@@ -88,15 +89,32 @@ async def publisher(
     return await MessagePublisher.create(broker, topology, settings=broker_settings)
 
 
+class _Clock:
+    """An injected monotonic clock the test moves by hand."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 def _relay(
     session_factory: async_sessionmaker[AsyncSession],
     publisher: object,
     batch_size: int = 100,
+    *,
+    clock: _Clock | None = None,
 ) -> OutboxRelay:
+    """With a ``clock``, failed rows wait 1 s, then 2 s, then 3 s at most; without one, the
+    pauses are short enough for the tests that run the relay in real time."""
     return OutboxRelay(
         unit_of_work_factory(session_factory),
         publisher,  # type: ignore[arg-type]
         batch_size=batch_size,
+        retry_base_delay_seconds=1.0 if clock else 0.01,
+        retry_max_delay_seconds=3.0 if clock else 0.05,
+        clock=clock or time.monotonic,
     )
 
 
@@ -159,7 +177,7 @@ async def test_a_crash_after_publish_resends_the_message(
     assert await _state(engine) == [(envelope.message_id, True, 1, None)]
 
 
-async def test_a_failed_publish_is_recorded_and_retried_in_order(
+async def test_a_failed_row_does_not_block_the_rows_after_it(
     session_factory: async_sessionmaker[AsyncSession],
     engine: AsyncEngine,
     publisher: MessagePublisher,
@@ -168,32 +186,71 @@ async def test_a_failed_publish_is_recorded_and_retried_in_order(
     topology: Topology,
     queue: AbstractQueue,
 ) -> None:
-    """No queue accepts ``late.command`` yet: the relay records the failure and stops the batch,
-    so the message behind it is not sent first."""
-    first, second = await _write(session_factory, "late.command", "test.command")
-    relay = _relay(session_factory, publisher)
+    """No queue accepts ``late.command`` yet (its worker has not declared it). The relay records
+    the failure and goes on: the broker carries no job order (the database does), so a row that
+    keeps failing must not stall every later command."""
+    late, other = await _write(session_factory, "late.command", "test.command")
+    clock = _Clock()
+    relay = _relay(session_factory, publisher, clock=clock)
 
-    assert await relay.relay_batch() == 0
-    assert await relay.relay_batch() == 0
+    assert await relay.relay_batch() == 1
 
-    [(_, published, attempts, last_error), behind] = await _state(engine)
-    assert (published, attempts) == (False, 2)
-    assert last_error is not None and "NO_ROUTE" in last_error
-    assert behind == (second.message_id, False, 0, None)
+    failed, published = await _state(engine)
+    assert failed[1:3] == (False, 1)
+    assert failed[3] is not None and "NO_ROUTE" in failed[3]
+    assert published == (other.message_id, True, 1, None)
+    assert await _drain(queue) == [other]
 
-    channel = await broker.channel()
     await declare_queue(
-        channel,
+        await broker.channel(),
         topology,
         queue_spec(topology, "test.command", "late.command"),
         settings=broker_settings,
     )
-    assert await relay.relay_batch() == 2
-    assert await _drain(queue) == [first, second]
-    assert await _state(engine) == [
-        (first.message_id, True, 3, None),
-        (second.message_id, True, 1, None),
-    ]
+    assert await relay.relay_batch() == 0  # still pausing
+    clock.now += 1.0
+    assert await relay.relay_batch() == 1
+
+    assert await _drain(queue) == [late]
+    assert (await _state(engine))[0] == (late.message_id, True, 2, None)
+
+
+async def test_a_failing_row_waits_a_doubling_pause_up_to_the_maximum(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    publisher: MessagePublisher,
+) -> None:
+    """Pauses of 1 s, 2 s, then 3 s (the maximum): not a retry, an UPDATE and a warning on
+    every poll."""
+    await _write(session_factory, "nobody.listens")
+    clock = _Clock()
+    relay = _relay(session_factory, publisher, clock=clock)
+    start = clock.now
+    attempts = []
+
+    for at in (0, 0.99, 1.0, 2.99, 3.0, 5.99, 6.0):
+        clock.now = start + at
+        await relay.relay_batch()
+        [(_, _, publish_attempts, _)] = await _state(engine)
+        attempts.append(publish_attempts)
+
+    assert attempts == [1, 1, 2, 2, 3, 3, 4]
+
+
+async def test_a_new_relay_retries_a_failed_row_at_once(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    publisher: MessagePublisher,
+) -> None:
+    """The pauses live in the relay process: after a restart the row is tried again."""
+    await _write(session_factory, "nobody.listens")
+    clock = _Clock()
+
+    await _relay(session_factory, publisher, clock=clock).relay_batch()
+    await _relay(session_factory, publisher, clock=clock).relay_batch()
+
+    [(_, _, publish_attempts, _)] = await _state(engine)
+    assert publish_attempts == 2
 
 
 async def test_uncommitted_messages_are_not_published(
@@ -238,7 +295,7 @@ async def _wait_for_message(queue: AbstractQueue) -> bytes:
 
 
 class _FailsOnce:
-    """An unexpected error (not a failed publish) the first time: the batch rolls back."""
+    """An unexpected error (not a failed publish) the first time."""
 
     def __init__(self, publisher: MessagePublisher) -> None:
         self._publisher = publisher
@@ -281,8 +338,8 @@ async def test_a_row_that_is_not_an_envelope_does_not_undo_the_batch(
     publisher: MessagePublisher,
     queue: AbstractQueue,
 ) -> None:
-    """The JSONB column accepts a float the envelope rejects. The row before it stays marked
-    published (else it would be resent on every poll); the row after it waits behind it."""
+    """The JSONB column accepts a float the envelope rejects. The rows around it are published
+    and marked (else the row before it would be resent on every poll)."""
     [before] = await _write(session_factory, "test.command")
     async with engine.begin() as connection:
         await connection.execute(
@@ -292,15 +349,15 @@ async def test_a_row_that_is_not_an_envelope_does_not_undo_the_batch(
             )
         )
     [after] = await _write(session_factory, "test.command")
-    relay = _relay(session_factory, publisher)
+    relay = _relay(session_factory, publisher, clock=_Clock())
 
-    assert await relay.relay_batch() == 1
+    assert await relay.relay_batch() == 2
     assert await relay.relay_batch() == 0
 
-    marked, (_, poison_published, attempts, last_error), waiting = await _state(engine)
+    marked, (_, poison_published, attempts, last_error), also_marked = await _state(engine)
     assert marked == (before.message_id, True, 1, None)
-    assert (poison_published, attempts) == (False, 2)
+    assert (poison_published, attempts) == (False, 1)
     assert last_error is not None and last_error.startswith("not a valid envelope")
     assert "1.5" not in last_error
-    assert waiting == (after.message_id, False, 0, None)
-    assert await _drain(queue) == [before]
+    assert also_marked == (after.message_id, True, 1, None)
+    assert await _drain(queue) == [before, after]

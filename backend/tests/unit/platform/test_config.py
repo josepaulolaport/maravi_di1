@@ -125,6 +125,8 @@ BROKER_ENV_NAMES = (
     "RABBITMQ_PUBLISH_TIMEOUT_SECONDS",
     "OUTBOX_RELAY_BATCH_SIZE",
     "OUTBOX_RELAY_POLL_INTERVAL_SECONDS",
+    "OUTBOX_RELAY_RETRY_BASE_DELAY_SECONDS",
+    "OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS",
 )
 
 
@@ -147,6 +149,8 @@ def test_broker_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.rabbitmq_publish_timeout_seconds == 10.0
     assert settings.outbox_relay_batch_size == 100
     assert settings.outbox_relay_poll_interval_seconds == 1.0
+    assert settings.outbox_relay_retry_base_delay_seconds == 1.0
+    assert settings.outbox_relay_retry_max_delay_seconds == 60.0
 
 
 @pytest.mark.usefixtures("clean_broker_environment")
@@ -159,6 +163,8 @@ def test_broker_values_come_from_the_environment(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("RABBITMQ_PUBLISH_TIMEOUT_SECONDS", "2.5")
     monkeypatch.setenv("OUTBOX_RELAY_BATCH_SIZE", "10")
     monkeypatch.setenv("OUTBOX_RELAY_POLL_INTERVAL_SECONDS", "0.2")
+    monkeypatch.setenv("OUTBOX_RELAY_RETRY_BASE_DELAY_SECONDS", "2")
+    monkeypatch.setenv("OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS", "8")
 
     settings = get_broker_settings()
 
@@ -168,6 +174,8 @@ def test_broker_values_come_from_the_environment(monkeypatch: pytest.MonkeyPatch
     assert settings.rabbitmq_publish_timeout_seconds == 2.5
     assert settings.outbox_relay_batch_size == 10
     assert settings.outbox_relay_poll_interval_seconds == 0.2
+    assert settings.outbox_relay_retry_base_delay_seconds == 2.0
+    assert settings.outbox_relay_retry_max_delay_seconds == 8.0
 
 
 @pytest.mark.usefixtures("clean_broker_environment")
@@ -202,6 +210,8 @@ def test_only_amqp_urls_are_accepted(monkeypatch: pytest.MonkeyPatch, url: str) 
         ("RABBITMQ_PUBLISH_TIMEOUT_SECONDS", "0"),
         ("OUTBOX_RELAY_BATCH_SIZE", "0"),
         ("OUTBOX_RELAY_POLL_INTERVAL_SECONDS", "0"),
+        ("OUTBOX_RELAY_RETRY_BASE_DELAY_SECONDS", "0"),
+        ("OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS", "0"),
     ],
 )
 def test_broker_bounds(monkeypatch: pytest.MonkeyPatch, name: str, value: str) -> None:
