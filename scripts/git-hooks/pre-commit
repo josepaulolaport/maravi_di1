@@ -81,14 +81,23 @@ if [[ $fe_any -eq 1 ]]; then
       if [[ ${#fe[@]} -gt 0 ]]; then
         # No `--` before the paths: vitest's CLI parser would set them aside and run nothing.
         # Paths always start with src/, so none can be read as an option.
-        out=$(npx --no vitest related --run "${fe[@]}" 2>&1); rc=$?
-        printf '%s\n' "$out"
-        [[ $rc -eq 0 ]] || exit 1
-        # vitest exits 0 when it finds no tests; a staged test file must have run.
-        if printf '%s\n' "${fe[@]}" | grep -Eq '\.(test|spec)\.tsx?$' \
-          && grep -q 'No test files found' <<<"$out"; then
-          echo "pre-commit: test files were staged but vitest ran none" >&2
-          exit 1
+        npx --no vitest related --run "${fe[@]}" || exit 1
+        # vitest skips files its config does not include, so every staged test file must be
+        # one it collects; otherwise a staged test would never run and the commit would pass.
+        tests=()
+        for f in "${fe[@]}"; do [[ $f =~ \.(test|spec)\.tsx?$ ]] && tests+=("$f"); done
+        if [[ ${#tests[@]} -gt 0 ]]; then
+          listed=$(npx --no vitest list --filesOnly "${tests[@]}") || exit 1
+          declare -A collected=()
+          while IFS= read -r line; do collected["$line"]=1; done <<<"$listed"
+          missing=0
+          for f in "${tests[@]}"; do
+            if [[ -z ${collected["$f"]:-} ]]; then
+              echo "pre-commit: staged test file is not run by vitest: frontend/$f" >&2
+              missing=1
+            fi
+          done
+          [[ $missing -eq 0 ]] || exit 1
         fi
       else
         npx --no vitest run || exit 1
