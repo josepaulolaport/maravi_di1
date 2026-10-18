@@ -1,35 +1,17 @@
-import {
-  Button,
-  Drawer,
-  Group,
-  List,
-  Menu,
-  Paper,
-  Skeleton,
-  Stack,
-  Text,
-  TextInput,
-} from '@mantine/core';
+import { Button, Group, List, Paper, Skeleton, Stack, Text, TextInput } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import {
-  IconCalendar,
-  IconChevronDown,
-  IconPlus,
-  IconSearch,
-  IconTrash,
-} from '@tabler/icons-react';
+import { IconCalendar, IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import type { IsoDate } from '@/api/contract';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
-import { CashMovementForm } from './components/CashMovementForm';
 import { CashStrip } from './components/CashStrip';
 import { EntriesTable, entryLabel } from './components/EntriesTable';
-import { TradeForm } from './components/TradeForm';
+import { NewEntryModal } from './components/NewEntryModal';
 import { type LedgerEntry, mergeEntries, type SortDirection, sortEntries } from './entries';
 import {
   useCashMovements,
@@ -40,32 +22,6 @@ import {
   useLedgerFilters,
   useTrades,
 } from './hooks/useLedger';
-
-type NewEntry = 'BUY' | 'SELL' | 'DEPOSIT' | 'WITHDRAWAL';
-
-const DRAWER_TITLES: Record<NewEntry, string> = {
-  BUY: 'Nova compra',
-  SELL: 'Nova venda',
-  DEPOSIT: 'Novo aporte',
-  WITHDRAWAL: 'Nova retirada',
-};
-
-const NEW_ENTRY_MENU: { label: string; items: { value: NewEntry; label: string }[] }[] = [
-  {
-    label: 'Operações',
-    items: [
-      { value: 'BUY', label: 'Compra' },
-      { value: 'SELL', label: 'Venda' },
-    ],
-  },
-  {
-    label: 'Caixa',
-    items: [
-      { value: 'DEPOSIT', label: 'Aporte' },
-      { value: 'WITHDRAWAL', label: 'Retirada' },
-    ],
-  },
-];
 
 type DeleteTarget = { mode: 'one'; entry: LedgerEntry } | { mode: 'many'; entries: LedgerEntry[] };
 
@@ -78,7 +34,7 @@ const countLabel = (n: number) =>
 
 /**
  * Lançamentos (spec §11.3): trades and cash movements in an inclusive range, with a search;
- * the cash strip for the range's end; drawers for compra, venda, aporte and retirada; single
+ * the cash strip for the range's end; one modal for compra, venda, aporte and retirada; single
  * and multiple delete with confirmation. There is no editing (§6.1).
  */
 export function LedgerPage() {
@@ -90,7 +46,7 @@ export function LedgerPage() {
   const saving = useIsSavingEntry();
 
   const [sort, setSort] = useState<SortDirection>('desc');
-  const [creating, setCreating] = useState<NewEntry | null>(null);
+  const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
 
   // A selection belongs to one range and search: a new filter starts with nothing selected,
@@ -168,31 +124,14 @@ export function LedgerPage() {
               Excluir selecionados
             </Button>
           )}
-          <Menu position="bottom-end" withinPortal>
-            <Menu.Target>
-              <Button
-                leftSection={<IconPlus size={16} stroke={1.5} />}
-                rightSection={<IconChevronDown size={16} stroke={1.5} />}
-              >
-                Novo lançamento
-              </Button>
-            </Menu.Target>
-            <Menu.Dropdown>
-              {NEW_ENTRY_MENU.map((group) => [
-                <Menu.Label key={group.label}>{group.label}</Menu.Label>,
-                ...group.items.map((item) => (
-                  <Menu.Item
-                    key={item.value}
-                    onClick={() => {
-                      setCreating(item.value);
-                    }}
-                  >
-                    {item.label}
-                  </Menu.Item>
-                )),
-              ])}
-            </Menu.Dropdown>
-          </Menu>
+          <Button
+            leftSection={<IconPlus size={16} stroke={1.5} />}
+            onClick={() => {
+              setCreating(true);
+            }}
+          >
+            Novo lançamento
+          </Button>
         </Group>
       </Group>
 
@@ -237,41 +176,16 @@ export function LedgerPage() {
         </Paper>
       )}
 
-      {/* While a save runs the drawer stays open: its result (notification or errors) belongs
+      {/* While a save runs the modal stays open: its result (notification or errors) belongs
           to the form, which closing would unmount. */}
-      <Drawer
-        opened={creating !== null}
+      <NewEntryModal
+        opened={creating}
         onClose={() => {
-          setCreating(null);
+          setCreating(false);
         }}
-        title={creating ? DRAWER_TITLES[creating] : ''}
-        position="right"
-        closeOnEscape={!saving}
-        closeOnClickOutside={!saving}
-        withCloseButton={!saving}
-        closeButtonProps={{ 'aria-label': 'Fechar' }}
-      >
-        {(creating === 'BUY' || creating === 'SELL') && (
-          <TradeForm
-            key={creating}
-            side={creating}
-            today={today}
-            onDone={() => {
-              setCreating(null);
-            }}
-          />
-        )}
-        {(creating === 'DEPOSIT' || creating === 'WITHDRAWAL') && (
-          <CashMovementForm
-            key={creating}
-            type={creating}
-            today={today}
-            onDone={() => {
-              setCreating(null);
-            }}
-          />
-        )}
-      </Drawer>
+        today={today}
+        saving={saving}
+      />
 
       <DeleteDialog
         target={deleting}

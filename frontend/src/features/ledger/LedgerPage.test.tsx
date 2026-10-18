@@ -9,7 +9,7 @@ import {
 import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
-import { cashMovements, IDS, trades } from '@/api/mocks/fixtures';
+import { cashMovements, IDS, instruments, products, trades } from '@/api/mocks/fixtures';
 import { fieldError, problem, url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { addDays, formatDate, todayInSaoPaulo } from '@/shared/format';
@@ -60,10 +60,20 @@ function captureBodies(method: 'post', path: string) {
   return bodies;
 }
 
-async function openNew(user: ReturnType<typeof renderApp>['user'], item: string) {
+const ENTRY_GROUP = {
+  Compra: 'Operação',
+  Venda: 'Operação',
+  Aporte: 'Caixa',
+  Retirada: 'Caixa',
+} as const;
+
+/** "Novo lançamento" → the modal, set to the given kind of entry (Operação or Caixa first). */
+async function openNew(user: ReturnType<typeof renderApp>['user'], item: keyof typeof ENTRY_GROUP) {
   await user.click(screen.getByRole('button', { name: 'Novo lançamento' }));
-  await user.click(await screen.findByRole('menuitem', { name: item }));
-  return within(await screen.findByRole('dialog'));
+  const modal = within(await screen.findByRole('dialog', { name: 'Novo lançamento' }));
+  await user.click(modal.getByRole('radio', { name: ENTRY_GROUP[item] }));
+  await user.click(modal.getByRole('radio', { name: item }));
+  return modal;
 }
 
 async function typeDate(
@@ -78,10 +88,10 @@ async function typeDate(
 
 async function chooseContract(
   user: ReturnType<typeof renderApp>['user'],
-  drawer: BoundFunctions<typeof queries>,
+  modal: BoundFunctions<typeof queries>,
   code: string,
 ) {
-  const select = drawer.getByRole('combobox', { name: 'Contrato' });
+  const select = modal.getByRole('combobox', { name: 'Contrato' });
   await waitFor(() => {
     expect(select).toBeEnabled();
   });
@@ -334,28 +344,28 @@ describe('Lançamentos (§11.3)', () => {
     expect(await end.findByText('R$ 199.650,37')).toBeInTheDocument();
     expect(end.queryByText('Desatualizado')).not.toBeInTheDocument();
 
-    const drawer = await openNew(user, 'Aporte');
-    await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '15/10/2026');
-    await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
-    await user.click(drawer.getByRole('button', { name: 'Registrar aporte' }));
+    const modal = await openNew(user, 'Aporte');
+    await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
+    await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
+    await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
     expect(await end.findByText('Desatualizado')).toBeInTheDocument();
   });
 
-  describe('Compra / Venda drawer (§6.1)', () => {
+  describe('Compra / Venda (§6.1)', () => {
     it('§6.1 registers a compra typed as PU, positive quantity', async () => {
       const bodies = captureBodies('post', '/trades');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F29');
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '16/10/2026');
-      fireEvent.change(drawer.getByLabelText('Hora', { exact: false }), {
+      await chooseContract(user, modal, 'DI1F29');
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
+      fireEvent.change(modal.getByLabelText('Hora', { exact: false }), {
         target: { value: '16:45' },
       });
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '3');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '80.000,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '3');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '80.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
       expect(await screen.findByText('Compra registrada.')).toBeInTheDocument();
       expect(bodies).toEqual([
@@ -377,17 +387,17 @@ describe('Lançamentos (§11.3)', () => {
     it('§6.1 registers a venda typed as a rate, sent as a fraction with a negative quantity', async () => {
       const bodies = captureBodies('post', '/trades');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Venda');
+      const modal = await openNew(user, 'Venda');
 
-      await chooseContract(user, drawer, 'DI1F28');
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '16/10/2026');
-      fireEvent.change(drawer.getByLabelText('Hora', { exact: false }), {
+      await chooseContract(user, modal, 'DI1F28');
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
+      fireEvent.change(modal.getByLabelText('Hora', { exact: false }), {
         target: { value: '17:05' },
       });
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '2');
-      await user.click(drawer.getByRole('radio', { name: 'Taxa a.a. (%)' }));
-      await user.type(drawer.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,45');
-      await user.click(drawer.getByRole('button', { name: 'Registrar venda' }));
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '2');
+      await user.click(modal.getByRole('radio', { name: 'Taxa a.a. (%)' }));
+      await user.type(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,45');
+      await user.click(modal.getByRole('button', { name: 'Registrar venda' }));
 
       expect(await screen.findByText('Venda registrada.')).toBeInTheDocument();
       expect(bodies).toEqual([
@@ -404,20 +414,20 @@ describe('Lançamentos (§11.3)', () => {
 
     it('OQ-13 suggests today and the current time, and has no PU/rate preview', async () => {
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      expect(drawer.getByRole('textbox', { name: 'Data' })).toHaveValue(
+      expect(modal.getByRole('textbox', { name: 'Data' })).toHaveValue(
         formatDate(todayInSaoPaulo()),
       );
-      expect(drawer.getByLabelText<HTMLInputElement>('Hora', { exact: false }).value).toMatch(
+      expect(modal.getByLabelText<HTMLInputElement>('Hora', { exact: false }).value).toMatch(
         /^\d{2}:\d{2}$/,
       );
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '89.006,46');
-      expect(drawer.queryByRole('textbox', { name: 'Taxa a.a. (%)' })).not.toBeInTheDocument();
-      expect(drawer.queryByText(/%$/)).not.toBeInTheDocument();
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '89.006,46');
+      expect(modal.queryByRole('textbox', { name: 'Taxa a.a. (%)' })).not.toBeInTheDocument();
+      expect(modal.queryByText(/%$/)).not.toBeInTheDocument();
     });
 
-    it('OQ-15 keeps the drawer open while saving, so the result is never lost', async () => {
+    it('OQ-15 keeps the modal open while saving, so the result is never lost', async () => {
       let release: () => void = () => undefined;
       server.use(
         http.post(url('/trades'), async () => {
@@ -428,19 +438,19 @@ describe('Lançamentos (§11.3)', () => {
         }),
       );
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
-      await chooseContract(user, drawer, 'DI1F29');
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '16/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '80.000,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      const modal = await openNew(user, 'Compra');
+      await chooseContract(user, modal, 'DI1F29');
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '80.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
       await user.keyboard('{Escape}');
-      // Past the drawer's close transition: a closing drawer would be gone by now.
+      // Past the modal's close transition: a closing modal would be gone by now.
       await new Promise((resolve) => setTimeout(resolve, 400));
-      expect(drawer.queryByRole('button', { name: 'Fechar' })).not.toBeInTheDocument();
+      expect(modal.queryByRole('button', { name: 'Fechar' })).not.toBeInTheDocument();
       expect(screen.getByRole('dialog')).toBeInTheDocument();
-      expect(drawer.getByRole('button', { name: 'Registrar compra' })).toBeInTheDocument();
+      expect(modal.getByRole('button', { name: 'Registrar compra' })).toBeInTheDocument();
       release();
       expect(await screen.findByText('Compra registrada.')).toBeInTheDocument();
     });
@@ -448,46 +458,44 @@ describe('Lançamentos (§11.3)', () => {
     it('§6.1 checks the required fields before sending', async () => {
       const bodies = captureBodies('post', '/trades');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(drawer.getByText('Selecione um contrato.')).toBeInTheDocument();
-      expect(
-        drawer.getByText('Informe uma quantidade inteira maior que zero.'),
-      ).toBeInTheDocument();
-      expect(drawer.getByText('Informe o PU.')).toBeInTheDocument();
+      expect(modal.getByText('Selecione um contrato.')).toBeInTheDocument();
+      expect(modal.getByText('Informe uma quantidade inteira maior que zero.')).toBeInTheDocument();
+      expect(modal.getByText('Informe o PU.')).toBeInTheDocument();
       expect(bodies).toEqual([]);
     });
 
     it('OQ-3 shows the decimal-place error of a PU on its field', async () => {
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F29');
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '16/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '80.000,12345678901');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await chooseContract(user, modal, 'DI1F29');
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '80.000,12345678901');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await drawer.findByText('Use no máximo 10 casas decimais.')).toBeInTheDocument();
-      expect(drawer.getByRole('textbox', { name: 'PU' })).toHaveAttribute('aria-invalid', 'true');
+      expect(await modal.findByText('Use no máximo 10 casas decimais.')).toBeInTheDocument();
+      expect(modal.getByRole('textbox', { name: 'PU' })).toHaveAttribute('aria-invalid', 'true');
     });
 
     it('OQ-3 shows the decimal-place error of a rate on its field', async () => {
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F29');
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '16/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.click(drawer.getByRole('radio', { name: 'Taxa a.a. (%)' }));
+      await chooseContract(user, modal, 'DI1F29');
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.click(modal.getByRole('radio', { name: 'Taxa a.a. (%)' }));
       // 10,12345678901% = 0.1012345678901: 13 places, one more than OQ-3 allows.
-      await user.type(drawer.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,12345678901');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await user.type(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,12345678901');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await drawer.findByText('Use no máximo 12 casas decimais.')).toBeInTheDocument();
-      expect(drawer.getByRole('textbox', { name: 'Taxa a.a. (%)' })).toHaveAttribute(
+      expect(await modal.findByText('Use no máximo 12 casas decimais.')).toBeInTheDocument();
+      expect(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' })).toHaveAttribute(
         'aria-invalid',
         'true',
       );
@@ -501,15 +509,15 @@ describe('Lançamentos (§11.3)', () => {
         http.post(url('/trades'), () => problem(422, [fieldError(code, message, 'trade_date')])),
       );
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F27');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '99.000,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await chooseContract(user, modal, 'DI1F27');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '99.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await drawer.findByText(message)).toBeInTheDocument();
-      expect(drawer.getByRole('textbox', { name: 'Data' })).toHaveAttribute('aria-invalid', 'true');
+      expect(await modal.findByText(message)).toBeInTheDocument();
+      expect(modal.getByRole('textbox', { name: 'Data' })).toHaveAttribute('aria-invalid', 'true');
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
 
@@ -523,15 +531,15 @@ describe('Lançamentos (§11.3)', () => {
         ),
       );
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F27');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '99.000,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await chooseContract(user, modal, 'DI1F27');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '99.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await drawer.findByText(/Informe um número válido\./)).toBeInTheDocument();
-      expect(drawer.getByText(/Informe o PU ou a taxa\./)).toBeInTheDocument();
+      expect(await modal.findByText(/Informe um número válido\./)).toBeInTheDocument();
+      expect(modal.getByText(/Informe o PU ou a taxa\./)).toBeInTheDocument();
     });
 
     it('OQ-15 shows an error without a field above the form', async () => {
@@ -541,28 +549,28 @@ describe('Lançamentos (§11.3)', () => {
         ),
       );
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F27');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '99.000,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await chooseContract(user, modal, 'DI1F27');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '99.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await drawer.findByRole('alert')).toHaveTextContent(
+      expect(await modal.findByRole('alert')).toHaveTextContent(
         'Lançamentos bloqueados no momento.',
       );
     });
   });
 
-  describe('Aporte / Retirada drawer (§6.2)', () => {
+  describe('Aporte / Retirada (§6.2)', () => {
     it('§6.2 registers an aporte with a positive amount', async () => {
       const bodies = captureBodies('post', '/cash-movements');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Aporte');
+      const modal = await openNew(user, 'Aporte');
 
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '15/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '2.500,50');
-      await user.click(drawer.getByRole('button', { name: 'Registrar aporte' }));
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '2.500,50');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
       expect(await screen.findByText('Aporte registrado.')).toBeInTheDocument();
       expect(bodies).toEqual([
@@ -574,11 +582,11 @@ describe('Lançamentos (§11.3)', () => {
     it('§6.2 registers a retirada; the amount is sent positive', async () => {
       const bodies = captureBodies('post', '/cash-movements');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Retirada');
+      const modal = await openNew(user, 'Retirada');
 
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '15/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '1.000');
-      await user.click(drawer.getByRole('button', { name: 'Registrar retirada' }));
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '1.000');
+      await user.click(modal.getByRole('button', { name: 'Registrar retirada' }));
 
       expect(await screen.findByText('Retirada registrada.')).toBeInTheDocument();
       expect(bodies).toEqual([
@@ -589,14 +597,14 @@ describe('Lançamentos (§11.3)', () => {
 
     it('OQ-3 shows the decimal-place error of an amount on its field', async () => {
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Aporte');
+      const modal = await openNew(user, 'Aporte');
 
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '15/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '10,505');
-      await user.click(drawer.getByRole('button', { name: 'Registrar aporte' }));
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '10,505');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
-      expect(await drawer.findByText('Use no máximo 2 casas decimais.')).toBeInTheDocument();
-      expect(drawer.getByRole('textbox', { name: 'Valor (R$)' })).toHaveAttribute(
+      expect(await modal.findByText('Use no máximo 2 casas decimais.')).toBeInTheDocument();
+      expect(modal.getByRole('textbox', { name: 'Valor (R$)' })).toHaveAttribute(
         'aria-invalid',
         'true',
       );
@@ -611,25 +619,182 @@ describe('Lançamentos (§11.3)', () => {
         ),
       );
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Aporte');
+      const modal = await openNew(user, 'Aporte');
 
-      await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar aporte' }));
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
-      expect(await drawer.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
-      expect(drawer.getByRole('textbox', { name: 'Data' })).toHaveAttribute('aria-invalid', 'true');
+      expect(await modal.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+      expect(modal.getByRole('textbox', { name: 'Data' })).toHaveAttribute('aria-invalid', 'true');
     });
 
     it('§6.2 rejects a value that is not a pt-BR number before sending', async () => {
       const bodies = captureBodies('post', '/cash-movements');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Aporte');
+      const modal = await openNew(user, 'Aporte');
 
-      await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '1,000.50');
-      await user.click(drawer.getByRole('button', { name: 'Registrar aporte' }));
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '1,000.50');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
-      expect(drawer.getByText('Informe um valor válido, como 1.234,56.')).toBeInTheDocument();
+      expect(modal.getByText('Informe um valor válido, como 1.234,56.')).toBeInTheDocument();
       expect(bodies).toEqual([]);
+    });
+  });
+
+  describe('Novo lançamento modal (§11.3)', () => {
+    it('§11.3 opens one modal that switches between Operação and Caixa', async () => {
+      const { user } = await openLedger();
+
+      await user.click(screen.getByRole('button', { name: 'Novo lançamento' }));
+      const modal = within(await screen.findByRole('dialog', { name: 'Novo lançamento' }));
+
+      expect(screen.queryByRole('menuitem')).not.toBeInTheDocument();
+      expect(modal.getByRole('radio', { name: 'Operação' })).toBeChecked();
+      expect(modal.getByRole('radio', { name: 'Compra' })).toBeChecked();
+      expect(modal.getByRole('radio', { name: 'Venda' })).not.toBeChecked();
+      expect(modal.getByRole('combobox', { name: 'Contrato' })).toBeInTheDocument();
+      expect(modal.getByRole('button', { name: 'Registrar compra' })).toBeInTheDocument();
+
+      await user.click(modal.getByRole('radio', { name: 'Caixa' }));
+
+      expect(modal.getByRole('radio', { name: 'Aporte' })).toBeChecked();
+      expect(modal.getByRole('radio', { name: 'Retirada' })).not.toBeChecked();
+      expect(modal.getByRole('textbox', { name: 'Valor (R$)' })).toBeInTheDocument();
+      expect(modal.queryByRole('combobox', { name: 'Contrato' })).not.toBeInTheDocument();
+      expect(modal.getByRole('button', { name: 'Registrar aporte' })).toBeInTheDocument();
+
+      await user.click(modal.getByRole('radio', { name: 'Retirada' }));
+      expect(modal.getByRole('button', { name: 'Registrar retirada' })).toBeInTheDocument();
+    });
+
+    it('§11.3 filters the contracts by asset class and finds one by its code', async () => {
+      // A second class, so the filter has something to leave out.
+      const dollar = {
+        ...products[0],
+        id: 'b0000000-0000-4000-8000-000000000001',
+        code: 'DOL',
+        name: 'Futuro de Dólar Comercial',
+        asset_class: { id: 2, code: 'FX_FUTURE', name: 'Futuros de Moeda' },
+        instrument_count: 1,
+      };
+      server.use(
+        http.get(url('/products'), () => HttpResponse.json({ items: [...products, dollar] })),
+        http.get(url('/instruments'), () =>
+          HttpResponse.json({
+            items: [
+              ...instruments.map((i) => ({ ...i, last_reference: null })),
+              {
+                id: 'b0000000-0000-4000-8000-0000000000d1',
+                code: 'DOLX26',
+                product_id: dollar.id,
+                product_code: 'DOL',
+                maturity_date: '2026-12-01',
+                created_at: '2026-10-01T09:00:00-03:00',
+                last_reference: null,
+              },
+            ],
+          }),
+        ),
+      );
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Compra');
+      const contract = modal.getByRole('combobox', { name: 'Contrato' });
+      await waitFor(() => {
+        expect(contract).toBeEnabled();
+      });
+      const option = (code: string) => screen.queryByRole('option', { name: code, hidden: true });
+
+      await user.click(contract);
+      expect(option('DOLX26')).toBeInTheDocument();
+      expect(option('DI1F28')).toBeInTheDocument();
+      await user.click(screen.getByRole('option', { name: 'DOLX26', hidden: true }));
+      expect(contract).toHaveValue('DOLX26');
+
+      await user.click(modal.getByRole('combobox', { name: 'Classe de ativo' }));
+      await user.click(
+        await screen.findByRole('option', { name: 'Futuros de Taxa de Juros', hidden: true }),
+      );
+      // DOLX26 is not of that class: it is cleared and no longer offered.
+      expect(contract).toHaveValue('');
+      await user.click(contract);
+      expect(option('DOLX26')).not.toBeInTheDocument();
+      expect(option('DI1F28')).toBeInTheDocument();
+
+      await user.type(contract, 'F29');
+      expect(option('DI1F29')).toBeInTheDocument();
+      expect(option('DI1F28')).not.toBeInTheDocument();
+    });
+
+    it('§11.3 a class change keeps a contract of the chosen class', async () => {
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Compra');
+      await chooseContract(user, modal, 'DI1F28');
+
+      await user.click(modal.getByRole('combobox', { name: 'Classe de ativo' }));
+      await user.click(
+        await screen.findByRole('option', { name: 'Futuros de Taxa de Juros', hidden: true }),
+      );
+
+      expect(modal.getByRole('combobox', { name: 'Contrato' })).toHaveValue('DI1F28');
+    });
+  });
+
+  describe('Novo lançamento modal: state (§11.3)', () => {
+    it('§11.3 each opening starts again at Operação → Compra with blank fields', async () => {
+      const { user } = await openLedger();
+      let modal = await openNew(user, 'Retirada');
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '1.000,00');
+      await user.click(modal.getByRole('button', { name: 'Fechar' }));
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', { name: 'Novo lançamento' }));
+      modal = within(await screen.findByRole('dialog', { name: 'Novo lançamento' }));
+
+      expect(modal.getByRole('radio', { name: 'Operação' })).toBeChecked();
+      expect(modal.getByRole('radio', { name: 'Compra' })).toBeChecked();
+      await user.click(modal.getByRole('radio', { name: 'Caixa' }));
+      expect(modal.getByRole('radio', { name: 'Aporte' })).toBeChecked();
+      expect(modal.getByRole('textbox', { name: 'Valor (R$)' })).toHaveValue('');
+    });
+
+    it('OQ-15 locks the kind of entry while a save runs', async () => {
+      let release: () => void = () => undefined;
+      server.use(
+        http.post(url('/cash-movements'), async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return undefined;
+        }),
+      );
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Aporte');
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '1.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
+
+      await waitFor(() => {
+        expect(modal.getByRole('radio', { name: 'Operação' })).toBeDisabled();
+      });
+      expect(modal.getByRole('radio', { name: 'Retirada' })).toBeDisabled();
+      release();
+    });
+
+    it('§12 says so on Classe de ativo when the classes fail to load; contracts still work', async () => {
+      server.use(
+        http.get(url('/products'), () =>
+          problem(500, [fieldError('VALIDATION_ERROR', 'Erro interno.')]),
+        ),
+      );
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Compra');
+
+      expect(
+        await modal.findByText('Não foi possível carregar as classes de ativo.'),
+      ).toBeInTheDocument();
+      expect(modal.queryByText('Não foi possível carregar os contratos.')).not.toBeInTheDocument();
+      await chooseContract(user, modal, 'DI1F28');
     });
   });
 

@@ -23,8 +23,9 @@ export const ledgerKeys = {
     [...queryRoots.ledger, 'cash-movements', start, end, search] as const,
   summary: (date: IsoDate) => [...queryRoots.portfolio, 'summary', date] as const,
   instruments: () => [...queryRoots.assets, 'instruments', 'all'] as const,
+  products: () => [...queryRoots.assets, 'products', 'all'] as const,
   instrumentTypes: () => [...queryRoots.assets, 'instrument-types'] as const,
-  /** Mutation key of the drawers' saves, so the page knows a save is running. */
+  /** Mutation key of the new-entry saves, so the page knows a save is running. */
   create: () => [...queryRoots.ledger, 'create'] as const,
 };
 
@@ -119,6 +120,14 @@ export function useInstruments() {
   });
 }
 
+/** Products carry the asset class of their contracts (the trade form's class filter). */
+export function useProducts() {
+  return useQuery({
+    queryKey: ledgerKeys.products(),
+    queryFn: () => assetsApi.listProducts(),
+  });
+}
+
 export function useInstrumentTypes() {
   return useQuery({
     queryKey: ledgerKeys.instrumentTypes(),
@@ -148,7 +157,7 @@ export const useCreateCashMovement = () =>
     ledgerKeys.create(),
   );
 
-/** A drawer's save is running: the drawer must stay open until its result is shown. */
+/** A new entry's save is running: the modal must stay open until its result is shown. */
 export const useIsSavingEntry = () => useIsMutating({ mutationKey: ledgerKeys.create() }) > 0;
 
 /** One entry: `DELETE /trades/{id}` or `DELETE /cash-movements/{id}`. */

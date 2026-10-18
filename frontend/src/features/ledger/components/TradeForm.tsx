@@ -13,12 +13,12 @@ import { DateInput, TimeInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconAlertTriangle } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import type { CreateTradeRequest, InputKind, IsoDate } from '@/api/contract';
 import { parsePtBrDecimal, percentToFraction } from '@/shared/format';
 
-import { useCreateTrade, useInstruments } from '../hooks/useLedger';
+import { useCreateTrade, useInstruments, useProducts } from '../hooks/useLedger';
 import { nowInSaoPaulo, parsePtBrDate, splitErrors, toIsoTime } from './formSupport';
 
 export type TradeSide = 'BUY' | 'SELL';
@@ -65,6 +65,43 @@ function typedPrice(values: TradeValues): string | null {
 }
 
 /**
+ * The contract picker's options: every contract, or those whose product is of the chosen
+ * asset class. The class names come from the products, so only classes with a product show.
+ */
+function useContractOptions(assetClassId: string | null) {
+  const instruments = useInstruments();
+  const products = useProducts();
+  const classOf = useMemo(
+    () => new Map((products.data?.items ?? []).map((p) => [p.id, String(p.asset_class.id)])),
+    [products.data],
+  );
+  const classOptions = useMemo(() => {
+    const names = new Map(
+      (products.data?.items ?? []).map((p) => [String(p.asset_class.id), p.asset_class.name]),
+    );
+    return [...names].map(([value, label]) => ({ value, label }));
+  }, [products.data]);
+  const items = instruments.data?.items ?? [];
+  const contractOptions = items
+    .filter((i) => assetClassId === null || classOf.get(i.product_id) === assetClassId)
+    .map((i) => ({ value: i.id, label: i.code }));
+  /** The asset class of a contract, by its id. */
+  const classOfContract = (instrumentId: string) => {
+    const instrument = items.find((i) => i.id === instrumentId);
+    return instrument ? classOf.get(instrument.product_id) : undefined;
+  };
+  return {
+    classOptions,
+    contractOptions,
+    classOfContract,
+    pending: instruments.isPending || products.isPending,
+    /** Without products the class filter is unavailable; the contracts still are. */
+    classesFailed: products.isError,
+    contractsFailed: instruments.isError,
+  };
+}
+
+/**
  * Compra or venda (§6.1). The user types PU **or** rate; the backend computes the other on
  * save and there is no preview (OQ-19 item 7). The quantity is typed positive; the side gives
  * the sign. Date and time are required, suggested as today and now in São Paulo (OQ-13).
@@ -78,9 +115,10 @@ export function TradeForm({
   today: IsoDate;
   onDone: () => void;
 }) {
-  const instruments = useInstruments();
   const createTrade = useCreateTrade();
   const [pageErrors, setPageErrors] = useState<string[]>([]);
+  const [assetClassId, setAssetClassId] = useState<string | null>(null);
+  const contracts = useContractOptions(assetClassId);
 
   const form = useForm<TradeValues>({
     initialValues: {
@@ -133,11 +171,6 @@ export function TradeForm({
     });
   });
 
-  const contractOptions = (instruments.data?.items ?? []).map((i) => ({
-    value: i.id,
-    label: i.code,
-  }));
-
   return (
     <form onSubmit={submit} noValidate>
       <Stack gap="md">
@@ -152,17 +185,42 @@ export function TradeForm({
             </Stack>
           </Alert>
         )}
-        <Select
-          label="Contrato"
-          placeholder={instruments.isPending ? 'Carregando contratos...' : 'Selecione'}
-          data={contractOptions}
-          // Inside the drawer, so the options are not hidden behind its modal layer.
-          comboboxProps={{ withinPortal: false }}
-          disabled={instruments.isPending}
-          withAsterisk
-          {...form.getInputProps('assetId')}
-          {...(instruments.isError ? { error: 'Não foi possível carregar os contratos.' } : {})}
-        />
+        <Group grow align="flex-start">
+          <Select
+            label="Classe de ativo"
+            placeholder="Todas as classes"
+            data={contracts.classOptions}
+            comboboxProps={{ withinPortal: false }}
+            disabled={contracts.pending || contracts.classesFailed}
+            {...(contracts.classesFailed
+              ? { error: 'Não foi possível carregar as classes de ativo.' }
+              : {})}
+            clearable
+            value={assetClassId}
+            onChange={(value) => {
+              setAssetClassId(value);
+              // A contract of another class is no longer offered: it must be chosen again.
+              const chosen = form.values.assetId;
+              if (chosen && value !== null && contracts.classOfContract(chosen) !== value) {
+                form.setFieldValue('assetId', null);
+              }
+            }}
+          />
+          <Select
+            label="Contrato"
+            placeholder={contracts.pending ? 'Carregando contratos...' : 'Buscar contrato'}
+            data={contracts.contractOptions}
+            searchable
+            nothingFoundMessage="Nenhum contrato encontrado"
+            comboboxProps={{ withinPortal: false }}
+            disabled={contracts.pending}
+            withAsterisk
+            {...form.getInputProps('assetId')}
+            {...(contracts.contractsFailed
+              ? { error: 'Não foi possível carregar os contratos.' }
+              : {})}
+          />
+        </Group>
         <Group grow align="flex-start">
           <DateInput
             label="Data"
