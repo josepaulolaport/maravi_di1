@@ -90,16 +90,23 @@ def _typed_pu(pu: Decimal) -> Decimal:
 
 
 def _pu_from_rate(rate: Decimal, days: int, face_value: Decimal) -> Decimal:
-    try:
-        with financial_context():
-            pu = face_value / (1 + rate) ** (Decimal(days) / DAYS_PER_YEAR)
-    except Overflow:
-        pu = Decimal(0)  # a discount factor beyond the context's range: the PU is ~0
+    rounds_to_zero = InvalidPricingInputError(
+        "the rate gives a PU that rounds to zero at 10 places", field="rate"
+    )
+    with financial_context():
+        try:
+            discount = (1 + rate) ** (Decimal(days) / DAYS_PER_YEAR)
+        except Overflow as exc:
+            raise rounds_to_zero from exc  # a discount factor that large gives a PU of ~0
+        try:
+            pu = face_value / discount
+        except Overflow as exc:
+            raise InvalidPricingInputError(
+                "the rate gives a PU beyond the calculation's range", field="rate"
+            ) from exc
     stored = quantize_pu(pu)
     if stored <= 0:
-        raise InvalidPricingInputError(
-            "the rate gives a PU that rounds to zero at 10 places", field="rate"
-        )
+        raise rounds_to_zero
     return stored
 
 

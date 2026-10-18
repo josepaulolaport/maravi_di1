@@ -224,6 +224,26 @@ def test_a_pu_that_would_be_stored_as_zero_is_rejected() -> None:
     assert caught.value.field == "rate"
 
 
+def test_a_discount_factor_beyond_the_context_range_gives_a_zero_pu() -> None:
+    # (1E+100000)^10 overflows the context (Emax 999999): the PU is ~0, rejected like above.
+    with pytest.raises(InvalidPricingInputError, match="rounds to zero") as caught:
+        price(days_before_maturity(3650), Quote.rate(Decimal("1E+100000")))
+
+    assert caught.value.field == "rate"
+
+
+def test_a_pu_beyond_the_context_range_is_rejected_as_out_of_range() -> None:
+    # 1E+999990 / (1E-12)^(366/365) ≈ 1E+1000002 overflows the division, not the power.
+    with pytest.raises(InvalidPricingInputError, match="beyond the calculation's range") as caught:
+        price(
+            days_before_maturity(366),
+            Quote.rate(Decimal("-0.999999999999")),
+            face=Decimal("1E+999990"),
+        )
+
+    assert caught.value.field == "rate"
+
+
 def test_a_rate_that_would_be_stored_as_minus_one_is_rejected() -> None:
     # (100000 / 1E+10)^365 − 1 = 1E-1825 − 1 rounds to −1 at 12 places (schema: rate > −1).
     with pytest.raises(InvalidPricingInputError) as caught:
