@@ -35,4 +35,5 @@ review with an inline comment per finding. The reviewer's instructions are in
 artifact, must match `.github/ai-review/review.schema.json`. It needs one repository secret,
 `GEMINI_API_KEY`, holding a Google AI Studio API key; until it is set the job fails without
 blocking the merge. On the free tier Google may use the prompts to improve its products, and
-fork PRs get no review (secrets are unavailable to them).
+fork PRs get no review (secrets are unavailable to them). PRs that change only documentation
+(`docs/**` or Markdown files) skip it; Markdown is also left out of a mixed PR's review.

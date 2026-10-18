@@ -37,7 +37,7 @@ CHUNK_CHARS = 300_000  # about 75k tokens of diff per request
 MAX_REQUESTS = 6
 REQUEST_TIMEOUT = 180  # seconds; a slower answer is dropped and retried
 ATTEMPTS = 3
-EXCLUDE = ["backend/uv.lock", "frontend/package-lock.json", "docs"]
+EXCLUDE = ["backend/uv.lock", "frontend/package-lock.json", "docs", "**/*.md"]  # globs
 # Keywords Gemini's structured output does not document; they are still checked locally.
 _UNSUPPORTED = {"$schema", "minLength"}
 _TYPES: dict[str, tuple[type, ...]] = {
@@ -256,7 +256,7 @@ def post_review(review: dict[str, Any], files: dict[str, FileDiff], head: str, n
 
 
 def main(base: str, head: str, out_dir: str) -> int:
-    pathspec = [".", *(f":(exclude){p}" for p in EXCLUDE)]
+    pathspec = [".", *(f":(exclude,glob){p}" for p in EXCLUDE)]
     diff = subprocess.run(
         ["git", "diff", "--no-color", "--unified=3", "-M", f"{base}...{head}", "--", *pathspec],
         check=True,

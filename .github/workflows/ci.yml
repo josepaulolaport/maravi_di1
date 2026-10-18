@@ -35,11 +35,15 @@ jobs:
       # A push to main runs everything.
       backend: ${{ github.event_name == 'push' || steps.filter.outputs.backend == 'true' }}
       frontend: ${{ github.event_name == 'push' || steps.filter.outputs.frontend == 'true' }}
+      # The AI review runs only on PRs that change something other than documentation.
+      review: ${{ steps.filter.outputs.review == 'true' }}
     steps:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         if: github.event_name == 'pull_request'
         with:
+          # A file matches a filter when it matches a pattern and none of its '!' patterns.
+          predicate-quantifier: some-with-excludes
           filters: |
             backend:
               - 'backend/**'
@@ -51,6 +55,10 @@ jobs:
               - 'frontend/**'
               - 'Makefile'
               - '.github/workflows/**'
+            review:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
 
   backend:
     name: backend
@@ -169,11 +177,12 @@ jobs:
   # this repository; pull_request_target is never used.
   ai-review:
     name: ai-review
-    needs: ci-ok
+    needs: [changes, ci-ok]
     # always() drops the implicit success(), which would also require every upstream job (a
     # skipped frontend or backend job included) to succeed; ci-ok already decides that.
     if: >-
       always() && needs.ci-ok.result == 'success'
+      && needs.changes.outputs.review == 'true'
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
