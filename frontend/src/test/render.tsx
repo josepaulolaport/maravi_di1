@@ -8,6 +8,7 @@ import { routes } from '@/app/routes';
 
 interface RenderAppResult extends RenderResult {
   user: UserEvent;
+  router: ReturnType<typeof createMemoryRouter>;
 }
 
 /** Renders the whole app (providers, layout, routes) at `route`. */
@@ -22,5 +23,5 @@ export function renderApp(route = '/'): RenderAppResult {
       <RouterProvider router={router} />
     </AppProviders>,
   );
-  return { user, ...result };
+  return { user, router, ...result };
 }
