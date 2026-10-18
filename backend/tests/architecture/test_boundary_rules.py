@@ -139,7 +139,7 @@ def test_module_init_contains_no_imports(tmp_path: Path) -> None:
         ("import asyncio\n", {"domain-purity"}),
         ("import subprocess\n", {"domain-purity"}),
         ("import logging\n", {"domain-purity"}),
-        ("import random\n", {"domain-purity"}),
+        ("import secrets\n", {"domain-purity"}),
         # side-effecting calls inside otherwise pure modules
         ("from datetime import datetime\nnow = datetime.now()\n", {"domain-purity"}),
         ("import datetime\ntoday = datetime.date.today()\n", {"domain-purity"}),
@@ -149,6 +149,12 @@ def test_module_init_contains_no_imports(tmp_path: Path) -> None:
         ("import uuid\nnew_id = uuid.uuid4()\n", {"domain-purity"}),
         ("data = open('prices.csv').read()\n", {"domain-purity"}),
         ("print('debug')\n", {"domain-purity"}),
+        # randomness generated internally (no explicit seed or injected generator)
+        ("import random\nx = random.random()\n", {"domain-purity"}),
+        ("from random import randint\nroll = randint(1, 6)\n", {"domain-purity"}),
+        ("import random\nrandom.seed(42)\n", {"domain-purity"}),
+        ("import random\nrng = random.Random()\n", {"domain-purity"}),
+        ("from random import SystemRandom\nrng = SystemRandom(42)\n", {"domain-purity"}),
     ],
 )
 def test_domain_has_no_io_or_side_effects(tmp_path: Path, source: str, expected: set[str]) -> None:
@@ -168,6 +174,19 @@ def test_domain_may_use_pure_standard_library(tmp_path: Path) -> None:
         "asset_id = uuid.UUID('6ad8f84a-7cb3-46d1-a737-0360bf1d754f')\n"
         "label = time.strftime('%Y', (2027, 1, 1, 0, 0, 0, 0, 1, 0))\n"
         "pu = Decimal('100000') / Decimal('1.1')\n"
+    )
+    assert _rules_for(tmp_path, DOMAIN, source) == set()
+
+
+def test_domain_may_use_a_seeded_or_injected_random_generator(tmp_path: Path) -> None:
+    source = (
+        "import random\n"
+        "from random import Random\n"
+        "def simulate(paths: int, rng: random.Random) -> list[float]:\n"
+        "    return [rng.gauss(0.0, 1.0) for _ in range(paths)]\n"
+        "def reproducible(seed: int) -> float:\n"
+        "    return Random(seed).random()\n"
+        "fixed = random.Random(42)\n"
     )
     assert _rules_for(tmp_path, DOMAIN, source) == set()
 

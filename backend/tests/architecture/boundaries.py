@@ -15,10 +15,13 @@ Rules:
 - ``domain-purity``: ``domain/`` is deterministic and free of I/O and side effects. It imports
   only the standard library, ``di1.contracts`` and its own module's domain; it never imports a
   standard-library module whose purpose is filesystem, network, database, environment,
-  process, concurrency, logging or randomness access; and it never calls the system clock,
+  process, concurrency, logging or OS-entropy access; and it never calls the system clock,
   random identifiers or I/O builtins (``datetime.now``, ``date.today``, ``time.monotonic``,
-  ``uuid.uuid4``, ``open``, ``print``, ...). Pure utilities stay allowed: ``datetime``
-  arithmetic, ``decimal``, ``enum``, ``dataclasses``, ``uuid.UUID``.
+  ``uuid.uuid4``, ``open``, ``print``, ...). Randomness is never generated internally: the
+  module-level ``random`` functions, ``random.seed``, ``SystemRandom`` and an unseeded
+  ``random.Random()`` are forbidden, while an injected generator (``rng: random.Random``) or one
+  built from an explicit seed (``random.Random(seed)``) is allowed. Pure utilities stay
+  allowed: ``datetime`` arithmetic, ``decimal``, ``enum``, ``dataclasses``, ``uuid.UUID``.
 - ``layering``: ``application/`` does not import its module's ``infrastructure/`` or
   ``presentation/``; ``infrastructure/`` does not import ``presentation/``; ``presentation/``
   (HTTP routers, message handlers) does not import ``infrastructure/``, so business logic
@@ -57,14 +60,15 @@ SQL_LIBRARIES = ("sqlalchemy", "psycopg", "alembic")
 BROKER_LIBRARIES = ("aio_pika", "aiormq", "pika")
 PYDANTIC_LIBRARIES = ("pydantic", "pydantic_settings", "pydantic_core")
 # Standard-library modules whose purpose is a side effect: filesystem, network, database,
-# environment and process, concurrency, logging, randomness.
+# environment and process, concurrency, logging (it belongs in the outer layers: domain code
+# reports failures through exceptions and explicit results), OS entropy.
 DOMAIN_FORBIDDEN_STDLIB = frozenset(
     {
         "os", "sys", "pathlib", "io", "shutil", "tempfile", "glob", "fileinput", "zipfile",
         "tarfile", "mmap", "socket", "ssl", "select", "selectors", "http", "urllib", "ftplib",
         "smtplib", "poplib", "imaplib", "socketserver", "xmlrpc", "wsgiref", "webbrowser",
         "sqlite3", "dbm", "shelve", "asyncio", "threading", "multiprocessing", "concurrent",
-        "subprocess", "signal", "sched", "queue", "logging", "random", "secrets", "getpass",
+        "subprocess", "signal", "sched", "queue", "logging", "secrets", "getpass",
         "platform", "ctypes",
     }
 )  # fmt: skip
@@ -79,8 +83,18 @@ DOMAIN_FORBIDDEN_CALLS = frozenset(
         "time.localtime", "time.gmtime", "time.ctime", "time.mktime", "uuid.uuid1",
         "uuid.uuid4", "builtins.open", "builtins.input", "builtins.print",
         "builtins.breakpoint", "builtins.exec", "builtins.eval",
+        # internal randomness: the hidden global generator and OS entropy
+        "random.random", "random.uniform", "random.triangular", "random.randint",
+        "random.randrange", "random.randbytes", "random.getrandbits", "random.choice",
+        "random.choices", "random.shuffle", "random.sample", "random.binomialvariate",
+        "random.gauss", "random.normalvariate", "random.lognormvariate", "random.expovariate",
+        "random.vonmisesvariate", "random.gammavariate", "random.betavariate",
+        "random.paretovariate", "random.weibullvariate", "random.seed", "random.setstate",
+        "random.SystemRandom",
     }
 )  # fmt: skip
+# A generator built without an explicit seed is seeded from OS entropy.
+SEEDED_GENERATORS = frozenset({"random.Random"})
 BUSINESS_MESSAGING = (
     f"{ROOT}.platform.messaging.outbox",
     f"{ROOT}.platform.messaging.inbox",
@@ -199,7 +213,8 @@ def _aliases(tree: ast.AST) -> dict[str, str]:
 
 
 def _called_names(tree: ast.AST) -> Iterator[str]:
-    """The fully qualified name of every call whose target is a (dotted) name."""
+    """The fully qualified name of every call whose target is a (dotted) name. A seeded
+    generator called without any argument is reported with an ``()`` suffix."""
     bound = _aliases(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -212,7 +227,9 @@ def _called_names(tree: ast.AST) -> Iterator[str]:
         if not isinstance(target, ast.Name):
             continue
         head = bound.get(target.id, f"builtins.{target.id}" if not chain else target.id)
-        yield ".".join([head, *chain])
+        name = ".".join([head, *chain])
+        unseeded = name in SEEDED_GENERATORS and not node.args and not node.keywords
+        yield f"{name}()" if unseeded else name
 
 
 def _dynamic_imports(tree: ast.AST) -> Iterator[str]:
@@ -337,6 +354,7 @@ def find_violations(package: Path) -> list[str]:
         for call in set(_dynamic_imports(tree)):
             report.add(f"dynamic-import: {source.relative} calls {call}")
         if source.layer == "domain":
-            for call in set(_called_names(tree)) & DOMAIN_FORBIDDEN_CALLS:
+            unseeded = {f"{name}()" for name in SEEDED_GENERATORS}
+            for call in set(_called_names(tree)) & (DOMAIN_FORBIDDEN_CALLS | unseeded):
                 report.add(f"domain-purity: {source.relative} calls {call}")
     return sorted(report)
