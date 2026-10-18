@@ -99,12 +99,13 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 - Docker Compose runs the API, PostgreSQL, RabbitMQ, the worker, the dispatcher and the outbox relay.
 
 **Modular monolith:** the modules are `asset`, `pricing`, `ledger`, `prices`, `portfolio`, `pnl` and `processing`; `platform` holds the shared technical infrastructure. The layout is in `docs/maravi_implementation_plan.md` §1:
-- `backend/src/di1/modules/<m>/{public.py, domain/, application/services/, application/interfaces/, infrastructure/persistence/, presentation/http/}`
+- `backend/src/di1/modules/<m>/{public.py, domain/, application/services/, application/interfaces/, infrastructure/, presentation/http/, presentation/messaging/}`
+- `infrastructure/` holds persistence and any other outbound adapter. A module's RabbitMQ consumers and handlers live in `presentation/messaging/`; shared RabbitMQ infrastructure lives in `platform/messaging/`; business processing logic stays in `application/`.
 - `composition/`, `workers/`, `platform/`
 
 **Rules:**
 - Cross-module access goes **only** through `public.py` DTOs and services. Never import another module's ORM or repositories.
-- Calculators (`pricing`, `pnl`, portfolio accounting) are pure and synchronous: no DB, no messaging, no FastAPI.
+- Domain code, including the calculators (`pricing`, `pnl`, portfolio accounting), is deterministic, synchronous and free of I/O and side effects: no filesystem, network, database, messaging, environment or system-clock access, and no FastAPI. Pure standard-library utilities (`datetime` arithmetic, `Decimal`, `Enum`, `dataclasses`) are allowed.
 - SQL lives in `infrastructure/persistence/queries`.
 - FastAPI `Depends` is used only in HTTP adapters and dependency providers. Workers use plain factories.
 - One Unit of Work per operation that must save a fact and its invalidation together.

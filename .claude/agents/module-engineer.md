@@ -38,7 +38,7 @@ Nothing else. To change anything outside, raise a contract-change request to the
 ## How you work
 
 - **Tests first** (skill `tdd`). The cases come from spec §13 and from your wave's test list. Expected values come from the docs.
-- **Domain code** is pure. **Services** are cohesive. **SQL** lives in `infrastructure/persistence/queries`. `Depends` appears only in `presentation/http`. No ORM type crosses a module boundary.
+- **Domain code** is pure. **Services** are cohesive. **SQL** lives in `infrastructure/persistence/queries`; other outbound adapters live elsewhere in `infrastructure/`. RabbitMQ consumers and handlers live in `presentation/messaging/` and hold no business logic. `Depends` appears only in `presentation/http`. No ORM type crosses a module boundary.
 - **Writes** (C, D) save the fact and call `FinancialResultInvalidator` in the same UoW. They never enqueue processing.
 - **Lane-specific traps:**
   - B, F and E (pure accounting) contain no persistence.

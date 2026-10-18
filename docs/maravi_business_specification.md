@@ -371,6 +371,7 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - Erros em problem+json (RFC 9457) com catálogo de códigos (OQ-15).
 - `GET /portfolio/pnl` alimenta o gráfico de P&L acumulado (OQ-16).
 - Lane H é dona de `platform/**` (OQ-17).
+- Arquitetura (usuário, 18/10/2026): `infrastructure/` contém persistência e outros adaptadores de saída; consumidores e handlers RabbitMQ de um módulo ficam em `presentation/messaging/`, a infraestrutura RabbitMQ compartilhada em `platform/messaging/`, e a lógica de processamento em `application/`. O domínio é determinístico e sem I/O nem efeitos colaterais (sem arquivo, rede, banco, mensageria, ambiente ou relógio do sistema); utilitários puros da biblioteca padrão (`datetime`, `Decimal`, `Enum`, `dataclasses`) são permitidos.
 
 - Desvios e interpretações do enunciado registrados em §15 (OQ-18).
 
