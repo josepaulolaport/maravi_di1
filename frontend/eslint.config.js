@@ -26,11 +26,12 @@ export default tseslint.config(
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
     },
   },
-  // Dependencies point inward (frontend/CLAUDE.md "Architecture"): a feature never imports
-  // another feature (its own files are imported relatively), and shared/api never import
-  // features or app.
-  {
-    files: ['src/features/**/*.{ts,tsx}'],
+  // Dependencies point inward (frontend/CLAUDE.md "Architecture"): a feature imports only
+  // @/api, @/shared, @/app/paths and its own files; shared and api never import features or
+  // app. Relative paths are checked too: a relative import may not climb out of its feature
+  // (one rule block per folder depth, since flat config replaces a rule's options per block).
+  ...[0, 1, 2, 3].map((depth) => ({
+    files: [`src/features/*/${'*/'.repeat(depth)}*.{ts,tsx}`],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -41,14 +42,18 @@ export default tseslint.config(
               message: 'Features are independent; move shared code to @/shared.',
             },
             {
-              group: ['@/app/routes', '@/app/providers', '@/app/navigation'],
-              message: 'Features do not depend on app composition.',
+              regex: '^@/app/(?!paths$)',
+              message: 'From app, a feature imports only @/app/paths.',
+            },
+            {
+              regex: `^(\\.\\./){${depth + 1},}`,
+              message: 'A relative import stays inside its feature; use @/ for api and shared.',
             },
           ],
         },
       ],
     },
-  },
+  })),
   {
     files: ['src/shared/**/*.{ts,tsx}', 'src/api/**/*.{ts,tsx}'],
     ignores: ['src/**/*.test.{ts,tsx}'],
@@ -59,6 +64,10 @@ export default tseslint.config(
           patterns: [
             { group: ['@/features/*'], message: 'shared and api must not depend on features.' },
             { group: ['@/app/*'], message: 'shared and api must not depend on app composition.' },
+            {
+              regex: '^(\\.\\./)+(features|app)(/|$)',
+              message: 'shared and api must not depend on features or app.',
+            },
           ],
         },
       ],
