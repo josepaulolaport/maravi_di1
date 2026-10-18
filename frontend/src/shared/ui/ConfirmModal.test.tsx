@@ -117,6 +117,38 @@ describe('ConfirmModal', () => {
     expect(onConfirm).toHaveBeenCalledTimes(2);
   });
 
+  it('§6.1 stays guarded when the parent clears the error before reporting loading', async () => {
+    const onConfirm = vi.fn();
+    const props = {
+      opened: true,
+      onClose: vi.fn(),
+      onConfirm,
+      title: 'Cancelar processamento?',
+      confirmLabel: 'Confirmar cancelamento',
+    };
+    const user = userEvent.setup();
+    const { rerender } = renderUi(
+      <ConfirmModal {...props} error={new Error('x')}>
+        Resumo
+      </ConfirmModal>,
+    );
+
+    // Retry: the parent clears the old error at once and reports loading a render later.
+    await user.click(await screen.findByRole('button', { name: 'Confirmar cancelamento' }));
+    rerender(<ConfirmModal {...props}>Resumo</ConfirmModal>);
+    await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+
+    // The retry fails without the parent ever reporting loading: a new error reopens it.
+    rerender(
+      <ConfirmModal {...props} error={new Error('y')}>
+        Resumo
+      </ConfirmModal>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Confirmar cancelamento' }));
+    expect(onConfirm).toHaveBeenCalledTimes(2);
+  });
+
   it('OQ-15 shows a field-bound API message too, since a dialog has no fields', async () => {
     const error = new ApiError({
       type: 'about:blank',

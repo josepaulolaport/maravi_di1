@@ -34,11 +34,15 @@ export function ConfirmModal({
 }: ConfirmModalProps) {
   // A double click must not run the action twice before the parent reports `loading`
   // (two cancel-and-replace requests would queue two jobs, §10.2). The guard opens again
-  // once the attempt has finished: not loading, failed, or the dialog reopened.
+  // once the attempt has finished (loading ended, or the dialog reopened) or has failed (a
+  // new error). Clearing the error, which a parent may do as a retry starts, keeps it shut.
   const confirming = useRef(false);
   useEffect(() => {
     if (!loading) confirming.current = false;
-  }, [loading, error, opened]);
+  }, [loading, opened]);
+  useEffect(() => {
+    if (!loading && error !== undefined && error !== null) confirming.current = false;
+  }, [loading, error]);
   const confirm = () => {
     if (loading || confirming.current) return;
     confirming.current = true;
