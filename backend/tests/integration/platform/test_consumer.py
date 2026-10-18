@@ -274,17 +274,18 @@ async def test_a_permanent_failure_is_dead_lettered_at_once(
 
 @dataclass
 class _FailsFor:
-    """A dependency is down for ``seconds`` (a database restart): fails until then."""
+    """A dependency is down for ``seconds`` from the first delivery on (a database restart).
+
+    The outage starts at the first call, not when the handler is built, so the broker set-up
+    before the first delivery cannot use up part of it on a slow machine."""
 
     seconds: float
     calls: list[float] = field(default_factory=list)
 
-    def __post_init__(self) -> None:
-        self._until = time.monotonic() + self.seconds
-
     async def __call__(self, envelope: Envelope, *, uow: UnitOfWork) -> None:
-        self.calls.append(time.monotonic())
-        if time.monotonic() < self._until:
+        now = time.monotonic()
+        self.calls.append(now)
+        if now < self.calls[0] + self.seconds:
             raise RuntimeError("database restarting")
         await uow.session.execute(EFFECT, {"m": envelope.message_id})
 
