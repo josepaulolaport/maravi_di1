@@ -372,15 +372,43 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - `GET /portfolio/pnl` alimenta o gráfico de P&L acumulado (OQ-16).
 - Lane H é dona de `platform/**` (OQ-17).
 
+- Desvios e interpretações do enunciado registrados em §15 (OQ-18).
+
 ### Aberto — requer decisão específica antes de codificar o comportamento
 
-1. **Desvios do enunciado (OQ-18):** auditoria do PDF do desafio contra esta especificação.
+Nenhum item em aberto.
 
 ### TODO posterior à entrega principal
 
 - Importação CSV de preços de referência via RabbitMQ.
 - Integração para captura de preços oficiais B3.
 - Outras famílias de calculadoras/metodologias de PU e taxa, se justificadas.
+
+## 15. Desvios e interpretações do enunciado
+
+Fonte: `docs/desafio_tecnico_di1_1.pdf`. Auditoria de 18/10/2026; desvios aprovados pelo usuário (OQ-18). O README repete esta seção.
+
+### Interpretações (texto ambíguo)
+
+| # | Enunciado | Leitura adotada | Por quê |
+|---|---|---|---|
+| I1 | §3: o contrato possui identificador, **data de referência**, vencimento e taxa ou PU | O contrato possui identificador e vencimento; data de referência e taxa/PU pertencem à calculadora, à operação ou ao preço de referência | Os mesmos dados, separados entre o contrato estático e os eventos datados |
+| I2 | §4.2: saldo de caixa = entradas − saídas | O caixa inclui também o efeito financeiro das operações (§7.3) | O exemplo do §5 exige: caixa 109.090,91 após a compra |
+| I3 | §5: "Financeiro total: 200.000" | AUM = caixa + valor de mercado (§8.2) | 200.000 = 109.090,91 + 90.909,09 |
+| I4 | §5: "Resultado financeiro simplificado da posição" | Valor de mercado (`financial_total`) e P&L de posições e de operações (§8) | O enunciado não define a métrica |
+
+### Adições (não rejeitam nada que o enunciado descreve, exceto D4)
+
+Hora da operação obrigatória (§6.1); regras de vencimento (§7.4); fontes MANUAL e B3 (§5); Pendências e processamento sob solicitação (§10).
+
+### Desvios deliberados
+
+| # | Enunciado | Especificação | Como o exemplo do enunciado roda |
+|---|---|---|---|
+| D1 | §5: BRL aparece como linha da tabela de posições (QTD 109090.91, PREÇO 1) | Caixa é o indicador "Saldo em caixa", nunca uma linha de posição (§11.4) | Mesmos números, apresentação diferente |
+| D2 | §5: "preços de referência disponíveis"; o exemplo avalia DI1F28 ao preço da própria operação | Preço de referência somente da data exata; preço de execução nunca vira referência (§4.2, §5) | O usuário informa também um preço de referência de 10% (PU 90.909,09) para DI1F28 em 01/01/2027; os números então coincidem |
+| D3 | §5 e requisito 6: a consulta reconstrói a carteira a partir dos eventos até a data | A reconstrução ocorre no processamento solicitado pelo usuário, a partir dos fatos imutáveis; o GET só lê resultados publicados (§10, §11.4) | Após um processamento de 01/01/2027; antes disso a tela mostra "não processado" ou "desatualizado", com link para Processamentos. Justifica onde o assíncrono agrega valor (§8 do enunciado) |
+| D4 | Os exemplos são datados de 01/01/2027, data futura em 18/10/2026 | Datas após hoje são rejeitadas (§6.1) | Testes automatizados rodam os exemplos exatamente como escritos, com relógio injetado fixo em 01/01/2027; a demonstração do README usa os mesmos passos datados de hoje, com vencimento em hoje + 365 dias: números idênticos (PU 90.909,09, caixa 109.090,91, AUM 200.000) |
 
 ---
 

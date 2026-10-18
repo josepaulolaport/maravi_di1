@@ -9,11 +9,12 @@ These files are the whole specification. They replaced the earlier `docs/` on 20
 | [schema.sql](schema.sql) | The PostgreSQL 16 DDL (applies cleanly; see schema.md Status) | SQL |
 | [interfaces.md](interfaces.md) | Module contracts, transaction boundaries, HTTP endpoints, DI composition | en |
 | [maravi_implementation_plan.md](maravi_implementation_plan.md) | Architecture, repository layout, agent lanes, waves and gates | en |
-| [open-questions.md](open-questions.md) | Decisions not yet taken, and points where the specs disagree | en |
+| [open-questions.md](open-questions.md) | Decisions not yet taken, and the user's answers | en |
+| [desafio_tecnico_di1_1.pdf](desafio_tecnico_di1_1.pdf) | The challenge text (authority 1) | pt-BR |
 
 ## Order of authority
 
-1. The challenge text sets the minimum requirements. Any discrepancy with it is recorded, never hidden: see OQ-18.
+1. The challenge text ([desafio_tecnico_di1_1.pdf](desafio_tecnico_di1_1.pdf)) sets the minimum requirements. Every interpretation of it and every deliberate deviation from it is in spec §15.
 2. `maravi_business_specification.md`, for behaviour and business rules. Where it disagrees with an older document, the most recent explicit decision wins (spec header).
 3. `schema.md` / `schema.sql`, `interfaces.md` and `maravi_implementation_plan.md`, for technical execution. Exact endpoint names and SQL types are not business requirements (spec header).
 4. Code comments, chat history and assumptions: never authoritative.

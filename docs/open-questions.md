@@ -6,9 +6,7 @@ When the user answers a question, it moves to "Answered" below, and the decision
 
 ## Open
 
-| ID | Question | Where |
-|---|---|---|
-| OQ-18 | **Discrepancies with the challenge.** The spec header says discrepancies with the challenge "must be recorded and not hidden". The user will add the challenge PDF as `docs/challenge.pdf` (2026-10-18). The integrator then compares it with the spec and lists every discrepancy in a "Desvios do enunciado" section, for the user's approval; the README repeats it. A known candidate: the old docs read challenge §5 ("preços de referência disponíveis") as "the latest price on or before D", while the spec uses the exact date only. | spec header, §5 |
+None.
 
 ## Answered
 
@@ -31,4 +29,5 @@ All answered by the user on 2026-10-18, in the integrator session, one question 
 | OQ-14 | Validation rules | "Rejected" (future dates); "Schema checks only" (bounds) | 1. A trade, cash movement or reference price dated after today (America/Sao_Paulo, through an injected clock) is rejected. Maturity dates are exempt. 2. The value bounds are only the schema's: rate > −1, PU > 0, quantity ≠ 0, amount > 0. 3. Dates after maturity: OQ-1, item 5. |
 | OQ-15 | The error contract | "problem+json + code list" | RFC 9457 `application/problem+json`: `{type, title, status, detail, errors: [{code, message, field}]}`. The code catalogue is in `interfaces.md`. Messages are pt-BR; codes are English. |
 | OQ-16 | `GET /portfolio/pnl` | "Feeds cumulative chart" | It returns the published `portfolio_metrics` series for [start, end]: for each date, `cumulative_pnl`, `daily_pnl`, the statuses and the stale flag. The Carteira chart draws only the complete, non-stale points. No per-asset data. |
+| OQ-18 | Discrepancies with the challenge | "Add PDF, I audit"; then, for D1, D2 and D3, "Keep, record deviation"; for D4, "Fixed clock in tests + shifted demo" | 1. The challenge is `docs/desafio_tecnico_di1_1.pdf`. 2. The audit's interpretations (I1–I4), additions and deliberate deviations (D1–D4) are recorded in spec §15, and the README repeats them. 3. D1: cash is a KPI, not a position row. 4. D2: exact-date reference price, trade price never used; the example needs a reference price entry. 5. D3: rebuilt only by user-requested processing. 6. D4: future dates stay rejected; tests use a clock fixed at 01/01/2027, and the demo shifts the dates to today. |
 | OQ-17 | Who owns `platform/**` | "Lane H owns" | Lane H owns `platform/**` and `workers/**`. The integrator reviews changes to the platform interfaces that modules use (UoW, outbox writer). The prose of plan §2 is corrected. |
