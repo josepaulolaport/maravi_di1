@@ -5,6 +5,9 @@
 # Never bypass with --no-verify.
 set -uo pipefail
 export LC_ALL=C.UTF-8
+# Never let uv sync from the temporary copy: that would re-point the shared .venv's editable
+# install at a folder this hook deletes.
+export UV_NO_SYNC=1
 root=$(git rev-parse --show-toplevel)
 cd "$root" || exit 1
 
@@ -49,11 +52,13 @@ if [[ $backend_any -eq 1 ]]; then
         uv run --frozen --quiet ruff check -- "${py[@]}" || exit 1
       fi
       if [[ -d src ]]; then uv run --frozen --quiet mypy src tests || exit 1; fi
-      if [[ -d tests/unit ]]; then
-        uv run --frozen --quiet pytest tests/unit -q -x -p no:cacheprovider; rc=$?
+      fast=()
+      for d in tests/unit tests/architecture; do [[ -d $d ]] && fast+=("$d"); done
+      if [[ ${#fast[@]} -gt 0 ]]; then
+        uv run --frozen --quiet pytest "${fast[@]}" -q -x -p no:cacheprovider; rc=$?
         [[ $rc -eq 0 || $rc -eq 5 ]] || exit 1
       fi
-    ) || fail "backend checks failed (ruff / mypy / unit tests)"
+    ) || fail "backend checks failed (ruff / mypy / unit and architecture tests)"
   fi
 fi
 
