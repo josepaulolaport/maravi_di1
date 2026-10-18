@@ -6,6 +6,7 @@ import type {
   CreateTradeRequest,
   DeleteEntriesRequest,
   IsoDate,
+  LedgerOrder,
 } from '@/api/contract';
 import { assetsApi, ledgerApi, portfolioApi } from '@/api/endpoints';
 import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
@@ -17,10 +18,8 @@ import type { LedgerEntry } from '../entries';
 // portfolio summary under the same key Carteira uses, so a finished job refreshes both.
 export const ledgerKeys = {
   all: queryRoots.ledger,
-  trades: (start: IsoDate, end: IsoDate, search: string) =>
-    [...queryRoots.ledger, 'trades', start, end, search] as const,
-  cashMovements: (start: IsoDate, end: IsoDate, search: string) =>
-    [...queryRoots.ledger, 'cash-movements', start, end, search] as const,
+  entries: (start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) =>
+    [...queryRoots.ledger, 'entries', start, end, search, order] as const,
   summary: (date: IsoDate) => [...queryRoots.portfolio, 'summary', date] as const,
   instruments: () => [...queryRoots.assets, 'instruments', 'all'] as const,
   products: () => [...queryRoots.assets, 'products', 'all'] as const,
@@ -86,23 +85,25 @@ export function useLedgerFilters(): LedgerFilters {
   };
 }
 
-export function useTrades(start: IsoDate, end: IsoDate, search: string) {
+/** The list, filtered and ordered by the backend (P18); a new order is a new request. */
+export function useEntries(start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) {
   return useQuery({
-    queryKey: ledgerKeys.trades(start, end, search),
+    queryKey: ledgerKeys.entries(start, end, search, order),
     queryFn: () =>
-      ledgerApi.listTrades({ start_date: start, end_date: end, ...(search ? { search } : {}) }),
-  });
-}
-
-export function useCashMovements(start: IsoDate, end: IsoDate, search: string) {
-  return useQuery({
-    queryKey: ledgerKeys.cashMovements(start, end, search),
-    queryFn: () =>
-      ledgerApi.listCashMovements({
+      ledgerApi.listEntries({
         start_date: start,
         end_date: end,
         ...(search ? { search } : {}),
+        order,
       }),
+    // Only a new order keeps the rows on screen while it loads; a new range or search shows
+    // the loading state, so rows of another filter are never listed (or selected).
+    placeholderData: (previous, previousQuery) => {
+      const key = previousQuery?.queryKey;
+      const sameFilter =
+        key !== undefined && key[2] === start && key[3] === end && key[4] === search;
+      return sameFilter ? previous : undefined;
+    },
   });
 }
 

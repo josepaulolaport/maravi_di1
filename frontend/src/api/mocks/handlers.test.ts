@@ -755,3 +755,84 @@ describe('mock ids', () => {
     expect(new Set(shortIds).size).toBe(items.length);
   });
 });
+
+describe('mock ledger entries (GET /ledger/entries)', () => {
+  const FULL = { start_date: '2026-10-14', end_date: '2026-10-16' };
+
+  it('§11.3 merges trades and cash movements: newest date first, trades before cash in a date', async () => {
+    const { items } = await ledgerApi.listEntries(FULL);
+
+    expect(items.map((e) => [e.kind, e.date, e.time])).toEqual([
+      ['TRADE', '2026-10-16', '15:00:00'],
+      ['CASH_MOVEMENT', '2026-10-16', null],
+      ['TRADE', '2026-10-15', '10:30:00'],
+      ['TRADE', '2026-10-14', '14:10:00'],
+      ['CASH_MOVEMENT', '2026-10-14', null],
+    ]);
+  });
+
+  it('§6.1 orders the trades of one date by time, then seq, newest first', async () => {
+    const trade = {
+      asset_id: IDS.di1f28,
+      trade_date: '2026-10-16',
+      signed_quantity: 1,
+      input_kind: 'PU',
+      execution_pu: '89000.00',
+    } as const;
+    const early = await ledgerApi.createTrade({ ...trade, trade_time: '10:00:00' });
+    const later = await ledgerApi.createTrade({ ...trade, trade_time: '10:00:00' });
+
+    const { items } = await ledgerApi.listEntries({ ...FULL, start_date: '2026-10-16' });
+
+    expect(items.flatMap((e) => (e.kind === 'TRADE' ? [e.seq] : []))).toEqual([
+      3,
+      later.seq,
+      early.seq,
+    ]);
+  });
+
+  it('§11.3 order=asc is the exact reverse of the default order', async () => {
+    const desc = (await ledgerApi.listEntries(FULL)).items.map((e) => e.id);
+    const asc = (await ledgerApi.listEntries({ ...FULL, order: 'asc' })).items.map((e) => e.id);
+
+    expect(asc).toEqual([...desc].reverse());
+  });
+
+  it('§11.3 gives every row its signed cash effect: the trade cash_amount, ±amount for cash', async () => {
+    const { items } = await ledgerApi.listEntries(FULL);
+
+    expect(items.map((e) => e.cash_amount)).toEqual([
+      '356408.8906133732',
+      '-50000.00',
+      '-410285.00',
+      '-890064.6254673500',
+      '1500000.00',
+    ]);
+  });
+
+  it('§11.3 applies the inclusive range and the search on the server', async () => {
+    const oneDay = await ledgerApi.listEntries({
+      start_date: '2026-10-14',
+      end_date: '2026-10-14',
+    });
+    const byAsset = await ledgerApi.listEntries({ ...FULL, search: 'DI1F28' });
+    const byType = await ledgerApi.listEntries({ ...FULL, search: 'retirada' });
+
+    expect(oneDay.items).toHaveLength(2);
+    expect(byAsset.items.map((e) => e.kind === 'TRADE' && e.asset_code)).toEqual([
+      'DI1F28',
+      'DI1F28',
+    ]);
+    expect(byType.items.map((e) => e.kind === 'CASH_MOVEMENT' && e.movement_type)).toEqual([
+      'WITHDRAWAL',
+    ]);
+  });
+
+  it('OQ-11 rejects a range that starts after it ends', async () => {
+    const problem = await problemOf(
+      ledgerApi.listEntries({ start_date: '2026-10-16', end_date: '2026-10-15' }),
+    );
+
+    expect(problem.errors?.[0]).toMatchObject({ code: 'INVALID_RANGE', field: 'start_date' });
+  });
+});

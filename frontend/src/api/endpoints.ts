@@ -5,6 +5,8 @@ import type {
   CreateInstrumentRequest,
   CreateTradeRequest,
   DeleteEntriesRequest,
+  LedgerEntry,
+  LedgerOrder,
   Instrument,
   InstrumentType,
   IsoDate,
@@ -44,6 +46,9 @@ export const assetsApi = {
 };
 
 export const ledgerApi = {
+  /** The Lançamentos list: both kinds of entry, filtered and ordered by the backend (P18). */
+  listEntries: (query: DateRange & { search?: string; order?: LedgerOrder }) =>
+    http.get<ListResponse<LedgerEntry>>('/ledger/entries', { query }),
   listTrades: (query: DateRange & { search?: string }) =>
     http.get<ListResponse<Trade>>('/trades', { query }),
   createTrade: (body: CreateTradeRequest) => http.post<Trade>('/trades', body),

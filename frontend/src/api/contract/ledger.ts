@@ -69,3 +69,48 @@ export interface DeleteEntriesRequest {
   cash_movement_ids: string[];
   reason?: string;
 }
+
+/**
+ * Proposal (P18): `GET /ledger/entries?start_date&end_date&search&order` — the Lançamentos
+ * list, trades and cash movements in one response, filtered and ordered by the backend.
+ * Default order (`desc`): newest date first; within a date, trades by (time, seq), newest
+ * first, then cash movements, which have no time (GAP-I-1), newest recorded first. `asc` is
+ * the exact reverse. Writes keep their own endpoints.
+ */
+interface LedgerEntryBase {
+  id: string;
+  /** `trade_date` or `movement_date`. */
+  date: IsoDate;
+  /**
+   * The entry's signed cash effect, computed by the backend: a trade's `cash_amount`
+   * (−signed_quantity × execution_pu), +amount for an aporte, −amount for a retirada.
+   */
+  cash_amount: Decimal;
+  created_at: IsoDateTime;
+}
+
+export interface TradeLedgerEntry extends LedgerEntryBase {
+  kind: 'TRADE';
+  time: IsoTime;
+  seq: number;
+  asset_id: string;
+  asset_code: string;
+  instrument_type_code: string;
+  signed_quantity: number;
+  execution_pu: Decimal;
+  execution_rate: Decimal;
+  input_kind: InputKind;
+}
+
+export interface CashLedgerEntry extends LedgerEntryBase {
+  kind: 'CASH_MOVEMENT';
+  /** Cash movements have no time (GAP-I-1). */
+  time: null;
+  movement_type: CashMovementType;
+  /** Always positive; `cash_amount` carries the direction. */
+  amount: Decimal;
+}
+
+export type LedgerEntry = TradeLedgerEntry | CashLedgerEntry;
+
+export type LedgerOrder = 'asc' | 'desc';

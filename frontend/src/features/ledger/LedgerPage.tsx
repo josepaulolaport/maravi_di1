@@ -12,15 +12,14 @@ import { ErrorState } from '@/shared/ui/ErrorState';
 import { CashStrip } from './components/CashStrip';
 import { EntriesTable, entryLabel } from './components/EntriesTable';
 import { NewEntryModal } from './components/NewEntryModal';
-import { type LedgerEntry, mergeEntries, type SortDirection, sortEntries } from './entries';
+import { type LedgerEntry, type SortDirection, toRow } from './entries';
 import {
-  useCashMovements,
   useDeleteEntries,
   useDeleteEntry,
+  useEntries,
   useInstrumentTypes,
   useIsSavingEntry,
   useLedgerFilters,
-  useTrades,
 } from './hooks/useLedger';
 
 type DeleteTarget = { mode: 'one'; entry: LedgerEntry } | { mode: 'many'; entries: LedgerEntry[] };
@@ -40,12 +39,11 @@ const countLabel = (n: number) =>
 export function LedgerPage() {
   const filters = useLedgerFilters();
   const { start, end, search, today } = filters;
-  const trades = useTrades(start, end, search);
-  const movements = useCashMovements(start, end, search);
+  const [sort, setSort] = useState<SortDirection>('desc');
+  const list = useEntries(start, end, search, sort);
   const instrumentTypes = useInstrumentTypes();
   const saving = useIsSavingEntry();
 
-  const [sort, setSort] = useState<SortDirection>('desc');
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
 
@@ -59,13 +57,8 @@ export function LedgerPage() {
     setSelection({ scope, keys });
   };
 
-  const entries = useMemo(
-    () =>
-      trades.data && movements.data
-        ? sortEntries(mergeEntries(trades.data.items, movements.data.items), sort)
-        : [],
-    [trades.data, movements.data, sort],
-  );
+  // The backend filters and orders the rows (GET /ledger/entries); they are only mapped here.
+  const entries = useMemo(() => (list.data ? list.data.items.map(toRow) : []), [list.data]);
   // Only listed entries count: a deleted row leaves the selection with the refetch.
   const visibleSelection = useMemo(
     () => new Set(entries.filter((e) => selected.has(e.key)).map((e) => e.key)),
@@ -137,15 +130,14 @@ export function LedgerPage() {
 
       <CashStrip end={end} />
 
-      {trades.isError || movements.isError ? (
+      {list.isError ? (
         <ErrorState
-          error={trades.error ?? movements.error}
+          error={list.error}
           onRetry={() => {
-            void trades.refetch();
-            void movements.refetch();
+            void list.refetch();
           }}
         />
-      ) : trades.isPending || movements.isPending ? (
+      ) : list.isPending ? (
         <div role="status" aria-label="Carregando lançamentos">
           <Skeleton h={320} />
         </div>

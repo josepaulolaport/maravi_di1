@@ -1,6 +1,15 @@
 import { http, HttpResponse } from 'msw';
 
-import type { InputKind, CashMovement, FieldError, ListResponse, Trade } from '../../contract';
+import type {
+  CashLedgerEntry,
+  CashMovement,
+  FieldError,
+  InputKind,
+  LedgerEntry,
+  ListResponse,
+  Trade,
+  TradeLedgerEntry,
+} from '../../contract';
 import { daysInclusive } from '../dates';
 import { db, markDirty, newId } from '../db';
 import {
@@ -46,7 +55,82 @@ function deleteMovement(id: string): boolean {
   return true;
 }
 
+/** A trade as a Lançamentos row (P18). */
+export function tradeEntry(trade: Trade): TradeLedgerEntry {
+  return {
+    kind: 'TRADE',
+    id: trade.id,
+    date: trade.trade_date,
+    time: trade.trade_time,
+    seq: trade.seq,
+    asset_id: trade.asset_id,
+    asset_code: trade.asset_code,
+    instrument_type_code: trade.instrument_type_code,
+    signed_quantity: trade.signed_quantity,
+    execution_pu: trade.execution_pu,
+    execution_rate: trade.execution_rate,
+    input_kind: trade.input_kind,
+    cash_amount: trade.cash_amount,
+    created_at: trade.created_at,
+  };
+}
+
+/** A cash movement as a Lançamentos row: the amount signed by its direction (§6.2). */
+export function cashEntry(movement: CashMovement): CashLedgerEntry {
+  return {
+    kind: 'CASH_MOVEMENT',
+    id: movement.id,
+    date: movement.movement_date,
+    time: null,
+    movement_type: movement.movement_type,
+    amount: movement.amount,
+    cash_amount: movement.movement_type === 'DEPOSIT' ? movement.amount : `-${movement.amount}`,
+    created_at: movement.created_at,
+  };
+}
+
+const compareText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * Newest first: by date; within a date, trades by (time, seq) as processed (§6.1), then cash
+ * movements, which have no time (GAP-I-1), newest recorded first.
+ */
+function compareDescending(a: LedgerEntry, b: LedgerEntry): number {
+  const byDate = compareText(b.date, a.date);
+  if (byDate !== 0) return byDate;
+  if (a.kind === 'TRADE' && b.kind === 'TRADE') {
+    return compareText(b.time, a.time) || b.seq - a.seq;
+  }
+  if (a.kind === 'CASH_MOVEMENT' && b.kind === 'CASH_MOVEMENT') {
+    return compareText(b.created_at, a.created_at);
+  }
+  return a.kind === 'TRADE' ? -1 : 1;
+}
+
 export const ledgerHandlers = [
+  // The Lançamentos list (P18): both kinds, filtered and ordered here, never in the browser.
+  http.get(url('/ledger/entries'), async ({ request }) => {
+    await latency();
+    const { start, end, search, errors } = inRange(request);
+    if (errors.length > 0) return problem(422, errors);
+    const order = new URL(request.url).searchParams.get('order') === 'asc' ? 'asc' : 'desc';
+    const inside = (date: string) => date >= (start as string) && date <= (end as string);
+    const items: LedgerEntry[] = [
+      ...db.trades
+        .filter((t) => inside(t.trade_date) && matches([t.asset_code], search))
+        .map(tradeEntry),
+      ...db.cashMovements
+        .filter(
+          (m) =>
+            inside(m.movement_date) &&
+            matches([m.description, MOVEMENT_LABELS[m.movement_type]], search),
+        )
+        .map(cashEntry),
+    ].sort(compareDescending);
+    if (order === 'asc') items.reverse();
+    return HttpResponse.json<ListResponse<LedgerEntry>>({ items });
+  }),
+
   http.get(url('/trades'), async ({ request }) => {
     await latency();
     const { start, end, search, errors } = inRange(request);

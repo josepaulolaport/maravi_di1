@@ -9,7 +9,9 @@ import {
 import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
+import type { CashMovement } from '@/api/contract';
 import { cashMovements, IDS, instruments, products, trades } from '@/api/mocks/fixtures';
+import { cashEntry } from '@/api/mocks/handlers/ledger';
 import { fieldError, problem, url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { addDays, formatDate, todayInSaoPaulo } from '@/shared/format';
@@ -184,6 +186,13 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§11.3 sorts by Data e hora, descending by default, ascending on click', async () => {
+      const orders: (string | null)[] = [];
+      server.use(
+        http.get(url('/ledger/entries'), ({ request }) => {
+          orders.push(new URL(request.url).searchParams.get('order'));
+          return undefined;
+        }),
+      );
       const { user } = await openLedger();
       const header = screen.getByRole('columnheader', { name: 'Data e hora' });
       expect(header).toHaveAttribute('aria-sort', 'descending');
@@ -191,8 +200,33 @@ describe('Lançamentos (§11.3)', () => {
       await user.click(within(header).getByRole('button'));
 
       expect(header).toHaveAttribute('aria-sort', 'ascending');
-      expect(cellTexts(bodyRows()[0] as HTMLElement)[1]).toBe('14/10/2026');
+      // The order is the backend's: the screen asks for it, it never sorts the rows itself.
+      await waitFor(() => {
+        expect(orders).toEqual(['desc', 'asc']);
+      });
+      await waitFor(() => {
+        expect(cellTexts(bodyRows()[0] as HTMLElement)[1]).toBe('14/10/2026');
+      });
       expect(cellTexts(bodyRows()[4] as HTMLElement)[1]).toBe('16/10/2026 15:00');
+    });
+
+    it('§11.3 a new range shows the loading state, never the rows of the previous range', async () => {
+      let release: () => void = () => undefined;
+      const { router } = await openLedger();
+      server.use(
+        http.get(url('/ledger/entries'), async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return undefined;
+        }),
+      );
+
+      await router.navigate('/lancamentos?inicio=2026-10-01&fim=2026-10-05');
+
+      expect(await screen.findByLabelText('Carregando lançamentos')).toBeInTheDocument();
+      expect(screen.queryByText('5 lançamentos encontrados')).not.toBeInTheDocument();
+      release();
     });
 
     it('§11.3 the range is inclusive on both ends', async () => {
@@ -235,16 +269,15 @@ describe('Lançamentos (§11.3)', () => {
       const start = addDays(today, -29);
       const seen: string[] = [];
       server.use(
-        http.get(url('/trades'), ({ request }) => {
+        http.get(url('/ledger/entries'), ({ request }) => {
           seen.push(new URL(request.url).search);
           return HttpResponse.json({ items: [] });
         }),
-        http.get(url('/cash-movements'), () => HttpResponse.json({ items: [] })),
       );
 
       await openLedger('/lancamentos?busca=DI1F29');
 
-      expect(seen[0]).toBe(`?start_date=${start}&end_date=${today}&search=DI1F29`);
+      expect(seen[0]).toBe(`?start_date=${start}&end_date=${today}&search=DI1F29&order=desc`);
       expect(screen.getByRole('button', { name: 'Período' })).toHaveTextContent(
         `${formatDate(start)} – ${formatDate(today)}`,
       );
@@ -259,7 +292,7 @@ describe('Lançamentos (§11.3)', () => {
 
     it('§12 shows the API error with a retry', async () => {
       server.use(
-        http.get(url('/trades'), () =>
+        http.get(url('/ledger/entries'), () =>
           problem(422, [fieldError('INVALID_RANGE', 'Período inválido para a consulta.', null)]),
         ),
       );
@@ -879,10 +912,11 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.1 tells apart two same-day cash movements of the same amount', async () => {
-      const twin = { ...cashMovements[1], id: 'twin', created_at: '2026-10-16T18:05:00-03:00' };
+      const withdrawalEntry = cashEntry(cashMovements[1] as CashMovement);
+      const twin = { ...withdrawalEntry, id: 'twin', created_at: '2026-10-16T18:05:00-03:00' };
       server.use(
-        http.get(url('/cash-movements'), () =>
-          HttpResponse.json({ items: [twin, cashMovements[1]] }),
+        http.get(url('/ledger/entries'), () =>
+          HttpResponse.json({ items: [twin, withdrawalEntry] }),
         ),
       );
       await openLedger();
