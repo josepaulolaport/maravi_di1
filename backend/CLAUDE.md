@@ -23,21 +23,29 @@ backend/
       application/services/
       application/interfaces/            # only when meaningful
       infrastructure/persistence/{models.py, repositories.py, queries/}
+      infrastructure/<adapter>/          # other outbound adapters, when needed
       presentation/http/{router.py, schemas.py}
+      presentation/messaging/            # this module's RabbitMQ consumers and handlers
     workers/{main.py, dispatcher.py, outbox_relay.py}   # lane H
   tests/{unit/<module>/, integration/, architecture/, e2e/}
 ```
 
-Create only the files and packages that are used. Only Processing has a messaging consumer.
+Create only the files and packages that are used. Initially only Processing has a messaging consumer. Its handlers parse the message and call `application/`, and hold no business logic. Shared RabbitMQ infrastructure (connection, publisher, consumer base, envelope, outbox, inbox, topology) lives in `platform/messaging/`.
 
 ## Python rules
 
 - **Typing and data:**
   - Full type hints.
   - Domain values are frozen dataclasses.
-  - Pydantic v2 is used only in `presentation/http/schemas.py`.
+  - Pydantic v2 is used only in `presentation/` (HTTP schemas, message payloads) and `platform/` (settings).
   - Decimal fields cross HTTP as strings.
-- **Calculators** (`pricing`, `pnl`, portfolio accounting) are pure, synchronous and deterministic. They take no session, broker, clock or FastAPI dependency.
+- **Domain code**, the calculators (`pricing`, `pnl`, portfolio accounting) included, is synchronous, deterministic and free of I/O and side effects:
+  - no filesystem, network, database, messaging, environment or system-clock access;
+  - no session, broker or FastAPI dependency;
+  - "today" arrives as an argument, never from `datetime.now()` or `date.today()`;
+  - pure standard-library utilities are fine: `datetime` arithmetic, `Decimal`, `Enum`, `dataclasses`, `uuid.UUID`;
+  - no logging: log in `application/`, `infrastructure/` or `presentation/`; the domain reports failures through exceptions and explicit results;
+  - no internal randomness: a calculation that needs it takes an explicit seed or an injected generator (`rng: random.Random`, or `random.Random(seed)`); the module-level `random` functions, `random.seed`, `SystemRandom` and an unseeded `random.Random()` are rejected.
 - **Services:**
   - Services and HTTP may be `async`.
   - A write receives the Unit of Work (`*, uow`) and saves the fact and the invalidation (`FinancialResultInvalidator`) in the same session, then commits once.
@@ -65,13 +73,13 @@ Create only the files and packages that are used. Only Processing has a messagin
 - Integration tests run against PostgreSQL 16, in your worktree's own database. Concurrency, outbox and dispatch tests use real connections.
 - `tests/architecture/` enforces the module boundaries. The full rule list is in `tests/architecture/boundaries.py`:
   - only `public.py` is imported across modules, and also by `workers/`. A module's `__init__.py` imports nothing;
-  - `domain/` uses only the standard library (no I/O, concurrency or clock modules), `di1.contracts` and its own domain;
-  - layers point inwards: `application/` never imports its `infrastructure/` or `presentation/`, and `public.py` exposes neither;
+  - `domain/` uses only the standard library, `di1.contracts` and its own domain. It imports no side-effect module (filesystem, network, database, environment, process, concurrency, logging, OS entropy) and calls no clock, random-id, I/O builtin or hidden-generator function. Only seeded or injected random generators are allowed;
+  - layers point inwards: `application/` never imports its `infrastructure/` or `presentation/`; `presentation/` never imports `infrastructure/`; `public.py` exposes neither;
   - FastAPI only in `presentation/`, the module's `dependencies.py` (its dependency providers), `composition/` and `main.py`;
   - SQL only in `infrastructure/`, `dependencies.py`, `platform/` and `composition/`;
   - Pydantic only in `presentation/` and `platform/`;
-  - modules use only the outbox, inbox and envelope parts of `platform.messaging`. aio-pika appears only in `platform/` and `workers/`;
-  - no dynamic imports, and every file sits in the plan §1 layout.
+  - modules use only the outbox, inbox and envelope parts of `platform.messaging`, and `presentation/messaging/` may also use its consumer base. aio-pika appears only in `platform/` and `workers/`;
+  - no dynamic imports. Every file sits in the plan §1 layout: `infrastructure/` may hold any adapter, and `presentation/` holds `http/` and `messaging/`.
 - API tests use FastAPI's `TestClient`, which needs `httpx2`. Async tests run under pytest-asyncio in `auto` mode; do not use the `anyio` marker.
 - Time-based behaviour (leases, queue order) uses an injected clock, never the wall clock.
 
