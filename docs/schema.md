@@ -55,7 +55,7 @@
 ## Application invariants (not adequately expressible as ordinary CHECK constraints)
 
 - The hierarchy must ensure that `asset.futures.product_id` points to a product whose class belongs to instrument type `FUTURE`; futures instruments require a maturity date. Enforce in Asset domain and integration tests. If untrusted direct DB writers are later allowed, add a DB trigger/denormalized composite FK strategy.
-- A stored reference-rate and reference-PU pair must be mathematically consistent with its recorded pricing methodology, face value, maturity and the 365-day convention. Official source PU is authoritative; a calculated implied rate is derived metadata. Do not synthesize an official observation from a calculator preview.
+- A stored reference-rate and reference-PU pair must be mathematically consistent with its face value, maturity and the 365-day convention. Official source PU is authoritative; a calculated implied rate is derived metadata. Do not synthesize an official observation from a calculator preview.
 - Each portfolio day's position is obtained by chronologically applying transactions, including closes and reversals. A reversing trade may close an old position and establish a new opposite position, without splitting the immutable ledger record.
 - `position_metrics.daily_pnl = position_pnl + trades_pnl` if all inputs are complete. `portfolio_metrics.daily_pnl` is the sum of **all expected** asset daily P&L values, not just available rows. No capital deposits/withdrawals enter trading P&L.
 - Cash movements affect cash; under the agreed simplified model, the trade cash effect is `-signed_quantity * execution_pu`. The multiplier is stored but not applied (OQ-2). Daily P&L is never posted into cash.

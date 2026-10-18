@@ -65,7 +65,12 @@ Create only the files and packages that are used. Initially only Processing has 
   - Acknowledge only after the durable state change is committed.
   - Publish only through `platform.outbox_messages` and the relay.
 - **Errors** are RFC 9457 problem+json with `errors[{code, message, field}]`; codes from the catalogue in `docs/interfaces.md` "Errors" (OQ-15).
+  - Raise a business error as `DomainError(ErrorDetail(code, "<pt-BR message>", "<field>"))` from `di1.shared.errors`, in `domain/` or `application/`. `composition/errors.py` renders it; never build an error response yourself.
+  - One `DomainError` holds details of one status only (all 422, say); mixing statuses answers 500.
+  - Pydantic schemas check syntax only. A message raised in a Pydantic validator becomes the generic "Valor inválido.", so `FUTURE_DATE`, `CONTRACT_MATURED` and too-many-decimals checks belong in the service.
+  - Routers never raise `HTTPException`: its `detail` is replaced by a generic one.
 - **Logging** uses the stdlib `logging` module: no prints and no secrets.
+  - Each module logs through its own `logger = logging.getLogger(__name__)`. Configuration is set once, at process startup; a logger is never injected or passed as an argument.
 - **Style:** ruff (lint + format). Use explicit names. A comment cites the spec section only where the reason is not obvious.
 
 ## Tests

@@ -16,8 +16,8 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 - Asset validates product/class/type hierarchy and maturity requirements. Futures' shared specs in `asset.futures`, contract maturity in `asset.instruments`.
 
 ### Pricing
-- `PricingService.calculate(instrument: InstrumentDescriptor, reference_date, input: PricingInput) -> PricingResult`
-- `PricingInput` has exactly one authoritative input: rate or PU. `PricingResult` returns PU, rate where derivable, methodology (`CHALLENGE_DC_365`), version, input_kind.
+- `PricingService.calculate(instrument: InstrumentDescriptor, reference_date, quote: Quote) -> Price`
+- `Quote` is what was typed, the single authoritative input: a rate or a PU. `Price` is the complete pair: PU, rate and input_kind, neither optional. The only convention is DC/365 (spec §4.1).
 - `DI1Calculator` is pure and returns a value. Calculators never publish messages or persist results. `PriceService` and `LedgerService` can both call Pricing's public interface; P&L does **not** belong here.
 
 ### Shared values

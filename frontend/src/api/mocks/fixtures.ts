@@ -176,6 +176,7 @@ export const PRICE_IDS = {
   f28_1014: '7e000000-0000-4000-8000-000000000006',
   f28_1015: '7e000000-0000-4000-8000-000000000007',
   f28_1016_r1: '7e000000-0000-4000-8000-000000000008',
+  f28_1016_r2: '7e000000-0000-4000-8000-000000000009',
   f29_1015: '7e000000-0000-4000-8000-000000000011',
 } as const;
 
@@ -415,6 +416,152 @@ export const pnlSeries: Omit<PnlPoint, 'stale'>[] = [
   },
   { date: '2026-10-16', daily_pnl: null, cumulative_pnl: null, pnl_status: 'MISSING' },
 ];
+
+// What a job publishes when it processes a day of this scenario with its inputs unchanged.
+// The fake backend does not calculate: these were computed offline with the same formulas
+// and precision as the published fixtures above (re-checked: the 16/10 revision-1 figures
+// reproduce exactly). 14/10 and 15/10 republish as they are; days before FIRST_ENTRY_DATE
+// are the zero state (§7).
+
+const DI1F28_AVERAGES = { average_entry_pu: '89006.4625467350', average_entry_rate: '0.10' };
+const DI1F29_AVERAGES = { average_entry_pu: '82057.00', average_entry_rate: '0.093203413834' };
+
+/** No reference price on the date: quantity and averages known, figures null (§8.3). */
+function unpricedRow(
+  assetId: string,
+  assetCode: string,
+  maturity: string,
+  quantity: number,
+  averages: typeof DI1F28_AVERAGES,
+): PublishedPositions['items'][number] {
+  return {
+    asset_id: assetId,
+    asset_code: assetCode,
+    maturity_date: maturity,
+    quantity,
+    ...averages,
+    reference_price_id: null,
+    reference_source: null,
+    reference_pu: null,
+    reference_rate: null,
+    financial_total: null,
+    position_pnl: null,
+    trades_pnl: '0',
+    daily_pnl: null,
+    valuation_status: 'MISSING',
+    pnl_status: 'MISSING',
+  };
+}
+
+/** A day after the last input (17/10, 18/10): no trades, no cash, no prices. */
+function dayWithoutInputs(date: string): RecalculatedDay {
+  return {
+    summary: {
+      date,
+      publication: 'PUBLISHED',
+      published_at: PUBLISHED_AT,
+      cash_balance: '506059.2651460232',
+      positions_market_value: null,
+      aum: null,
+      position_pnl: null,
+      trades_pnl: '0',
+      daily_pnl: null,
+      cumulative_pnl: null,
+      valuation_status: 'MISSING',
+      pnl_status: 'MISSING',
+    },
+    positions: {
+      date,
+      publication: 'PUBLISHED',
+      published_at: PUBLISHED_AT,
+      items: [
+        unpricedRow(IDS.di1f28, 'DI1F28', '2028-01-03', 6, DI1F28_AVERAGES),
+        unpricedRow(IDS.di1f29, 'DI1F29', '2029-01-02', 5, DI1F29_AVERAGES),
+      ],
+    },
+    pnl: { date, daily_pnl: null, cumulative_pnl: null, pnl_status: 'MISSING' },
+  };
+}
+
+export interface RecalculatedDay {
+  summary: Omit<PublishedSummary, 'stale'>;
+  positions: Omit<PublishedPositions, 'stale'>;
+  pnl: Omit<PnlPoint, 'stale'>;
+}
+
+/** Republished results that differ from the published fixtures (`published_at` is replaced). */
+export const recalculatedDays: Record<string, RecalculatedDay> = {
+  // DI1F28 now uses revision 2 of its 16/10 price; DI1F29 still has none, so incomplete.
+  '2026-10-16': {
+    summary: {
+      date: '2026-10-16',
+      publication: 'PUBLISHED',
+      published_at: PUBLISHED_AT,
+      cash_balance: '506059.2651460232',
+      positions_market_value: null,
+      aum: null,
+      position_pnl: null,
+      trades_pnl: '-592.3681943852',
+      daily_pnl: null,
+      cumulative_pnl: null,
+      valuation_status: 'MISSING',
+      pnl_status: 'MISSING',
+    },
+    positions: {
+      date: '2026-10-16',
+      publication: 'PUBLISHED',
+      published_at: PUBLISHED_AT,
+      items: [
+        {
+          asset_id: IDS.di1f28,
+          asset_code: 'DI1F28',
+          maturity_date: '2028-01-03',
+          quantity: 6,
+          ...DI1F28_AVERAGES,
+          reference_price_id: PRICE_IDS.f28_1016_r2,
+          reference_source: 'MANUAL',
+          reference_pu: '89250.3147019396',
+          reference_rate: '0.0980',
+          // 6 × 89250.3147019396
+          financial_total: '535501.8882116376',
+          // 10 × (89250.3147019396 − 89128.4824345118)
+          position_pnl: '1218.3226742780',
+          // −4 × (89250.3147019396 − 89102.2226533433)
+          trades_pnl: '-592.3681943852',
+          daily_pnl: '625.9544798928',
+          valuation_status: 'COMPLETE',
+          pnl_status: 'COMPLETE',
+        },
+        unpricedRow(IDS.di1f29, 'DI1F29', '2029-01-02', 5, DI1F29_AVERAGES),
+      ],
+    },
+    pnl: { date: '2026-10-16', daily_pnl: null, cumulative_pnl: null, pnl_status: 'MISSING' },
+  },
+  '2026-10-17': dayWithoutInputs('2026-10-17'),
+  '2026-10-18': dayWithoutInputs('2026-10-18'),
+};
+
+/** A day before the first input: zero cash, no positions, zero P&L (§7). */
+export function zeroStateDay(date: string): RecalculatedDay {
+  return {
+    summary: {
+      date,
+      publication: 'PUBLISHED',
+      published_at: PUBLISHED_AT,
+      cash_balance: '0',
+      positions_market_value: '0',
+      aum: '0',
+      position_pnl: '0',
+      trades_pnl: '0',
+      daily_pnl: '0',
+      cumulative_pnl: '0',
+      valuation_status: 'COMPLETE',
+      pnl_status: 'COMPLETE',
+    },
+    positions: { date, publication: 'PUBLISHED', published_at: PUBLISHED_AT, items: [] },
+    pnl: { date, daily_pnl: '0', cumulative_pnl: '0', pnl_status: 'COMPLETE' },
+  };
+}
 
 const REQUEST_IDS = {
   completed: '7f000000-0000-4000-8000-000000000001',
