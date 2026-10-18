@@ -13,7 +13,7 @@ case "$subject" in
 esac
 
 types='feat|fix|test|refactor|perf|docs|build|ci|chore|contract'
-scopes='asset|pricing|ledger|prices|portfolio|pnl|processing|platform|workers|composition|contracts|db|web|web-[a-z0-9-]+|infra|ci|docs|agents'
+scopes='asset|pricing|ledger|prices|portfolio|pnl|processing|platform|workers|composition|shared|db|web|web-[a-z0-9-]+|infra|ci|docs|agents'
 pattern="^(${types})\((${scopes})\): [a-z0-9\`].*[^.]$"
 fail() { printf 'commit-msg: %s\n  subject: "%s"\n  see .claude/skills/commit/SKILL.md\n' "$1" "$subject" >&2; exit 1; }
 

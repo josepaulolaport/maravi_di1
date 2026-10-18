@@ -15,7 +15,7 @@ git diff --name-only origin/main...HEAD
 ```
 
 - **Every changed path is in your lane's ownership** (plan §2). Shared files are owned by the integrator:
-  - `composition/`, `main.py`, `contracts/`;
+  - `composition/`, `main.py`, `shared/`;
   - `migrations/`;
   - `pyproject.toml`, `uv.lock`;
   - `compose.yaml`, CI.
