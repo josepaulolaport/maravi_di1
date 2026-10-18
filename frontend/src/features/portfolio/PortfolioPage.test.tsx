@@ -217,6 +217,17 @@ describe('Carteira (§11.4)', () => {
     expect(assetOrder()).toEqual(['DI1F28', 'DI1F29']);
   });
 
+  it('§11.4 picking a date in the calendar loads that date and puts it in the URL', async () => {
+    const { user, router } = await openCarteira('2026-10-15');
+
+    await user.click(screen.getByRole('button', { name: /Data de avaliação/ }));
+    await user.click(await screen.findByRole('button', { name: '16 outubro 2026' }));
+
+    expect(router.state.location.search).toBe('?date=2026-10-16');
+    const cash = await screen.findByRole('group', { name: 'Saldo em caixa' });
+    expect(within(cash).getByText('R$ 506.059,27')).toBeInTheDocument();
+  });
+
   it('§11.4 OQ-14 falls back to today for a future date, in the view and in the URL', async () => {
     const { router } = renderApp('/carteira?date=2999-01-01');
 
