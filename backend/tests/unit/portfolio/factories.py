@@ -8,8 +8,8 @@ from uuid import UUID
 
 from di1.modules.portfolio.domain.accounting import (
     OpenPosition,
+    Trade,
 )
-from di1.shared.trades import Trade
 
 DI1F27 = UUID("00000000-0000-0000-0000-000000000027")
 DI1F28 = UUID("00000000-0000-0000-0000-000000000028")

@@ -6,20 +6,20 @@ that day's trades and its deposit and withdrawal totals. Cash movements are Ledg
 not an input: quantities, averages and cash never depend on them (spec §7.2, §8.3), and P&L is
 never posted to cash (spec §7.3).
 
-Trades are the shared ``di1.shared.trades.Trade`` value that Ledger owns and exposes; the
-accounting types below are Portfolio's own.
+Ledger owns trades and cash movements. ``Trade`` below is Portfolio's own input view of a trade,
+holding only what accounting reads; Portfolio's application layer maps Ledger's public
+``TradeRecord`` onto it (ports and adapters).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from decimal import Decimal
 from uuid import UUID
 
 from di1.shared.decimals import financial_context, quantize_pu, quantize_rate
-from di1.shared.trades import Trade
 
 ONE_DAY = timedelta(days=1)
 ZERO = Decimal("0")
@@ -28,6 +28,30 @@ ZERO = Decimal("0")
 class AccountingError(ValueError):
     """Input the accounting engine cannot process: a skipped day, a misdated trade, or a value
     outside the bounds the engine relies on."""
+
+
+@dataclass(frozen=True)
+class Trade:
+    """What accounting reads from a Ledger trade. ``signed_quantity`` is positive for a buy and
+    negative for a sell; ``execution_pu`` and ``execution_rate`` are the execution price, never a
+    reference price (spec §4.2)."""
+
+    asset_id: UUID
+    trade_date: date
+    trade_time: time
+    seq: int
+    signed_quantity: int
+    execution_pu: Decimal
+    execution_rate: Decimal
+
+    def __post_init__(self) -> None:
+        if self.signed_quantity == 0:
+            raise AccountingError("a trade quantity cannot be zero")
+
+    @property
+    def order_key(self) -> tuple[date, time, int]:
+        """Chronological order of trades: (trade_date, trade_time, seq) (OQ-13)."""
+        return (self.trade_date, self.trade_time, self.seq)
 
 
 @dataclass(frozen=True)

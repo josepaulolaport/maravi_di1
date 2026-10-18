@@ -15,8 +15,8 @@ from di1.modules.portfolio.domain.accounting import (
     OpenPosition,
     PortfolioAccounting,
     PositionDay,
+    Trade,
 )
-from di1.shared.trades import Trade
 from tests.unit.portfolio.factories import DAY, DI1F27, position, trade
 
 ACCOUNTING = PortfolioAccounting()

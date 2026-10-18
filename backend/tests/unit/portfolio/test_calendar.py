@@ -241,7 +241,8 @@ def test_a_state_holding_the_same_asset_twice_is_rejected() -> None:
 
 
 def test_a_zero_quantity_trade_is_rejected() -> None:
-    with pytest.raises(ValueError):
+    # Schema CHECK trades_qty_nonzero (OQ-14).
+    with pytest.raises(AccountingError):
         trade(0, "95000")
 
 
