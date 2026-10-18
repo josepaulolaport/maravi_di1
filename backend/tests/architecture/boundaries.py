@@ -13,7 +13,7 @@ Rules:
 - ``module-init``: a module's ``__init__.py`` imports nothing (no re-export path around
   ``public.py``).
 - ``domain-purity``: ``domain/`` is deterministic and free of I/O and side effects. It imports
-  only the standard library, ``di1.contracts`` and its own module's domain; it never imports a
+  only the standard library, ``di1.shared`` and its own module's domain; it never imports a
   standard-library module whose purpose is filesystem, network, database, environment,
   process, concurrency, logging or OS-entropy access; and it never calls the system clock,
   random identifiers or I/O builtins (``datetime.now``, ``date.today``, ``time.monotonic``,
@@ -35,7 +35,7 @@ Rules:
   infrastructure). Module code uses only the outbox, inbox and envelope parts of
   ``di1.platform.messaging``; a module's ``presentation/messaging/`` (its consumers and
   handlers) may also use ``di1.platform.messaging.consumer``.
-- ``shared-independent``: ``platform/`` and ``contracts/`` import no module.
+- ``shared-independent``: ``platform/`` and ``shared/`` import no module.
 - ``entry-point``: ``di1.main`` and ``di1.composition`` are imported only by ``main.py`` and
   ``composition/``; workers may use only ``di1.composition.consumers``; ``di1.workers`` is
   imported only by ``workers/``, ``composition/`` and ``main.py``.
@@ -103,7 +103,7 @@ BUSINESS_MESSAGING = (
 CONSUMER_MESSAGING = (*BUSINESS_MESSAGING, f"{ROOT}.platform.messaging.consumer")
 
 TOP_FILES = frozenset({"__init__.py", "main.py"})
-TOP_PACKAGES = frozenset({"modules", "platform", "contracts", "composition", "workers"})
+TOP_PACKAGES = frozenset({"modules", "platform", "shared", "composition", "workers"})
 MODULE_ENTRIES = frozenset(
     {"__init__.py", "public.py", "dependencies.py", "domain", "application", "infrastructure",
      "presentation"}
@@ -273,7 +273,7 @@ def _rules(source: SourceFile, imported: Imported) -> Iterator[str]:
     if layer == "domain":
         top_level = name.split(".")[0]
         stdlib = top_level in sys.stdlib_module_names and top_level not in DOMAIN_FORBIDDEN_STDLIB
-        if not (stdlib or _under(name, (f"{ROOT}.contracts", f"{own}.domain"))):
+        if not (stdlib or _under(name, (f"{ROOT}.shared", f"{own}.domain"))):
             yield "domain-purity"
 
     if own is not None:
@@ -312,7 +312,7 @@ def _rules(source: SourceFile, imported: Imported) -> Iterator[str]:
     ):
         yield "messaging"
 
-    if top in ("platform", "contracts") and _under(name, (MODULES,)):
+    if top in ("platform", "shared") and _under(name, (MODULES,)):
         yield "shared-independent"
 
     if _under(name, (f"{ROOT}.composition", f"{ROOT}.main")) and top not in (

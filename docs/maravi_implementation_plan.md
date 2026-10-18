@@ -45,7 +45,7 @@ backend/
         inbox.py
         topology.py
       observability/
-    contracts/                 # frozen cross-module DTOs only if genuinely shared
+    shared/                    # frozen cross-module DTOs only if genuinely shared
     modules/
       asset/
       pricing/
