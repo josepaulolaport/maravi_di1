@@ -136,7 +136,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 
 ### B. Pricing
 - Pure DI1 calculator, signed Decimal inputs and exact DC/365 formula; inverse rate from PU; reference date/maturity validation and input-kind handling; explicit rounding rules once approved.
-- Calculation response with methodology/version; no repositories, queues or PnL.
+- Calculation response with PU, rate and input kind; no repositories, queues or PnL.
 - Tests: challenge example, forward/inverse tolerance, leap-year/calendar-day count, zero remaining days, nonpositive PU, invalid rate, Decimal stability.
 - **Done:** same calculator callable without FastAPI or DB.
 
