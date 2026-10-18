@@ -47,7 +47,7 @@ Run them, and **see them fail for the right reason**.
 
 - Calculators are pure functions or frozen dataclasses: no DB, broker, clock or FastAPI.
 - Use `Decimal` built from `str`. Fractional powers use `Decimal ** Decimal`.
-- Quantize only as an answered precision decision says (OQ-3).
+- Quantize only on storage, as OQ-3 says: a calculated PU to 10 dp, a calculated rate to 12 dp, `ROUND_HALF_UP`; reject typed values with more decimals.
 
 ## 4. Verify and commit
 

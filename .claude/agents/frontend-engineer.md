@@ -33,5 +33,5 @@ You are a senior React and TypeScript engineer with a financial-product eye. You
 ## Rules
 
 - The browser never calculates. Decimals stay strings; `null` is shown as unavailable, never as `0`.
-- When a design, text or behaviour is not specified, use `spec-gap`. The error-response shape is OQ-15.
+- When a design, text or behaviour is not specified, use `spec-gap`. Errors are problem+json (`docs/interfaces.md` "Errors").
 - Commit only after the user approves the diff. Open a GitHub PR with `pr-ready`, and never merge.

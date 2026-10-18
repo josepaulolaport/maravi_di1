@@ -11,7 +11,7 @@
 - No per-operation command classes, event-sourced rewrite, automatic P&L calculation, one RabbitMQ queue per module, separate Reader/Service class per operation or cross-module imports of private ORM/repositories. Service methods may combine reads and writes. Use narrow `Protocol` interfaces only where useful; dedicated `PortfolioQueryService` is warranted.
 - Financial conventions: DI1 challenge rate ↔ PU uses actual calendar days / 365, face value 100,000 (product-configured); source selection MANUAL > B3 exact day only; no price carry-forward; daily calendar processing; zero initial cash/positions/P&L; chronological trades incl. reversals; no deposits/withdrawals in trading P&L. `financial_total = signed_quantity × reference_PU`, AUM = cash + sum signed market value. Positions store just quantity; asset and portfolio metrics in separate tables. Missing prices can leave accounting available but valuation/P&L incomplete.
 - Input mutations immediately mark dependent financial state stale **in the same PostgreSQL transaction**; never automatically enqueue processing. Many overlapping queued requests permitted; only one active request; cancellation cooperative. Worker stages daily results and atomically publishes if inputs/claim token still valid. RabbitMQ dispatches work, database owns status/order.
-- Do not assume futures maturity settlement, multiplier economics, or rounding policies beyond schema decisions. Resolve explicitly before implementing such paths.
+- Maturity, multiplier and precision are decided (OQ-1, OQ-2, OQ-3 in `docs/open-questions.md`): no automatic settlement (the user closes with a trade, up to the maturity date; value 0 after it); multiplier stored, not applied; 34-digit `Decimal`, `ROUND_HALF_UP`, PU 10 dp, rate 12 dp. Do not assume anything beyond them.
 
 ## 1. Target repository layout
 
@@ -80,7 +80,7 @@ Each active module normally implements `public.py`, `dependencies.py` if needed,
 
 ## 2. Multi-agent operating model
 
-**Worktree per implementation agent.** A shared **Architect/Integrator** is the only editor of shared composition files, initial Alembic migration, `platform` shared code, `pyproject.toml`, global API contracts and compose files. Each module agent edits exclusively `modules/<module>/**` and `tests/unit/<module>/**`, plus agreed integration tests under a dedicated file namespace. The Frontend agent exclusively edits `frontend/**`. The Infrastructure agent edits `platform/**`, `workers/` bootstrap and root configuration in coordination with the integrator. No two agents edit the same file concurrently.
+**Worktree per implementation agent.** A shared **Architect/Integrator** is the only editor of shared composition files, initial Alembic migration, `pyproject.toml`, global API contracts and compose files; it reviews changes to the platform interfaces modules use (UoW, outbox writer), but `platform/**` belongs to lane H (OQ-17). Each module agent edits exclusively `modules/<module>/**` and `tests/unit/<module>/**`, plus agreed integration tests under a dedicated file namespace. The Frontend agent exclusively edits `frontend/**`. The Infrastructure agent edits `platform/**`, `workers/` bootstrap and root configuration in coordination with the integrator. No two agents edit the same file concurrently.
 
 Recommended agents (a reviewer can be a second agent applied after each module PR):
 
@@ -118,7 +118,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 **Deliverables:**
 - Verify supplied `schema.sql` against disposable PostgreSQL 16+; fix SQL defects before using it as migration baseline. Produce Alembic revision(s) **centrally**, preferably one initial revision incorporating all table DDL. Validate downgrade only where safe and documented.
 - Define stable public DTOs: `InstrumentDescriptor`, `TradeRecord`, `CashMovementRecord`, `ReferencePriceRecord`, `PositionState`, `AssetPnLResult`, `PortfolioPnLResult`, `CalculationCompleteness`, `ProcessingRequest`. Do not expose ORM types across modules.
-- Freeze rate units (rate `0.135` = 13.5%) and deterministic UTC timestamp vs local business-date semantics. Precision/rounding is frozen only once open decision OQ-3 (`docs/open-questions.md`) is answered; define same-day ordering `(trade_date, trade_time NULLS policy, seq, id)`.
+- Freeze rate units (rate `0.135` = 13.5%) and deterministic UTC timestamp vs local business-date semantics. Freeze precision as decided in OQ-3 (34-digit `Decimal`, `ROUND_HALF_UP`, PU 10 dp, rate 12 dp, excess decimals rejected), and the same-day order `(trade_date, trade_time, seq)` with `trade_time` required (OQ-13), and the error contract (OQ-15, `interfaces.md` "Errors").
 - Define Unit of Work around one AsyncSession, SQLAlchemy database factory, API/worker bootstrap, error types, Pydantic API schemas, exceptions mapping.
 - Define public invalidation contract `ledger_changed(effective_date, uow)` and `prices_changed(asset_id, date, uow)`; Processing agent owns implementation, but Ledger/Prices agents can use an in-memory fake now.
 - Add baseline lint/type/test commands (ruff, pytest, optional mypy/pyright, migration smoke test). Set import boundary tests.
@@ -185,7 +185,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 - Persist `positions(asset_id, position_date, quantity)`, `position_metrics(asset_id, metric_date, avg PU/rate, ref PU/id, financial_total, position/trades/daily PnL, status)`, `portfolio_metrics(metric_date, cash, positions market value, AUM, portfolio PnL/status)`.
 - `PortfolioQueryService` returns one assembled frontend table; indexed read SQL in Portfolio Infrastructure only. Join published asset records and metrics by asset+date; include processing validity status. Don't mix new/current reference price into old result.
 - Make read output distinguish `0`, `null`, `stale`, `unprocessed`, and `completed_with_issues`.
-- Implement stage and publish operations against `processing.staged_*` through a narrow collaboration contract with Processing. **Ownership caveat:** tables are in processing schema but Portfolio computes/persists result shapes; let X resolve repository ownership centrally without reaching into other module's private ORM.
+- Implement stage and publish operations against `processing.staged_*` through a narrow collaboration contract with Processing. **Ownership (OQ-8):** the `staged_*` tables are in the `portfolio` schema and owned by Portfolio; Processing calls `stage_day` / `publish_range` through `public.py`.
 - Tests: exact-day joins, null handling, average cost survives missing references, AUM computation, read consistency.
 
 **Gate 3:** Portfolio table/summary available from seeded historical data with correct accounting and missing-price flags.
@@ -194,7 +194,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 
 **Processing lane G** with Platform lane H, Portfolio lane E, Integrator X:
 - `ProcessingDispatcher`: lock singleton calculation state; select oldest eligible queued job; set `DISPATCHED` and outbox command atomically. One active global job (even if broker duplicates messages).
-- `PortfolioRangeProcessor`: worker claim token + lease; resolve effective range based on valid accounting checkpoint and dirty dates; iterate **every calendar day**; order ledger events; call portfolio accounting, preferred exact-day Prices, PnL calculators; persist staged daily rows and status/progress.
+- `PortfolioRangeProcessor`: worker claim token + lease; process exactly the requested range (OQ-11: if start−1 is stale or missing, still run and publish flagged stale with null P&L and a `STALE_PREDECESSOR` issue); iterate **every calendar day**; order ledger events; call portfolio accounting, preferred exact-day Prices, PnL calculators; persist staged daily rows and status/progress.
 - On cancellation request, stop at day boundary, mark cancelled, discard staging; queued requests can be cancelled without broker work.
 - Before publication, lock job/control state, verify claim token, no cancellation, source revisions still compatible, expected range and dependency completeness; atomically upsert all three Portfolio published tables, retire/deletes obsolete dated rows as required, update dirty markers and request outcome.
 - On changed inputs while running: `SUPERSEDED`; never publish stale run as current. On missing prices: preserve accounting, record `issues`, publish `COMPLETED_WITH_ISSUES` with null dependent metrics; do not retry domain-data gaps.
@@ -231,9 +231,11 @@ Do not merge branches merely because code compiles. Require reviewer sign-off an
 
 ## 11. Open decisions requiring human sign-off before relevant code
 
-1. Exact decimal precision/rounding in pricing and accounting intermediate/final values (financial `Decimal` usage is fixed, display formatting is separate).
-2. Maturity settlement timing and cash treatment; currently do not automatically implement settlement.
-3. Whether the stored `multiplier` participates in the simplified challenge ledger cash and PnL; current challenge calculations use PU directly.
-4. Clarify zero-day at-maturity PU/rate inverse behavior and nonbusiness-dated ledger event acceptance.
+Items 1–4 below were answered on 2026-10-18 (`docs/open-questions.md`); only OQ-18 (challenge discrepancies) remains open.
+
+1. Precision/rounding — OQ-3.
+2. Maturity settlement — OQ-1.
+3. Multiplier — OQ-2.
+4. Zero-day trades and non-business dates — OQ-1, OQ-7.
 
 **Post-completion TODO:** asynchronous CSV reference-price import and optional B3 extraction feeding `PriceService` via RabbitMQ adapter, not part of initial implementation.

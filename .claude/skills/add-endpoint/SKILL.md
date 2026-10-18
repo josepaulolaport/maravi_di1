@@ -10,7 +10,7 @@ description: Add or change a Maravi DI1 backend HTTP endpoint end to end inside 
 - **Find the endpoint** in `docs/interfaces.md`, "HTTP endpoints", and the service method behind it in the module's contract section.
 - **Find its transaction boundary** in `docs/interfaces.md`, "Transaction boundaries", for example a mutation plus invalidation in one UoW.
 - **Find the behaviour** in `docs/maravi_business_specification.md`.
-- **If the method, path, body, response or error is not specified, stop and use `spec-gap`.** The error shape is OQ-15, and `/portfolio/pnl` is OQ-16.
+- **If the method, path, body, response or error is not specified, stop and use `spec-gap`.** Errors follow `docs/interfaces.md` "Errors" (problem+json and its code catalogue).
 
 ## 2. Tests first
 

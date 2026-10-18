@@ -47,7 +47,8 @@ A estrutura persistente do módulo Asset utiliza `instrument_types`, `asset_clas
 - Não duplicar automaticamente especificações de DI1 em todos os vencimentos.
 - A estrutura admite futuramente mais classes e produtos, mas a implementação do desafio deve priorizar DI1.
 - Integridade das classificações e unicidade de identificadores/códigos deve ser validada; preferir unicidade insensível a maiúsculas/minúsculas.
-- **Ainda não decidido:** semântica operacional exata da liquidação no vencimento e do multiplicador para a contabilidade simplificada; não inferir uma regra financeira só a partir da presença desses campos.
+- **Multiplicador (decidido, OQ-2):** `contract_multiplier` permanece no cadastro, mas **não é aplicado** nos cálculos atuais (DI1 = 1; as fórmulas usam o PU diretamente). Quando for usado, os cálculos ficarão em um módulo calculador futuro.
+- **Vencimento:** ver §7.4.
 
 ## 4. Cálculo de preços e taxas
 
@@ -64,7 +65,8 @@ taxa = (100000 / PU) ^ (365 / dias_corridos) - 1
 - `dias_corridos` decorre da data de referência do cálculo e do vencimento do contrato.
 - A constante de 100.000 é a base especificada pelo desafio DI1. O cadastro de futuros reserva dados como `face_value` para extensibilidade; qualquer variação de base exige metodologia explícita e testes.
 - A aplicação aceita taxa **ou** PU e calcula o valor faltante; não deve tratar ambos como entradas independentes contraditórias.
-- Cálculos usam `Decimal`, critérios explícitos de precisão e arredondamento na implementação.
+- **Precisão (decidido, OQ-3):** cálculos em `Decimal` com contexto de 34 dígitos e arredondamento `ROUND_HALF_UP`. PU calculado é armazenado com 10 casas decimais e taxa calculada com 12. PU digitado com mais de 10 casas ou taxa digitada com mais de 12 é **rejeitado**, nunca arredondado. Valores monetários são armazenados exatos e arredondados a 2 casas apenas na exibição.
+- Limites de valores: apenas os do schema (taxa > −1, PU > 0, quantidade ≠ 0, valor > 0) (OQ-14).
 - Uma calculadora pode produzir uma prévia sem salvar nada.
 - O mesmo motor de cálculo pode ser usado ao registrar uma operação ou quando o fluxo de preço de referência realmente precisar derivar o valor complementar.
 - A convenção mais realista DU/252 discutida anteriormente **não** faz parte da implementação atual; pode ser adicionada futuramente como outra metodologia, sem alteração retroativa silenciosa.
@@ -96,9 +98,13 @@ O PriceService é o ponto único de gerenciamento dos **preços de referência**
 
 Uma compra/venda inclui contrato, direção, quantidade, data/hora efetiva e PU **ou** taxa de execução. O sistema pode calcular a representação faltante através de Pricing.
 
+- **Data e hora são obrigatórias** (OQ-13): `trade_time` em horário local de São Paulo; o formulário sugere a hora atual.
+- **Datas aceitas** (OQ-7, OQ-14): qualquer data corrida, inclusive fins de semana e feriados; nada datado **após hoje** (America/Sao_Paulo) é aceito, para operações, movimentações e preços. Vencimentos são isentos.
+- **Vencimento** (OQ-1): uma operação pode ser datada até a data de vencimento, inclusive; nessa data (dias corridos = 0) o PU é digitado e a taxa é armazenada como `0`. Operações datadas após o vencimento são rejeitadas.
+
 - Cada operação é preservada individualmente, mesmo quando várias operações atingem o mesmo contrato no mesmo dia.
 - Registro financeiro imutável: **não há edição direta** de operações. Exclusão lógica (soft delete) com auditoria; foi prevista exclusão múltipla com confirmação e operação atômica.
-- A ordem de processamento é cronológica por instante efetivo e desempate determinístico (sequência/ID); não somar ou compensar todas as operações do dia antes de atualizar custos médios.
+- A ordem de processamento é cronológica: `(data, hora, seq)`; não somar ou compensar todas as operações do dia antes de atualizar custos médios.
 - `created_at` (instante de cadastro) é diferente do momento efetivo da operação.
 - Alterações históricas por inclusão/exclusão invalidam os estados contábeis do dia afetado em diante, juntamente com os resultados dependentes.
 
@@ -143,7 +149,14 @@ cash[D] = cash[D-1]
 - O caixa de uma compra diminui, o de uma venda aumenta, independentemente do resultado de mercado.
 - **P&L diário de marcação a mercado não é creditado/debitado diretamente ao caixa.**
 - A aplicação **não** afirma reproduzir o fluxo de ajuste e garantias de um contrato futuro DI1 real.
-- O tratamento operacional de multiplicadores/settlement permanece aberto; não alterar a fórmula simplificada implicitamente.
+- O multiplicador não é aplicado (OQ-2); não alterar a fórmula simplificada implicitamente.
+
+### 7.4 Vencimento (decidido, OQ-1)
+
+- **Não há liquidação automática.** O usuário encerra a posição com uma operação normal, a qualquer PU, que pode ser datada no próprio vencimento (taxa armazenada como `0`, pois dias corridos = 0).
+- O preço de referência da data de vencimento é informado pelo usuário, como em qualquer outro dia; sem ele, os resultados dependentes ficam `null`, com pendência.
+- **Após o vencimento**, o valor do contrato é 0 por definição (PU de referência = 0; nenhum preço é exigido ou aceito). Operações e preços datados após o vencimento são rejeitados.
+- Uma posição deixada aberta após o vencimento gera `position_pnl = Q × (0 − PU_vencimento)` e a pendência **"contrato vencido com posição aberta"**.
 
 ## 8. P&L (`pnl`) e valuation
 
@@ -167,6 +180,8 @@ portfolio_cumulative_pnl[D] = cumulative_pnl[D-1] + portfolio_daily_pnl[D]
 - Esse é o modelo de atribuição simplificado acordado; não se deve somar separadamente um possível **realized P&L** a `position_pnl + trades_pnl`, pois duplicaria performance.
 - Métricas adicionais de P&L realizado podem ser avaliadas separadamente futuramente; **não fazem parte da visualização padrão atual**.
 - Para uma avaliação diária válida, usar referência do dia `D` para ativos/trades que a exigem; a referência `D-1` é exigida para `position_pnl` **somente quando `Q[a,D-1] != 0`**.
+- **Primeiro dia** (OQ-4): quando `Q[a,D-1] = 0`, `position_pnl` é exatamente 0 (não `null`), sem exigir referência `D-1`. O P&L acumulado começa em 0 antes do primeiro lançamento.
+- O PU de referência `D-1` usado é o registrado na linha `position_metrics` de `D-1` (OQ-9); uma mudança de preço em X invalida a avaliação de X em diante.
 - Trades intradiários podem exigir preço de referência mesmo se a posição de fechamento for zero.
 
 ### 8.2 Valor de mercado e AUM
@@ -187,6 +202,7 @@ aum[D]                     = cash_balance[D] + positions_market_value[D]
 - Se a referência exigida não existe para a data exata, o sistema calcula **quantidade, custo médio e caixa**, mas deixa os resultados financeiros dependentes como **indisponíveis (`null`)**, nunca zero inventado.
 - O valor de mercado de uma posição zero é zero mesmo sem referência; **isso não implica** que o P&L dos trades do dia seja calculável.
 - Alguns ativos podem ter P&L disponível enquanto outros não. O P&L agregado da carteira **não é completo** se faltar resultado de qualquer ativo esperado.
+- **Ativo esperado em D** (OQ-10): `Q[a,D-1] != 0` ou existe operação do ativo em D. Exatamente esses ativos têm linhas em `positions` e `position_metrics` para D, inclusive com quantidade 0 após zeragem ou round trip no dia.
 - O P&L acumulado permanece indisponível a partir do primeiro dia com lacuna não resolvida na cadeia histórica, até a correção e o reprocessamento necessário.
 - Uma data sem preços no calendário da tela de Ativos não gera automaticamente pendência; a pendência surge quando um cálculo requer efetivamente a observação ausente.
 - Ausência de dado de mercado **não é falha técnica** da fila ou da calculadora.
@@ -204,7 +220,7 @@ aum[D]                     = cash_balance[D] + positions_market_value[D]
 - Não criar simultaneamente tabelas PnL independentes duplicando exatamente os campos de `position_metrics`.
 - O módulo PnL calcula; Portfolio armazena os resultados publicados.
 - O frontend obtém uma **visão consolidada** por ativo/data a partir do Portfolio Query Service, em uma chamada HTTP, com leitura eficiente e controle de consistência de referência.
-- Cálculos parciais de jobs são gravados em **tabelas temporárias de estágio associadas ao pedido**; somente resultados coerentes são publicados para as três tabelas finais.
+- Cálculos parciais de jobs são gravados em **tabelas temporárias de estágio associadas ao pedido**, no schema `portfolio` e de propriedade do módulo Portfolio (OQ-8); somente resultados coerentes são publicados para as três tabelas finais.
 
 ## 10. Processamentos sob solicitação do usuário
 
@@ -212,7 +228,10 @@ aum[D]                     = cash_balance[D] + positions_market_value[D]
 
 **Cadastrar/excluir operação ou adicionar/corrigir preço apenas persiste o fato e invalida as saídas dependentes. Não inicia processamento de carteira nem manda recalcular P&L automaticamente.**
 
-O usuário acessa **Central de Controle → Processamentos**, escolhe intervalo inclusivo de datas e confirma o processamento. O sistema mostra o intervalo solicitado e, quando necessário, o intervalo **efetivo**, expandido para alcançar um estado predecessor válido.
+O usuário acessa **Central de Controle → Processamentos**, escolhe intervalo inclusivo de datas e confirma o processamento. **O processamento cobre exatamente o intervalo solicitado [A, B]**; não há expansão automática (OQ-11).
+
+- Se o estado de A−1 estiver desatualizado ou ausente, o job ainda executa e publica [A, B]: esses dias aparecem como desatualizados, o P&L fica `null` e uma pendência pede o processamento de um intervalo anterior. Sem lançamentos antes de A, o estado de A−1 é o estado zero, válido.
+- A pré-visualização avisa quando o estado de A−1 está desatualizado.
 
 ### 10.2 Fila, simultaneidade e cancelamento
 
@@ -240,7 +259,7 @@ Estados principais planejados:
 - `FAILED`: falha técnica inesperada.
 - `SUPERSEDED`: fonte de dados mudou; publicação obsoleta foi bloqueada.
 
-A lista de **Pendências** exibe problemas acionáveis (principalmente referência faltante): ativo, data necessária, motivo e ação de definir preço. Deduplicar problemas repetidos para a mesma obrigação de preço.
+A lista de **Pendências** exibe problemas acionáveis: ativo, data necessária, motivo e ação. Deduplicar problemas repetidos para a mesma obrigação. Tipos atuais: **preço de referência faltante** (ação: definir preço), **contrato vencido com posição aberta** (§7.4) e **estado anterior desatualizado** (§10.1; ação: processar intervalo anterior).
 
 ### 10.4 Publicação e invalidação
 
@@ -251,6 +270,8 @@ A lista de **Pendências** exibe problemas acionáveis (principalmente referênc
 - Uma alteração em Prices invalida avaliações e P&L dependentes, **sem** alterar quantidade, caixa ou custo médio.
 - Invalidação deve ocorrer na **mesma transação** que salva a alteração original.
 - Novos processamentos são uma decisão do usuário, não um efeito colateral da invalidação.
+- **Marcadores de invalidação** (OQ-12): após publicar [A, B] com as revisões inalteradas desde o início, um marcador dentro de [A, B] avança para B+1; um marcador anterior a A permanece. Dias após B continuam desatualizados até serem processados.
+- **Limites operacionais** (OQ-5): sem tamanho máximo de intervalo; jobs mantidos como histórico; estágios apagados ao publicar, cancelar ou ser `SUPERSEDED`; fila FIFO por `(created_at, id)`; lease de 60 s renovado a cada dia processado; todos os valores configuráveis.
 
 ## 11. Telas e experiência do usuário
 
@@ -261,7 +282,7 @@ Os designs existentes no **Aura Build** são a base visual e devem ser implement
 Duas abas: **Pendências** e **Processamentos**.
 
 - **Pendências:** problemas realmente identificados pela validação/processamento, não uma lista de todos os dias sem cotação. Ação **Definir preço** conduz à entrada/correção da referência.
-- **Processamentos:** escolher datas, pré-visualizar intervalo solicitado/efetivo, enfileirar, acompanhar progresso e status, ver erros, cancelar pedidos, eventualmente cancelar e substituir. Os jobs continuam existindo no histórico após conclusão/cancelamento.
+- **Processamentos:** escolher datas, pré-visualizar o intervalo (com aviso quando o estado anterior está desatualizado), enfileirar, acompanhar progresso e status, ver erros, cancelar pedidos, eventualmente cancelar e substituir. Os jobs continuam existindo no histórico após conclusão/cancelamento.
 - Sem KPIs financeiros redundantes na Central de Controle.
 
 ### 11.2 Ativos
@@ -296,6 +317,8 @@ Duas abas: **Pendências** e **Processamentos**.
 - Respostas identificam data, estado de processamento/completude e valores ausentes com `null` (não zero).
 - Valores monetários/PU/taxas trafegam como números decimais representados por **strings**, para preservar precisão no frontend.
 - Processamentos expõem criação, listagem, status/progresso e cancelamento. O frontend pode consultar status periodicamente enquanto houver trabalho.
+- **Erros** (OQ-15) seguem `application/problem+json` (RFC 9457) com `errors: [{code, message, field}]`; mensagens em pt-BR, códigos em inglês, catálogo em `interfaces.md`.
+- O gráfico de P&L acumulado da Carteira usa `GET /portfolio/pnl` (OQ-16).
 - Contratos podem evoluir durante o desenvolvimento; mudanças compartilhadas devem ser coordenadas entre Integrador, backend e mocks MSW. Não congelar uma API incorreta só para preservar mocks.
 
 ## 13. Requisitos de qualidade e testes de aceitação
@@ -331,13 +354,27 @@ Devem existir testes de unidade para calculadoras e testes de integração para 
 - Fila com sobreposição permitida, uma execução por vez, cancelamento seguro e publicação atômica.
 - Frontend real baseado nos designs existentes, com chamadas mockadas por MSW em paralelo ao desenvolvimento do backend.
 
+Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`):
+
+- Sem liquidação automática no vencimento; o usuário encerra com operação a qualquer PU, inclusive na data de vencimento (taxa 0); após o vencimento, valor 0 e lançamentos rejeitados (OQ-1, OQ-6).
+- Multiplicador mantido no cadastro e não aplicado nos cálculos atuais (OQ-2).
+- Precisão: 34 dígitos, `ROUND_HALF_UP`, PU 10 casas, taxa 12 casas, excesso de casas rejeitado (OQ-3).
+- Primeiro dia: `position_pnl` = 0 quando `Q[D-1] = 0` (OQ-4).
+- Limites operacionais simples e configuráveis (OQ-5).
+- Fins de semana e feriados aceitos; datas futuras rejeitadas; limites de valores apenas do schema (OQ-7, OQ-14).
+- Estágios no schema `portfolio`, de propriedade do Portfolio (OQ-8).
+- PU `D-1` rastreado pela linha de `D-1` (OQ-9).
+- Ativo esperado: `Q[D-1] != 0` ou operação em D (OQ-10).
+- Intervalo exato [A, B], sem expansão; predecessor desatualizado publica como desatualizado (OQ-11).
+- Marcadores avançam para B+1 quando cobertos (OQ-12).
+- Hora da operação obrigatória; ordem `(data, hora, seq)` (OQ-13).
+- Erros em problem+json (RFC 9457) com catálogo de códigos (OQ-15).
+- `GET /portfolio/pnl` alimenta o gráfico de P&L acumulado (OQ-16).
+- Lane H é dona de `platform/**` (OQ-17).
+
 ### Aberto — requer decisão específica antes de codificar o comportamento
 
-1. **Liquidação/vencimento dos futuros:** evento de settlement, efeito em caixa/posição, convenção de data e tratamento quando o contrato vence com posição aberta.
-2. **Multiplicadores e notional efetivos:** como aplicar os parâmetros de `asset.futures` ao PU, fluxo de caixa, valor de mercado e P&L sem violar o modelo simplificado do desafio.
-3. **Precisão formal:** escalas/rounding internos e de armazenamento, sobretudo nos limites de preço e na inversão PU → taxa.
-4. **Dia inicial de P&L:** tratamento do primeiro dia quando não há PU predecessor; estado inicial zero foi definido, mas a disponibilidade de P&L nesse caso merece regra/teste específico.
-5. **Política operacional de limites:** tamanho máximo de intervalos, retenção de jobs/estágios, prioridades da fila e timeout/lease, a definir conforme desempenho observado.
+1. **Desvios do enunciado (OQ-18):** auditoria do PDF do desafio contra esta especificação.
 
 ### TODO posterior à entrega principal
 

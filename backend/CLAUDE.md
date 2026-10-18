@@ -48,12 +48,14 @@ Create only the files and packages that are used. Only Processing has a messagin
   - Never expose an ORM type across modules.
 - **Decimal:**
   - Construct from `str`, never from `float`.
+  - The multiplier is not applied (OQ-2).
   - Fractional powers use `Decimal ** Decimal`; never `math.pow` or a float exponent.
-  - Quantize only where an answered precision decision says (OQ-3 is open until then).
+  - One shared context: 34 digits, `ROUND_HALF_UP` (OQ-3). Quantize only on storage (a calculated PU to 10 dp, a calculated rate to 12 dp). A typed value with more decimals is rejected.
 - **Messaging:**
   - RabbitMQ delivery is at least once. Handlers are idempotent through `platform.inbox_messages`.
   - Acknowledge only after the durable state change is committed.
   - Publish only through `platform.outbox_messages` and the relay.
+- **Errors** are RFC 9457 problem+json with `errors[{code, message, field}]`; codes from the catalogue in `docs/interfaces.md` "Errors" (OQ-15).
 - **Logging** uses the stdlib `logging` module: no prints and no secrets.
 - **Style:** ruff (lint + format). Use explicit names. A comment cites the spec section only where the reason is not obvious.
 
