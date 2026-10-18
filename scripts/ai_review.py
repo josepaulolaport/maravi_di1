@@ -35,7 +35,8 @@ ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/complet
 MODEL = "gemini-3.8-flash"
 CHUNK_CHARS = 300_000  # about 75k tokens of diff per request
 MAX_REQUESTS = 6
-REQUEST_TIMEOUT = 180  # seconds; a slower answer is dropped and retried
+# Seconds. Gemini dropped a request it held for ~280 s; stop just before that and retry.
+REQUEST_TIMEOUT = 270
 ATTEMPTS = 3
 EXCLUDE = ["backend/uv.lock", "frontend/package-lock.json", "docs", "**/*.md"]  # globs
 # Keywords Gemini's structured output does not document; they are still checked locally.
