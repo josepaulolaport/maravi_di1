@@ -9,15 +9,23 @@ export default defineConfig({
   build: {
     rolldownOptions: {
       output: {
-        // Vendor code changes rarely: separate chunks stay cached across app deploys.
+        // Vendor code changes rarely: separate chunks stay cached across app deploys. Charts
+        // (recharts and its d3 dependencies) get their own chunk, loaded only by the screens
+        // that draw one; higher priority wins when a module matches several groups.
         codeSplitting: {
           groups: [
             {
+              name: 'charts',
+              test: /node_modules[\\/](recharts|@mantine[\\/]charts|d3-[^\\/]+|victory-vendor|es-toolkit|decimal\.js-light|immer|reselect|@reduxjs|redux|react-redux|eventemitter3|internmap|use-sync-external-store)[\\/]/,
+              priority: 20,
+            },
+            {
               name: 'react',
               test: /node_modules[\\/](react|react-dom|react-router|scheduler)[\\/]/,
+              priority: 10,
             },
-            { name: 'mantine', test: /node_modules[\\/]@mantine[\\/]/ },
-            { name: 'tanstack', test: /node_modules[\\/]@tanstack[\\/]/ },
+            { name: 'mantine', test: /node_modules[\\/]@mantine[\\/]/, priority: 10 },
+            { name: 'tanstack', test: /node_modules[\\/]@tanstack[\\/]/, priority: 10 },
           ],
         },
       },
