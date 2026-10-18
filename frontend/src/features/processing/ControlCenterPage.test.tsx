@@ -138,6 +138,23 @@ describe('Pendências (§11.1, §10.3)', () => {
     expect(await screen.findByRole('textbox', { name: 'Data final' })).toHaveValue('16/10/2026');
   });
 
+  it('§10.3 shows the date whose price is needed, which may differ from the affected day', async () => {
+    serveIssues([issue({ affected_date: '2026-10-16', required_price_date: '2026-10-15' })]);
+    const { user } = renderApp(PAGE);
+
+    await screen.findByText('DI1F29');
+    const row = issueRow('DI1F29');
+    expect(row.getByText('15/10/2026')).toBeInTheDocument();
+    expect(row.queryByText('16/10/2026')).not.toBeInTheDocument();
+    expect(row.getByRole('link', { name: 'Definir preço' })).toHaveAttribute(
+      'href',
+      `/ativos/contratos/${IDS.di1f29}?registrar=2026-10-15`,
+    );
+
+    await user.type(screen.getByRole('textbox', { name: 'Buscar pendência' }), '15/10');
+    expect(screen.getByText('DI1F29')).toBeInTheDocument();
+  });
+
   it('§10.3 filters by asset or date', async () => {
     serveIssues([
       issue({}),

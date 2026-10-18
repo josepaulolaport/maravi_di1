@@ -15,7 +15,7 @@ import { Link } from 'react-router';
 
 import type { Issue, IssueType } from '@/api/contract';
 import { assetLinks, controlCenterLinks, ledgerLinks } from '@/app/paths';
-import { addDays, formatDate, UNAVAILABLE } from '@/shared/format';
+import { addDays, formatDate, formatQuantity, UNAVAILABLE } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
 import type { useIssues } from '../hooks/useProcessing';
@@ -58,16 +58,24 @@ function issueAction(issue: Issue): { label: string; to: string } | null {
   }
 }
 
+/**
+ * The date the user must act on (§10.3 "data necessária"): for a missing price, the date
+ * whose price is needed, which can precede the affected day (its D−1 price).
+ */
+function requiredDate(issue: Issue) {
+  return issue.required_price_date ?? issue.affected_date;
+}
+
 function matchesSearch(issue: Issue, search: string): boolean {
   const needle = search.trim().toLocaleLowerCase('pt-BR');
   if (!needle) return true;
-  return [issue.asset_code ?? '', formatDate(issue.affected_date)].some((value) =>
+  return [issue.asset_code ?? '', formatDate(requiredDate(issue))].some((value) =>
     value.toLocaleLowerCase('pt-BR').includes(needle),
   );
 }
 
 const countLabel = (n: number) =>
-  n === 1 ? '1 pendência encontrada' : `${String(n)} pendências encontradas`;
+  n === 1 ? '1 pendência encontrada' : `${formatQuantity(n)} pendências encontradas`;
 
 interface IssuesTabProps {
   issues: ReturnType<typeof useIssues>;
@@ -138,7 +146,7 @@ function IssueRow({ issue }: { issue: Issue }) {
   const action = issueAction(issue);
   return (
     <Table.Tr>
-      <Table.Td>{formatDate(issue.affected_date)}</Table.Td>
+      <Table.Td>{formatDate(requiredDate(issue))}</Table.Td>
       <Table.Td fw={500}>{issue.asset_code ?? UNAVAILABLE}</Table.Td>
       <Table.Td>
         <Group gap={6} wrap="nowrap">

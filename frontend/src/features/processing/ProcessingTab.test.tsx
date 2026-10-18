@@ -181,6 +181,9 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     expect(
       await screen.findByText('A data inicial deve ser anterior ou igual à data final.'),
     ).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Data final' })).toHaveAccessibleDescription(
+      'A data inicial deve ser anterior ou igual à data final.',
+    );
     expect(button).toBeDisabled();
 
     await typeRange(user, '17/10/2026', '18/10/2026');
@@ -355,6 +358,24 @@ describe('Processamentos: request safety (§10.2, OQ-15)', () => {
       'A data não pode ser posterior a hoje.',
     );
     expect(db.requests).toHaveLength(5);
+  });
+});
+
+describe('Processamentos: preview failure (OQ-15)', () => {
+  it('OQ-15 shows the API message when the preview fails, and cannot confirm', async () => {
+    server.use(
+      http.get(url('/processing/preview'), () =>
+        problemResponse(422, 'FUTURE_DATE', 'A data não pode ser posterior a hoje.'),
+      ),
+    );
+    const { user } = renderApp(`${PAGE}&inicio=2026-10-14&fim=2026-10-16`);
+
+    await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
+
+    const drawer = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    expect(await drawer.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+    expect(drawer.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();
+    expect(drawer.getByRole('button', { name: 'Confirmar processamento' })).toBeDisabled();
   });
 });
 
@@ -678,6 +699,47 @@ describe('Processamentos: cancel and replace refused (§10.2, OQ-15)', () => {
       'Este processamento já foi encerrado e não pode ser cancelado.',
     );
     expect(db.requests).toHaveLength(6);
+  });
+});
+
+describe('Processamentos: cancel and replace with an invalid range (OQ-15)', () => {
+  it('OQ-15 shows a field-bound message on its date input', async () => {
+    seedJob({});
+    holdWorker();
+    server.use(
+      http.post(url('/processing/requests/:id/cancel-and-replace'), () =>
+        HttpResponse.json(
+          {
+            type: 'about:blank',
+            title: 'Dados inválidos',
+            status: 422,
+            errors: [
+              {
+                code: 'FUTURE_DATE',
+                message: 'A data não pode ser posterior a hoje.',
+                field: 'start_date',
+              },
+            ],
+          },
+          { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    );
+    const { user } = renderApp(PAGE);
+
+    const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
+    await user.click(menu.getByRole('menuitem', { name: 'Cancelar e criar novo processamento' }));
+    const dialog = within(
+      await screen.findByRole('dialog', { name: 'Cancelar e criar novo processamento' }),
+    );
+    await user.click(dialog.getByRole('button', { name: 'Cancelar e criar novo' }));
+
+    await waitFor(() => {
+      expect(dialog.getByRole('textbox', { name: 'Data inicial' })).toHaveAccessibleDescription(
+        'A data não pode ser posterior a hoje.',
+      );
+    });
+    expect(dialog.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
 

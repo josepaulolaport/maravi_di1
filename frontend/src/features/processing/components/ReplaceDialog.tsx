@@ -2,11 +2,15 @@ import { Button, Group, Modal, Stack, Text } from '@mantine/core';
 import { useRef, useState } from 'react';
 
 import type { IsoDate, ProcessingRequest } from '@/api/contract';
+import { ApiError } from '@/api/http';
 
 import { formatPeriod, shortId } from '../format';
 import { useCancelAndReplace } from '../hooks/useProcessing';
 import { ActionError } from './ActionError';
 import { isValidRange, RangeFields } from './RangeFields';
+
+/** The request's fields shown as inputs here: their API messages go on the inputs. */
+const RANGE_FIELDS = ['start_date', 'end_date'] as const;
 
 interface ReplaceDialogProps {
   /** The active job to cancel; `null` keeps the dialog closed. */
@@ -58,6 +62,8 @@ function ReplaceForm({ job, replace, onClose, today }: ReplaceFormProps) {
   const [end, setEnd] = useState<IsoDate | null>(job.requested_end_date);
   // One request per click, before `isPending` is rendered (two would queue two jobs, §10.2).
   const sending = useRef(false);
+  const fieldErrors: Partial<Record<string, string>> =
+    replace.error instanceof ApiError ? replace.error.fieldErrors() : {};
 
   const confirm = () => {
     if (!start || !end || !isValidRange(start, end) || sending.current) return;
@@ -90,8 +96,10 @@ function ReplaceForm({ job, replace, onClose, today }: ReplaceFormProps) {
         onStartChange={setStart}
         onEndChange={setEnd}
         maxDate={today}
+        startError={fieldErrors.start_date}
+        endError={fieldErrors.end_date}
       />
-      <ActionError error={replace.error} />
+      <ActionError error={replace.error} shownOnFields={RANGE_FIELDS} />
       <Group justify="flex-end" gap="sm">
         <Button variant="default" onClick={onClose} disabled={replace.isPending}>
           Voltar

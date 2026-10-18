@@ -13,6 +13,7 @@ import {
 import { IconDots, IconSearch } from '@tabler/icons-react';
 
 import type { ProcessingRequest } from '@/api/contract';
+import { formatQuantity } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
@@ -39,7 +40,7 @@ function matchesSearch(job: ProcessingRequest, search: string): boolean {
 }
 
 const countLabel = (n: number) =>
-  n === 1 ? '1 processamento encontrado' : `${String(n)} processamentos encontrados`;
+  n === 1 ? '1 processamento encontrado' : `${formatQuantity(n)} processamentos encontrados`;
 
 interface HistoryTableProps extends JobActions {
   requests: ReturnType<typeof useProcessingRequests>;

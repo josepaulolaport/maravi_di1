@@ -20,21 +20,38 @@ interface RangeFieldsProps {
   onStartChange: (date: IsoDate | null) => void;
   onEndChange: (date: IsoDate | null) => void;
   maxDate: IsoDate;
+  /** API messages bound to `start_date` / `end_date` (OQ-15). */
+  startError?: string | undefined;
+  endError?: string | undefined;
 }
 
 /** "Data inicial" and "Data final", typed as DD/MM/AAAA or picked; never after today. */
-export function RangeFields({ start, end, onStartChange, onEndChange, maxDate }: RangeFieldsProps) {
+export function RangeFields({
+  start,
+  end,
+  onStartChange,
+  onEndChange,
+  maxDate,
+  startError,
+  endError,
+}: RangeFieldsProps) {
   const reversed = start !== null && end !== null && start > end;
   return (
     <Group align="flex-start" gap="md" grow>
-      <DateField label="Data inicial" value={start} onChange={onStartChange} maxDate={maxDate} />
+      <DateField
+        label="Data inicial"
+        value={start}
+        onChange={onStartChange}
+        maxDate={maxDate}
+        error={startError}
+      />
       {/* On the field, so it is announced with it (aria-invalid, aria-describedby). */}
       <DateField
         label="Data final"
         value={end}
         onChange={onEndChange}
         maxDate={maxDate}
-        error={reversed ? INVALID_RANGE_MESSAGE : undefined}
+        error={reversed ? INVALID_RANGE_MESSAGE : endError}
       />
     </Group>
   );

@@ -29,7 +29,8 @@ export function ConfirmDrawer({ range, onClose, onQueued }: ConfirmDrawerProps) 
   const sending = useRef(false);
 
   const close = () => {
-    if (enqueue.isPending) return;
+    // `sending` too: `isPending` reaches this render only after the click's render.
+    if (enqueue.isPending || sending.current) return;
     enqueue.reset();
     onClose();
   };
@@ -62,7 +63,7 @@ export function ConfirmDrawer({ range, onClose, onQueued }: ConfirmDrawerProps) 
       <Stack gap="md">
         {preview.isError ? (
           <ErrorState error={preview.error} onRetry={() => void preview.refetch()} />
-        ) : preview.isPending ? (
+        ) : preview.isPending || preview.isFetching ? (
           <Skeleton h={160} aria-busy="true" aria-label="Carregando pré-visualização" />
         ) : (
           <PreviewSummary preview={preview.data} />
@@ -72,7 +73,11 @@ export function ConfirmDrawer({ range, onClose, onQueued }: ConfirmDrawerProps) 
           <Button variant="default" onClick={close} disabled={enqueue.isPending}>
             Cancelar
           </Button>
-          <Button onClick={confirm} loading={enqueue.isPending} disabled={!preview.isSuccess}>
+          <Button
+            onClick={confirm}
+            loading={enqueue.isPending}
+            disabled={!preview.isSuccess || preview.isFetching}
+          >
             Confirmar processamento
           </Button>
         </Group>

@@ -1,5 +1,7 @@
 import { Badge, Stack, Tabs, Title } from '@mantine/core';
 
+import { formatQuantity } from '@/shared/format';
+
 import { IssuesTab } from './components/IssuesTab';
 import { ProcessingTab } from './components/ProcessingTab';
 import { type ControlCenterTab, useControlCenterParams } from './hooks/useControlCenterParams';
@@ -34,7 +36,7 @@ export function ControlCenterPage() {
             rightSection={
               issues.data && (
                 <Badge size="sm" variant="light" circle>
-                  {issues.data.items.length}
+                  {formatQuantity(issues.data.items.length)}
                 </Badge>
               )
             }

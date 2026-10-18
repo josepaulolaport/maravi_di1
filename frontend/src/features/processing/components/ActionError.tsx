@@ -4,11 +4,17 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 import { ApiError } from '@/api/http';
 
 /**
- * A failed action in a drawer or dialog: every problem+json message, field-bound ones too,
- * since the API's fields are not inputs here (OQ-15).
+ * A failed action in a drawer or dialog (OQ-15): every problem+json message, except those
+ * bound to a field in `shownOnFields`, which the form shows on its own inputs.
  */
-export function ActionError({ error }: { error: unknown }) {
-  const messages = errorMessages(error);
+export function ActionError({
+  error,
+  shownOnFields = [],
+}: {
+  error: unknown;
+  shownOnFields?: readonly string[];
+}) {
+  const messages = errorMessages(error, shownOnFields);
   if (messages.length === 0) return null;
   return (
     <Alert role="alert" color="red" variant="light" icon={<IconAlertTriangle size={18} />}>
@@ -23,9 +29,12 @@ export function ActionError({ error }: { error: unknown }) {
   );
 }
 
-function errorMessages(error: unknown): string[] {
+function errorMessages(error: unknown, shownOnFields: readonly string[]): string[] {
   if (error === undefined || error === null) return [];
   if (!(error instanceof ApiError)) return ['Ocorreu um erro inesperado. Tente novamente.'];
-  const all = (error.problem.errors ?? []).map((e) => e.message);
-  return all.length > 0 ? all : [error.message];
+  const errors = error.problem.errors ?? [];
+  if (errors.length === 0) return [error.message];
+  return errors
+    .filter((e) => !(e.field !== null && shownOnFields.includes(e.field)))
+    .map((e) => e.message);
 }
