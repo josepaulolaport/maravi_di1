@@ -89,7 +89,7 @@ if [[ $fe_any -eq 1 ]]; then
         if [[ ${#tests[@]} -gt 0 ]]; then
           listed=$(npx --no vitest list --filesOnly "${tests[@]}") || exit 1
           declare -A collected=()
-          while IFS= read -r line; do collected["$line"]=1; done <<<"$listed"
+          while IFS= read -r line; do [[ -n $line ]] && collected["$line"]=1; done <<<"$listed"
           missing=0
           for f in "${tests[@]}"; do
             if [[ -z ${collected["$f"]:-} ]]; then
