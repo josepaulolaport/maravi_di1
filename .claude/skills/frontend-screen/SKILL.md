@@ -13,7 +13,7 @@ description: Build or change a Maravi DI1 screen or component (React, TypeScript
   - §11.3: Lançamentos;
   - §11.4: Carteira.
 - **The API rules** in §12.
-- **The design** in Figma, read through the Figma MCP tools (`frontend/CLAUDE.md` "Designs"), if one exists. Where it disagrees with the spec, the spec wins: use `spec-gap`.
+- **The design** in Figma, read through the Figma MCP tools (`frontend/CLAUDE.md` "Designs"), if one exists. Where it disagrees with the spec, the user decides which is right: use `spec-gap`, quoting both.
 - **The endpoints** in `docs/interfaces.md`, "HTTP endpoints".
 - If a text, column, state or behaviour is not specified, use `spec-gap`. Do not invent product behaviour.
 

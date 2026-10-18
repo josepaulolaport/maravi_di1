@@ -10,7 +10,7 @@ The Aura Build designs are the visual base, and the screens implement them; they
 
 - **Access** is through Figma's official Claude Code plugin (`figma@claude-plugins-official`, installed at user scope, remote server `https://mcp.figma.com/mcp`). Before the first use, run `/mcp` in the session, select figma and authenticate in the browser; `/mcp` again confirms the connection.
 - **The file link is given in the session prompt.** Read frames, components and variables through the MCP tools, and take spacing, colours and typography from the design, mapped onto Mantine theme tokens.
-- When a screen has no design in Figma, raise a `spec-gap` and do not invent one. When the design and the spec disagree (a column, a figure or a state), the **spec wins**: raise a `spec-gap` and do not follow the design silently.
+- When a screen has no design in Figma, raise a `spec-gap` and do not invent one. When the design and the spec disagree (a column, a figure or a state), **the user decides which is right**. Follow neither silently: stop that part, raise a `spec-gap` that quotes both (spec section and Figma frame) with your recommendation, and keep building the parts that do not depend on it.
 
 ## Stack and layout (plan §0–§1)
 
