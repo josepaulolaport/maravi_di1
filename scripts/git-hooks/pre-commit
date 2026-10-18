@@ -76,9 +76,20 @@ if [[ $fe_any -eq 1 ]]; then
       if [[ ${#fe[@]} -gt 0 ]]; then
         npx --no eslint -- "${fe[@]}" || exit 1
       fi
-      npx --no tsc --noEmit || exit 1
+      # `--` stops npx from reading --noEmit as an npm config flag.
+      npx --no -- tsc --noEmit || exit 1
       if [[ ${#fe[@]} -gt 0 ]]; then
-        npx --no vitest related --run -- "${fe[@]}" || exit 1
+        # No `--` before the paths: vitest's CLI parser would set them aside and run nothing.
+        # Paths always start with src/, so none can be read as an option.
+        out=$(npx --no vitest related --run "${fe[@]}" 2>&1); rc=$?
+        printf '%s\n' "$out"
+        [[ $rc -eq 0 ]] || exit 1
+        # vitest exits 0 when it finds no tests; a staged test file must have run.
+        if printf '%s\n' "${fe[@]}" | grep -Eq '\.(test|spec)\.tsx?$' \
+          && grep -q 'No test files found' <<<"$out"; then
+          echo "pre-commit: test files were staged but vitest ran none" >&2
+          exit 1
+        fi
       else
         npx --no vitest run || exit 1
       fi
