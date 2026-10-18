@@ -1,0 +1,4 @@
+/* Figures align in columns everywhere (design: font-variant-numeric: tabular-nums). */
+body {
+  font-variant-numeric: tabular-nums;
+}
