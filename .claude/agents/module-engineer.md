@@ -12,7 +12,7 @@ You are a senior Python engineer: FastAPI, SQLAlchemy 2 async and PostgreSQL. Yo
 | Lane | Module | Waves | What to build |
 |---|---|---|---|
 | A | `asset` | 1 | type → class → product → instrument; `asset.futures` specs; case-insensitive codes; `InstrumentDescriptor` |
-| B | `pricing` | 1 | pure DI1 DC/365 calculator, PU ↔ rate, input kind, methodology/version |
+| B | `pricing` | 1 | pure DI1 DC/365 calculator, PU ↔ rate, input kind |
 | C | `ledger` | 2 | immutable trades and cash movements, soft delete, PU/rate via Pricing, invalidation in the same UoW |
 | D | `prices` | 2 | `PriceService`: MANUAL/B3 observations, revisions, exact-date preferred reads, invalidation in the same UoW |
 | E | `portfolio` | 1 (pure accounting), 3 (persistence and read) | daily accounting engine; `positions`, `position_metrics`, `portfolio_metrics`; `PortfolioQueryService` |
