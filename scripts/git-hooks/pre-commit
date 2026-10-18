@@ -51,7 +51,10 @@ if [[ $backend_any -eq 1 ]]; then
         uv run --frozen --quiet ruff format --check -- "${py[@]}" || exit 1
         uv run --frozen --quiet ruff check -- "${py[@]}" || exit 1
       fi
-      if [[ -d src ]]; then uv run --frozen --quiet mypy src tests || exit 1; fi
+      if [[ -d src ]]; then
+        targets=(src tests); [[ -d migrations ]] && targets+=(migrations)
+        uv run --frozen --quiet mypy "${targets[@]}" || exit 1
+      fi
       fast=()
       for d in tests/unit tests/architecture; do [[ -d $d ]] && fast+=("$d"); done
       if [[ ${#fast[@]} -gt 0 ]]; then

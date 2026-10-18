@@ -10,7 +10,7 @@ These rules add to the root CLAUDE.md. The authorities are:
 ```text
 backend/
   pyproject.toml  uv.lock  alembic.ini
-  migrations/{env.py, versions/}        # integrator (X) only
+  migrations/{env.py, versions/, sql/}  # integrator (X) only; sql/0001_initial.sql = docs/schema.sql minus BEGIN/COMMIT
   src/di1/
     main.py                              # integrator
     composition/{routers,dependencies,consumers}.py   # integrator
@@ -89,8 +89,14 @@ The integrator fixes these commands in Wave 0. Until the scaffold exists, they a
 
 ```bash
 uv sync
-uv run pytest -q
+uv run pytest -q                # unit + architecture; database tests are skipped (reported) without TEST_DATABASE_URL
+TEST_DATABASE_URL=postgresql+psycopg://postgres:x@localhost:55432/postgres uv run pytest -q
+                                # adds the integration tests; each test creates and drops its own database
 uv run ruff check . && uv run ruff format --check .
-uv run mypy src tests           # type checks (plan §0: ruff, pytest, optional mypy/pyright)
-uv run alembic upgrade head     # against your worktree's database
+uv run mypy src tests migrations
+DATABASE_URL=postgresql+psycopg://…/<your db> uv run alembic upgrade head    # integrator owns migrations/
 ```
+
+Downgrade is for throwaway databases only: it refuses while business data exists unless `-x allow_data_loss=true` is given. An async test that migrates its database passes its connection through `connection.run_sync` and `config.attributes["connection"]` (see `migrations/env.py`), and never calls `command.upgrade` straight from the event loop. CI sets `REQUIRE_DATABASE_TESTS=1`, so a missing database fails the run instead of skipping.
+
+A test PostgreSQL 16 for your worktree: `docker run -d --name di1-test-db-<lane> -e POSTGRES_PASSWORD=x -p <port>:5432 postgres:16`, with a port of your own.
