@@ -59,7 +59,7 @@ Create only the files and packages that are used. Initially only Processing has 
   - Construct from `str`, never from `float`.
   - The multiplier is not applied (OQ-2).
   - Fractional powers use `Decimal ** Decimal`; never `math.pow` or a float exponent.
-  - One shared context: 34 digits, `ROUND_HALF_UP` (OQ-3). Quantize only on storage (a calculated PU to 10 dp, a calculated rate to 12 dp). A typed value with more decimals is rejected.
+  - One shared context: 34 digits, `ROUND_HALF_UP` (OQ-3). Quantize only on storage (a calculated PU to 10 dp, a calculated rate to 12 dp). Portfolio's average entry PU and rate are rounded the same way at each day's close, and carried rounded, so results never depend on how a range is split into jobs. A typed value with more decimals is rejected.
 - **Messaging:**
   - RabbitMQ delivery is at least once. Handlers are idempotent through `platform.inbox_messages`.
   - Acknowledge only after the durable state change is committed.
