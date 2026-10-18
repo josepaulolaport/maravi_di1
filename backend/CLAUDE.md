@@ -15,7 +15,7 @@ backend/
     main.py                              # integrator
     composition/{routers,dependencies,consumers}.py   # integrator
     platform/{config.py, database/, messaging/, observability/}   # lane H
-    shared/                              # value types read by more than one module, defined once; integrator
+    shared/                              # only DTOs that are genuinely shared; integrator
     modules/<module>/                    # lanes A–G
       public.py
       dependencies.py                    # if needed
@@ -37,7 +37,6 @@ Create only the files and packages that are used. Initially only Processing has 
 - **Typing and data:**
   - Full type hints.
   - Domain values are frozen dataclasses.
-  - One definition per shared value: a value type that more than one module reads lives in `di1.shared` (standard library only, so domain code can import it), for example `di1.shared.trades.Trade`. The owner's `public.py` exposes it, and consumers never redeclare a copy or a subset of it. The owner's record metadata (id, audit fields) stays in the owner's DTO. A type only one module uses stays in that module. Adding a shared type needs the user's or the integrator's approval.
   - Pydantic v2 is used only in `presentation/` (HTTP schemas, message payloads) and `platform/` (settings).
   - Decimal fields cross HTTP as strings.
 - **Domain code**, the calculators (`pricing`, `pnl`, portfolio accounting) included, is synchronous, deterministic and free of I/O and side effects:
@@ -59,7 +58,7 @@ Create only the files and packages that are used. Initially only Processing has 
   - Construct from `str`, never from `float`.
   - The multiplier is not applied (OQ-2).
   - Fractional powers use `Decimal ** Decimal`; never `math.pow` or a float exponent.
-  - One shared context: 34 digits, `ROUND_HALF_UP` (OQ-3). Quantize only on storage (a calculated PU to 10 dp, a calculated rate to 12 dp). Portfolio's average entry PU and rate are rounded the same way at each day's close, and carried rounded, so results never depend on how a range is split into jobs. A typed value with more decimals is rejected.
+  - One shared context: 34 digits, `ROUND_HALF_UP` (OQ-3). Quantize only on storage (a calculated PU to 10 dp, a calculated rate to 12 dp). A typed value with more decimals is rejected.
 - **Messaging:**
   - RabbitMQ delivery is at least once. Handlers are idempotent through `platform.inbox_messages`.
   - Acknowledge only after the durable state change is committed.

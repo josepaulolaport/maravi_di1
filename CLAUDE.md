@@ -105,7 +105,6 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 
 **Rules:**
 - Cross-module access goes **only** through `public.py` DTOs and services. Never import another module's ORM or repositories.
-- **One definition per shared value.** A value type read by more than one module (e.g. `Trade`, read by Ledger, Portfolio, PnL and Processing) is a frozen dataclass in `di1.shared`, defined once. The owning module's `public.py` exposes it; consumers import it and never redeclare a copy (no `PnLTrade`, no `AccountingTrade`). The owner's record metadata (ids, audit, `created_at`) stays in the owner's own DTO. A type only one module uses stays in that module.
 - Domain code, including the calculators (`pricing`, `pnl`, portfolio accounting), is deterministic, synchronous and free of I/O and side effects: no filesystem, network, database, messaging, environment or system-clock access, and no FastAPI. Pure standard-library utilities (`datetime` arithmetic, `Decimal`, `Enum`, `dataclasses`) are allowed.
 - Domain code does not log: logging belongs in the application, infrastructure or presentation layers, and the domain reports failures through exceptions and explicit results. It never generates randomness internally: a calculation that needs it (e.g. Monte Carlo) takes an explicit seed or an injected random-number generator.
 - SQL lives in `infrastructure/persistence/queries`.
