@@ -94,6 +94,19 @@ describe('mock portfolio', () => {
   });
 });
 
+describe('mock assets', () => {
+  it('§4.1 the futures spec carries no pricing methodology: DC/365 is the only convention', async () => {
+    const product = await assetsApi.getProduct(IDS.di1);
+
+    expect(product.futures).toEqual({
+      face_value: '100000',
+      contract_multiplier: '1',
+      settlement_method: 'CASH',
+      settlement_description: 'Liquidação financeira',
+    });
+  });
+});
+
 describe('mock reference prices', () => {
   it('§5 prefers MANUAL over B3 and lists only dates with an observation', async () => {
     const { items } = await pricesApi.listReferencePrices({

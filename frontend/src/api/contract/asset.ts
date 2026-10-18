@@ -24,8 +24,8 @@ export interface FuturesSpec {
   contract_multiplier: Decimal;
   settlement_method: string;
   settlement_description: string | null;
-  /** Proposal: the pricing methodology, shown as "Dias corridos / 365" (§4.1). */
-  pricing_methodology: 'CHALLENGE_DC_365';
+  // No pricing-methodology field: DC/365 is the only convention (§4.1), so the product
+  // page shows "Contagem de dias" as the fixed text "Dias corridos / 365".
 }
 
 /** `GET /products`, `GET /products/{id}`. */

@@ -60,7 +60,6 @@ export const products: Product[] = [
       contract_multiplier: '1',
       settlement_method: 'CASH',
       settlement_description: 'Liquidação financeira',
-      pricing_methodology: 'CHALLENGE_DC_365',
     },
     created_at: '2026-10-01T09:00:00-03:00',
   },
