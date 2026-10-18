@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 
 import { cleanup } from '@testing-library/react';
 
+import { resetDb } from '@/api/mocks/db';
 import { server } from '@/api/mocks/server';
 
 // jsdom lacks these browser APIs; Mantine needs them (Mantine testing guide).
@@ -31,6 +32,9 @@ window.HTMLElement.prototype.scrollIntoView = () => undefined;
 // Every request in a test must be mocked explicitly.
 beforeAll(() => {
   server.listen({ onUnhandledFrame: 'error' });
+});
+beforeEach(() => {
+  resetDb();
 });
 afterEach(() => {
   cleanup();
