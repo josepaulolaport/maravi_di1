@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from di1.composition.errors import PROBLEM_JSON, STATUS_BY_CODE, install_problem_handlers
@@ -38,6 +39,23 @@ def _app() -> FastAPI:
             ErrorDetail(ErrorCode.VALIDATION_ERROR, "Valor inválido.", "quantity"),
             ErrorDetail(ErrorCode.NOT_FOUND, "Ativo não encontrado.", "instrument_id"),
         )
+
+    @app.get("/two-fields")
+    async def two_fields() -> None:
+        raise DomainError(
+            ErrorDetail(ErrorCode.VALIDATION_ERROR, "Valor inválido.", "quantity"),
+            ErrorDetail(
+                ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", "trade_date"
+            ),
+        )
+
+    @app.get("/http-conflict")
+    async def http_conflict() -> None:
+        raise HTTPException(409, detail="internal reason the client must not see")
+
+    @app.get("/http-unauthorized")
+    async def http_unauthorized() -> None:
+        raise HTTPException(401, detail="token expired", headers={"WWW-Authenticate": "Bearer"})
 
     @app.get("/typed")
     async def typed(start_date: date, quantity: int) -> None:
@@ -101,6 +119,14 @@ def test_the_status_follows_the_code(client: TestClient) -> None:
     ]
 
 
+def test_several_details_get_the_generic_detail_of_their_status(client: TestClient) -> None:
+    body = _problem(
+        client.get("/two-fields"), 422, "Dados inválidos", "A requisição contém dados inválidos."
+    )
+
+    assert [error["field"] for error in body["errors"]] == ["quantity", "trade_date"]
+
+
 def test_invalid_query_parameters_are_validation_errors_per_field(client: TestClient) -> None:
     response = client.get("/typed", params={"start_date": "31/12/2026"})
     body = _problem(response, 422, "Dados inválidos", "A requisição contém dados inválidos.")
@@ -159,10 +185,31 @@ def test_an_unexpected_error_is_a_500_that_hides_the_exception(client: TestClien
     assert body["errors"] == []
 
 
+def test_an_http_exception_from_a_route_loses_its_detail(client: TestClient) -> None:
+    response = client.get("/http-conflict")
+    body = _problem(response, 409, "Conflito", "Conflito.")
+
+    assert "internal reason" not in response.text
+    assert body["errors"] == []
+
+
+def test_an_http_exception_keeps_its_headers(client: TestClient) -> None:
+    response = client.get("/http-unauthorized")
+    _problem(response, 401, "Erro na requisição", "Erro na requisição.")
+
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert "token expired" not in response.text
+
+
 def test_details_of_different_statuses_are_a_500_not_an_order_dependent_status(
-    client: TestClient,
+    client: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
-    response = client.get("/mixed")
+    with caplog.at_level(logging.ERROR, logger="di1.composition.errors"):
+        response = client.get("/mixed")
     body = _problem(response, 500, "Erro interno", "Ocorreu um erro interno. Tente novamente.")
 
     assert body["errors"] == []
+    [record] = caplog.records
+    assert "different statuses" in record.getMessage()
+    assert record.exc_info is not None
+    assert record.exc_info[0] is DomainError

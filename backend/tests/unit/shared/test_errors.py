@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import copy
+import pickle
+
 import pytest
 
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
@@ -41,6 +44,16 @@ def test_the_detail_defaults_to_the_first_message() -> None:
     assert str(error) == "Operação não encontrada."
 
 
+def test_several_details_leave_the_summary_to_the_http_layer() -> None:
+    error = DomainError(
+        ErrorDetail(ErrorCode.VALIDATION_ERROR, "Valor inválido.", "quantity"),
+        ErrorDetail(ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", "trade_date"),
+    )
+
+    assert error.detail is None
+    assert str(error) == "Valor inválido.; A data não pode ser posterior a hoje."
+
+
 def test_an_explicit_detail_is_kept() -> None:
     error = DomainError(
         ErrorDetail(ErrorCode.INVALID_RANGE, "A data inicial é posterior à final.", "start_date"),
@@ -57,3 +70,17 @@ def test_a_field_is_optional() -> None:
 def test_a_domain_error_needs_at_least_one_detail() -> None:
     with pytest.raises(ValueError, match="at least one"):
         DomainError()
+
+
+@pytest.mark.parametrize("detail", [None, "Intervalo inválido."])
+def test_a_domain_error_survives_copy_and_pickle(detail: str | None) -> None:
+    error = DomainError(
+        ErrorDetail(ErrorCode.INVALID_RANGE, "A data inicial é posterior à final.", "start_date"),
+        detail=detail,
+    )
+
+    for clone in (copy.copy(error), pickle.loads(pickle.dumps(error))):
+        assert isinstance(clone, DomainError)
+        assert clone.errors == error.errors
+        assert clone.detail == error.detail
+        assert str(clone) == str(error)

@@ -14,9 +14,9 @@ Mapped here, once for the whole API:
 
 Business codes (``FUTURE_DATE``, ``CONTRACT_MATURED``, too many decimals as
 ``VALIDATION_ERROR``, ...) are raised only as a `DomainError` from ``application/`` or
-``domain/``. Pydantic schemas check syntax only: a message raised inside a Pydantic validator
-is replaced by the generic "Valor inválido.". Routers raise `DomainError`, never
-``HTTPException``, whose ``detail`` is replaced too.
+``domain/``; routers raise no errors of their own, and never ``HTTPException``, whose
+``detail`` is replaced by the generic one. Pydantic schemas check syntax only: a message raised
+inside a Pydantic validator is replaced by the generic "Valor inválido.".
 """
 
 from __future__ import annotations
@@ -112,10 +112,14 @@ async def _on_domain_error(_: Request, exc: Exception) -> JSONResponse:
     error = _expect(exc, DomainError)
     statuses = {STATUS_BY_CODE[detail.code] for detail in error.errors}
     if len(statuses) != 1:
-        logger.error("DomainError mixes codes of different statuses: %s", error.errors)
+        logger.error(
+            "DomainError mixes codes of different statuses: %s", error.errors, exc_info=error
+        )
         status = HTTPStatus.INTERNAL_SERVER_ERROR
         return problem_response(status, _detail(status))
-    return problem_response(statuses.pop(), error.detail, error.errors)
+    status = statuses.pop()
+    detail = error.detail if error.detail is not None else _detail(status)
+    return problem_response(status, detail, error.errors)
 
 
 async def _on_validation_error(_: Request, exc: Exception) -> JSONResponse:

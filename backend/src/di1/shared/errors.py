@@ -8,8 +8,10 @@ the catalogue additively.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 
 
 class ErrorCode(StrEnum):
@@ -42,21 +44,29 @@ class ErrorDetail:
 class DomainError(Exception):
     """A business rule refused the operation. Raised by domain and application code.
 
-    ``detail`` (pt-BR) summarises the whole problem and defaults to the first message. The first
-    detail's code decides the HTTP status, so raise details of one kind together.
+    All details must map to one HTTP status (all 422, say); mixing statuses is a programming
+    error and answers 500. ``detail`` (pt-BR) summarises the whole problem: by default the
+    message of a single detail, and ``None`` for several, which leaves the summary to the HTTP
+    layer's generic text for the status.
     """
 
     errors: tuple[ErrorDetail, ...]
-    detail: str
+    detail: str | None
 
     def __init__(self, *errors: ErrorDetail, detail: str | None = None) -> None:
         if not errors:
             raise ValueError("a DomainError needs at least one ErrorDetail")
         self.errors = errors
-        self.detail = detail if detail is not None else errors[0].message
-        super().__init__(self.detail)
+        if detail is None and len(errors) == 1:
+            detail = errors[0].message
+        self.detail = detail
+        super().__init__(detail if detail is not None else "; ".join(e.message for e in errors))
+
+    def __reduce__(self) -> tuple[Callable[..., DomainError], tuple[ErrorDetail, ...]]:
+        # Exception's default rebuilds from ``args`` (the summary string), which loses the details.
+        return (partial(type(self), detail=self.detail), self.errors)
 
     @property
     def code(self) -> ErrorCode:
-        """The code of the first detail."""
+        """The code of the first detail, for logs and tests; the HTTP status uses every detail."""
         return self.errors[0].code
