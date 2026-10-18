@@ -1,0 +1,26 @@
+import { QueryClient } from '@tanstack/react-query';
+import { render, type RenderResult } from '@testing-library/react';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
+import { createMemoryRouter, RouterProvider } from 'react-router';
+
+import { AppProviders } from '@/app/providers';
+import { routes } from '@/app/routes';
+
+interface RenderAppResult extends RenderResult {
+  user: UserEvent;
+}
+
+/** Renders the whole app (providers, layout, routes) at `route`. */
+export function renderApp(route = '/'): RenderAppResult {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const router = createMemoryRouter(routes, { initialEntries: [route] });
+  const user = userEvent.setup();
+  const result = render(
+    <AppProviders queryClient={queryClient}>
+      <RouterProvider router={router} />
+    </AppProviders>,
+  );
+  return { user, ...result };
+}
