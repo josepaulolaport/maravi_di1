@@ -35,15 +35,11 @@ jobs:
       # A push to main runs everything.
       backend: ${{ github.event_name == 'push' || steps.filter.outputs.backend == 'true' }}
       frontend: ${{ github.event_name == 'push' || steps.filter.outputs.frontend == 'true' }}
-      # The AI review runs only on PRs that change something other than documentation.
-      review: ${{ steps.filter.outputs.review == 'true' }}
     steps:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
         if: github.event_name == 'pull_request'
         with:
-          # A file matches a filter when it matches a pattern and none of its '!' patterns.
-          predicate-quantifier: some-with-excludes
           filters: |
             backend:
               - 'backend/**'
@@ -55,10 +51,6 @@ jobs:
               - 'frontend/**'
               - 'Makefile'
               - '.github/workflows/**'
-            review:
-              - '**'
-              - '!docs/**'
-              - '!**/*.md'
 
   backend:
     name: backend
@@ -168,51 +160,3 @@ jobs:
             echo "::error title=ci-ok::$bad needed job(s) failed or were cancelled"
             exit 1
           fi
-
-  # AI review: scripts/ai_review.py sends the PR diff to Gemini (free tier; Google may use the
-  # prompts, here the diff of a public repository, to improve its products) in one request, or a
-  # few for a large diff, and posts one review with an inline comment per finding. It starts only
-  # once ci-ok has passed and is deliberately not part of ci-ok: an LLM outage or a missing key
-  # must not block a merge. Secrets are unavailable on fork PRs, so it runs only for branches of
-  # this repository; pull_request_target is never used.
-  ai-review:
-    name: ai-review
-    needs: [changes, ci-ok]
-    # always() drops the implicit success(), which would also require every upstream job (a
-    # skipped frontend or backend job included) to succeed; ci-ok already decides that.
-    if: >-
-      always() && needs.ci-ok.result == 'success'
-      && needs.changes.outputs.review == 'true'
-      && github.event_name == 'pull_request'
-      && github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      pull-requests: write # the review and its inline comments
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0 # the merge base with the PR base
-          persist-credentials: false
-      - name: Review the diff and post the findings
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          if [[ -z "$GEMINI_API_KEY" ]]; then
-            echo "::error title=ai-review::secret GEMINI_API_KEY is not set (a Google AI Studio key; see README)"
-            exit 1
-          fi
-          python3 -I scripts/ai_review.py "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/ai-review"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: ai-review
-          path: ${{ runner.temp }}/ai-review/review.json
-          if-no-files-found: ignore # absent only when the review failed before answering
