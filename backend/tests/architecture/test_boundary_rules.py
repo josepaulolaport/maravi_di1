@@ -38,6 +38,7 @@ INFRA = "modules/ledger/infrastructure/persistence/repositories.py"
 HTTP = "modules/ledger/presentation/http/router.py"
 PUBLIC = "modules/ledger/public.py"
 WORKER = "workers/main.py"
+CONSUMER = "modules/processing/presentation/messaging/handlers.py"
 
 
 # ---------------------------------------------------------------- allowed imports
@@ -58,6 +59,16 @@ def test_clean_tree_has_no_violations(tmp_path: Path) -> None:
                 "from di1.platform.messaging.outbox import OutboxWriter\n"
             ),
             "modules/ledger/infrastructure/persistence/models.py": "import sqlalchemy\n",
+            "modules/prices/infrastructure/b3/client.py": "import decimal\n",
+            "modules/processing/infrastructure/messaging/outbox.py": (
+                "from di1.platform.messaging.outbox import OutboxWriter\n"
+            ),
+            CONSUMER: (
+                "from di1.platform.messaging.consumer import Handler\n"
+                "from di1.platform.messaging.envelope import Envelope\n"
+                "from di1.platform.messaging.inbox import Inbox\n"
+                "from ...application.services.processing import ProcessingService\n"
+            ),
             HTTP: "from fastapi import APIRouter\n",
             "modules/ledger/presentation/http/schemas.py": "from pydantic import BaseModel\n",
             "modules/ledger/dependencies.py": "from fastapi import Depends\nimport sqlalchemy\n",
@@ -114,18 +125,51 @@ def test_module_init_contains_no_imports(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
+        # external dependencies and other layers
         ("import sqlalchemy\n", {"domain-purity", "sql"}),
         ("from pydantic import BaseModel\n", {"domain-purity", "pydantic"}),
         ("from di1.platform.database import engine\n", {"domain-purity"}),
         ("from di1.modules.ledger.infrastructure import models\n", {"domain-purity"}),
-        ("import asyncio\n", {"domain-purity"}),
-        ("import sqlite3\n", {"domain-purity"}),
+        # filesystem, network, database, environment and concurrency modules
+        ("import os\n", {"domain-purity"}),
+        ("from pathlib import Path\n", {"domain-purity"}),
         ("import socket\n", {"domain-purity"}),
         ("from urllib import request\n", {"domain-purity"}),
+        ("import sqlite3\n", {"domain-purity"}),
+        ("import asyncio\n", {"domain-purity"}),
+        ("import subprocess\n", {"domain-purity"}),
+        ("import logging\n", {"domain-purity"}),
+        ("import random\n", {"domain-purity"}),
+        # side-effecting calls inside otherwise pure modules
+        ("from datetime import datetime\nnow = datetime.now()\n", {"domain-purity"}),
+        ("import datetime\ntoday = datetime.date.today()\n", {"domain-purity"}),
+        ("from datetime import date as d\ntoday = d.today()\n", {"domain-purity"}),
+        ("import time\nstarted = time.monotonic()\n", {"domain-purity"}),
+        ("from time import time\nstarted = time()\n", {"domain-purity"}),
+        ("import uuid\nnew_id = uuid.uuid4()\n", {"domain-purity"}),
+        ("data = open('prices.csv').read()\n", {"domain-purity"}),
+        ("print('debug')\n", {"domain-purity"}),
     ],
 )
-def test_domain_is_pure(tmp_path: Path, source: str, expected: set[str]) -> None:
+def test_domain_has_no_io_or_side_effects(tmp_path: Path, source: str, expected: set[str]) -> None:
     assert _rules_for(tmp_path, DOMAIN, source) == expected
+
+
+def test_domain_may_use_pure_standard_library(tmp_path: Path) -> None:
+    source = (
+        "import time\n"
+        "import uuid\n"
+        "from dataclasses import dataclass\n"
+        "from datetime import date, datetime, timedelta\n"
+        "from decimal import ROUND_HALF_UP, Decimal, localcontext\n"
+        "from enum import StrEnum\n"
+        "maturity = date(2028, 1, 1) - timedelta(days=365)\n"
+        "stamp = datetime.fromisoformat('2027-01-01T10:00:00')\n"
+        "asset_id = uuid.UUID('6ad8f84a-7cb3-46d1-a737-0360bf1d754f')\n"
+        "label = time.strftime('%Y', (2027, 1, 1, 0, 0, 0, 0, 1, 0))\n"
+        "pu = Decimal('100000') / Decimal('1.1')\n"
+    )
+    assert _rules_for(tmp_path, DOMAIN, source) == set()
 
 
 @pytest.mark.parametrize(
@@ -136,6 +180,8 @@ def test_domain_is_pure(tmp_path: Path, source: str, expected: set[str]) -> None
         (INFRA, "from di1.modules.ledger.presentation.http import schemas\n"),
         (PUBLIC, "from .infrastructure.persistence.repositories import LedgerRepository\n"),
         (PUBLIC, "from .presentation.http.schemas import TradeIn\n"),
+        (HTTP, "from ...infrastructure.persistence import repositories\n"),
+        (CONSUMER, "from di1.modules.processing.infrastructure.persistence import repositories\n"),
     ],
 )
 def test_layers_point_inwards(tmp_path: Path, path: str, source: str) -> None:
@@ -183,6 +229,21 @@ def test_pydantic_only_in_presentation_and_platform(tmp_path: Path, path: str) -
 )
 def test_business_code_uses_only_outbox_and_inbox_messaging(tmp_path: Path, source: str) -> None:
     assert _rules_for(tmp_path, INFRA, source) == {"messaging"}
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (APP, "from di1.platform.messaging.consumer import Handler\n"),
+        (INFRA, "from di1.platform.messaging.consumer import Handler\n"),
+        (CONSUMER, "import aio_pika\n"),
+        (CONSUMER, "from di1.platform.messaging.publisher import Publisher\n"),
+    ],
+)
+def test_only_presentation_messaging_consumes_and_never_touches_the_broker(
+    tmp_path: Path, path: str, source: str
+) -> None:
+    assert _rules_for(tmp_path, path, source) == {"messaging"}
 
 
 @pytest.mark.parametrize("path", ["platform/config.py", "contracts/money.py"])
@@ -241,7 +302,14 @@ def test_dynamic_imports_are_forbidden(tmp_path: Path, source: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "path", ["helpers.py", "modules/ledger/services/ledger.py", "modules/ledger/utils.py"]
+    "path",
+    [
+        "helpers.py",
+        "modules/ledger/services/ledger.py",
+        "modules/ledger/utils.py",
+        "modules/ledger/presentation/cli/main.py",
+        "modules/ledger/application/helpers/x.py",
+    ],
 )
 def test_files_outside_the_plan_layout_are_reported(tmp_path: Path, path: str) -> None:
     package = _tree(tmp_path, {path: "import decimal\n"})

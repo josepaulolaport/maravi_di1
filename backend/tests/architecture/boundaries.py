@@ -12,24 +12,33 @@ Rules:
   form that names the package itself.
 - ``module-init``: a module's ``__init__.py`` imports nothing (no re-export path around
   ``public.py``).
-- ``domain-purity``: ``domain/`` imports only the standard library (without I/O, concurrency or
-  clock modules), ``di1.contracts`` and its own module's domain.
+- ``domain-purity``: ``domain/`` is deterministic and free of I/O and side effects. It imports
+  only the standard library, ``di1.contracts`` and its own module's domain; it never imports a
+  standard-library module whose purpose is filesystem, network, database, environment,
+  process, concurrency, logging or randomness access; and it never calls the system clock,
+  random identifiers or I/O builtins (``datetime.now``, ``date.today``, ``time.monotonic``,
+  ``uuid.uuid4``, ``open``, ``print``, ...). Pure utilities stay allowed: ``datetime``
+  arithmetic, ``decimal``, ``enum``, ``dataclasses``, ``uuid.UUID``.
 - ``layering``: ``application/`` does not import its module's ``infrastructure/`` or
-  ``presentation/``; ``infrastructure/`` does not import ``presentation/``; ``public.py`` does
-  not expose ``infrastructure/`` or ``presentation/``.
+  ``presentation/``; ``infrastructure/`` does not import ``presentation/``; ``presentation/``
+  (HTTP routers, message handlers) does not import ``infrastructure/``, so business logic
+  stays in ``application/``; ``public.py`` exposes neither.
 - ``fastapi``: FastAPI/Starlette only in ``presentation/``, a module's ``dependencies.py``
   (its dependency providers), ``composition/`` and ``main.py``.
 - ``sql``: SQLAlchemy/psycopg/Alembic only in ``infrastructure/``, ``dependencies.py``,
   ``platform/`` and ``composition/``.
 - ``pydantic``: Pydantic only in ``presentation/`` and ``platform/`` (settings).
-- ``messaging``: aio-pika only in ``platform/`` and ``workers/``; business modules use only the
-  outbox, inbox and envelope parts of ``di1.platform.messaging``.
+- ``messaging``: aio-pika only in ``platform/`` and ``workers/`` (shared RabbitMQ
+  infrastructure). Module code uses only the outbox, inbox and envelope parts of
+  ``di1.platform.messaging``; a module's ``presentation/messaging/`` (its consumers and
+  handlers) may also use ``di1.platform.messaging.consumer``.
 - ``shared-independent``: ``platform/`` and ``contracts/`` import no module.
 - ``entry-point``: ``di1.main`` and ``di1.composition`` are imported only by ``main.py`` and
   ``composition/``; workers may use only ``di1.composition.consumers``; ``di1.workers`` is
   imported only by ``workers/``, ``composition/`` and ``main.py``.
 - ``dynamic-import``: no ``importlib.import_module`` or ``__import__`` calls.
-- ``layout``: every file sits in the plan §1 layout.
+- ``layout``: every file sits in the plan §1 layout. ``infrastructure/`` may hold any outbound
+  adapter; ``presentation/`` holds ``http/`` and ``messaging/``.
 """
 
 from __future__ import annotations
@@ -47,10 +56,29 @@ FASTAPI_LIBRARIES = ("fastapi", "starlette")
 SQL_LIBRARIES = ("sqlalchemy", "psycopg", "alembic")
 BROKER_LIBRARIES = ("aio_pika", "aiormq", "pika")
 PYDANTIC_LIBRARIES = ("pydantic", "pydantic_settings", "pydantic_core")
+# Standard-library modules whose purpose is a side effect: filesystem, network, database,
+# environment and process, concurrency, logging, randomness.
 DOMAIN_FORBIDDEN_STDLIB = frozenset(
     {
-        "asyncio", "concurrent", "http", "multiprocessing", "os", "selectors", "shutil",
-        "socket", "sqlite3", "ssl", "subprocess", "threading", "time", "urllib",
+        "os", "sys", "pathlib", "io", "shutil", "tempfile", "glob", "fileinput", "zipfile",
+        "tarfile", "mmap", "socket", "ssl", "select", "selectors", "http", "urllib", "ftplib",
+        "smtplib", "poplib", "imaplib", "socketserver", "xmlrpc", "wsgiref", "webbrowser",
+        "sqlite3", "dbm", "shelve", "asyncio", "threading", "multiprocessing", "concurrent",
+        "subprocess", "signal", "sched", "queue", "logging", "random", "secrets", "getpass",
+        "platform", "ctypes",
+    }
+)  # fmt: skip
+# Side-effecting calls inside otherwise pure modules: the system clock, random identifiers and
+# I/O builtins. Names are fully qualified after resolving import aliases.
+DOMAIN_FORBIDDEN_CALLS = frozenset(
+    {
+        "datetime.datetime.now", "datetime.datetime.utcnow", "datetime.datetime.today",
+        "datetime.date.today", "time.time", "time.time_ns", "time.monotonic",
+        "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns", "time.process_time",
+        "time.process_time_ns", "time.thread_time", "time.thread_time_ns", "time.sleep",
+        "time.localtime", "time.gmtime", "time.ctime", "time.mktime", "uuid.uuid1",
+        "uuid.uuid4", "builtins.open", "builtins.input", "builtins.print",
+        "builtins.breakpoint", "builtins.exec", "builtins.eval",
     }
 )  # fmt: skip
 BUSINESS_MESSAGING = (
@@ -58,6 +86,7 @@ BUSINESS_MESSAGING = (
     f"{ROOT}.platform.messaging.inbox",
     f"{ROOT}.platform.messaging.envelope",
 )
+CONSUMER_MESSAGING = (*BUSINESS_MESSAGING, f"{ROOT}.platform.messaging.consumer")
 
 TOP_FILES = frozenset({"__init__.py", "main.py"})
 TOP_PACKAGES = frozenset({"modules", "platform", "contracts", "composition", "workers"})
@@ -65,10 +94,11 @@ MODULE_ENTRIES = frozenset(
     {"__init__.py", "public.py", "dependencies.py", "domain", "application", "infrastructure",
      "presentation"}
 )  # fmt: skip
+# Allowed entries directly under a layer; a layer missing here (domain, infrastructure) may hold
+# any sub-package: infrastructure/ holds every outbound adapter a module needs.
 LAYER_ENTRIES = {
     "application": frozenset({"__init__.py", "services", "interfaces"}),
-    "infrastructure": frozenset({"__init__.py", "persistence"}),
-    "presentation": frozenset({"__init__.py", "http"}),
+    "presentation": frozenset({"__init__.py", "http", "messaging"}),
 }
 
 
@@ -93,6 +123,13 @@ class SourceFile:
         """``domain``, ``application``, ``infrastructure``, ``presentation``, or the stem of a
         file directly in the module (``public``, ``dependencies``, ``__init__``)."""
         return self.parts[2].removesuffix(".py") if self.module is not None else None
+
+    @property
+    def is_message_consumer(self) -> bool:
+        """A module's ``presentation/messaging/`` (its RabbitMQ consumers and handlers)."""
+        return (
+            self.layer == "presentation" and len(self.parts) >= 5 and self.parts[3] == "messaging"
+        )
 
     def package_parts(self) -> list[str]:
         return [ROOT, *self.parts[:-1]]
@@ -144,6 +181,40 @@ def _imports(tree: ast.AST, source: SourceFile) -> Iterator[Imported]:
                     yield Imported(f"{module}.{alias.name}", via_from=False)
 
 
+def _aliases(tree: ast.AST) -> dict[str, str]:
+    """Local name → fully qualified name, for every name the file binds by importing."""
+    bound: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    bound[alias.asname] = alias.name
+                else:
+                    first = alias.name.split(".")[0]
+                    bound[first] = first
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            for alias in node.names:
+                bound[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return bound
+
+
+def _called_names(tree: ast.AST) -> Iterator[str]:
+    """The fully qualified name of every call whose target is a (dotted) name."""
+    bound = _aliases(tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        chain: list[str] = []
+        target: ast.expr = node.func
+        while isinstance(target, ast.Attribute):
+            chain.insert(0, target.attr)
+            target = target.value
+        if not isinstance(target, ast.Name):
+            continue
+        head = bound.get(target.id, f"builtins.{target.id}" if not chain else target.id)
+        yield ".".join([head, *chain])
+
+
 def _dynamic_imports(tree: ast.AST) -> Iterator[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -192,6 +263,7 @@ def _rules(source: SourceFile, imported: Imported) -> Iterator[str]:
         inner = {
             "application": (f"{own}.infrastructure", f"{own}.presentation"),
             "infrastructure": (f"{own}.presentation",),
+            "presentation": (f"{own}.infrastructure",),
             "public": (f"{own}.infrastructure", f"{own}.presentation"),
         }.get(layer or "", ())
         if inner and _under(name, inner):
@@ -217,7 +289,9 @@ def _rules(source: SourceFile, imported: Imported) -> Iterator[str]:
         top == "modules"
         and _under(name, (messaging_package,))
         and not (name == messaging_package and imported.via_from)
-        and not _under(name, BUSINESS_MESSAGING)
+        and not _under(
+            name, CONSUMER_MESSAGING if source.is_message_consumer else BUSINESS_MESSAGING
+        )
     ):
         yield "messaging"
 
@@ -262,4 +336,7 @@ def find_violations(package: Path) -> list[str]:
             report.add(f"{rule}: {source.relative} imports {name}")
         for call in set(_dynamic_imports(tree)):
             report.add(f"dynamic-import: {source.relative} calls {call}")
+        if source.layer == "domain":
+            for call in set(_called_names(tree)) & DOMAIN_FORBIDDEN_CALLS:
+                report.add(f"domain-purity: {source.relative} calls {call}")
     return sorted(report)
