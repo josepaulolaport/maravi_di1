@@ -1,0 +1,55 @@
+# CodeRabbit AI review (https://docs.coderabbit.ai/reference/configuration).
+# It only comments: request_changes_workflow stays off, so a review never blocks a merge.
+language: "en-US"
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true # applies once the repository has 10 stars; until then: @coderabbitai review
+    drafts: false
+  # Documentation and lock files are not reviewed.
+  path_filters:
+    - "!docs/**"
+    - "!**/*.md"
+    - "!backend/uv.lock"
+    - "!frontend/package-lock.json"
+  path_instructions:
+    - path: "**/*"
+      instructions: >-
+        Review as a principal engineer expert in this stack. Report only concrete bugs,
+        incorrect logic, bad practices, security issues and architecture violations, each with
+        the scenario that breaks and the fix; no style nits that ruff, mypy, eslint or prettier
+        already catch. Conventions are in CLAUDE.md, backend/CLAUDE.md and frontend/CLAUDE.md.
+    - path: "backend/**/*.py"
+      instructions: >-
+        Python 3.12, FastAPI, async SQLAlchemy 2, psycopg 3, Pydantic v2, aio-pika. Look for
+        blocking calls in async code, sessions or transactions used outside their scope, missing
+        commit/rollback, N+1 queries, SQL built from strings, races, swallowed or broad
+        exceptions, float where Decimal is needed. Modular monolith: modules import each other
+        only through public.py; domain/ has no I/O, clock, logging or framework code;
+        application/ never imports infrastructure/ or presentation/; SQL only in
+        infrastructure/; message handlers are idempotent and acknowledge after commit.
+    - path: "backend/tests/**"
+      instructions: >-
+        Flag tests that cannot fail, tests weakened or skipped to pass, shared state or a shared
+        database between tests, and wall-clock time instead of an injected clock.
+    - path: "frontend/**"
+      instructions: >-
+        React, strict TypeScript, Mantine, TanStack Query, MSW, Vitest. Look for wrong hook usage
+        and stale closures, unstable query keys, missing cache invalidation after mutations,
+        unhandled loading and error states, `any` or unsafe casts, accessibility problems, and
+        calculations done in the browser that belong in the API.
+    - path: ".github/**"
+      instructions: &ci >-
+        Look for failures that can pass silently (|| true, continue-on-error, missing
+        set -euo pipefail), pull_request_target, actions not pinned by commit SHA, permissions
+        wider than needed, untrusted PR input interpolated into scripts, missing timeout-minutes.
+    - path: "Makefile"
+      instructions: *ci
+    - path: "scripts/**"
+      instructions: *ci
+chat:
+  auto_reply: true
