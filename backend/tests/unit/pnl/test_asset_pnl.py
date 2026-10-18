@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from di1.modules.pnl.domain.asset_pnl import AssetPnLCalculator, PnLTrade
+from di1.modules.pnl.domain.asset_pnl import AssetPnLCalculator
 from di1.modules.pnl.domain.results import (
     AssetPnLResult,
     CalculationCompleteness,
     MissingReferencePrice,
 )
+from di1.modules.pnl.domain.trade import PnLTrade
 
 D = Decimal
 

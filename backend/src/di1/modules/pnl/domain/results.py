@@ -53,3 +53,8 @@ class PortfolioPnLResult:
     status: CalculationCompleteness
     cumulative_status: CalculationCompleteness
     incomplete_assets: frozenset[UUID]
+
+
+def unsigned_zero(value: Decimal) -> Decimal:
+    """A short times a zero move is ``-0`` in ``Decimal``; P&L never carries that sign."""
+    return value.copy_abs() if value.is_zero() else value
