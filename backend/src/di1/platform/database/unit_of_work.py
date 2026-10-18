@@ -16,11 +16,14 @@ start a second transaction that the exit would silently discard.
 from __future__ import annotations
 
 import enum
+import logging
 from collections.abc import Callable
 from types import TracebackType
 from typing import Protocol, Self
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+logger = logging.getLogger(__name__)
 
 
 class UnitOfWorkError(RuntimeError):
@@ -70,6 +73,12 @@ class SqlAlchemyUnitOfWork:
         try:
             if self._state is _State.ACTIVE:
                 await session.rollback()
+        except Exception:
+            if exc is None:
+                raise
+            # The block's own error is what the caller must see; closing the session below
+            # still discards the transaction.
+            logger.exception("rollback failed while handling %s", type(exc).__name__)
         finally:
             self._session = None
             self._state = _State.CLOSED

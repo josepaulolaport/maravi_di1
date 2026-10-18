@@ -130,6 +130,55 @@ async def test_a_failed_commit_rolls_back_and_releases_the_connection(
     assert _checked_out(engine) == 0
 
 
+class _RollbackFailedError(Exception):
+    pass
+
+
+async def _failing_rollback() -> None:
+    raise _RollbackFailedError
+
+
+async def test_a_failed_rollback_does_not_mask_the_original_error(
+    uow: SqlAlchemyUnitOfWork, engine: AsyncEngine, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The caller (problem+json, a job's FAILED status) must see why the block failed."""
+    with pytest.raises(_BoomError):
+        async with uow:
+            await _write(uow, uuid.uuid4())
+            uow.session.rollback = _failing_rollback  # type: ignore[method-assign]
+            raise _BoomError
+
+    assert await _stored(engine) == set()
+    assert _checked_out(engine) == 0
+    assert "rollback failed" in caplog.text
+
+
+async def test_a_failed_rollback_without_another_error_propagates(
+    uow: SqlAlchemyUnitOfWork, engine: AsyncEngine
+) -> None:
+    with pytest.raises(_RollbackFailedError):
+        async with uow:
+            await _write(uow, uuid.uuid4())
+            uow.session.rollback = _failing_rollback  # type: ignore[method-assign]
+
+    assert await _stored(engine) == set()
+    assert _checked_out(engine) == 0
+
+
+async def test_an_error_after_commit_keeps_the_committed_writes(
+    uow: SqlAlchemyUnitOfWork, engine: AsyncEngine
+) -> None:
+    message_id = uuid.uuid4()
+
+    with pytest.raises(_BoomError):
+        async with uow:
+            await _write(uow, message_id)
+            await uow.commit()
+            raise _BoomError
+
+    assert await _stored(engine) == {message_id}
+
+
 async def test_commit_twice_is_rejected_and_the_first_commit_stands(
     uow: SqlAlchemyUnitOfWork, engine: AsyncEngine
 ) -> None:
