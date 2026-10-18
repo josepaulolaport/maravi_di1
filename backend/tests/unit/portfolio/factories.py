@@ -6,10 +6,8 @@ from datetime import date, time
 from decimal import Decimal
 from uuid import UUID
 
-from di1.modules.portfolio.domain.accounting import (
-    OpenPosition,
-    Trade,
-)
+from di1.modules.portfolio.domain.positions import OpenPosition
+from di1.modules.portfolio.domain.trade import Trade
 
 DI1F27 = UUID("00000000-0000-0000-0000-000000000027")
 DI1F28 = UUID("00000000-0000-0000-0000-000000000028")

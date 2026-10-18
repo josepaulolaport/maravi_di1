@@ -1,6 +1,7 @@
-"""Every calendar day, the starting state, the expected-asset set and input validation.
+"""Both chains together: every calendar day, the starting state, chaining and validation.
 
-Spec §7.1, §8.3 (OQ-10), §13 items 2 and 7; OQ-7 (weekends and holidays are ordinary days).
+Spec §7.1, §7.3, §13 items 2, 4 and 7; OQ-7 (weekends and holidays are ordinary days).
+``PortfolioAccounting`` only pairs the positions and cash chains, which stay independent.
 """
 
 from __future__ import annotations
@@ -10,21 +11,11 @@ from decimal import Decimal
 
 import pytest
 
-from di1.modules.portfolio.domain.accounting import (
-    ZERO,
-    AccountingError,
-    AccountingState,
-    OpenPosition,
-    PortfolioAccounting,
-)
-from tests.unit.portfolio.factories import (
-    DAY,
-    DI1F27,
-    DI1F28,
-    DI1F29,
-    position,
-    trade,
-)
+from di1.modules.portfolio.domain.accounting import ZERO, AccountingState, PortfolioAccounting
+from di1.modules.portfolio.domain.cash import CashBalance, CashCalculator
+from di1.modules.portfolio.domain.errors import AccountingError
+from di1.modules.portfolio.domain.positions import OpenPosition, PositionsEngine, PositionState
+from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28, position, trade
 
 ACCOUNTING = PortfolioAccounting()
 YESTERDAY = DAY - timedelta(days=1)
@@ -128,61 +119,6 @@ def test_an_empty_range_yields_no_days() -> None:
     assert ACCOUNTING.calculate_range(AccountingState.zero(DAY), [], {}, {}, DAY) == ()
 
 
-def test_expected_assets_are_those_held_yesterday_or_traded_today() -> None:
-    # DI1F27 held, not traded; DI1F28 opened today; DI1F29 closed before yesterday (absent).
-    state = AccountingState(
-        as_of=YESTERDAY, cash_balance=Decimal("0"), positions=(position(3, "95000", "0.1"),)
-    )
-
-    day = ACCOUNTING.calculate_day(state, [trade(1, "91000", asset_id=DI1F28)], ZERO, ZERO, DAY)
-
-    assert [p.asset_id for p in day.positions] == [DI1F27, DI1F28]
-    assert DI1F29 not in {p.asset_id for p in day.positions}
-
-
-def test_a_position_closed_today_keeps_its_row_today_and_leaves_tomorrow() -> None:
-    state = AccountingState(
-        as_of=YESTERDAY, cash_balance=Decimal("0"), positions=(position(3, "95000", "0.1"),)
-    )
-
-    today = ACCOUNTING.calculate_day(state, [trade(-3, "96000")], ZERO, ZERO, DAY)
-    tomorrow = ACCOUNTING.calculate_day(
-        today.closing_state(), [], ZERO, ZERO, DAY + timedelta(days=1)
-    )
-
-    assert [(p.asset_id, p.quantity) for p in today.positions] == [(DI1F27, 0)]
-    assert today.closing_state().positions == ()
-    assert tomorrow.positions == ()
-
-
-def test_positions_are_listed_in_asset_id_order() -> None:
-    day = ACCOUNTING.calculate_day(
-        AccountingState.zero(YESTERDAY),
-        [
-            trade(1, "90000", asset_id=DI1F29, seq=1),
-            trade(1, "91000", asset_id=DI1F27, seq=2),
-            trade(1, "92000", asset_id=DI1F28, seq=3),
-        ],
-        ZERO,
-        ZERO,
-        DAY,
-    )
-
-    assert [p.asset_id for p in day.positions] == [DI1F27, DI1F28, DI1F29]
-
-
-def test_trades_of_different_assets_do_not_mix_averages() -> None:
-    day = ACCOUNTING.calculate_day(
-        AccountingState.zero(YESTERDAY),
-        [trade(1, "90000", asset_id=DI1F28, seq=1), trade(1, "95000", asset_id=DI1F27, seq=2)],
-        ZERO,
-        ZERO,
-        DAY,
-    )
-
-    assert [p.average_entry_pu for p in day.positions] == [Decimal("95000"), Decimal("90000")]
-
-
 def test_the_previous_state_must_be_the_day_before() -> None:
     # Every calendar day is processed: skipping one would drop its events.
     with pytest.raises(AccountingError):
@@ -223,27 +159,6 @@ def test_a_range_rejects_cash_totals_outside_it(side: str) -> None:
 def test_a_range_cannot_end_before_its_previous_state() -> None:
     with pytest.raises(AccountingError):
         ACCOUNTING.calculate_range(AccountingState.zero(DAY), [], {}, {}, YESTERDAY)
-
-
-def test_a_flat_position_is_never_carried() -> None:
-    # The next day's state holds open positions only; flat assets are not expected (OQ-10).
-    with pytest.raises(AccountingError):
-        position(0, "95000", "0.1")
-
-
-def test_a_state_holding_the_same_asset_twice_is_rejected() -> None:
-    with pytest.raises(AccountingError):
-        AccountingState(
-            as_of=YESTERDAY,
-            cash_balance=Decimal("0"),
-            positions=(position(1, "95000", "0.1"), position(2, "95000", "0.1")),
-        )
-
-
-def test_a_zero_quantity_trade_is_rejected() -> None:
-    # Schema CHECK trades_qty_nonzero (OQ-14).
-    with pytest.raises(AccountingError):
-        trade(0, "95000")
 
 
 def test_a_backdated_trade_is_applied_on_its_own_date_whatever_the_input_order() -> None:
@@ -292,3 +207,49 @@ def test_a_range_equals_jobs_split_by_day_reading_the_stored_previous_state() ->
     assert stored.average_entry_pu == Decimal("90969.6969696970")
     assert one_job[-1].positions[0].average_entry_pu == Decimal("90977.2727272728")
     assert second_job[-1] == one_job[-1]
+
+
+def test_the_challenge_example_leaves_109090_91_in_cash() -> None:
+    # Challenge §5 (spec §15 I2, D4): deposit 200,000, buy 1 DI1F28 at 10% → PU 90909.0909090909.
+    on = date(2027, 1, 1)
+    day = ACCOUNTING.calculate_day(
+        AccountingState.zero(on - timedelta(days=1)),
+        [trade(1, "90909.0909090909", "0.1", asset_id=DI1F28, on=on)],
+        Decimal("200000.00"),
+        ZERO,
+        on,
+    )
+
+    assert day.cash_balance == Decimal("109090.9090909091")
+    assert day.positions[0].quantity == 1
+
+
+def test_an_open_position_without_trades_leaves_cash_unchanged_day_after_day() -> None:
+    # Mark-to-market P&L would move every day; cash must not.
+    state = AccountingState(
+        as_of=YESTERDAY,
+        cash_balance=Decimal("4500.00"),
+        positions=(position(10, "95000", "0.105"),),
+    )
+
+    days = ACCOUNTING.calculate_range(state, [], {}, {}, DAY + timedelta(days=2))
+
+    assert [d.cash_balance for d in days] == [Decimal("4500.00")] * 3
+    assert all(d.trades_cash_flow == 0 for d in days)
+
+
+def test_each_day_pairs_the_independent_chains() -> None:
+    trades = [trade(3, "95000", on=SATURDAY), trade(-1, "96000", on=MONDAY)]
+    deposits = {FRIDAY: Decimal("500000")}
+    start = AccountingState.zero(FRIDAY - timedelta(days=1))
+
+    together = ACCOUNTING.calculate_range(start, trades, deposits, {}, MONDAY)
+    cash_alone = CashCalculator().calculate_range(
+        CashBalance.zero(start.as_of), trades, deposits, {}, MONDAY
+    )
+    positions_alone = PositionsEngine().calculate_range(
+        PositionState.zero(start.as_of), trades, MONDAY
+    )
+
+    assert tuple(d.cash for d in together) == cash_alone
+    assert tuple(d.positions_day for d in together) == positions_alone

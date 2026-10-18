@@ -7,6 +7,7 @@ from datetime import date
 
 import pytest
 
+from di1.modules.portfolio.domain.errors import AccountingError
 from tests.unit.portfolio.factories import trade
 
 
@@ -30,3 +31,9 @@ def test_a_trade_is_immutable() -> None:
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         executed.signed_quantity = 2  # type: ignore[misc]
+
+
+def test_a_zero_quantity_trade_is_rejected() -> None:
+    # Schema CHECK trades_qty_nonzero (OQ-14).
+    with pytest.raises(AccountingError):
+        trade(0, "95000")
