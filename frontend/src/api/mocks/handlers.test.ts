@@ -744,3 +744,14 @@ describe('mock publication (a finished job publishes the precomputed results of 
     },
   );
 });
+
+describe('mock ids', () => {
+  it('§11.1 gives every job a distinct short id (its first 8 characters), as real UUIDs do', async () => {
+    await processingApi.enqueue({ start_date: '2026-10-14', end_date: '2026-10-14' });
+    await processingApi.enqueue({ start_date: '2026-10-15', end_date: '2026-10-15' });
+
+    const { items } = await processingApi.listRequests();
+    const shortIds = items.map((job) => job.id.slice(0, 8));
+    expect(new Set(shortIds).size).toBe(items.length);
+  });
+});

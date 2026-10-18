@@ -39,10 +39,13 @@ export function resetDb(): void {
   db = createDb();
 }
 
-/** Deterministic ids for records created during a session. */
+/**
+ * Deterministic ids for records created during a session, distinct in their first 8
+ * characters (the short id the UI shows), as random UUIDs would be.
+ */
 export function newId(): string {
   const n = db.nextId++;
-  return `9a000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  return `9a${String(n).padStart(6, '0')}-0000-4000-8000-${String(n).padStart(12, '0')}`;
 }
 
 /** Marks accounting (ledger change) or valuation (price change) dirty from `date` (§10.4). */

@@ -563,12 +563,14 @@ export function zeroStateDay(date: string): RecalculatedDay {
   };
 }
 
+// Distinct in their first 8 characters, which the UI shows as the short id, as random
+// UUIDs would be.
 const REQUEST_IDS = {
-  completed: '7f000000-0000-4000-8000-000000000001',
-  withIssues: '7f000000-0000-4000-8000-000000000002',
-  cancelled: '7f000000-0000-4000-8000-000000000003',
-  failed: '7f000000-0000-4000-8000-000000000004',
-  superseded: '7f000000-0000-4000-8000-000000000005',
+  completed: '7f3c9a01-0000-4000-8000-000000000001',
+  withIssues: '7f3c9a02-0000-4000-8000-000000000002',
+  cancelled: '7f3c9a03-0000-4000-8000-000000000003',
+  failed: '7f3c9a04-0000-4000-8000-000000000004',
+  superseded: '7f3c9a05-0000-4000-8000-000000000005',
 } as const;
 
 function job(
