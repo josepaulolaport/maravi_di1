@@ -2,38 +2,33 @@
 
 Status: 2026-10-18. These are decisions the specs leave open, or points where the specs disagree with each other. **Only the user answers them.** Code that depends on an open question is not written: it stops with a `spec-gap` (see `.claude/skills/spec-gap`).
 
-When the user answers a question, its answer moves to the "Closed" list in `maravi_business_specification.md` §14, and the question is moved to "Answered" below.
+When the user answers a question, it moves to "Answered" below, and the decision is added to the "Fechado" list in `maravi_business_specification.md` §14 and to every affected doc.
 
-## Open, from the specs themselves
+## Open
 
-These questions come from business spec §14 ("Aberto"), implementation plan §11, schema.md and interfaces.md.
-
-| ID | Question | Blocks |
+| ID | Question | Where |
 |---|---|---|
-| OQ-1 | **Maturity settlement.** What is the settlement event, its effect on cash and position, its date convention, and what happens to a contract that matures with an open position? | Portfolio accounting after maturity; see also OQ-6 |
-| OQ-2 | **Multiplier and notional.** Does `asset.futures.contract_multiplier` enter cash, market value and P&L, and how? Today the formulas use the PU directly. | Ledger cash effect, Portfolio, PnL |
-| OQ-3 | **Precision and rounding.** Internal and stored scales and the rounding method, especially at the price limits and in the PU → rate inversion. | Pricing (Wave 1 B), Wave 0 freeze |
-| OQ-4 | **The first P&L day** when there is no previous PU: what P&L is available? | PnL |
-| OQ-5 | **Operational limits.** The maximum range size, how long jobs and staging rows are kept, queue priorities, and the timeout/lease values. | Processing (Wave 4) |
-| OQ-7 | **Zero days to maturity and non-business dates.** What does the PU ↔ rate inverse do on the maturity day? Are entries on weekends and holidays accepted? (plan §11.4) | Pricing, Ledger validation |
-
-## Open, found when the old docs were replaced (2026-10-18)
-
-| ID | Question | Where the specs disagree or are silent |
-|---|---|---|
-| OQ-6 | **A contract held past maturity can never be priced again.** Under the exact-date rule (spec §5) it stays `MISSING`, and the cumulative P&L chain breaks for good (spec §8.3). This depends on OQ-1. | spec §5, §8.3, §14 item 1 |
-| OQ-8 | **Who owns the staging tables?** `interfaces.md` (Portfolio) says Portfolio owns the staging representations. `schema.sql` puts `staged_*` in the `processing` schema. Plan §6 leaves this "for X to resolve". | interfaces.md Portfolio; schema.sql; plan §6 |
-| OQ-9 | **Tracing the D−1 price.** `position_pnl` uses the reference PU of D−1, but `position_metrics.reference_price_id` links only the price of D. Spec §5 requires that the price used can be traced. | spec §5, §8.1; schema.sql `position_metrics` |
-| OQ-10 | **"Expected assets", and when a `positions` row with quantity 0 is written.** The portfolio P&L is complete only if every expected asset has a result (spec §8.3), but the term is not defined. The implied rule is: Q[D−1] ≠ 0, or a trade on D. Every `position_metrics` row needs a `positions` row (FK). | spec §8.3; schema.md invariants |
-| OQ-11 | **How far the effective range expands.** Spec §10.1 says the range is "expanded to reach a valid predecessor state". From which marker (`accounting_dirty_from`, `valuation_dirty_from`, the last published day), and how far back for the cumulative P&L? | spec §10.1; interfaces.md Processing |
-| OQ-12 | **Clearing the dirty markers.** There is a single `valuation_dirty_from` date. When can a job clear it while other dirty dates are unprocessed or still queued? (interfaces.md "Dirty marker caution") | interfaces.md; schema.sql `calculation_state` |
-| OQ-13 | **Trade time and order.** The spec says "data/hora efetiva". The schema has `trade_date` plus an optional `trade_time TIME` with no timezone. Where do trades with `NULL` time sort? (plan §3: "NULLS policy") | spec §6.1; schema.sql `ledger.trades`; plan §3 |
-| OQ-14 | **Validation rules.** What are the rate and PU bounds, the maturity limits, and the rule for future-dated entries? Can a trade or price be dated on or after maturity? | spec §4, §6; nothing in the specs |
-| OQ-15 | **The error contract.** What is the error response shape and its codes, for the frontend and the MSW mocks? | spec §12; interfaces.md HTTP |
-| OQ-16 | **`GET /portfolio/pnl?start_date=&end_date=`** appears only in `interfaces.md`. Is it the source of the cumulative P&L chart (spec §11.4)? What is its response? | interfaces.md HTTP; spec §11.4 |
-| OQ-17 | **Who owns `platform/**`?** Plan §2 prose says the integrator is "the only editor of … `platform` shared code". Plan §2 table gives `platform/**` to lane H. | plan §2 |
-| OQ-18 | **Discrepancies with the challenge.** Spec header: discrepancies with the challenge "must be recorded and not hidden". The old docs read challenge §5 ("preços de referência disponíveis") as "the latest price on or before D". Exact-date only is a different reading, and it needs a line in the README. Are there others to record (e.g. settlement)? | spec header, §5 |
+| OQ-18 | **Discrepancies with the challenge.** The spec header says discrepancies with the challenge "must be recorded and not hidden". The user will add the challenge PDF as `docs/challenge.pdf` (2026-10-18). The integrator then compares it with the spec and lists every discrepancy in a "Desvios do enunciado" section, for the user's approval; the README repeats it. A known candidate: the old docs read challenge §5 ("preços de referência disponíveis") as "the latest price on or before D", while the spec uses the exact date only. | spec header, §5 |
 
 ## Answered
 
-None yet.
+All answered by the user on 2026-10-18, in the integrator session, one question at a time. The quote is the user's typed answer, or the option the user selected.
+
+| ID | Question | User's words | Decision |
+|---|---|---|---|
+| OQ-1, OQ-6 | Maturity settlement; a contract held past maturity | "no need to auto-settle. Since the value of the asset will be 0 for any calculations after that the user will need to create a cash transaction"; then "users are able to close with a trade, but lets not limit the PU. let him do it"; then "Also on maturity, rate = 0"; then "User enters it"; then "Value 0, entries rejected" | 1. No automatic settlement. 2. The user closes a position with a normal trade, at any PU, which may be dated on the maturity date. 3. On the maturity date d = 0, so the PU is typed and `execution_rate` is stored as `0`. 4. The maturity-day reference price is entered by the user, like any other day; without it, the dependent figures are `null` with a Pendência. 5. After the maturity date the contract's value is 0 by definition (reference PU = 0, no price needed or accepted), and trades and reference prices dated after maturity are rejected. 6. A position still open after maturity shows `position_pnl = Q × (0 − PU_maturity)` and raises the Pendência "contrato vencido com posição aberta". |
+| OQ-2 | Multiplier | "yes, keep in mind that we will create the calculations in our calculator module"; then "The calculator module, but since we are not using it for now we can keep it out" | 1. The multiplier will enter the calculations, inside a future calculator module. 2. For now it is not applied: the formulas use the PU directly (DI1 = 1). 3. `asset.futures.contract_multiplier` stays in the schema. |
+| OQ-3 | Precision and rounding | "34 digits, PU 10dp, rate 12dp" | 1. `Decimal` with a 34-digit context, `ROUND_HALF_UP`. 2. A calculated PU is stored with 10 dp, a calculated rate with 12 dp. 3. A typed PU with more than 10 dp, or a typed rate with more than 12 dp, is rejected, never rounded. 4. Money is stored exact and rounded to 2 dp only for display. |
+| OQ-4 | The first P&L day | "Exactly 0, no D−1 price" | When Q[D−1] = 0, `position_pnl` = 0 exactly (not `null`), with no D−1 price needed. The cumulative P&L starts at 0 before the first entry. |
+| OQ-5 | Operational limits | "Simple defaults" | 1. No maximum range. 2. Jobs are kept forever as history. 3. Staging rows are deleted on publish, cancel or supersede. 4. FIFO order by `(created_at, id)`, with no priorities. 5. The lease is 60 s, renewed after each processed day; an expired lease is recoverable. 6. Every value comes from configuration. |
+| OQ-7 | Zero days; non-business dates | "Accepted" (weekends/holidays) | 1. Any calendar date is valid, weekends and holidays included; there is no holiday calendar. 2. Zero days is answered by OQ-1, item 3. |
+| OQ-8 | Who owns the staging tables | "Portfolio owns, move schema" | The three `staged_*` tables move to the `portfolio` schema. Portfolio (`PortfolioResultsWriter`) writes and publishes them. Processing calls `stage_day` / `publish_range` through `public.py`, and owns only `requests`, `calculation_state` and `issues`. |
+| OQ-9 | Tracing the D−1 price | "Trace via D−1 row" | 1. No schema change: the D−1 price is the one recorded on D−1's `position_metrics` row. 2. A price change on day X invalidates valuation from X onward, so D = X+1 is never left published on an old D−1 price. A test covers this. |
+| OQ-10 | Expected assets; zero-quantity rows | "Held yesterday or traded today" | An asset is expected on D when Q[D−1] ≠ 0 or it has a trade on D. Exactly those assets get a `positions` and a `position_metrics` row for D, including quantity 0 after a full close or a same-day round trip. |
+| OQ-11 | Effective range | "Exactly [A, B]"; then "Run, publish accounting as incomplete" | 1. A job processes exactly the requested [A, B]; there is no automatic expansion. 2. If the state of A−1 is stale or missing, the job still runs and publishes [A, B]. Those days read as stale (the accounting marker stays before A, see OQ-12), their P&L is `null` (`pnl_status = MISSING`), and a Pendência asks the user to process an earlier range. 3. With no entries before A, A−1 is the valid zero state. |
+| OQ-12 | Clearing the dirty markers | "Advance to B+1 if covered" | After a successful publish of [A, B] with the input revisions unchanged since the start: a marker in [A, B] becomes B+1; a marker before A stays. Days after B stay stale until they are processed. |
+| OQ-13 | Trade time and order | "Time required" | `ledger.trades.trade_time` is `NOT NULL`, in São Paulo local time; the form suggests the current time. Same-date order: `(trade_date, trade_time, seq)`. |
+| OQ-14 | Validation rules | "Rejected" (future dates); "Schema checks only" (bounds) | 1. A trade, cash movement or reference price dated after today (America/Sao_Paulo, through an injected clock) is rejected. Maturity dates are exempt. 2. The value bounds are only the schema's: rate > −1, PU > 0, quantity ≠ 0, amount > 0. 3. Dates after maturity: OQ-1, item 5. |
+| OQ-15 | The error contract | "problem+json + code list" | RFC 9457 `application/problem+json`: `{type, title, status, detail, errors: [{code, message, field}]}`. The code catalogue is in `interfaces.md`. Messages are pt-BR; codes are English. |
+| OQ-16 | `GET /portfolio/pnl` | "Feeds cumulative chart" | It returns the published `portfolio_metrics` series for [start, end]: for each date, `cumulative_pnl`, `daily_pnl`, the statuses and the stale flag. The Carteira chart draws only the complete, non-stale points. No per-asset data. |
+| OQ-17 | Who owns `platform/**` | "Lane H owns" | Lane H owns `platform/**` and `workers/**`. The integrator reviews changes to the platform interfaces that modules use (UoW, outbox writer). The prose of plan §2 is corrected. |

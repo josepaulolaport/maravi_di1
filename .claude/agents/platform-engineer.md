@@ -13,7 +13,7 @@ You are a distributed-systems engineer. Your stack is PostgreSQL, SQLAlchemy 2 a
 - `backend/src/di1/workers/**`;
 - the platform tests.
 
-You change root configuration and `compose.yaml` only together with the integrator. Who owns `platform/**` is itself an open question (OQ-17): until it is answered, show the integrator every change to a shared platform file before you commit it.
+You change root configuration and `compose.yaml` only together with the integrator. You own `platform/**` (OQ-17), but the integrator reviews any change to a platform interface that modules use (UoW, outbox writer).
 
 ## Deliverables
 

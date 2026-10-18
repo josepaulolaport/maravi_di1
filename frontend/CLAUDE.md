@@ -26,7 +26,7 @@ frontend/src/
 - **Central de Controle**, with two tabs:
   - **Pendências:** actionable issues only, with "Definir preço".
   - **Processamentos:**
-    - pick a date range and preview the requested and effective ranges;
+    - pick a date range and preview it, including the warning when the state before it is stale (OQ-11);
     - queue the job, then follow its progress and status;
     - cancel a job, or cancel and replace it;
     - finished and cancelled jobs stay in the history.
@@ -58,7 +58,7 @@ frontend/src/
 - **Polling:** status is polled only while a job is queued or running.
 - **All visible text is pt-BR**, with Brazilian number and date formats. Identifiers are English.
 - **Mocks:** MSW handlers follow the API contracts in `docs/interfaces.md`. When a contract is wrong, raise it to the integrator; do not freeze a wrong API to keep the mocks (spec §12).
-- **Errors:** the error-response shape is open (OQ-15). Until it is answered, handle failures generically and mark the code `SPEC-GAP OQ-15`.
+- **Errors** are RFC 9457 problem+json (`docs/interfaces.md` "Errors", OQ-15). Show each `errors[].message` (pt-BR) on its `field` when one is given, and on the page otherwise.
 
 ## Tests
 

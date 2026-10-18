@@ -31,7 +31,8 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - `PU = 100000 / (1 + taxa)^(dias_corridos/365)`
   - `taxa = (100000/PU)^(365/dias_corridos) − 1`
   - The rate is a fraction (0.10 = 10% a.a.). Rate **or** PU is typed, and the other is computed.
-  - Precision and rounding are **open** (OQ-3).
+  - Precision (OQ-3): `Decimal` at 34 digits, `ROUND_HALF_UP`. A calculated PU is stored with 10 dp, a calculated rate with 12 dp. A typed value with more decimals is **rejected**, never rounded. Money is stored exact and rounded to 2 dp only for display.
+  - The multiplier is stored but **not applied** (OQ-2).
 - **Three different prices:**
   - a *calculated* price, which is never stored as such;
   - an *execution* price (Ledger, immutable trade);
@@ -62,7 +63,8 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 - **Missing price:**
   - Quantity, average cost and cash are still computed.
   - The dependent figures are `null`, never zero.
-  - The portfolio total is not complete if any expected asset is missing.
+  - The portfolio total is not complete if any expected asset is missing. An asset is expected on D when Q[D−1] ≠ 0 or it trades on D (OQ-10).
+  - When Q[D−1] = 0, `position_pnl` = 0 exactly (OQ-4).
   - The cumulative P&L stays unavailable from the first gap onward.
   - A missing price is not a technical failure: the job ends `COMPLETED_WITH_ISSUES`.
 - **No automatic processing.**
@@ -74,10 +76,19 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - Cancellation is cooperative.
   - Results are staged per request, then published atomically, after a check of the input revisions and the claim token. A job whose inputs changed is marked `SUPERSEDED`.
 - **History is immutable.** Trades and cash movements are never edited: they are soft-deleted with an audit trail.
-- **Open, so do not assume:**
-  - maturity settlement (OQ-1);
-  - multiplier economics (OQ-2);
-  - precision (OQ-3).
+- **Dates and validation** (OQ-7, OQ-13, OQ-14):
+  - Any calendar date, weekends and holidays included.
+  - Nothing dated after today (America/Sao_Paulo, through an injected clock); maturities are exempt.
+  - `trade_time` is required. Same-date order: `(trade_date, trade_time, seq)`.
+  - Value bounds are only the schema's CHECKs.
+- **Maturity** (OQ-1):
+  - No automatic settlement. The user closes with a normal trade, at any PU, up to the maturity date inclusive. On the maturity date the PU is typed and the rate is stored as 0.
+  - The maturity-day reference price is entered by the user.
+  - After maturity the reference PU is 0 by definition, and trades and prices dated after it are rejected. An open position then raises the Pendência "contrato vencido com posição aberta".
+- **Processing ranges** (OQ-11, OQ-12):
+  - A job processes exactly [A, B], with no expansion.
+  - If A−1 is stale or missing, the job still publishes; those days read as stale, with `null` P&L and a `STALE_PREDECESSOR` issue.
+  - After a publish, a dirty marker within [A, B] advances to B+1.
 - **All user-facing text is Brazilian Portuguese**, with Brazilian formats. Code and identifiers are English.
 
 ## 3. Architecture
