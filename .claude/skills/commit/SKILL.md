@@ -40,7 +40,7 @@ Refs: spec §<n>; interfaces <module>; OQ-<n> if relevant
 - **Types:** feat, fix, test, refactor, perf, docs, build, ci, chore, contract.
 - **Scopes** (required; the hook rejects others):
   - modules: asset, pricing, ledger, prices, portfolio, pnl, processing;
-  - backend: platform, workers, composition, contracts, db;
+  - backend: platform, workers, composition, shared, db;
   - frontend: web, web-<feature>;
   - other: infra, ci, docs, agents.
 - **`feat` and `fix` need a `Refs:` line.** A `fix` includes the regression test that reproduces the bug.

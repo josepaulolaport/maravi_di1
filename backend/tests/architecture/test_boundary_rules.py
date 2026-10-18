@@ -48,7 +48,7 @@ def test_clean_tree_has_no_violations(tmp_path: Path) -> None:
     package = _tree(
         tmp_path,
         {
-            DOMAIN: "import decimal\nfrom di1.contracts import money\nfrom . import other\n",
+            DOMAIN: "import decimal\nfrom di1.shared import money\nfrom . import other\n",
             APP: (
                 "from typing import TYPE_CHECKING\n"
                 "from di1.modules.asset.public import AssetReader\n"
@@ -232,7 +232,7 @@ def test_sql_only_in_infrastructure_platform_and_wiring(tmp_path: Path, path: st
     assert _rules_for(tmp_path, path, "from sqlalchemy import select\n") == {"sql"}
 
 
-@pytest.mark.parametrize("path", [APP, PUBLIC, INFRA, "contracts/dto.py"])
+@pytest.mark.parametrize("path", [APP, PUBLIC, INFRA, "shared/dto.py"])
 def test_pydantic_only_in_presentation_and_platform(tmp_path: Path, path: str) -> None:
     assert _rules_for(tmp_path, path, "from pydantic import BaseModel\n") == {"pydantic"}
 
@@ -265,7 +265,7 @@ def test_only_presentation_messaging_consumes_and_never_touches_the_broker(
     assert _rules_for(tmp_path, path, source) == {"messaging"}
 
 
-@pytest.mark.parametrize("path", ["platform/config.py", "contracts/money.py"])
+@pytest.mark.parametrize("path", ["platform/config.py", "shared/money.py"])
 def test_platform_and_contracts_do_not_depend_on_modules(tmp_path: Path, path: str) -> None:
     source = "from di1.modules.ledger.public import LedgerReader\n"
     assert _rules_for(tmp_path, path, source) == {"shared-independent"}

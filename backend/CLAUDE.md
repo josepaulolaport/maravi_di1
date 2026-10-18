@@ -15,7 +15,7 @@ backend/
     main.py                              # integrator
     composition/{routers,dependencies,consumers}.py   # integrator
     platform/{config.py, database/, messaging/, observability/}   # lane H
-    contracts/                           # only DTOs that are genuinely shared; integrator
+    shared/                              # only DTOs that are genuinely shared; integrator
     modules/<module>/                    # lanes A–G
       public.py
       dependencies.py                    # if needed
@@ -73,7 +73,7 @@ Create only the files and packages that are used. Initially only Processing has 
 - Integration tests run against PostgreSQL 16, in your worktree's own database. Concurrency, outbox and dispatch tests use real connections.
 - `tests/architecture/` enforces the module boundaries. The full rule list is in `tests/architecture/boundaries.py`:
   - only `public.py` is imported across modules, and also by `workers/`. A module's `__init__.py` imports nothing;
-  - `domain/` uses only the standard library, `di1.contracts` and its own domain. It imports no side-effect module (filesystem, network, database, environment, process, concurrency, logging, OS entropy) and calls no clock, random-id, I/O builtin or hidden-generator function. Only seeded or injected random generators are allowed;
+  - `domain/` uses only the standard library, `di1.shared` and its own domain. It imports no side-effect module (filesystem, network, database, environment, process, concurrency, logging, OS entropy) and calls no clock, random-id, I/O builtin or hidden-generator function. Only seeded or injected random generators are allowed;
   - layers point inwards: `application/` never imports its `infrastructure/` or `presentation/`; `presentation/` never imports `infrastructure/`; `public.py` exposes neither;
   - FastAPI only in `presentation/`, the module's `dependencies.py` (its dependency providers), `composition/` and `main.py`;
   - SQL only in `infrastructure/`, `dependencies.py`, `platform/` and `composition/`;
