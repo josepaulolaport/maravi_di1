@@ -1,4 +1,4 @@
-import { Alert, Button, Drawer, Group, Progress, SimpleGrid, Stack, Text } from '@mantine/core';
+import { Alert, Button, Modal, Group, Progress, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 
 import type { ProcessingRequest } from '@/api/contract';
@@ -16,26 +16,27 @@ export const UNPUBLISHED_NOTICE =
 /** A FAILED job without its message (the contract allows `null`). */
 const FAILED_FALLBACK = 'Falha técnica inesperada.';
 
-interface JobDetailsDrawerProps extends Omit<JobActions, 'onDetails'> {
-  /** The job being followed (from the polled history); `null` keeps the drawer closed. */
+interface JobDetailsModalProps extends Omit<JobActions, 'onDetails'> {
+  /** The job being followed (from the polled history); `null` keeps the modal closed. */
   job: ProcessingRequest | null;
   onClose: () => void;
 }
 
 /** A job's details (§11.1): its range, times, days, progress and, if any, its error. */
-export function JobDetailsDrawer({
+export function JobDetailsModal({
   job,
   onClose,
   onCancel,
   onReplace,
   onRequestAgain,
-}: JobDetailsDrawerProps) {
+}: JobDetailsModalProps) {
   return (
-    <Drawer
+    <Modal
       opened={job !== null}
       onClose={onClose}
       title="Detalhes do processamento"
-      position="right"
+      centered
+      size="lg"
       closeButtonProps={{ 'aria-label': 'Fechar' }}
     >
       {job && (
@@ -115,6 +116,6 @@ export function JobDetailsDrawer({
           </Group>
         </Stack>
       )}
-    </Drawer>
+    </Modal>
   );
 }

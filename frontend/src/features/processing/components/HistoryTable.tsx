@@ -21,7 +21,7 @@ import { formatPeriod, formatProgress, shortId } from '../format';
 import type { useProcessingRequests } from '../hooks/useProcessing';
 import { canCancel, canRequestAgain, jobStatusBadge } from '../jobStatus';
 
-/** What the user can do with a job, from its row menu or its details drawer (OQ-20). */
+/** What the user can do with a job, from its row menu or its details modal (OQ-20). */
 export interface JobActions {
   onDetails: (job: ProcessingRequest) => void;
   onCancel: (job: ProcessingRequest) => void;

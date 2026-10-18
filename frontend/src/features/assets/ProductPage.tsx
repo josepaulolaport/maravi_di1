@@ -10,7 +10,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { ContractsTable } from './components/ContractsTable';
 import { countLabel } from './components/countLabel';
-import { NewContractDrawer } from './components/NewContractDrawer';
+import { NewContractModal } from './components/NewContractModal';
 import { PageHeader } from './components/PageHeader';
 import { useInstruments, useProduct, useSearchParam } from './hooks/useAssets';
 
@@ -33,7 +33,7 @@ export function ProductPage() {
 
 function ProductBody({ product }: { product: Product }) {
   const [text, setSearch, search] = useSearchParam();
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
   const instruments = useInstruments(product.id, search);
 
   return (
@@ -47,7 +47,7 @@ function ProductBody({ product }: { product: Product }) {
           <Button
             leftSection={<IconPlus size={16} />}
             onClick={() => {
-              setDrawerOpen(true);
+              setModalOpen(true);
             }}
           >
             Novo contrato
@@ -81,11 +81,11 @@ function ProductBody({ product }: { product: Product }) {
           </Text>
         </Stack>
       </Paper>
-      <NewContractDrawer
+      <NewContractModal
         product={product}
-        opened={drawerOpen}
+        opened={modalOpen}
         onClose={() => {
-          setDrawerOpen(false);
+          setModalOpen(false);
         }}
       />
     </Stack>

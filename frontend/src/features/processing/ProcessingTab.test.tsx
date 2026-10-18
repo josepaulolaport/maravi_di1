@@ -213,12 +213,12 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
-    expect(await drawer.findByText('14/10/2026 a 16/10/2026')).toBeInTheDocument();
-    expect(drawer.getByText('3')).toBeInTheDocument();
-    expect(drawer.getByText('Estado inicial (sem lançamentos anteriores)')).toBeInTheDocument();
-    expect(drawer.queryByRole('alert')).not.toBeInTheDocument();
-    expect(drawer.queryByText(/período efetivo/i)).not.toBeInTheDocument();
+    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    expect(await modal.findByText('14/10/2026 a 16/10/2026')).toBeInTheDocument();
+    expect(modal.getByText('3')).toBeInTheDocument();
+    expect(modal.getByText('Estado inicial (sem lançamentos anteriores)')).toBeInTheDocument();
+    expect(modal.queryByRole('alert')).not.toBeInTheDocument();
+    expect(modal.queryByText(/período efetivo/i)).not.toBeInTheDocument();
   });
 
   it('OQ-11 previews a range after a valid day as valid on that day', async () => {
@@ -226,10 +226,10 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
-    expect(await drawer.findByText('Válido em 14/10')).toBeInTheDocument();
-    expect(drawer.getByText('2')).toBeInTheDocument();
-    expect(drawer.queryByRole('alert')).not.toBeInTheDocument();
+    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    expect(await modal.findByText('Válido em 14/10')).toBeInTheDocument();
+    expect(modal.getByText('2')).toBeInTheDocument();
+    expect(modal.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('OQ-11 warns that a range after a stale day still runs, but reads as stale', async () => {
@@ -237,8 +237,8 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
-    const warning = await drawer.findByRole('alert');
+    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    const warning = await modal.findByRole('alert');
     expect(warning).toHaveTextContent('O fechamento de 16/10/2026 está desatualizado.');
     expect(warning).toHaveTextContent(
       'O processamento será executado, mas os dias do intervalo aparecerão como desatualizados, sem P&L, e uma pendência pedirá o processamento de um intervalo anterior.',
@@ -250,11 +250,11 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
-    const warning = await drawer.findByRole('alert');
+    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    const warning = await modal.findByRole('alert');
     expect(warning).toHaveTextContent('O dia 17/10/2026 ainda não foi processado.');
     expect(warning).toHaveTextContent('O processamento será executado');
-    expect(drawer.getByText('1')).toBeInTheDocument();
+    expect(modal.getByText('1')).toBeInTheDocument();
   });
 
   it('§10.1 queues the confirmed range and shows it in the history', async () => {
@@ -372,10 +372,10 @@ describe('Processamentos: preview failure (OQ-15)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
-    expect(await drawer.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
-    expect(drawer.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();
-    expect(drawer.getByRole('button', { name: 'Confirmar processamento' })).toBeDisabled();
+    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    expect(await modal.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+    expect(modal.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();
+    expect(modal.getByRole('button', { name: 'Confirmar processamento' })).toBeDisabled();
   });
 });
 
@@ -744,16 +744,34 @@ describe('Processamentos: cancel and replace with an invalid range (OQ-15)', () 
 });
 
 describe('Processamentos: details (§11.1, §10.4)', () => {
+  it('§10.2 from the details, "Cancelar processamento" moves the focus into the cancel dialog', async () => {
+    holdWorker();
+    seedJob(RUNNING);
+    const { user } = renderApp(PAGE);
+
+    const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));
+    await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
+    const details = within(
+      await screen.findByRole('dialog', { name: 'Detalhes do processamento' }),
+    );
+    await user.click(details.getByRole('button', { name: 'Cancelar processamento' }));
+
+    const cancel = await screen.findByRole('dialog', { name: 'Cancelar processamento?' });
+    await waitFor(() => {
+      expect(cancel).toContainElement(document.activeElement as HTMLElement);
+    });
+  });
+
   it('§11.1 shows a failed job: times in Brasília, days, its error and that nothing was published', async () => {
     const { user, router } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '01/10/2026 a 05/10/2026', 'Falhou'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
-    expect(drawer.getByRole('status')).toHaveTextContent('Falhou');
-    expect(drawer.getByText('7f3c9a04')).toBeInTheDocument();
-    const field = (label: string) => within(drawer.getByRole('group', { name: label }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    expect(modal.getByRole('status')).toHaveTextContent('Falhou');
+    expect(modal.getByText('7f3c9a04')).toBeInTheDocument();
+    const field = (label: string) => within(modal.getByRole('group', { name: label }));
     expect(field('Período solicitado').getByText('01/10/2026 a 05/10/2026')).toBeInTheDocument();
     expect(field('Criação').getByText('14/10/2026 08:00')).toBeInTheDocument();
     expect(field('Início').getByText('14/10/2026 08:00')).toBeInTheDocument();
@@ -761,17 +779,17 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     expect(field('Total de dias').getByText('5')).toBeInTheDocument();
     expect(field('Dias concluídos').getByText('2')).toBeInTheDocument();
     expect(field('Dias restantes').getByText('3')).toBeInTheDocument();
-    expect(drawer.getByRole('alert')).toHaveTextContent(
+    expect(modal.getByRole('alert')).toHaveTextContent(
       'Falha inesperada ao gravar os resultados. Nenhum dia foi publicado; tente novamente.',
     );
     expect(
-      drawer.getByText(
+      modal.getByText(
         'Nenhum dia deste processamento foi publicado; os resultados anteriores permanecem inalterados.',
       ),
     ).toBeInTheDocument();
-    expect(drawer.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(modal.queryByRole('progressbar')).not.toBeInTheDocument();
 
-    await user.click(drawer.getByRole('button', { name: 'Solicitar novo processamento' }));
+    await user.click(modal.getByRole('button', { name: 'Solicitar novo processamento' }));
     expect(router.state.location.search).toBe(
       '?tab=processamentos&inicio=2026-10-01&fim=2026-10-05',
     );
@@ -783,13 +801,13 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     const menu = within(await openMenu(user, '10/10/2026 a 12/10/2026', 'Cancelado'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
     expect(
-      drawer.getByText(
+      modal.getByText(
         'Nenhum dia deste processamento foi publicado; os resultados anteriores permanecem inalterados.',
       ),
     ).toBeInTheDocument();
-    expect(drawer.queryByRole('alert')).not.toBeInTheDocument();
+    expect(modal.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('§10.4 says a superseded job published nothing, and offers a new request', async () => {
@@ -798,17 +816,15 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     const menu = within(await openMenu(user, '14/10/2026 a 16/10/2026', 'Obsoleto'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
-    expect(drawer.getByRole('status')).toHaveTextContent('Obsoleto');
-    expect(field(drawer, 'Finalização').getByText('16/10/2026 17:31')).toBeInTheDocument();
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    expect(modal.getByRole('status')).toHaveTextContent('Obsoleto');
+    expect(field(modal, 'Finalização').getByText('16/10/2026 17:31')).toBeInTheDocument();
     expect(
-      drawer.getByText(
+      modal.getByText(
         'Nenhum dia deste processamento foi publicado; os resultados anteriores permanecem inalterados.',
       ),
     ).toBeInTheDocument();
-    expect(
-      drawer.getByRole('button', { name: 'Solicitar novo processamento' }),
-    ).toBeInTheDocument();
+    expect(modal.getByRole('button', { name: 'Solicitar novo processamento' })).toBeInTheDocument();
   });
 
   it('§11.1 still shows an error box for a failed job without a message', async () => {
@@ -822,8 +838,8 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Falhou'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
-    expect(drawer.getByRole('alert')).toHaveTextContent('Falha técnica inesperada.');
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    expect(modal.getByRole('alert')).toHaveTextContent('Falha técnica inesperada.');
   });
 
   it('§11.1 shows a completed job without the unpublished notice or actions', async () => {
@@ -832,11 +848,11 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     const menu = within(await openMenu(user, '14/10/2026 a 15/10/2026', 'Concluído'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
-    expect(drawer.getByRole('status')).toHaveTextContent('Concluído');
-    expect(drawer.queryByText(/Nenhum dia deste processamento/)).not.toBeInTheDocument();
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    expect(modal.getByRole('status')).toHaveTextContent('Concluído');
+    expect(modal.queryByText(/Nenhum dia deste processamento/)).not.toBeInTheDocument();
     expect(
-      drawer.queryByRole('button', { name: /Solicitar novo|Cancelar/ }),
+      modal.queryByRole('button', { name: /Solicitar novo|Cancelar/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -848,17 +864,17 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
 
-    const drawer = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
-    const field = (label: string) => within(drawer.getByRole('group', { name: label }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    const field = (label: string) => within(modal.getByRole('group', { name: label }));
     expect(field('Data em processamento').getByText('18/10/2026')).toBeInTheDocument();
     expect(field('Criação').getByText('18/10/2026 09:58')).toBeInTheDocument();
     expect(field('Início').getByText('18/10/2026 10:00')).toBeInTheDocument();
     expect(field('Finalização').getByText('—')).toBeInTheDocument();
     expect(field('Dias restantes').getByText('1')).toBeInTheDocument();
-    expect(drawer.getByRole('progressbar', { name: 'Progresso' })).toBeInTheDocument();
-    expect(drawer.getByRole('button', { name: 'Cancelar processamento' })).toBeInTheDocument();
+    expect(modal.getByRole('progressbar', { name: 'Progresso' })).toBeInTheDocument();
+    expect(modal.getByRole('button', { name: 'Cancelar processamento' })).toBeInTheDocument();
     expect(
-      drawer.getByRole('button', { name: 'Cancelar e criar novo processamento' }),
+      modal.getByRole('button', { name: 'Cancelar e criar novo processamento' }),
     ).toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import { Alert, Button, Drawer, Group, Skeleton, Stack, Text } from '@mantine/core';
+import { Alert, Button, Modal, Group, Skeleton, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { useRef } from 'react';
 
@@ -11,8 +11,8 @@ import { useEnqueue, usePreview } from '../hooks/useProcessing';
 import { ActionError } from './ActionError';
 import { Field } from './Field';
 
-interface ConfirmDrawerProps {
-  /** The range to confirm; `null` keeps the drawer closed. */
+interface ConfirmProcessingModalProps {
+  /** The range to confirm; `null` keeps the modal closed. */
   range: ProcessingRangeRequest | null;
   onClose: () => void;
   /** The job was queued. */
@@ -20,11 +20,11 @@ interface ConfirmDrawerProps {
 }
 
 /** "Confirmar processamento" (§10.1, OQ-11): exactly [A, B], its days and the state before it. */
-export function ConfirmDrawer({ range, onClose, onQueued }: ConfirmDrawerProps) {
+export function ConfirmProcessingModal({ range, onClose, onQueued }: ConfirmProcessingModalProps) {
   const preview = usePreview(range);
   const enqueue = useEnqueue();
 
-  // One job per click, before `isPending` is rendered (§10.2). The drawer cannot close while
+  // One job per click, before `isPending` is rendered (§10.2). The modal cannot close while
   // the request runs, so the guard is always released by its outcome.
   const sending = useRef(false);
 
@@ -50,11 +50,12 @@ export function ConfirmDrawer({ range, onClose, onQueued }: ConfirmDrawerProps) 
   };
 
   return (
-    <Drawer
+    <Modal
       opened={range !== null}
       onClose={close}
       title="Confirmar processamento"
-      position="right"
+      centered
+      size="lg"
       closeOnEscape={!enqueue.isPending}
       closeOnClickOutside={!enqueue.isPending}
       withCloseButton={!enqueue.isPending}
@@ -82,7 +83,7 @@ export function ConfirmDrawer({ range, onClose, onQueued }: ConfirmDrawerProps) 
           </Button>
         </Group>
       </Stack>
-    </Drawer>
+    </Modal>
   );
 }
 

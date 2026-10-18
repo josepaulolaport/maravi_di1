@@ -102,19 +102,19 @@ describe('Ativos: produto (§11.2)', () => {
     const { user } = await openProduct();
 
     await user.click(screen.getByRole('button', { name: 'Novo contrato' }));
-    const drawer = within(await screen.findByRole('dialog', { name: 'Novo contrato' }));
-    await user.click(drawer.getByRole('button', { name: 'Cadastrar contrato' }));
-    expect(await drawer.findByText('Informe o código do contrato.')).toBeInTheDocument();
-    expect(drawer.getByText('Informe o vencimento.')).toBeInTheDocument();
+    const modal = within(await screen.findByRole('dialog', { name: 'Novo contrato' }));
+    await user.click(modal.getByRole('button', { name: 'Cadastrar contrato' }));
+    expect(await modal.findByText('Informe o código do contrato.')).toBeInTheDocument();
+    expect(modal.getByText('Informe o vencimento.')).toBeInTheDocument();
 
-    await user.type(drawer.getByRole('textbox', { name: 'Código' }), 'DI1F28');
-    await user.type(drawer.getByRole('textbox', { name: 'Vencimento' }), '02/01/2031');
-    await user.click(drawer.getByRole('button', { name: 'Cadastrar contrato' }));
-    expect(await drawer.findByText('Já existe um contrato com este código.')).toBeInTheDocument();
+    await user.type(modal.getByRole('textbox', { name: 'Código' }), 'DI1F28');
+    await user.type(modal.getByRole('textbox', { name: 'Vencimento' }), '02/01/2031');
+    await user.click(modal.getByRole('button', { name: 'Cadastrar contrato' }));
+    expect(await modal.findByText('Já existe um contrato com este código.')).toBeInTheDocument();
 
-    await user.clear(drawer.getByRole('textbox', { name: 'Código' }));
-    await user.type(drawer.getByRole('textbox', { name: 'Código' }), 'DI1F31');
-    await user.click(drawer.getByRole('button', { name: 'Cadastrar contrato' }));
+    await user.clear(modal.getByRole('textbox', { name: 'Código' }));
+    await user.type(modal.getByRole('textbox', { name: 'Código' }), 'DI1F31');
+    await user.click(modal.getByRole('button', { name: 'Cadastrar contrato' }));
 
     expect(await screen.findByText('DI1F31', { selector: 'td *' })).toBeInTheDocument();
     expect(cellTexts('DI1F31').slice(0, 5)).toEqual(['DI1F31', '02/01/2031', '—', '—', '—']);

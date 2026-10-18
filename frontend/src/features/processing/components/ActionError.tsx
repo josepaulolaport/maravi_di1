@@ -4,7 +4,7 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 import { ApiError } from '@/api/http';
 
 /**
- * A failed action in a drawer or dialog (OQ-15): every problem+json message, except those
+ * A failed action in a modal (OQ-15): every problem+json message, except those
  * bound to a field in `shownOnFields`, which the form shows on its own inputs.
  */
 export function ActionError({

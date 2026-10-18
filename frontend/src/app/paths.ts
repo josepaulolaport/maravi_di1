@@ -36,7 +36,7 @@ export const assetLinks = {
   catalogue: () => paths.assets,
   product: (productId: string) =>
     paths.assetProduct.replace(':productId', encodeURIComponent(productId)),
-  /** `register` opens the price drawer on that date ("Definir preço", §11.1). */
+  /** `register` opens the price modal on that date ("Definir preço", §11.1). */
   contract: (instrumentId: string, options?: { register?: IsoDate }) =>
     withQuery(paths.assetContract.replace(':instrumentId', encodeURIComponent(instrumentId)), {
       registrar: options?.register,

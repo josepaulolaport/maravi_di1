@@ -1,7 +1,7 @@
 import {
   Alert,
   Button,
-  Drawer,
+  Modal,
   Group,
   Input,
   SegmentedControl,
@@ -21,13 +21,13 @@ import { useSetReferencePrice } from '../hooks/usePrices';
 import { parsePtBrDate } from './dateInput';
 import { formErrors } from './formErrors';
 
-interface PriceDrawerProps {
+interface PriceModalProps {
   instrument: Instrument;
-  /** The date the drawer opens on; `null` closes it. */
+  /** The date the modal opens on; `null` closes it. */
   date: IsoDate | null;
   /** Bumped on every opening, so each one starts with a clean form. */
   session: number;
-  /** `saved` is the date of the price just recorded, when the drawer closes after a save. */
+  /** `saved` is the date of the price just recorded, when the modal closes after a save. */
   onClose: (saved?: IsoDate) => void;
 }
 
@@ -36,22 +36,23 @@ interface PriceDrawerProps {
  * **or** rate. There is no computed field and no preview: the backend computes the other value
  * on save (OQ-19 item 7). A correction is the same call and appends a new revision.
  */
-export function PriceDrawer({ instrument, date, session, onClose }: PriceDrawerProps) {
+export function PriceModal({ instrument, date, session, onClose }: PriceModalProps) {
   const save = useSetReferencePrice();
-  // While a save runs the drawer stays open, so its confirmation is never lost.
+  // While a save runs the modal stays open, so its confirmation is never lost.
   const close = (saved?: IsoDate) => {
     if (save.isPending) return;
     save.reset();
     onClose(saved);
   };
   return (
-    <Drawer
+    <Modal
       opened={date !== null}
       onClose={() => {
         close();
       }}
       title="Registrar preço de referência"
-      position="right"
+      centered
+      size="lg"
       closeOnClickOutside={!save.isPending}
       closeOnEscape={!save.isPending}
       withCloseButton={!save.isPending}
@@ -66,7 +67,7 @@ export function PriceDrawer({ instrument, date, session, onClose }: PriceDrawerP
           onDone={close}
         />
       )}
-    </Drawer>
+    </Modal>
   );
 }
 

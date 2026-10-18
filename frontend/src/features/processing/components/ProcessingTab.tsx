@@ -5,9 +5,9 @@ import type { IsoDate, ProcessingRangeRequest, ProcessingRequest } from '@/api/c
 
 import type { useProcessingRequests } from '../hooks/useProcessing';
 import { CancelDialog } from './CancelDialog';
-import { ConfirmDrawer } from './ConfirmDrawer';
+import { ConfirmProcessingModal } from './ConfirmProcessingModal';
 import { HistoryTable } from './HistoryTable';
-import { JobDetailsDrawer } from './JobDetailsDrawer';
+import { JobDetailsModal } from './JobDetailsModal';
 import { isValidRange } from './RangeFields';
 import { ReplaceDialog } from './ReplaceDialog';
 import { RequestCard } from './RequestCard';
@@ -82,7 +82,7 @@ export function ProcessingTab({
         onReplace={open('replace')}
         onRequestAgain={requestAgain}
       />
-      <ConfirmDrawer
+      <ConfirmProcessingModal
         range={confirming}
         onClose={() => {
           setConfirming(null);
@@ -91,7 +91,7 @@ export function ProcessingTab({
           setConfirming(null);
         }}
       />
-      <JobDetailsDrawer
+      <JobDetailsModal
         job={jobFor('details')}
         onClose={close}
         onCancel={open('cancel')}
