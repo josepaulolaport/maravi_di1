@@ -1,7 +1,7 @@
 import type { PortfolioPositions, PortfolioSummary, ProcessingRequest } from '../contract';
 import { assetsApi, ledgerApi, portfolioApi, pricesApi, processingApi } from '../endpoints';
 import { ApiError } from '../http';
-import { IDS } from './fixtures';
+import { IDS, PRICE_IDS } from './fixtures';
 
 // The MSW fake backend must honour the documented rules, so screens built against it behave
 // like they will against the real API. Expected values come from the spec and the fixtures'
@@ -91,6 +91,19 @@ describe('mock portfolio', () => {
       ['2026-10-15', '-8034.1345282660'],
       ['2026-10-16', null],
     ]);
+  });
+});
+
+describe('mock assets', () => {
+  it('§4.1 the futures spec carries no pricing methodology: DC/365 is the only convention', async () => {
+    const product = await assetsApi.getProduct(IDS.di1);
+
+    expect(product.futures).toEqual({
+      face_value: '100000',
+      contract_multiplier: '1',
+      settlement_method: 'CASH',
+      settlement_description: 'Liquidação financeira',
+    });
   });
 });
 
@@ -417,4 +430,317 @@ describe('mock processing', () => {
       }),
     ]);
   });
+});
+
+describe('mock publication (a finished job publishes the precomputed results of its days)', () => {
+  const FINAL = ['COMPLETED', 'COMPLETED_WITH_ISSUES', 'CANCELLED', 'FAILED', 'SUPERSEDED'];
+
+  /** Queues [start, end] and polls it until it reaches a final status. */
+  async function run(start: string, end: string): Promise<ProcessingRequest> {
+    const job = await processingApi.enqueue({ start_date: start, end_date: end });
+    for (let i = 0; i < 50; i += 1) {
+      const current = await processingApi.getRequest(job.id);
+      if (FINAL.includes(current.status)) return current;
+    }
+    throw new Error('the job never finished');
+  }
+
+  async function missingPrices(): Promise<string[]> {
+    const { items } = await processingApi.listIssues();
+    return items
+      .filter((i) => i.issue_type === 'MISSING_REFERENCE_PRICE')
+      .map((i) => `${i.asset_code ?? ''} ${i.required_price_date ?? ''}`)
+      .sort();
+  }
+
+  it('§10.4 OQ-12 republishes 16/10 with the corrected price and clears its stale flag', async () => {
+    expect((await run('2026-10-16', '2026-10-18')).status).toBe('COMPLETED_WITH_ISSUES');
+
+    const summary = published(await portfolioApi.getSummary('2026-10-16'));
+    expect(summary).toMatchObject({
+      stale: false,
+      cash_balance: '506059.2651460232',
+      positions_market_value: null,
+      aum: null,
+      position_pnl: null,
+      trades_pnl: '-592.3681943852',
+      daily_pnl: null,
+      cumulative_pnl: null,
+      valuation_status: 'MISSING',
+      pnl_status: 'MISSING',
+    });
+    expect(summary.published_at).not.toBe('2026-10-16T18:40:00-03:00');
+
+    const rows = published(await portfolioApi.getPositions('2026-10-16')).items;
+    expect(rows.find((r) => r.asset_code === 'DI1F28')).toMatchObject({
+      quantity: 6,
+      average_entry_pu: '89006.4625467350',
+      average_entry_rate: '0.10',
+      reference_price_id: PRICE_IDS.f28_1016_r2,
+      reference_source: 'MANUAL',
+      reference_pu: '89250.3147019396',
+      reference_rate: '0.0980',
+      financial_total: '535501.8882116376',
+      position_pnl: '1218.3226742780',
+      trades_pnl: '-592.3681943852',
+      daily_pnl: '625.9544798928',
+      valuation_status: 'COMPLETE',
+      pnl_status: 'COMPLETE',
+    });
+    expect(rows.find((r) => r.asset_code === 'DI1F29')).toMatchObject({
+      quantity: 5,
+      reference_pu: null,
+      financial_total: null,
+      position_pnl: null,
+      trades_pnl: '0',
+      daily_pnl: null,
+      valuation_status: 'MISSING',
+    });
+  });
+
+  it.each(['2026-10-17', '2026-10-18'])(
+    '§5 §8.3 publishes %s with quantities and cash but no valuation: no carry-forward',
+    async (date) => {
+      await run('2026-10-16', '2026-10-18');
+
+      expect(published(await portfolioApi.getSummary(date))).toMatchObject({
+        stale: false,
+        cash_balance: '506059.2651460232',
+        positions_market_value: null,
+        aum: null,
+        position_pnl: null,
+        trades_pnl: '0',
+        daily_pnl: null,
+        cumulative_pnl: null,
+        valuation_status: 'MISSING',
+        pnl_status: 'MISSING',
+      });
+      const rows = published(await portfolioApi.getPositions(date)).items;
+      expect(rows.map((r) => [r.asset_code, r.quantity, r.reference_pu, r.trades_pnl])).toEqual([
+        ['DI1F28', 6, null, '0'],
+        ['DI1F29', 5, null, '0'],
+      ]);
+    },
+  );
+
+  it('§10.3 replaces the range Pendências with one missing price per contract and day', async () => {
+    await run('2026-10-16', '2026-10-18');
+
+    expect(await missingPrices()).toEqual([
+      'DI1F28 2026-10-17',
+      'DI1F28 2026-10-18',
+      'DI1F29 2026-10-16',
+      'DI1F29 2026-10-17',
+      'DI1F29 2026-10-18',
+    ]);
+  });
+
+  it('OQ-16 extends the P&L series with the published days, unavailable from the gap', async () => {
+    await run('2026-10-16', '2026-10-18');
+
+    const { items } = await portfolioApi.getPnlSeries({
+      start_date: '2026-10-14',
+      end_date: '2026-10-18',
+    });
+    expect(items.map((p) => [p.date, p.cumulative_pnl, p.stale])).toEqual([
+      ['2026-10-14', '0.0000000000', false],
+      ['2026-10-15', '-8034.1345282660', false],
+      ['2026-10-16', null, false],
+      ['2026-10-17', null, false],
+      ['2026-10-18', null, false],
+    ]);
+  });
+
+  it('OQ-12 keeps a marker before the range: 17–18/10 publish but read as stale', async () => {
+    expect((await run('2026-10-17', '2026-10-18')).status).toBe('COMPLETED_WITH_ISSUES');
+
+    for (const date of ['2026-10-16', '2026-10-17', '2026-10-18']) {
+      expect(published(await portfolioApi.getSummary(date)).stale).toBe(true);
+    }
+  });
+
+  it('OQ-11 a range after an unprocessed day reads as stale until the gap is processed', async () => {
+    await run('2026-10-16', '2026-10-16');
+    expect(
+      (await processingApi.preview({ start_date: '2026-10-17', end_date: '2026-10-17' }))
+        .predecessor_state,
+    ).toBe('VALID');
+
+    await run('2026-10-18', '2026-10-18');
+    expect(published(await portfolioApi.getSummary('2026-10-18')).stale).toBe(true);
+    expect((await processingApi.listIssues()).items).toContainEqual(
+      expect.objectContaining({ issue_type: 'STALE_PREDECESSOR', affected_date: '2026-10-18' }),
+    );
+
+    await run('2026-10-17', '2026-10-18');
+    expect(published(await portfolioApi.getSummary('2026-10-18')).stale).toBe(false);
+    expect((await processingApi.listIssues()).items).not.toContainEqual(
+      expect.objectContaining({ issue_type: 'STALE_PREDECESSOR' }),
+    );
+  });
+
+  it('§7 publishes the days before the first entry as the zero state', async () => {
+    expect((await run('2026-10-10', '2026-10-13')).status).toBe('COMPLETED');
+
+    expect(published(await portfolioApi.getSummary('2026-10-12'))).toMatchObject({
+      stale: false,
+      cash_balance: '0',
+      positions_market_value: '0',
+      aum: '0',
+      position_pnl: '0',
+      trades_pnl: '0',
+      daily_pnl: '0',
+      cumulative_pnl: '0',
+      valuation_status: 'COMPLETE',
+      pnl_status: 'COMPLETE',
+    });
+    expect(published(await portfolioApi.getPositions('2026-10-12')).items).toEqual([]);
+  });
+
+  it('§10.4 a range before the first changed day still publishes', async () => {
+    await ledgerApi.createCashMovement({
+      movement_date: '2026-10-17',
+      movement_type: 'DEPOSIT',
+      amount: '1000.00',
+    });
+
+    expect((await run('2026-10-14', '2026-10-16')).status).toBe('COMPLETED_WITH_ISSUES');
+    const summary = published(await portfolioApi.getSummary('2026-10-16'));
+    expect(summary).toMatchObject({ stale: false, trades_pnl: '-592.3681943852' });
+    const rows = published(await portfolioApi.getPositions('2026-10-16')).items;
+    expect(rows.find((r) => r.asset_code === 'DI1F28')?.reference_price_id).toBe(
+      PRICE_IDS.f28_1016_r2,
+    );
+  });
+
+  it('§10.4 republishes 14/10 and 15/10 with their published figures unchanged', async () => {
+    expect((await run('2026-10-14', '2026-10-15')).status).toBe('COMPLETED');
+
+    const summary = published(await portfolioApi.getSummary('2026-10-15'));
+    expect(summary).toMatchObject({
+      stale: false,
+      cash_balance: '199650.3745326500',
+      aum: '1491965.8654717340',
+      daily_pnl: '-8034.1345282660',
+      cumulative_pnl: '-8034.1345282660',
+    });
+    expect(summary.published_at).not.toBe('2026-10-16T18:40:00-03:00');
+    expect(published(await portfolioApi.getSummary('2026-10-14')).aum).toBe('1500000.0000000000');
+  });
+
+  it('§10.3 does not duplicate Pendências when ranges are processed again', async () => {
+    await run('2026-10-17', '2026-10-18');
+    await run('2026-10-17', '2026-10-18');
+    const stalePredecessors = (await processingApi.listIssues()).items.filter(
+      (i) => i.issue_type === 'STALE_PREDECESSOR',
+    );
+    expect(stalePredecessors.map((i) => i.affected_date)).toEqual(['2026-10-17']);
+
+    await run('2026-10-16', '2026-10-18');
+    await run('2026-10-16', '2026-10-18');
+    await run('2026-10-17', '2026-10-18');
+
+    expect(await missingPrices()).toHaveLength(5);
+    expect((await processingApi.listIssues()).items).not.toContainEqual(
+      expect.objectContaining({ issue_type: 'STALE_PREDECESSOR' }),
+    );
+  });
+
+  it.each<[string, () => Promise<unknown>, string]>([
+    [
+      'POST /trades',
+      () =>
+        ledgerApi.createTrade({
+          asset_id: IDS.di1f28,
+          trade_date: '2026-10-17',
+          trade_time: '10:00:00',
+          signed_quantity: 1,
+          input_kind: 'PU',
+          execution_pu: '89000.00',
+        }),
+      '17/10/2026',
+    ],
+    [
+      'DELETE /trades/:id',
+      () => ledgerApi.deleteTrade('7a000000-0000-4000-8000-000000000003'),
+      '16/10/2026',
+    ],
+    [
+      'POST /ledger/deletions',
+      () =>
+        ledgerApi.deleteEntries({
+          trade_ids: [],
+          cash_movement_ids: ['7c000000-0000-4000-8000-000000000002'],
+        }),
+      '16/10/2026',
+    ],
+    [
+      'POST /reference-prices',
+      () =>
+        pricesApi.setReferencePrice({
+          asset_id: IDS.di1f29,
+          reference_date: '2026-10-16',
+          input_kind: 'PU',
+          pu: '80300.00',
+        }),
+      '16/10/2026',
+    ],
+    [
+      'DELETE /reference-prices/:id',
+      () => pricesApi.removeReferencePrice(PRICE_IDS.f28_1016_r2),
+      '16/10/2026',
+    ],
+  ])('§10.4 the mock fails a job after a write through %s', async (_path, write, shown) => {
+    await write();
+
+    const job = await run('2026-10-16', '2026-10-18');
+
+    expect(job.status).toBe('FAILED');
+    expect(job.error_message).toContain(`a partir de ${shown}`);
+    expect((await portfolioApi.getSummary('2026-10-18')).publication).toBe('NOT_PROCESSED');
+  });
+
+  it('§10.4 a write made while the job is queued fails it rather than superseding it', async () => {
+    const job = await processingApi.enqueue({ start_date: '2026-10-16', end_date: '2026-10-18' });
+    await ledgerApi.createCashMovement({
+      movement_date: '2026-10-17',
+      movement_type: 'DEPOSIT',
+      amount: '1000.00',
+    });
+
+    let current = job;
+    for (let i = 0; i < 50 && !FINAL.includes(current.status); i += 1) {
+      current = await processingApi.getRequest(job.id);
+    }
+
+    expect(current.status).toBe('FAILED');
+  });
+
+  it.each([
+    ['2026-10-17', '2026-10-16', '2026-10-18', '17/10/2026'],
+    ['2026-10-15', '2026-10-16', '2026-10-16', '15/10/2026'],
+  ])(
+    '§10.4 the mock fails a job whose range depends on a day changed since the seed (%s)',
+    async (changed, start, end, shown) => {
+      await ledgerApi.createCashMovement({
+        movement_date: changed,
+        movement_type: 'DEPOSIT',
+        amount: '1000.00',
+      });
+      const issuesBefore = (await processingApi.listIssues()).items;
+
+      const job = await run(start, end);
+
+      expect(job).toMatchObject({
+        status: 'FAILED',
+        error_message: `Backend simulado: os resultados a partir de ${shown} dependem de lançamentos ou preços alterados e só podem ser recalculados pelo backend real. Nenhum dia foi publicado.`,
+      });
+      // All or nothing (§10.4): no day of the range was published.
+      expect(published(await portfolioApi.getSummary('2026-10-16')).trades_pnl).toBe(
+        '-394.7129232316',
+      );
+      expect((await portfolioApi.getSummary('2026-10-18')).publication).toBe('NOT_PROCESSED');
+      expect((await processingApi.listIssues()).items).toEqual(issuesBefore);
+    },
+  );
 });

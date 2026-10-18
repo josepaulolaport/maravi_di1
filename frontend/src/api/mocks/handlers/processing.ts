@@ -9,6 +9,15 @@ import type {
 } from '../../contract';
 import { addDays, daysInclusive } from '../dates';
 import { db, isStale, newId } from '../db';
+import {
+  FIRST_ENTRY_DATE,
+  recalculatedDays,
+  summaries,
+  positions,
+  pnlSeries,
+  zeroStateDay,
+} from '../fixtures';
+import type { RecalculatedDay } from '../fixtures';
 import { firstEntryDate, isPublished } from './portfolio';
 import { fieldError, latency, notFound, problem, rangeErrors, readJson, url } from './support';
 
@@ -26,13 +35,91 @@ function predecessorState(start: string): ProcessingPreview['predecessor_state']
   return isStale(predecessor) ? 'STALE' : 'VALID';
 }
 
+/** The scenario's results for `date`, valid only while its inputs are unchanged. */
+function precomputedDay(date: string): RecalculatedDay {
+  const recalculated = recalculatedDays[date];
+  if (recalculated) return recalculated;
+  const summary = summaries.find((s) => s.date === date);
+  const rows = positions.find((p) => p.date === date);
+  const point = pnlSeries.find((p) => p.date === date);
+  if (summary && rows && point) return { summary, positions: rows, pnl: point };
+  if (date < FIRST_ENTRY_DATE) return zeroStateDay(date);
+  throw new Error(`The mock scenario has no results for ${date}.`);
+}
+
+const formatDateBr = (date: string) => date.split('-').reverse().join('/');
+
+/**
+ * Publishes [start, end] all at once (§10.4): the precomputed results of each day, the
+ * range's Pendências replaced by the current ones, and the dirty markers inside the range
+ * moved to end + 1 (OQ-12). A stale or unprocessed predecessor still publishes, and those
+ * days read as stale with a STALE_PREDECESSOR Pendência (OQ-11).
+ */
+function publish(job: ProcessingRequest): void {
+  const start = job.requested_start_date;
+  const end = job.requested_end_date;
+  const predecessor = predecessorState(start);
+  const stalePredecessor = predecessor === 'STALE' || predecessor === 'NOT_PROCESSED';
+  const publishedAt = now();
+  // Every day's results first, so nothing is applied if one is missing (all or nothing).
+  const days: [string, RecalculatedDay][] = [];
+  for (let date = start; date <= end; date = addDays(date, 1)) {
+    days.push([date, structuredClone(precomputedDay(date))]);
+  }
+
+  db.issues = db.issues.filter(
+    (i) =>
+      !(
+        (i.issue_type === 'MISSING_REFERENCE_PRICE' || i.issue_type === 'STALE_PREDECESSOR') &&
+        i.affected_date >= start &&
+        i.affected_date <= end
+      ),
+  );
+  for (const [date, day] of days) {
+    db.published.summaries.set(date, { ...day.summary, published_at: publishedAt });
+    db.published.positions.set(date, { ...day.positions, published_at: publishedAt });
+    db.published.pnl.set(date, day.pnl);
+    for (const row of day.positions.items.filter((r) => r.valuation_status === 'MISSING')) {
+      db.issues.push({
+        id: newId(),
+        issue_type: 'MISSING_REFERENCE_PRICE',
+        asset_id: row.asset_id,
+        asset_code: row.asset_code,
+        affected_date: date,
+        required_price_date: date,
+        request_id: job.id,
+      });
+    }
+  }
+  // OQ-11 also asks for null P&L on days after a stale or missing predecessor. The fake does
+  // not enforce it: in this scenario every such day (17/10, 18/10) already has null P&L. A
+  // larger scenario would have to null those fields here.
+  if (stalePredecessor) {
+    db.issues.push({
+      id: newId(),
+      issue_type: 'STALE_PREDECESSOR',
+      asset_id: null,
+      asset_code: null,
+      affected_date: start,
+      required_price_date: null,
+      request_id: job.id,
+    });
+  }
+  for (const kind of ['accounting', 'valuation'] as const) {
+    const marker = db.dirty[kind];
+    if (marker !== null && marker >= start && marker <= end) db.dirty[kind] = addDays(end, 1);
+  }
+}
+
 /**
  * Advances the fake worker one step per poll, so the UI can show every status:
  * QUEUED → DISPATCHED → RUNNING (one day per poll) → COMPLETED / COMPLETED_WITH_ISSUES /
- * SUPERSEDED, and CANCELLING → CANCELLED. Only one job is active at a time (§10.2).
+ * SUPERSEDED / FAILED, and CANCELLING → CANCELLED. Only one job is active at a time (§10.2).
  *
- * The fake cannot recalculate, so a finished job publishes nothing new and leaves the dirty
- * markers as they are; the real backend republishes and advances them (OQ-12).
+ * The fake cannot recalculate: a finished job publishes the scenario's precomputed results.
+ * When a write since the seed touched a day the range depends on (any day up to its end),
+ * those results would be wrong, so the job fails and publishes nothing; only the real
+ * backend can recalculate them.
  */
 function tick(): void {
   const active = db.requests.find((r) => ACTIVE.includes(r.status));
@@ -63,18 +150,16 @@ function tick(): void {
     }
     const start = active.requested_start_date;
     const end = active.requested_end_date;
-    const predecessor = predecessorState(start);
-    if (predecessor === 'STALE' || predecessor === 'NOT_PROCESSED') {
-      db.issues.push({
-        id: newId(),
-        issue_type: 'STALE_PREDECESSOR',
-        asset_id: null,
-        asset_code: null,
-        affected_date: start,
-        required_price_date: null,
-        request_id: active.id,
+    if (db.changedFrom !== null && db.changedFrom <= end) {
+      Object.assign(active, {
+        status: 'FAILED',
+        ...finished,
+        error_code: 'MOCK_INPUTS_CHANGED',
+        error_message: `Backend simulado: os resultados a partir de ${formatDateBr(db.changedFrom)} dependem de lançamentos ou preços alterados e só podem ser recalculados pelo backend real. Nenhum dia foi publicado.`,
       });
+      return;
     }
+    publish(active);
     const withIssues = db.issues.some((i) => i.affected_date >= start && i.affected_date <= end);
     Object.assign(active, {
       status: withIssues ? 'COMPLETED_WITH_ISSUES' : 'COMPLETED',

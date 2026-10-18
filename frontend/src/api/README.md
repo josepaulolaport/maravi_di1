@@ -4,6 +4,7 @@
 - `http.ts`: the only HTTP client. JSON in and out; RFC 9457 problem+json errors become `ApiError` (OQ-15).
 - `endpoints.ts`: one typed function per endpoint. Feature hooks call these.
 - `mocks/`: the MSW fake backend: a stateful in-memory store (`db.ts`) seeded from one coherent scenario (`fixtures.ts`), with the documented validations, dirty markers and a job that advances one step per poll.
+  - A finished job publishes the scenario's precomputed results for its days, replaces the range's Pendências and moves the dirty markers inside the range to end + 1 (OQ-12). The fake does not calculate: once a write touches a day, any job whose range reaches that day ends **Falhou** with a "Backend simulado" message and publishes nothing.
 
 At Wave 5 the hand-written types are replaced by types generated from the backend's OpenAPI (`npm run gen:api`).
 
@@ -16,7 +17,7 @@ Everything below is used by the frontend but not yet named in `docs/interfaces.m
 | P1  | API served under `/api` (`VITE_API_BASE_URL`)                                                                                                                     | SPA routes and API paths never collide; one proxy rule                           |
 | P2  | Lists wrapped as `{ items: [...] }`                                                                                                                               | Metadata can be added without a breaking change                                  |
 | P3  | `GET /instrument-types` with nested `asset_classes`                                                                                                               | Ativos catalogue tabs (OQ-19 item 4)                                             |
-| P4  | `Product.asset_class`, `instrument_type`, `instrument_count`; `GET /products/{id}`; `FuturesSpec.pricing_methodology`                                             | Catalogue row, product page ("Contagem de dias")                                 |
+| P4  | `Product.asset_class`, `instrument_type`, `instrument_count`; `GET /products/{id}`                                                                                | Catalogue row, product page ("Dias corridos / 365" fixed, §4.1)                  |
 | P5  | `Instrument.product_code`, `last_reference {reference_date, pu, rate, source}`                                                                                    | Contract list, always with its date (OQ-19 item 5)                               |
 | P6  | `Trade.asset_code`, `instrument_type_code`, `cash_amount` (= −q × PU, computed by the backend)                                                                    | Lançamentos table; the browser never multiplies money                            |
 | P7  | `POST /ledger/deletions {trade_ids, cash_movement_ids, reason?}`, all or nothing                                                                                  | Atomic multiple delete (§6.1)                                                    |

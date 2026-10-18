@@ -2,11 +2,11 @@ import { http, HttpResponse } from 'msw';
 
 import type { ListResponse, PnlPoint, PortfolioPositions, PortfolioSummary } from '../../contract';
 import { db, isStale } from '../db';
-import { pnlSeries, positions, summaries } from '../fixtures';
 import { dateErrors, latency, problem, rangeErrors, url } from './support';
 
-// Published results are the fixtures; the mock does not recalculate them after a job (only
-// the real backend does). Stale flags follow the live dirty markers, so edits show as stale.
+// Published results start as the fixtures; a finished job replaces its days with the
+// precomputed results of the scenario (handlers/processing.ts). Stale flags follow the live
+// dirty markers, so edits show as stale.
 
 function dateParam(request: Request) {
   const date = new URL(request.url).searchParams.get('date');
@@ -18,7 +18,7 @@ export const portfolioHandlers = [
     await latency();
     const { date, errors } = dateParam(request);
     if (errors.length > 0 || !date) return problem(422, errors);
-    const published = summaries.find((s) => s.date === date);
+    const published = db.published.summaries.get(date);
     const body: PortfolioSummary = published
       ? { ...published, stale: isStale(date) }
       : { date, publication: 'NOT_PROCESSED' };
@@ -29,7 +29,7 @@ export const portfolioHandlers = [
     await latency();
     const { date, errors } = dateParam(request);
     if (errors.length > 0 || !date) return problem(422, errors);
-    const published = positions.find((p) => p.date === date);
+    const published = db.published.positions.get(date);
     const body: PortfolioPositions = published
       ? { ...published, stale: isStale(date) }
       : { date, publication: 'NOT_PROCESSED' };
@@ -43,15 +43,16 @@ export const portfolioHandlers = [
     const end = params.get('end_date');
     const errors = rangeErrors(start, end);
     if (errors.length > 0) return problem(422, errors);
-    const items = pnlSeries
+    const items = [...db.published.pnl.values()]
       .filter((p) => p.date >= (start as string) && p.date <= (end as string))
+      .sort((a, b) => a.date.localeCompare(b.date))
       .map((p) => ({ ...p, stale: isStale(p.date) }));
     return HttpResponse.json<ListResponse<PnlPoint>>({ items });
   }),
 ];
 
 /** Whether the mock has published results for `date`, for the processing preview. */
-export const isPublished = (date: string) => summaries.some((s) => s.date === date);
+export const isPublished = (date: string) => db.published.summaries.has(date);
 
 /** The earliest date with any ledger entry (the day before it is the zero state). */
 export function firstEntryDate(): string | undefined {
