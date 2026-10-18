@@ -38,6 +38,9 @@ class Envelope(BaseModel):
         return payload
 
     def to_json(self) -> bytes:
+        # `frozen` stops reassigning ``payload`` but not changing the dict inside it, so the
+        # rule is checked again before anything is serialized.
+        _reject_floats(self.payload, "payload")
         return self.model_dump_json().encode()
 
     @classmethod
