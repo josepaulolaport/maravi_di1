@@ -88,6 +88,12 @@ class SqlAlchemyUnitOfWork:
     def session(self) -> AsyncSession:
         return self._active_session()
 
+    @property
+    def committed(self) -> bool:
+        """Inside the block, whether ``commit()`` has succeeded: a provider that must commit
+        what a handler left uncommitted checks it (the message consumer)."""
+        return self._state is _State.COMMITTED
+
     async def commit(self) -> None:
         session = self._active_session()
         await session.commit()

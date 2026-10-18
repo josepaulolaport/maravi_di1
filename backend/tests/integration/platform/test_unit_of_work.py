@@ -230,6 +230,30 @@ async def test_it_cannot_be_entered_while_active(uow: SqlAlchemyUnitOfWork) -> N
                 pass
 
 
+async def test_committed_is_true_only_after_a_successful_commit(
+    uow: SqlAlchemyUnitOfWork,
+) -> None:
+    assert not uow.committed
+    async with uow:
+        assert not uow.committed
+        await uow.commit()
+        assert uow.committed
+    assert not uow.committed
+
+
+async def test_a_failed_commit_is_not_committed(uow: SqlAlchemyUnitOfWork) -> None:
+    duplicate = uuid.uuid4()
+
+    with pytest.raises(IntegrityError):
+        async with uow:
+            await _write(uow, duplicate)
+            uow.session.add(_InboxRow(consumer_name="test", message_id=duplicate))
+            try:
+                await uow.commit()
+            finally:
+                assert not uow.committed
+
+
 async def test_one_session_for_the_whole_block(uow: SqlAlchemyUnitOfWork) -> None:
     async with uow:
         first = uow.session
