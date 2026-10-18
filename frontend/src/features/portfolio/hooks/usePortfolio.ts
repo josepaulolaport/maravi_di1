@@ -4,10 +4,11 @@ import { useSearchParams } from 'react-router';
 
 import type { IsoDate } from '@/api/contract';
 import { portfolioApi } from '@/api/endpoints';
+import { queryRoots } from '@/api/queryRoots';
 import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
 
 export const portfolioKeys = {
-  all: ['portfolio'] as const,
+  all: queryRoots.portfolio,
   summary: (date: IsoDate) => [...portfolioKeys.all, 'summary', date] as const,
   positions: (date: IsoDate) => [...portfolioKeys.all, 'positions', date] as const,
   pnl: (start: IsoDate, end: IsoDate) => [...portfolioKeys.all, 'pnl', start, end] as const,
