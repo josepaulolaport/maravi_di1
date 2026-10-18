@@ -52,7 +52,7 @@ A estrutura persistente do módulo Asset utiliza `instrument_types`, `asset_clas
 
 ## 4. Cálculo de preços e taxas
 
-### 4.1 Metodologia em uso
+### 4.1 Convenção de cálculo
 
 Foi decidida a convenção simplificada **DC/365**, usando dias **corridos**, incluindo finais de semana e feriados:
 
@@ -63,13 +63,12 @@ taxa = (100000 / PU) ^ (365 / dias_corridos) - 1
 
 - `taxa` é fração decimal anual: `0.10` significa 10% a.a.
 - `dias_corridos` decorre da data de referência do cálculo e do vencimento do contrato.
-- A constante de 100.000 é a base especificada pelo desafio DI1. O cadastro de futuros reserva dados como `face_value` para extensibilidade; qualquer variação de base exige metodologia explícita e testes.
+- O numerador é o `face_value` do cadastro de futuros: 100.000 para o DI1, a base especificada pelo desafio.
 - A aplicação aceita taxa **ou** PU e calcula o valor faltante; não deve tratar ambos como entradas independentes contraditórias.
 - **Precisão (decidido, OQ-3):** cálculos em `Decimal` com contexto de 34 dígitos e arredondamento `ROUND_HALF_UP`. PU calculado é armazenado com 10 casas decimais e taxa calculada com 12. PU digitado com mais de 10 casas ou taxa digitada com mais de 12 é **rejeitado**, nunca arredondado. Valores monetários são armazenados exatos e arredondados a 2 casas apenas na exibição.
 - Limites de valores: apenas os do schema (taxa > −1, PU > 0, quantidade ≠ 0, valor > 0) (OQ-14).
 - Uma calculadora pode produzir uma prévia sem salvar nada. A interface atual não oferece prévia nem calculadora avulsa: o valor complementar é calculado ao salvar e exibido depois (OQ-19).
 - O mesmo motor de cálculo pode ser usado ao registrar uma operação ou quando o fluxo de preço de referência realmente precisar derivar o valor complementar.
-- A convenção mais realista DU/252 discutida anteriormente **não** faz parte da implementação atual; pode ser adicionada futuramente como outra metodologia, sem alteração retroativa silenciosa.
 
 ### 4.2 Três valores diferentes que não podem ser confundidos
 
@@ -390,7 +389,6 @@ Nenhum item em aberto.
 
 - Importação CSV de preços de referência via RabbitMQ.
 - Integração para captura de preços oficiais B3.
-- Outras famílias de calculadoras/metodologias de PU e taxa, se justificadas.
 
 ## 15. Desvios e interpretações do enunciado
 
