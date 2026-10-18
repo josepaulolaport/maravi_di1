@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI review",
+  "description": "The AI review of one pull request. Each finding is posted as one inline PR comment on its lines.",
+  "type": "object",
+  "required": ["summary", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "start_line", "end_line", "issue", "severity", "confidence", "suggestion"],
+        "additionalProperties": false,
+        "properties": {
+          "file": { "type": "string", "minLength": 1 },
+          "start_line": { "type": "integer", "minimum": 1 },
+          "end_line": { "type": "integer", "minimum": 1 },
+          "issue": { "type": "string", "minLength": 1 },
+          "severity": { "type": "string", "enum": ["INFO", "LOW", "MEDIUM", "HIGH"] },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "suggestion": { "type": "string" }
+        }
+      }
+    }
+  }
+}

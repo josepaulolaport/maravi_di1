@@ -1,0 +1,218 @@
+# Continuous integration (plan §3, §9). The jobs call the root Makefile, so CI runs exactly
+# what `make install`, `make lint` and `make test` run locally.
+#
+# Path scoping is done with job-level `if:` on the `changes` job's outputs, never with a
+# workflow-level `paths:` filter: main's required status checks would wait forever for a check
+# that such a filter never started. `ci-ok` is the one check to require; a skipped job passes it.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # A PR's newer push cancels its older run; each push to main keeps its own run.
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read # paths-filter lists the PR's files through the API
+    outputs:
+      # A push to main runs everything.
+      backend: ${{ github.event_name == 'push' || steps.filter.outputs.backend == 'true' }}
+      frontend: ${{ github.event_name == 'push' || steps.filter.outputs.frontend == 'true' }}
+      # The AI review runs only on PRs that change something other than documentation.
+      review: ${{ steps.filter.outputs.review == 'true' }}
+    steps:
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          # A file matches a filter when it matches a pattern and none of its '!' patterns.
+          predicate-quantifier: some-with-excludes
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'docs/schema.sql' # tests/architecture/test_migration_sql.py reads it
+              - 'scripts/**'
+              - 'Makefile'
+              - '.github/workflows/**'
+            frontend:
+              - 'frontend/**'
+              - 'Makefile'
+              - '.github/workflows/**'
+            review:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+
+  backend:
+    name: backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: x
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:x@localhost:5432/postgres
+      REQUIRE_DATABASE_TESTS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # uv reads the Python version from backend/.python-version.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.13.1"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: make install-backend
+        run: make install-backend
+      - name: make lint-backend (uv lock --check, ruff, ruff format, mypy)
+        run: make lint-backend
+      - name: make test-backend (Alembic head, migration smoke, pytest + coverage)
+        run: make test-backend
+
+  frontend:
+    name: frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Detect the frontend scaffold
+        id: scaffold
+        run: |
+          set -euo pipefail
+          if [[ -f frontend/package.json ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=frontend::frontend/package.json not found: no frontend scaffold yet, nothing to run"
+          fi
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.scaffold.outputs.present == 'true'
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: make install-frontend
+        if: steps.scaffold.outputs.present == 'true'
+        run: make install-frontend
+      - name: make lint-frontend (lint, typecheck, format:check)
+        if: steps.scaffold.outputs.present == 'true'
+        run: make lint-frontend
+      - name: make test-frontend
+        if: steps.scaffold.outputs.present == 'true'
+        run: make test-frontend
+
+  commits:
+    name: commit messages
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: make lint-commits (the PR's commits)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+        run: make lint-commits
+
+  ci-ok:
+    name: ci-ok
+    needs: [changes, backend, frontend, commits]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every needed job succeeded or was skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          bad=$(jq '[to_entries[] | select(.value.result == "failure" or .value.result == "cancelled")] | length' <<<"$NEEDS")
+          if [[ "$bad" -ne 0 ]]; then
+            echo "::error title=ci-ok::$bad needed job(s) failed or were cancelled"
+            exit 1
+          fi
+
+  # AI review: scripts/ai_review.py sends the PR diff to Gemini (free tier; Google may use the
+  # prompts, here the diff of a public repository, to improve its products) in one request, or a
+  # few for a large diff, and posts one review with an inline comment per finding. It starts only
+  # once ci-ok has passed and is deliberately not part of ci-ok: an LLM outage or a missing key
+  # must not block a merge. Secrets are unavailable on fork PRs, so it runs only for branches of
+  # this repository; pull_request_target is never used.
+  ai-review:
+    name: ai-review
+    needs: [changes, ci-ok]
+    # always() drops the implicit success(), which would also require every upstream job (a
+    # skipped frontend or backend job included) to succeed; ci-ok already decides that.
+    if: >-
+      always() && needs.ci-ok.result == 'success'
+      && needs.changes.outputs.review == 'true'
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write # the review and its inline comments
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0 # the merge base with the PR base
+          persist-credentials: false
+      - name: Review the diff and post the findings
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$GEMINI_API_KEY" ]]; then
+            echo "::error title=ai-review::secret GEMINI_API_KEY is not set (a Google AI Studio key; see README)"
+            exit 1
+          fi
+          python3 -I scripts/ai_review.py "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/ai-review"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: ai-review
+          path: ${{ runner.temp }}/ai-review/review.json
+          if-no-files-found: ignore # absent only when the review failed before answering
