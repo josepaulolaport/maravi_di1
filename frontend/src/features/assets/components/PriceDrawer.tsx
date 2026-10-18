@@ -110,9 +110,15 @@ function PriceForm({ instrument, initialDate, save, onDone }: PriceFormProps) {
   };
 
   const { fields, page: pageErrors } = formErrors(save.error, SHOWN_FIELDS);
+  // The value input owns the pu, rate and input_kind errors: every one of them is shown.
+  const valueMessages = [fields.pu, fields.rate, fields.input_kind].filter(
+    (message): message is string => message !== undefined,
+  );
   const valueError = invalidValue
     ? 'Informe um número válido.'
-    : (fields.pu ?? fields.rate ?? fields.input_kind);
+    : valueMessages.length > 0
+      ? valueMessages.join(' ')
+      : undefined;
 
   return (
     <form

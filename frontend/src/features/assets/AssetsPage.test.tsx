@@ -1,7 +1,7 @@
-import { screen, within } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
+import { act, screen, within } from '@testing-library/react';
+import { delay, http, HttpResponse } from 'msw';
 
-import { IDS } from '@/api/mocks/fixtures';
+import { IDS, instrumentTypes } from '@/api/mocks/fixtures';
 import { problem, url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { renderApp } from '@/test/render';
@@ -74,6 +74,40 @@ describe('Ativos: catálogo (§11.2)', () => {
     await user.click(screen.getByRole('link', { name: 'Abrir produto DI1' }));
 
     expect(router.state.location.pathname).toBe(`/ativos/produtos/${IDS.di1}`);
+  });
+
+  it("§11.2 a new tab never shows the previous type's products while it loads", async () => {
+    server.use(
+      http.get(url('/instrument-types'), () =>
+        HttpResponse.json({
+          items: [...instrumentTypes, { id: 2, code: 'OPTION', name: 'Opções', asset_classes: [] }],
+        }),
+      ),
+      http.get(url('/products'), async ({ request }) => {
+        if (new URL(request.url).searchParams.get('instrument_type') === 'OPTION') {
+          await delay('infinite');
+        }
+        return undefined;
+      }),
+    );
+    const { user } = await openCatalogue();
+
+    await user.click(screen.getByRole('tab', { name: 'Opções' }));
+
+    expect(await screen.findByRole('status', { name: 'Carregando produtos' })).toBeInTheDocument();
+    expect(screen.queryByRole('row', { name: /DI1/ })).not.toBeInTheDocument();
+  });
+
+  it('§11.2 the search box follows the URL on navigation (back, links)', async () => {
+    const { router } = await openCatalogue('/ativos?busca=juros');
+    const search = screen.getByRole('textbox', { name: 'Buscar produtos' });
+
+    await act(() => router.navigate('/ativos?busca=xyz'));
+    expect(search).toHaveValue('xyz');
+    expect(await screen.findByText('0 produtos encontrados')).toBeInTheDocument();
+
+    await act(() => router.navigate(-1));
+    expect(search).toHaveValue('juros');
   });
 
   it('§12 shows the API error with a retry', async () => {

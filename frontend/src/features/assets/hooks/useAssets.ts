@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { NavigationType, useNavigationType, useSearchParams } from 'react-router';
 
 import type { CreateInstrumentRequest } from '@/api/contract';
 import { assetsApi } from '@/api/endpoints';
@@ -30,8 +30,10 @@ export function useProducts(instrumentType: string | undefined, search: string) 
     queryKey: assetKeys.products(instrumentType ?? '', search),
     queryFn: () => assetsApi.listProducts({ instrument_type: instrumentType ?? '', search }),
     enabled: instrumentType !== undefined,
-    // While a new search loads, the previous rows stay on screen instead of a skeleton.
-    placeholderData: keepPreviousData,
+    // While a new search of the same type loads, its previous rows stay on screen; another
+    // type shows its own loading state, never the previous type's products.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2].instrumentType === (instrumentType ?? '') ? previous : undefined,
   });
 }
 
@@ -75,6 +77,14 @@ export function useSearchParam(): [string, (value: string) => void, string] {
   const [params, setParams] = useSearchParams();
   const search = params.get('busca') ?? '';
   const [text, setText] = useState(search);
+  // The box follows the URL when navigation changes it (Back, a link). Our own updates while
+  // typing are REPLACE navigations and may lag behind the text, so they never overwrite it.
+  const navigationType = useNavigationType();
+  const [seen, setSeen] = useState(search);
+  if (seen !== search) {
+    setSeen(search);
+    if (navigationType !== NavigationType.Replace) setText(search);
+  }
   const setSearch = (value: string) => {
     setText(value);
     setParams(

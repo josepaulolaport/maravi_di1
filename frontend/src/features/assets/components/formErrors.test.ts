@@ -21,6 +21,23 @@ describe('formErrors', () => {
     expect(result.page).toEqual([]);
   });
 
+  it('§12 keeps every message of a field, not only the first (OQ-15)', () => {
+    const result = formErrors(
+      problem([
+        { field: 'pu', message: 'Informe um número válido.' },
+        { field: 'pu', message: 'Use no máximo 10 casas decimais.' },
+        { field: 'source', message: 'Fonte inválida.' },
+        { field: 'source', message: 'Fonte desconhecida.' },
+      ]),
+      ['pu'],
+    );
+
+    expect(result.fields).toEqual({
+      pu: 'Informe um número válido. Use no máximo 10 casas decimais.',
+    });
+    expect(result.page).toEqual(['Fonte inválida.', 'Fonte desconhecida.']);
+  });
+
   it('§12 shows on the page a field error no input displays, so no message is lost', () => {
     const result = formErrors(
       problem([

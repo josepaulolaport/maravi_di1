@@ -339,6 +339,29 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
     expect(await drawer.findByText('Use no máximo 10 casas decimais.')).toBeInTheDocument();
   });
 
+  it('§12 shows every error the API gives for the value input (pu, rate, input_kind)', async () => {
+    server.use(
+      http.post(url('/reference-prices'), () =>
+        problem(422, [
+          { code: 'VALIDATION_ERROR', message: 'Forma de entrada inválida.', field: 'input_kind' },
+          { code: 'VALIDATION_ERROR', message: 'O valor deve ser maior que zero.', field: 'pu' },
+        ]),
+      ),
+    );
+    const { user } = await openContract(`${F28}?registrar=2026-10-17`);
+
+    const drawer = within(
+      await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
+    );
+    await user.type(drawer.getByRole('textbox', { name: 'PU' }), '89.300,00');
+    await user.click(drawer.getByRole('button', { name: 'Salvar' }));
+
+    expect(
+      await drawer.findByText('O valor deve ser maior que zero.', { exact: false }),
+    ).toBeInTheDocument();
+    expect(drawer.getByText('Forma de entrada inválida.', { exact: false })).toBeInTheDocument();
+  });
+
   it('OQ-14 shows FUTURE_DATE on the date field', async () => {
     const { user } = await openContract(`${F28}?registrar=2026-10-19`);
 

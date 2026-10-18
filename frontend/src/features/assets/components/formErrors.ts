@@ -13,9 +13,14 @@ export function formErrors(
 ): { fields: Record<string, string>; page: string[] } {
   if (error === null || error === undefined) return { fields: {}, page: [] };
   if (!(error instanceof ApiError)) return { fields: {}, page: [UNEXPECTED] };
-  const fields = error.fieldErrors();
-  const orphans = Object.entries(fields)
-    .filter(([field]) => !shownFields.includes(field))
-    .map(([, message]) => message);
-  return { fields, page: [...error.pageErrors(), ...orphans] };
+  // Built from every entry, not `fieldErrors()` (first message per field only): a field may
+  // carry several messages, and each one is shown.
+  const fields: Record<string, string> = {};
+  const page = error.pageErrors();
+  for (const { field, message } of error.problem.errors ?? []) {
+    if (!field) continue;
+    if (!shownFields.includes(field)) page.push(message);
+    else fields[field] = fields[field] ? `${fields[field]} ${message}` : message;
+  }
+  return { fields, page };
 }
