@@ -1,7 +1,7 @@
 import { http as mock, HttpResponse } from 'msw';
 
 import { server } from './mocks/server';
-import { API_BASE, ApiError, http } from './http';
+import { API_BASE, ApiError, buildUrl, http } from './http';
 
 const path = '/probe';
 const url = `${API_BASE}${path}`;
@@ -110,6 +110,21 @@ describe('http client', () => {
     expect(error.status).toBe(0);
     expect(error.message).toBe(
       'Não foi possível contactar o servidor. Verifique a conexão e tente novamente.',
+    );
+  });
+
+  it('P1 keeps the base path of an absolute API URL, with or without a trailing slash', () => {
+    expect(buildUrl('/trades', {}, 'https://api.example.com/api')).toBe(
+      'https://api.example.com/api/trades',
+    );
+    expect(buildUrl('/trades', {}, 'https://api.example.com/api/')).toBe(
+      'https://api.example.com/api/trades',
+    );
+  });
+
+  it('P1 resolves a relative API base against the page origin', () => {
+    expect(buildUrl('/portfolio/summary', { date: '2026-10-15' }, '/api/')).toBe(
+      `${window.location.origin}/api/portfolio/summary?date=2026-10-15`,
     );
   });
 });

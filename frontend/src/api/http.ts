@@ -48,8 +48,14 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
-function buildUrl(path: string, query?: Record<string, QueryValue>): string {
-  const url = new URL(`${API_BASE}${path}`, window.location.origin);
+export function buildUrl(
+  path: string,
+  query?: Record<string, QueryValue>,
+  base: string = API_BASE,
+): string {
+  // `base` may be relative (`/api`) or absolute (`https://host/api`), with or without a
+  // trailing slash; `path` always starts with one.
+  const url = new URL(`${base.replace(/\/+$/, '')}${path}`, window.location.origin);
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined && value !== null && value !== '') {
       url.searchParams.set(key, String(value));
