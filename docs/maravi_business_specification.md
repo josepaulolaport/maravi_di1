@@ -67,7 +67,7 @@ taxa = (100000 / PU) ^ (365 / dias_corridos) - 1
 - A aplicação aceita taxa **ou** PU e calcula o valor faltante; não deve tratar ambos como entradas independentes contraditórias.
 - **Precisão (decidido, OQ-3):** cálculos em `Decimal` com contexto de 34 dígitos e arredondamento `ROUND_HALF_UP`. PU calculado é armazenado com 10 casas decimais e taxa calculada com 12. PU digitado com mais de 10 casas ou taxa digitada com mais de 12 é **rejeitado**, nunca arredondado. Valores monetários são armazenados exatos e arredondados a 2 casas apenas na exibição.
 - Limites de valores: apenas os do schema (taxa > −1, PU > 0, quantidade ≠ 0, valor > 0) (OQ-14).
-- Uma calculadora pode produzir uma prévia sem salvar nada.
+- Uma calculadora pode produzir uma prévia sem salvar nada. A interface atual não oferece prévia nem calculadora avulsa: o valor complementar é calculado ao salvar e exibido depois (OQ-19).
 - O mesmo motor de cálculo pode ser usado ao registrar uma operação ou quando o fluxo de preço de referência realmente precisar derivar o valor complementar.
 - A convenção mais realista DU/252 discutida anteriormente **não** faz parte da implementação atual; pode ser adicionada futuramente como outra metodologia, sem alteração retroativa silenciosa.
 
@@ -239,7 +239,7 @@ O usuário acessa **Central de Controle → Processamentos**, escolhe intervalo 
 - **Somente um pedido é executado por vez** para a carteira única.
 - O usuário pode cancelar pedidos **na fila** imediatamente.
 - Para pedido **em execução**, cancelar sinaliza interrupção; o worker verifica o sinal em pontos seguros entre dias/transações, conclui a operação corrente com integridade e encerra sem publicar a faixa incompleta.
-- O usuário pode registrar nova operação ou corrigir preço, enfileirar um novo intervalo e cancelar o job anterior. Opcionalmente, UI **Cancelar e criar novo processamento** faz os dois pedidos de forma coordenada.
+- O usuário pode registrar nova operação ou corrigir preço, enfileirar um novo intervalo e cancelar o job anterior. A UI oferece **Cancelar e criar novo processamento**, que faz os dois pedidos de forma coordenada (OQ-20).
 - A fila durável e os estados de jobs pertencem ao **PostgreSQL**. RabbitMQ transporta comandos de execução; não é a fonte de verdade sobre a ordem dos jobs.
 - O worker processa cronologicamente as datas com chamadas diretas aos módulos (Portfolio, Prices, PnL); não se publica uma mensagem para cada ativo ou dia.
 - Um job calcula com versões dos inputs capturadas ao iniciar e verifica as versões antes de publicar. Se mudanças posteriores tornarem o resultado obsoleto, não pode sobrescrever dados atuais (**SUPERSEDED**).
@@ -259,6 +259,8 @@ Estados principais planejados:
 - `FAILED`: falha técnica inesperada.
 - `SUPERSEDED`: fonte de dados mudou; publicação obsoleta foi bloqueada.
 
+Rótulos na interface (OQ-20): `QUEUED` **Na fila**, `DISPATCHED` **Enviado**, `RUNNING` **Processando**, `CANCELLING` **Cancelando**, `CANCELLED` **Cancelado**, `COMPLETED` **Concluído**, `COMPLETED_WITH_ISSUES` **Concluído com pendências**, `FAILED` **Falhou**, `SUPERSEDED` **Obsoleto**. Não existe status "Bloqueado": preço ausente nunca interrompe um job.
+
 A lista de **Pendências** exibe problemas acionáveis: ativo, data necessária, motivo e ação. Deduplicar problemas repetidos para a mesma obrigação. Tipos atuais: **preço de referência faltante** (ação: definir preço), **contrato vencido com posição aberta** (§7.4) e **estado anterior desatualizado** (§10.1; ação: processar intervalo anterior).
 
 ### 10.4 Publicação e invalidação
@@ -275,23 +277,26 @@ A lista de **Pendências** exibe problemas acionáveis: ativo, data necessária,
 
 ## 11. Telas e experiência do usuário
 
-Os designs existentes no **Aura Build** são a base visual e devem ser implementados, não reconstruídos como um aplicativo de demonstração separado. UI inteira em **pt-BR**, com React, Mantine e TanStack Query. Durante o desenvolvimento, o frontend real pode usar respostas simuladas via **MSW**, seguindo contratos de API revisáveis.
+Os designs existentes no **Aura Build** são a base visual e devem ser implementados, não reconstruídos como um aplicativo de demonstração separado. Eles estão no Figma (Carteira, Ativos, Lançamentos, Central de Controle → Pendências) e no HTML clicável da Central de Controle (Processamentos); são preliminares e serão refinados durante o desenvolvimento. Dados e funcionalidades prevalecem: onde o design diverge desta especificação, valem as decisões OQ-19 e OQ-20. UI inteira em **pt-BR**, com React, Mantine e TanStack Query. Durante o desenvolvimento, o frontend real pode usar respostas simuladas via **MSW**, seguindo contratos de API revisáveis.
 
 ### 11.1 Central de Controle
 
 Duas abas: **Pendências** e **Processamentos**.
 
-- **Pendências:** problemas realmente identificados pela validação/processamento, não uma lista de todos os dias sem cotação. Ação **Definir preço** conduz à entrada/correção da referência.
-- **Processamentos:** escolher datas, pré-visualizar o intervalo (com aviso quando o estado anterior está desatualizado), enfileirar, acompanhar progresso e status, ver erros, cancelar pedidos, eventualmente cancelar e substituir. Os jobs continuam existindo no histórico após conclusão/cancelamento.
+- **Pendências:** problemas realmente identificados pela validação/processamento, não uma lista de todos os dias sem cotação. Somente os três tipos de §10.3; falha técnica (`FAILED`) aparece em Processamentos, não como pendência (OQ-19). Ação **Definir preço** conduz à entrada/correção da referência.
+- **Processamentos:** escolher datas, pré-visualizar o intervalo exato [A, B] (dias a processar, com aviso quando o estado anterior está desatualizado; sem "período efetivo" expandido), enfileirar, acompanhar progresso e status, ver erros, cancelar pedidos, cancelar e substituir. Os jobs continuam existindo no histórico após conclusão/cancelamento (OQ-20).
+  - Os detalhes de um job cancelado, com falha ou obsoleto informam que nenhum dia foi publicado e que os resultados anteriores ficaram inalterados (publicação tudo ou nada, §10.4).
+  - Um job cancelado, com falha ou obsoleto oferece **Solicitar novo processamento**, que preenche o formulário com o intervalo original completo.
+  - Pedidos sobrepostos ou repetidos continuam permitidos; não há coluna "Motivo".
 - Sem KPIs financeiros redundantes na Central de Controle.
 
 ### 11.2 Ativos
 
-- Navegar pelo cadastro `tipo → classe → produto → instrumento`.
-- Ver contrato, especificações, datas e referências existentes.
-- A tela de contrato permite cálculo taxa ↔ PU e cadastro/inspeção/correção de preço de referência de data específica.
-- Calendário/serie de preços deve distinguir observações reais de dias sem observação; **não inventar** preços interpolados.
-- Um PU informado manualmente não precisa gerar obrigatoriamente um segundo campo visível para a taxa implícita, embora o motor possa calculá-la quando necessário.
+- Navegar pelo cadastro `tipo → classe → produto → instrumento`. O catálogo mostra somente o que a API devolve (tipos como abas, produtos reais); nenhum produto ilustrativo (OQ-19).
+- Ver contrato, especificações, datas e referências existentes. A lista de contratos de um produto mostra a última observação de referência (PU, taxa) **sempre ao lado da sua data**, nunca como preço de hoje.
+- A tela de contrato permite cadastro/inspeção/correção de preço de referência de data específica. **Não há calculadora taxa ↔ PU** nessa tela (OQ-19): o usuário informa PU ou taxa e o valor complementar é calculado ao salvar.
+- Calendário/serie de preços deve distinguir observações reais de dias sem observação; **não inventar** preços interpolados. Mostra a **Fonte** (Manual/B3) da observação preferencial; o menu da linha oferece Corrigir, Remover e Ver revisões.
+- Um PU informado manualmente não precisa gerar obrigatoriamente um segundo campo visível para a taxa implícita, embora o motor possa calculá-la quando necessário. Quando a taxa existir, ela é exibida ao lado do PU (OQ-19).
 
 ### 11.3 Lançamentos
 
@@ -299,7 +304,8 @@ Duas abas: **Pendências** e **Processamentos**.
 - Registrar compra, venda, aporte e retirada por formulários/drawers apropriados.
 - Distinguir **tipo de instrumento** de **tipo de lançamento**.
 - Excluir uma operação ou múltiplas com confirmação; **não editar** trades existentes.
-- Exibir data/hora efetiva e valores com formatação brasileira.
+- Exibir data/hora efetiva e valores com formatação brasileira. Cada operação mostra PU **e** taxa de execução: o valor informado e o calculado pelo backend ao salvar (OQ-19).
+- Faixa de caixa (OQ-19): **Caixa D0** é o saldo publicado na data final do período selecionado e **Caixa D−1** o do dia anterior, lidos do resumo da carteira e marcados como desatualizados ou não processados quando for o caso.
 
 ### 11.4 Carteira
 
@@ -374,6 +380,7 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - Arquitetura (usuário, 18/10/2026): `infrastructure/` contém persistência e outros adaptadores de saída; consumidores e handlers RabbitMQ de um módulo ficam em `presentation/messaging/`, a infraestrutura RabbitMQ compartilhada em `platform/messaging/`, e a lógica de processamento em `application/`. O domínio é determinístico e sem I/O nem efeitos colaterais (sem arquivo, rede, banco, mensageria, ambiente ou relógio do sistema); utilitários puros da biblioteca padrão (`datetime`, `Decimal`, `Enum`, `dataclasses`) são permitidos. O domínio não faz logging (que pertence às camadas de aplicação, infraestrutura e apresentação) e comunica falhas por exceções e resultados explícitos; não gera aleatoriedade internamente: um cálculo que precise dela (ex.: Monte Carlo) recebe uma semente explícita ou um gerador injetado.
 
 - Desvios e interpretações do enunciado registrados em §15 (OQ-18).
+- Design × especificação (usuário, 18/10/2026, sessão do frontend; OQ-19, OQ-20): dados e funcionalidades da especificação prevalecem sobre o design preliminar; Carteira com P&L de posições e de operações; três tipos de pendência; faixa Caixa D0/D−1 em Lançamentos; catálogo só com dados da API; última referência sempre com sua data; coluna Fonte no calendário; sem calculadora taxa ↔ PU nem prévia (valor complementar calculado ao salvar); intervalo exato [A, B]; nove status com rótulos em português e sem "Bloqueado"; publicação tudo ou nada; novo processamento com o intervalo original; cancelar e substituir.
 
 ### Aberto — requer decisão específica antes de codificar o comportamento
 

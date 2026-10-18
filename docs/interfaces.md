@@ -87,7 +87,16 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 - `POST /reference-prices`, `GET /reference-prices`, `DELETE /reference-prices/{id}` (audit-preserving removal)
 - `GET /portfolio/positions?date=YYYY-MM-DD`, `GET /portfolio/summary?date=YYYY-MM-DD`, `GET /portfolio/pnl?start_date=&end_date=` (the published `portfolio_metrics` series: per date `cumulative_pnl`, `daily_pnl`, statuses and stale flag; feeds the Carteira cumulative chart, no per-asset data; OQ-16)
 - `POST /processing/requests`, `GET /processing/requests`, `GET /processing/requests/{id}`, `POST /processing/requests/{id}/cancel`, `POST /processing/requests/{id}/cancel-and-replace`
-- `GET /instruments`, `POST /instruments`, `GET /products`, `POST /products`; direct `POST /pricing/calculate` for previews if needed.
+- `GET /instruments`, `POST /instruments`, `GET /products`, `POST /products`; direct `POST /pricing/calculate` for previews if needed (the current UI shows no preview: the complementary PU or rate is computed when an entry is saved, OQ-19).
+- **UI read needs (OQ-19, OQ-20).** The frontend's draft contract (lane I) proposes how each is served; the integrator fixes route names and shapes:
+  - Pendências list: an HTTP route for `ProcessingService.get_issues`, three issue types only.
+  - Range preview: an HTTP route for `ProcessingService.preview_range` (exact [A, B], number of days, stale-predecessor flag).
+  - Processing request read: requested range, status, days done and total, the date being processed, created/started/finished times and the error message, if any.
+  - Ativos catalogue: instrument types and asset classes, and per product its class, type and number of contracts.
+  - Contract list: per instrument, its latest current reference observation `{date, pu, rate, source}`, or `null`.
+  - Reference prices: the source of each observation and the revision history for an (asset, date).
+  - Trades: both execution PU and execution rate.
+  - Lançamentos cash strip: `GET /portfolio/summary` for the range end date and the day before, with their stale and unprocessed flags.
 - All UI-facing content/labels in pt-BR; schema, internal interfaces, and Python identifiers remain English.
 
 ### Errors (OQ-15)

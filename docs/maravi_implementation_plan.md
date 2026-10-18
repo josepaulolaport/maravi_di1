@@ -153,7 +153,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 
 ### I. Frontend (mock contracts)
 - Implement existing pt-BR screens using Mantine and TanStack Query against typed mock API fixtures: Ativos, Lançamentos, Carteira, Central de Controle/Pendências/Processamentos.
-- Handle stale/incomplete metric chips, pending/queued/running/cancelling/cancelled, cancel and replace action, range preview and percentage progress.
+- Handle stale/incomplete metric chips, the nine job statuses with their pt-BR labels (spec §10.3, OQ-20), cancel and replace action, "Solicitar novo processamento" with the original range, exact-range preview and day progress. Design-vs-spec decisions: OQ-19, OQ-20.
 - **Done:** screens demonstrate full flows with mock adapters before backend integration.
 
 ## 5. Wave 2 — input persistence + processing request API (parallel)

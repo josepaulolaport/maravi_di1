@@ -13,9 +13,9 @@ description: Build or change a Maravi DI1 screen or component (React, TypeScript
   - §11.3: Lançamentos;
   - §11.4: Carteira.
 - **The API rules** in §12.
-- **The design** in Figma, read through the Figma MCP tools (`frontend/CLAUDE.md` "Designs"), if one exists. Where it disagrees with the spec, the user decides which is right: use `spec-gap`, quoting both.
+- **The design** in Figma, read through the Figma MCP tools (`frontend/CLAUDE.md` "Designs"), if one exists. Where it disagrees with the spec, the user decides which is right: first check OQ-19 and OQ-20 in `docs/open-questions.md` (decisions already taken), otherwise use `spec-gap`, quoting both.
 - **The endpoints** in `docs/interfaces.md`, "HTTP endpoints".
-- If a text, column, state or behaviour is not specified, use `spec-gap`. Do not invent product behaviour.
+- If a text, column, state or behaviour is not specified, use `spec-gap`. Do not invent product behaviour. Drawers and modals without a design are built in the same visual language (OQ-19 item 8); their texts and fields still follow the spec.
 
 ## 2. Tests first (Vitest + Testing Library + MSW)
 
@@ -37,7 +37,7 @@ See them fail first.
 - Put the query and mutation hooks in the feature folder. Query keys include the date, and mutations invalidate the related queries.
 - Poll a job's status only while it is queued or running.
 - Format from decimal strings with `Intl.NumberFormat('pt-BR', …)`. Never use `parseFloat`, `toFixed` or `Math.round` on money.
-- The browser never calculates. Calculator previews call the pricing endpoint.
+- The browser never calculates. Forms take PU or rate and show no preview; the backend computes the other value on save (OQ-19).
 - Every input has a label, and colour is never the only signal.
 
 ## 4. Verify

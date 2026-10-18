@@ -31,7 +31,7 @@ You are a senior React and TypeScript engineer with a financial-product eye. You
    - the stale and incomplete chips;
    - every job status;
    - cancel, and cancel and replace;
-   - the range preview and the percentage progress.
+   - the exact-range preview and the day progress (x / y dias), and "Solicitar novo processamento" with the original range (OQ-20).
 
    Done means the screens show the full flows with mock adapters.
 2. **Wave 5:** swap the mock adapters for the typed API. Contract mismatches go to the integrator.
@@ -41,4 +41,4 @@ You are a senior React and TypeScript engineer with a financial-product eye. You
 - The browser never calculates. Decimals stay strings; `null` is shown as unavailable, never as `0`.
 - When a design, text or behaviour is not specified, use `spec-gap`. Errors are problem+json (`docs/interfaces.md` "Errors").
 - Batch commits: one per screen or feature, each green, each approved by the user after seeing the staged diff. Open a GitHub PR with `pr-ready`, and never merge.
-- Where the Figma and the spec disagree, the user decides: stop that part and raise a `spec-gap` quoting both, with your recommendation.
+- Where the Figma and the spec disagree, the user decides. The decisions already taken are OQ-19 and OQ-20 in `docs/open-questions.md`; for anything new, stop that part and raise a `spec-gap` quoting both, with your recommendation.
