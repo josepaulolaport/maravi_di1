@@ -1,0 +1,95 @@
+.navbar {
+  background-color: var(--mantine-color-navy-9);
+  border-right: none;
+  transition: width 220ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navbar {
+    transition: none;
+  }
+}
+
+.header {
+  height: 96px;
+  margin-inline: 12px;
+  padding-inline: 12px;
+  border-bottom: 1px solid var(--app-sidebar-divider);
+}
+
+.headerCollapsed {
+  margin-inline: 8px;
+  padding-inline: 0;
+}
+
+.brand {
+  color: var(--mantine-color-white);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 24px;
+  letter-spacing: 0.14em;
+}
+
+.brandSub {
+  margin-top: 4px;
+  color: var(--app-sidebar-muted);
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.2em;
+}
+
+.toggle {
+  color: var(--app-sidebar-muted);
+}
+
+.toggle:hover {
+  background-color: var(--app-sidebar-hover);
+  color: var(--mantine-color-white);
+}
+
+.toggleIconCollapsed {
+  transform: rotate(180deg);
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  padding-inline: 12px;
+  border-radius: 7px;
+  color: var(--mantine-color-navy-2);
+  font-size: 14px;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background-color 150ms;
+}
+
+.link:hover {
+  background-color: var(--app-sidebar-hover);
+  color: var(--mantine-color-white);
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+
+.link[aria-current='page'] {
+  background-color: var(--mantine-color-navy-6);
+  color: var(--mantine-color-white);
+}
+
+.link[aria-current='page'] .icon {
+  color: var(--app-accent);
+}
+
+.linkCollapsed {
+  justify-content: center;
+  gap: 0;
+  padding-inline: 0;
+}
+
+.icon {
+  flex-shrink: 0;
+}
