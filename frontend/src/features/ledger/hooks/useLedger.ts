@@ -1,4 +1,10 @@
-import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 
 import type { CreateLedgerEntryRequest, IsoDate, LedgerOrder } from '@/api/contract';
@@ -79,17 +85,28 @@ export function useLedgerFilters(): LedgerFilters {
   };
 }
 
-/** The list, filtered and ordered by the backend (P18); a new order is a new request. */
+/** Entries per page of the list (P21); "Carregar mais" reads the next one. */
+export const LEDGER_PAGE_SIZE = 50;
+
+/**
+ * The list, filtered and ordered by the backend (P18), read page by page (P21); `data.items`
+ * holds every page read so far. A new order is a new request, from the first page.
+ */
 export function useEntries(start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: ledgerKeys.entries(start, end, search, order),
-    queryFn: () =>
+    queryFn: ({ pageParam }) =>
       ledgerApi.listEntries({
         start_date: start,
         end_date: end,
         ...(search ? { search } : {}),
         order,
+        limit: LEDGER_PAGE_SIZE,
+        ...(pageParam ? { cursor: pageParam } : {}),
       }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.next_cursor,
+    select: (data) => ({ items: data.pages.flatMap((page) => page.items) }),
     // Only a new order keeps the rows on screen while it loads; a new range or search shows
     // the loading state, so rows of another filter are never listed (or selected).
     placeholderData: (previous, previousQuery) => {

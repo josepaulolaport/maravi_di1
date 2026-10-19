@@ -15,6 +15,7 @@ import { IconDots, IconSearch } from '@tabler/icons-react';
 import type { ProcessingRequest } from '@/api/contract';
 import { formatQuantity } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
+import { LoadMore } from '@/shared/ui/LoadMore';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { SCOPE_LABELS } from '@/shared/processing/scope';
@@ -42,8 +43,11 @@ function matchesSearch(job: ProcessingRequest, search: string): boolean {
   ].some((value) => value.toLocaleLowerCase('pt-BR').includes(needle));
 }
 
-const countLabel = (n: number) =>
-  n === 1 ? '1 processamento encontrado' : `${formatQuantity(n)} processamentos encontrados`;
+/** "encontrados" once every page is read; "exibidos" while the backend has more (P21). */
+const countLabel = (n: number, more: boolean) => {
+  if (more) return `${formatQuantity(n)} processamentos exibidos`;
+  return n === 1 ? '1 processamento encontrado' : `${formatQuantity(n)} processamentos encontrados`;
+};
 
 interface HistoryTableProps extends JobActions {
   requests: ReturnType<typeof useProcessingRequests>;
@@ -88,6 +92,7 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
   if (requests.isPending) {
     return <Skeleton h={220} aria-busy="true" aria-label="Carregando processamentos" />;
   }
+  // The search filters the pages read so far; "Carregar mais" reads older jobs.
   const rows = requests.data.items.filter((job) => matchesSearch(job, search));
   return (
     <>
@@ -120,8 +125,15 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
           </Table.Tbody>
         </Table>
       </Table.ScrollContainer>
+      <LoadMore
+        hasMore={requests.hasNextPage}
+        loading={requests.isFetchingNextPage}
+        onLoad={() => {
+          void requests.fetchNextPage();
+        }}
+      />
       <Text size="sm" c="dimmed">
-        {countLabel(rows.length)}
+        {countLabel(rows.length, requests.hasNextPage)}
       </Text>
     </>
   );

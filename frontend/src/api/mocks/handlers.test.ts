@@ -415,6 +415,17 @@ describe('mock ledger validation', () => {
 });
 
 describe('mock processing', () => {
+  it('P21 pages the jobs newest first, by (created_at, id)', async () => {
+    const all = (await processingApi.listRequests()).items;
+    const first = await processingApi.listRequests({ limit: 2 });
+    const rest = await processingApi.listRequests({ limit: 50, cursor: first.next_cursor ?? '' });
+
+    expect([...first.items, ...rest.items].map((j) => j.id)).toEqual(all.map((j) => j.id));
+    expect(rest.next_cursor).toBeNull();
+    const created = all.map((j) => j.created_at);
+    expect(created).toEqual([...created].sort().reverse());
+  });
+
   async function poll(id: string): Promise<ProcessingRequest> {
     return processingApi.getRequest(id);
   }
@@ -923,6 +934,39 @@ describe('mock ids', () => {
 
 describe('mock ledger entries (GET /ledger/entries)', () => {
   const FULL = { start_date: '2026-10-14', end_date: '2026-10-16' };
+
+  it('P21 pages by keyset: following next_cursor reads every entry once, in order', async () => {
+    const all = (await ledgerApi.listEntries(FULL)).items.map((e) => e.id);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const page = await ledgerApi.listEntries({
+        ...FULL,
+        limit: 2,
+        ...(cursor ? { cursor } : {}),
+      });
+      seen.push(...page.items.map((e) => e.id));
+      cursor = page.next_cursor;
+      pages += 1;
+    } while (cursor !== null);
+
+    expect(pages).toBe(3);
+    expect(seen).toEqual(all);
+  });
+
+  it('P21 the last page has no next_cursor', async () => {
+    expect((await ledgerApi.listEntries(FULL)).next_cursor).toBeNull();
+    expect((await ledgerApi.listEntries({ ...FULL, limit: 5 })).next_cursor).toBeNull();
+  });
+
+  it('P21 rejects a limit out of 1–200 and an unknown cursor', async () => {
+    const badLimit = await problemOf(ledgerApi.listEntries({ ...FULL, limit: 0 }));
+    const badCursor = await problemOf(ledgerApi.listEntries({ ...FULL, cursor: 'bm9wZQ==' }));
+
+    expect(badLimit.errors?.[0]).toMatchObject({ field: 'limit' });
+    expect(badCursor.errors?.[0]).toMatchObject({ field: 'cursor' });
+  });
 
   it('§11.3 lists both types in one order, by date and time, newest first', async () => {
     const { items } = await ledgerApi.listEntries(FULL);

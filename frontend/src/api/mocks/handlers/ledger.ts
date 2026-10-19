@@ -5,7 +5,7 @@ import type {
   FieldError,
   InputKind,
   LedgerEntry,
-  ListResponse,
+  Page,
   TradeLedgerEntry,
 } from '../../contract';
 import { daysInclusive } from '../dates';
@@ -21,6 +21,7 @@ import {
   notFound,
   problem,
   rangeErrors,
+  paginate,
   readJson,
   url,
 } from './support';
@@ -154,7 +155,8 @@ export const ledgerHandlers = [
       .filter((e) => matches(searchable(e), search))
       .sort(compareDescending);
     if (order === 'asc') items.reverse();
-    return HttpResponse.json<ListResponse<LedgerEntry>>({ items });
+    const page = paginate(items, request);
+    return page instanceof Response ? page : HttpResponse.json<Page<LedgerEntry>>(page);
   }),
 
   http.post(url('/ledger/entries'), async ({ request }) => {

@@ -12,6 +12,7 @@ import {
 } from '@/shared/processing/ProcessingRequestModal';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorState } from '@/shared/ui/ErrorState';
+import { LoadMore } from '@/shared/ui/LoadMore';
 
 import { CashStrip } from './components/CashStrip';
 import { EntriesTable, entryLabel } from './components/EntriesTable';
@@ -32,8 +33,11 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
-const countLabel = (n: number) =>
-  n === 1 ? '1 lançamento encontrado' : `${String(n)} lançamentos encontrados`;
+/** "encontrados" once every page is read; "exibidos" while the backend has more (P21). */
+const countLabel = (n: number, more: boolean) => {
+  if (more) return `${String(n)} lançamentos exibidos`;
+  return n === 1 ? '1 lançamento encontrado' : `${String(n)} lançamentos encontrados`;
+};
 
 /**
  * Lançamentos (spec §11.3): trades and cash movements in an inclusive range, with a search;
@@ -181,8 +185,15 @@ export function LedgerPage() {
               Nenhum lançamento no período.
             </Text>
           )}
+          <LoadMore
+            hasMore={list.hasNextPage}
+            loading={list.isFetchingNextPage}
+            onLoad={() => {
+              void list.fetchNextPage();
+            }}
+          />
           <Text size="sm" c="dimmed" p="md" role="status">
-            {countLabel(entries.length)}
+            {countLabel(entries.length, list.hasNextPage)}
           </Text>
         </Paper>
       )}

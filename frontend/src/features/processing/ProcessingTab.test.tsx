@@ -36,7 +36,7 @@ function holdWorker() {
         return undefined; // falls through to the mock handler, which advances the worker
       }
       const items = [...db.requests].sort((a, b) => b.created_at.localeCompare(a.created_at));
-      return HttpResponse.json({ items });
+      return HttpResponse.json({ items, next_cursor: null });
     }),
   );
   return {
@@ -489,11 +489,37 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
   });
 
   it('§11.1 says when there is no job', async () => {
-    server.use(http.get(url('/processing/requests'), () => HttpResponse.json({ items: [] })));
+    server.use(
+      http.get(url('/processing/requests'), () =>
+        HttpResponse.json({ items: [], next_cursor: null }),
+      ),
+    );
     renderApp(PAGE);
 
     expect(await screen.findByText('Nenhum processamento encontrado.')).toBeInTheDocument();
     expect(screen.getByText('0 processamentos encontrados')).toBeInTheDocument();
+  });
+
+  it('P21 reads the history page by page: "Carregar mais" asks for the next cursor', async () => {
+    const seen: string[] = [];
+    server.use(
+      http.get(url('/processing/requests'), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        seen.push(params.toString());
+        const jobs = [...db.requests].sort((a, b) => b.created_at.localeCompare(a.created_at));
+        return params.get('cursor') === 'page-2'
+          ? HttpResponse.json({ items: jobs.slice(2), next_cursor: null })
+          : HttpResponse.json({ items: jobs.slice(0, 2), next_cursor: 'page-2' });
+      }),
+    );
+    const { user } = renderApp(PAGE);
+
+    expect(await screen.findByText('2 processamentos exibidos')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Carregar mais' }));
+
+    expect(await screen.findByText('5 processamentos encontrados')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Carregar mais' })).not.toBeInTheDocument();
+    expect(seen.slice(0, 2)).toEqual(['limit=20', 'limit=20&cursor=page-2']);
   });
 
   it('OQ-20 offers only the actions each status allows', async () => {

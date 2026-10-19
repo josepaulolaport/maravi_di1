@@ -1,6 +1,6 @@
 import { delay, HttpResponse } from 'msw';
 
-import type { ErrorCode, FieldError, Problem } from '../../contract';
+import type { ErrorCode, FieldError, Page, Problem } from '../../contract';
 import { API_BASE } from '../../http';
 import { isIsoDate } from '../dates';
 import { db } from '../db';
@@ -129,4 +129,40 @@ export function rangeErrors(start: unknown, end: unknown): FieldError[] {
     );
   }
   return errors;
+}
+
+/** The page size when `limit` is not given, and the largest one accepted. */
+export const DEFAULT_PAGE_SIZE = 50;
+export const MAX_PAGE_SIZE = 200;
+
+/**
+ * Keyset pagination over an already-ordered list (P21): the cursor is opaque to the client;
+ * here it carries the id of the last row of the previous page. Returns the problem response
+ * for an invalid `limit` or an unknown cursor.
+ */
+export function paginate<T extends { id: string }>(
+  ordered: T[],
+  request: Request,
+): Page<T> | Response {
+  const params = new URL(request.url).searchParams;
+  const rawLimit = params.get('limit');
+  const limit = rawLimit === null ? DEFAULT_PAGE_SIZE : Number(rawLimit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_SIZE) {
+    return problem(422, [
+      fieldError('VALIDATION_ERROR', `Use um limite entre 1 e ${MAX_PAGE_SIZE}.`, 'limit'),
+    ]);
+  }
+  const cursor = params.get('cursor');
+  let from = 0;
+  if (cursor !== null) {
+    const index = ordered.findIndex((row) => row.id === atob(cursor));
+    if (index < 0) {
+      return problem(422, [fieldError('VALIDATION_ERROR', 'Cursor inválido.', 'cursor')]);
+    }
+    from = index + 1;
+  }
+  const items = ordered.slice(from, from + limit);
+  const last = items.at(-1);
+  const more = from + limit < ordered.length;
+  return { items, next_cursor: more && last ? btoa(last.id) : null };
 }

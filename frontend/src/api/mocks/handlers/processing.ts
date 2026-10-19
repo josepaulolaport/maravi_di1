@@ -4,7 +4,7 @@ import type {
   CancelAndReplaceResponse,
   FieldError,
   JobStatus,
-  ListResponse,
+  Page,
   PredecessorState,
   ProcessingChain,
   ProcessingPreview,
@@ -23,7 +23,16 @@ import {
 } from '../fixtures';
 import type { RecalculatedDay } from '../fixtures';
 import { firstEntryDate } from './portfolio';
-import { fieldError, latency, notFound, problem, rangeErrors, readJson, url } from './support';
+import {
+  fieldError,
+  latency,
+  notFound,
+  paginate,
+  problem,
+  rangeErrors,
+  readJson,
+  url,
+} from './support';
 
 const ACTIVE: JobStatus[] = ['DISPATCHED', 'RUNNING', 'CANCELLING'];
 const CANCELLABLE: JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING'];
@@ -315,11 +324,15 @@ function requestErrors(start: unknown, end: unknown, scope: unknown): FieldError
 }
 
 export const processingHandlers = [
-  http.get(url('/processing/requests'), async () => {
+  // Newest first, by (created_at, id), paged by keyset (P21).
+  http.get(url('/processing/requests'), async ({ request }) => {
     await latency();
     tick();
-    const items = [...db.requests].sort((a, b) => b.created_at.localeCompare(a.created_at));
-    return HttpResponse.json<ListResponse<ProcessingRequest>>({ items });
+    const items = [...db.requests].sort(
+      (a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id),
+    );
+    const page = paginate(items, request);
+    return page instanceof Response ? page : HttpResponse.json<Page<ProcessingRequest>>(page);
   }),
 
   http.get(url('/processing/requests/:id'), async ({ params }) => {

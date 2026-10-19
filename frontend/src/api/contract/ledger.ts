@@ -49,9 +49,9 @@ export interface CashLedgerEntry extends LedgerEntryBase {
 export type LedgerEntry = TradeLedgerEntry | CashLedgerEntry;
 
 /**
- * `GET /ledger/entries?start_date&end_date&search&order` (P18): both types in one list,
- * filtered and ordered by the backend, by (date, time, seq); `desc` (default) newest first,
- * `asc` the exact reverse.
+ * `GET /ledger/entries?start_date&end_date&search&order&limit&cursor` (P18, P21): both types
+ * in one list, filtered and ordered by the backend, by (date, time, seq); `desc` (default)
+ * newest first, `asc` the exact reverse. Returns a `Page<LedgerEntry>`.
  */
 export type LedgerOrder = 'asc' | 'desc';
 

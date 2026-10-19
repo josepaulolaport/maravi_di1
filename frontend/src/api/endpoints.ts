@@ -10,6 +10,8 @@ import type {
   IsoDate,
   Issue,
   ListResponse,
+  Page,
+  PageQuery,
   PnlPoint,
   PortfolioPositions,
   PortfolioSummary,
@@ -44,8 +46,8 @@ export const assetsApi = {
 
 export const ledgerApi = {
   /** The Lançamentos list: both types, filtered and ordered by the backend (P18). */
-  listEntries: (query: DateRange & { search?: string; order?: LedgerOrder }) =>
-    http.get<ListResponse<LedgerEntry>>('/ledger/entries', { query }),
+  listEntries: (query: DateRange & PageQuery & { search?: string; order?: LedgerOrder }) =>
+    http.get<Page<LedgerEntry>>('/ledger/entries', { query }),
   createEntry: (body: CreateLedgerEntryRequest) => http.post<LedgerEntry>('/ledger/entries', body),
   /** All or nothing (§6.1); one entry is a list of one. */
   deleteEntries: (body: DeleteLedgerEntriesRequest) =>
@@ -69,7 +71,9 @@ export const portfolioApi = {
 };
 
 export const processingApi = {
-  listRequests: () => http.get<ListResponse<ProcessingRequest>>('/processing/requests'),
+  /** Newest first, by (created_at, id). */
+  listRequests: (query: PageQuery = {}) =>
+    http.get<Page<ProcessingRequest>>('/processing/requests', { query: { ...query } }),
   getRequest: (requestId: string) =>
     http.get<ProcessingRequest>(`/processing/requests/${id(requestId)}`),
   preview: (query: ProcessingRangeRequest) =>

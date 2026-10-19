@@ -23,7 +23,10 @@ export type JobStatus =
   | 'FAILED'
   | 'SUPERSEDED';
 
-/** `GET /processing/requests` (newest first), `GET /processing/requests/{id}`. */
+/**
+ * `GET /processing/requests?limit&cursor` (newest first, by (created_at, id); a `Page`, P21),
+ * `GET /processing/requests/{id}`.
+ */
 export interface ProcessingRequest {
   id: string;
   /** The job processes exactly this range (OQ-11). */

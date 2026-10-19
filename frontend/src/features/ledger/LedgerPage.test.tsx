@@ -270,16 +270,39 @@ describe('Lançamentos (§11.3)', () => {
       server.use(
         http.get(url('/ledger/entries'), ({ request }) => {
           seen.push(new URL(request.url).search);
-          return HttpResponse.json({ items: [] });
+          return HttpResponse.json({ items: [], next_cursor: null });
         }),
       );
 
       await openLedger('/lancamentos?busca=DI1F29');
 
-      expect(seen[0]).toBe(`?start_date=${start}&end_date=${today}&search=DI1F29&order=desc`);
+      expect(seen[0]).toBe(
+        `?start_date=${start}&end_date=${today}&search=DI1F29&order=desc&limit=50`,
+      );
       expect(screen.getByRole('button', { name: 'Período' })).toHaveTextContent(
         `${formatDate(start)} – ${formatDate(today)}`,
       );
+    });
+
+    it('P21 reads the list page by page: "Carregar mais" asks for the next cursor', async () => {
+      const seen: (string | null)[] = [];
+      server.use(
+        http.get(url('/ledger/entries'), ({ request }) => {
+          const cursor = new URL(request.url).searchParams.get('cursor');
+          seen.push(cursor);
+          return cursor === 'page-2'
+            ? HttpResponse.json({ items: tradeEntries.slice(0, 2), next_cursor: null })
+            : HttpResponse.json({ items: cashEntries, next_cursor: 'page-2' });
+        }),
+      );
+      const { user } = renderApp(FULL_RANGE);
+
+      expect(await screen.findByText('2 lançamentos exibidos')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Carregar mais' }));
+
+      expect(await screen.findByText('4 lançamentos encontrados')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Carregar mais' })).not.toBeInTheDocument();
+      expect(seen.slice(0, 2)).toEqual([null, 'page-2']);
     });
 
     it('§11.3 shows the empty state for a range without entries', async () => {
@@ -1047,7 +1070,7 @@ describe('Lançamentos (§11.3)', () => {
       const twin = { ...withdrawalEntry, id: 'twin', time: '18:05:00' };
       server.use(
         http.get(url('/ledger/entries'), () =>
-          HttpResponse.json({ items: [twin, withdrawalEntry] }),
+          HttpResponse.json({ items: [twin, withdrawalEntry], next_cursor: null }),
         ),
       );
       await openLedger();
