@@ -16,6 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from di1.modules.ledger.public import EntryType
 from di1.modules.portfolio.public import CashBalance
 from di1.modules.prices.public import PriceSource
+from di1.modules.processing.application.services.dispatcher import ProcessingDispatcher
+from di1.modules.processing.infrastructure.persistence.run_store import SqlRunStore
+from di1.platform.database.unit_of_work import unit_of_work_factory
 from tests.integration.processing.support import make_service, seed_instrument, seed_statuses
 from tests.integration.processing.worker_support import Worker
 from tests.unit.processing.run_fakes import cash_movement, trade
@@ -742,3 +745,98 @@ async def test_a_command_lost_after_the_outbox_publish_is_re_dispatched(worker: 
     await worker.processor.run(claim.request_id, claim.token)
 
     assert (await worker.run_row(request_id))["status"] == "COMPLETED"
+
+
+# --- recovery cap (user decision, 2026-10-19) -------------------------------------------
+
+
+async def crashed_run(worker: Worker, *, attempts: int) -> UUID:
+    """A CASH run over D1..D2 that crashed on D1, leaving D1 RUNNING over PROCESSED, after
+    ``attempts`` claims; its lease has expired."""
+    await seed_statuses(worker.engine, {D0: (None, "PROCESSED"), D1: (None, "PROCESSED")})
+    worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("0"))
+    request_id = await worker.enqueue("CASH", D1, D2)
+
+    async def crash(chain: str, day: date) -> None:
+        raise asyncio.CancelledError
+
+    worker.writer.hook = crash
+    with pytest.raises(asyncio.CancelledError):
+        await worker.dispatch_and_run()
+    worker.writer.hook = None
+    await worker.execute(
+        "UPDATE processing.requests SET attempt_count = :n WHERE id = :id",
+        n=attempts,
+        id=request_id,
+    )
+    worker.clock.advance(61)
+    return request_id
+
+
+async def test_a_run_past_the_recovery_cap_ends_failed_and_frees_the_slot(
+    worker: Worker,
+) -> None:
+    stuck = await crashed_run(worker, attempts=4)  # the first claim and 3 recoveries
+    queued = await worker.enqueue("CASH", D2, D2)
+    outbox_before = len(await worker.outbox())
+
+    assert await worker.dispatcher.dispatch_next() == queued
+
+    run = await worker.run_row(stuck)
+    assert (run["status"], run["error_code"], run["error_message"]) == (
+        "FAILED",
+        "RECOVERY_EXHAUSTED",
+        "Processamento interrompido após repetidas falhas de recuperação.",
+    )
+    assert run["finished_at"] == worker.clock.now()
+    assert run["claim_token"] is None and run["lease_expires_at"] is None
+    rows = await worker.status_rows()
+    assert (rows[D1]["cash"], rows[D1]["cash_previous"]) == ("PROCESSED", None)  # restored
+    assert await worker.active_request_id() == queued
+    assert len(await worker.outbox()) == outbox_before + 1  # only the queued run's command
+    assert (await worker.run_row(queued))["status"] == "DISPATCHED"
+
+
+async def test_a_run_below_the_recovery_cap_is_still_re_dispatched(worker: Worker) -> None:
+    stuck = await crashed_run(worker, attempts=3)
+
+    assert await worker.dispatcher.dispatch_next() == stuck
+    assert (await worker.run_row(stuck))["status"] == "RUNNING"
+
+
+async def test_the_recovery_cap_is_configurable(
+    worker: Worker, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    stuck = await crashed_run(worker, attempts=2)
+    dispatcher = ProcessingDispatcher(
+        uow_factory=unit_of_work_factory(session_factory),
+        store=SqlRunStore(worker.clock),
+        clock=worker.clock,
+        max_recovery_attempts=1,
+    )
+
+    assert await dispatcher.dispatch_next() is None
+
+    run = await worker.run_row(stuck)
+    assert (run["status"], run["error_code"]) == ("FAILED", "RECOVERY_EXHAUSTED")
+    assert await worker.active_request_id() is None
+
+
+async def test_a_crash_on_a_new_date_past_the_cap_deletes_its_empty_row(worker: Worker) -> None:
+    request_id = await worker.enqueue("CASH", D1, D1)
+
+    async def crash(chain: str, day: date) -> None:
+        raise asyncio.CancelledError
+
+    worker.writer.hook = crash
+    with pytest.raises(asyncio.CancelledError):
+        await worker.dispatch_and_run()
+    await worker.execute(
+        "UPDATE processing.requests SET attempt_count = 4 WHERE id = :id", id=request_id
+    )
+    worker.clock.advance(61)
+
+    await worker.dispatcher.dispatch_next()
+
+    assert await worker.statuses() == {}
+    assert (await worker.run_row(request_id))["status"] == "FAILED"

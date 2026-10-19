@@ -118,6 +118,25 @@ def first_failure(failures: list[ChainFailure]) -> ChainFailure:
     return failures[0]
 
 
+async def end_run(
+    store: RunStore, run: RunRecord, status: ProcessingStatus, now: datetime, *, uow: UnitOfWork
+) -> None:
+    """Ends the run: every date of its range still RUNNING is restored from ``*_previous`` (a
+    row left with no status is deleted, OQ-26), and the claim and lease are dropped. The worker
+    never locks ``calculation_state``: the dispatcher locks it before the run's row, so the
+    worker, which locks the run's row first, leaves freeing the slot to the dispatcher."""
+    request = run.request
+    for row in await store.running_dates(request.start_date, request.end_date, uow=uow):
+        await store.save_date_status(row.restored(), uow=uow)
+    finished = RunRecord(
+        request=replace(request, status=status, finished_at=now, updated_at=now),
+        claim_token=None,
+        lease_expires_at=None,
+        attempt_count=run.attempt_count,
+    )
+    await store.save_run(finished, uow=uow)
+
+
 class PortfolioRangeProcessor:
     def __init__(
         self,
@@ -415,20 +434,7 @@ class PortfolioRangeProcessor:
     async def _finish(
         self, run: RunRecord, status: ProcessingStatus, now: datetime, *, uow: UnitOfWork
     ) -> None:
-        """Ends the run: every date of its range still RUNNING is restored from ``*_previous``
-        (a row left with no status is deleted, OQ-26). The worker never locks
-        ``calculation_state``: the dispatcher locks it before the run's row, so the worker, which
-        locks the run's row first, leaves freeing the slot to the dispatcher's next tick."""
-        request = run.request
-        for row in await self._store.running_dates(request.start_date, request.end_date, uow=uow):
-            await self._store.save_date_status(row.restored(), uow=uow)
-        finished = RunRecord(
-            request=replace(request, status=status, finished_at=now, updated_at=now),
-            claim_token=run.claim_token,
-            lease_expires_at=None,
-            attempt_count=run.attempt_count,
-        )
-        await self._store.save_run(finished, uow=uow)
+        await end_run(self._store, run, status, now, uow=uow)
 
     async def _fence(self, request_id: UUID, token: UUID, uow: UnitOfWork) -> RunRecord:
         run = await self._store.get_run(request_id, uow=uow, for_update=True)

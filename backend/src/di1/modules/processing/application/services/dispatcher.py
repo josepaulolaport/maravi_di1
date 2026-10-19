@@ -7,7 +7,10 @@ One call is one transaction under a row lock on the singleton ``calculation_stat
   dispatched;
 - an active run whose lease expired (a crashed worker, or a command never claimed) is
   re-dispatched: its claim token is cleared, which fences out the old worker, and a new command
-  is written, so a new claim resumes it after ``progress_date``;
+  is written, so a new claim resumes it after ``progress_date``; once it has been claimed more
+  than ``max_recovery_attempts`` times after its first claim, it is not re-dispatched but ends
+  FAILED with ``RECOVERY_EXHAUSTED``, its RUNNING dates restored, and the slot goes to the next
+  QUEUED run (user decision, 2026-10-19: configurable, default 3);
 - otherwise the slot of an ended run is freed and the oldest QUEUED run by
   ``(created_at, id)`` becomes DISPATCHED and active.
 
@@ -20,11 +23,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from di1.modules.processing.application.interfaces.run_store import RunRecord, RunStore
-from di1.modules.processing.application.services.run_processor import DEFAULT_LEASE_SECONDS
+from di1.modules.processing.application.services.run_processor import (
+    DEFAULT_LEASE_SECONDS,
+    end_run,
+)
 from di1.modules.processing.public import ProcessingStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
 from di1.platform.messaging.outbox import add_outbox_message
@@ -34,6 +40,11 @@ logger = logging.getLogger(__name__)
 
 RUN_REQUEST_MESSAGE_TYPE = "processing.run_request"
 """The dispatch command; payload ``{"request_id": "<uuid>"}``, schema version 1."""
+
+DEFAULT_MAX_RECOVERY_ATTEMPTS = 3
+"""Re-claims allowed after a run's first claim (user decision, 2026-10-19)."""
+RECOVERY_EXHAUSTED_CODE = "RECOVERY_EXHAUSTED"
+RECOVERY_EXHAUSTED_MESSAGE = "Processamento interrompido após repetidas falhas de recuperação."
 
 ACTIVE = frozenset(
     {ProcessingStatus.DISPATCHED, ProcessingStatus.RUNNING, ProcessingStatus.CANCELLING}
@@ -48,11 +59,15 @@ class ProcessingDispatcher:
         store: RunStore,
         clock: Clock,
         lease_seconds: int = DEFAULT_LEASE_SECONDS,
+        max_recovery_attempts: int = DEFAULT_MAX_RECOVERY_ATTEMPTS,
     ) -> None:
+        if max_recovery_attempts < 0:
+            raise ValueError("max_recovery_attempts cannot be negative")
         self._uow_factory = uow_factory
         self._store = store
         self._clock = clock
         self._lease = timedelta(seconds=lease_seconds)
+        self._max_recovery_attempts = max_recovery_attempts
 
     async def dispatch_next(self) -> UUID | None:
         """Dispatches or re-dispatches one run and returns its id; ``None`` when nothing was
@@ -65,18 +80,23 @@ class ProcessingDispatcher:
                 if active is not None and active.request.status in ACTIVE:
                     if active.lease_expires_at is not None and active.lease_expires_at > now:
                         return None
-                    await self._send(
-                        replace(
-                            active,
-                            request=replace(active.request, updated_at=now),
-                            claim_token=None,
-                            lease_expires_at=now + self._lease,
-                        ),
-                        uow,
-                    )
-                    await uow.commit()
-                    logger.warning("processing request %s re-dispatched (lease expired)", active_id)
-                    return active_id
+                    if active.attempt_count > self._max_recovery_attempts:
+                        await self._exhaust(active, now, uow)
+                    else:
+                        await self._send(
+                            replace(
+                                active,
+                                request=replace(active.request, updated_at=now),
+                                claim_token=None,
+                                lease_expires_at=now + self._lease,
+                            ),
+                            uow,
+                        )
+                        await uow.commit()
+                        logger.warning(
+                            "processing request %s re-dispatched (lease expired)", active_id
+                        )
+                        return active_id
                 # The active run has ended (the worker leaves the slot to us): free it.
                 await self._store.set_active_request_id(None, now, uow=uow)
 
@@ -106,6 +126,24 @@ class ProcessingDispatcher:
             await uow.commit()
             logger.info("processing request %s dispatched", queued.request.id)
             return queued.request.id
+
+    async def _exhaust(self, run: RunRecord, now: datetime, uow: UnitOfWork) -> None:
+        """Ends a run that kept losing its lease: FAILED with RECOVERY_EXHAUSTED, its dates left
+        RUNNING restored; the caller frees the slot in the same transaction."""
+        failed = replace(
+            run,
+            request=replace(
+                run.request,
+                error_code=RECOVERY_EXHAUSTED_CODE,
+                error_message=RECOVERY_EXHAUSTED_MESSAGE,
+            ),
+        )
+        await end_run(self._store, failed, ProcessingStatus.FAILED, now, uow=uow)
+        logger.error(
+            "processing request %s ended FAILED after %s claims (recovery exhausted)",
+            run.request.id,
+            run.attempt_count,
+        )
 
     async def _send(self, run: RunRecord, uow: UnitOfWork) -> None:
         await self._store.save_run(run, uow=uow)
