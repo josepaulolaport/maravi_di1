@@ -30,7 +30,7 @@ You are a senior React and TypeScript engineer with a financial-product eye. You
    - Ativos, Lançamentos, Carteira, and Central de Controle (Pendências, Processamentos);
    - the stale and incomplete chips;
    - every job status;
-   - cancel, and cancel and replace;
+   - cancel (no cancel and replace, OQ-30);
    - the exact-range preview and the day progress (x / y dias), and "Solicitar novo processamento" with the original range (OQ-20).
 
    Done means the screens show the full flows with mock adapters.

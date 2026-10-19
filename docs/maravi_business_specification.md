@@ -85,7 +85,7 @@ O PriceService é o ponto único de gerenciamento dos **preços de referência**
 - Existe **uma única observação por instrumento, data e fonte**; não há revisões (OQ-25). Adicionar um preço para um instrumento, data e fonte que já tem um **apaga o atual** e grava o novo (OQ-26); é assim que **Corrigir** funciona na tela. **Remover** apaga a observação.
 - **Prioridade de seleção para avaliação:** `MANUAL` primeiro, `B3` em segundo. Se nenhuma existir na data exata, o preço exigido está ausente.
 - Não utilizar automaticamente o último PU disponível antes da data solicitada. **Não há carry-forward**, nem aos sábados/domingos.
-- O preço de referência efetivamente utilizado no cálculo é rastreável pela linha publicada: `position_metrics` guarda o **PU de referência usado e sua fonte** (MANUAL ou B3) (OQ-25), para não misturar valor corrigido com P&L antigo.
+- **Os preços ficam somente na tabela de preços** (OQ-30): a Carteira mostra, para cada data, o PU, a taxa e a fonte da observação preferencial atual (MANUAL, senão B3, data exata; após o vencimento o PU é 0). `position_metrics` não guarda PU de referência nem fonte; guarda o `financial_total` e o P&L calculados. Após uma correção de preço, a data mostra o PU novo ao lado dos valores antigos e fica **Desatualizada** até ser reprocessada.
 - A remoção da observação manual faz a fonte B3, se existir, passar a prevalecer para a mesma data.
 - Inserir, corrigir ou remover preço marca a cadeia de posições como **desatualizada** da sua data em diante (§10.4, OQ-23); **não altera trades e nem recalcula as quantidades**.
 - Invalidação ocorre junto da gravação da observação; nenhuma atualização de preço inicia um job de P&L automaticamente.
@@ -104,7 +104,6 @@ Uma compra/venda inclui contrato, direção, quantidade, data/hora efetiva e PU 
 
 - **Data e hora são obrigatórias** (OQ-13, OQ-24): hora em horário local de São Paulo; o formulário sugere a hora atual.
 - **Datas aceitas** (OQ-7, OQ-14): qualquer data corrida, inclusive fins de semana e feriados; nada datado **após hoje** (America/Sao_Paulo) é aceito, para operações, movimentações e preços. Vencimentos são isentos.
-- Um pedido de processamento, um cancelar-e-substituir ou uma pré-visualização cujo intervalo termina **após hoje** é recusado com 422 `FUTURE_DATE` (OQ-29).
 - **Vencimento** (OQ-1): uma operação pode ser datada até a data de vencimento, inclusive; nessa data (dias corridos = 0) o PU é digitado e a taxa é armazenada como `0`. Operações datadas após o vencimento são rejeitadas.
 
 - Cada operação é preservada individualmente, mesmo quando várias operações atingem o mesmo contrato no mesmo dia.
@@ -189,7 +188,7 @@ portfolio_cumulative_pnl[D] = cumulative_pnl[D-1] + portfolio_daily_pnl[D]
 - Métricas adicionais de P&L realizado podem ser avaliadas separadamente futuramente; **não fazem parte da visualização padrão atual**.
 - Para uma avaliação diária válida, usar referência do dia `D` para ativos/trades que a exigem; a referência `D-1` é exigida para `position_pnl` **somente quando `Q[a,D-1] != 0`**.
 - **Primeiro dia** (OQ-4): quando `Q[a,D-1] = 0`, `position_pnl` é exatamente 0 (não `null`), sem exigir referência `D-1`. O P&L acumulado começa em 0 antes do primeiro lançamento.
-- O PU de referência `D-1` usado é o registrado, com sua fonte, na linha `position_metrics` de `D-1` (OQ-9, OQ-25); uma mudança de preço em X marca a cadeia de posições como desatualizada de X em diante (OQ-23).
+- O PU de referência `D-1` usado é o da tabela de preços, observação preferencial atual de `D-1` (OQ-9, OQ-30); uma mudança de preço em X marca a cadeia de posições como desatualizada de X em diante (OQ-23). Se o preço de `D-1` mudou depois que `D-1` foi processado, `D-1` está **Desatualizado** e, pela regra do predecessor (§10.4), `D` também.
 - Trades intradiários podem exigir preço de referência mesmo se a posição de fechamento for zero.
 
 ### 8.2 Valor de mercado e AUM
@@ -217,20 +216,21 @@ aum[D]                     = cash_balance[D] + positions_market_value[D]
 - O P&L acumulado permanece indisponível a partir do primeiro dia com lacuna não resolvida na cadeia histórica, até a correção e o reprocessamento necessário.
 - Uma data sem preços no calendário da tela de Ativos não gera automaticamente pendência; a pendência surge quando um cálculo requer efetivamente a observação ausente.
 - Ausência de dado de mercado **não é falha técnica** da fila ou da calculadora.
-- As telas devem distinguir dados **válidos, ausentes/incompletos e desatualizados**; não combinar PU recém-corrigido com P&L calculado antes da correção.
+- As telas devem distinguir dados **válidos, ausentes/incompletos e desatualizados**; um PU corrigido depois do processamento aparece ao lado dos valores calculados antes da correção, com a data marcada **Desatualizada** até ser reprocessada (OQ-30).
 
 ## 9. Persistência funcional das posições e métricas
 
 | Tabela | Chave lógica | Conteúdo |
 |---|---|---|
 | `portfolio.positions` | `(asset_id, position_date)` | Quantidade de fechamento assinada |
-| `portfolio.position_metrics` | `(asset_id, metric_date)` | PU/taxa médios de entrada, PU de referência usado e sua fonte (OQ-25), `financial_total`, `position_pnl`, `trades_pnl`, `daily_pnl` e estados de completude |
+| `portfolio.position_metrics` | `(asset_id, metric_date)` | PU/taxa médios de entrada, `financial_total`, `position_pnl`, `trades_pnl`, `daily_pnl` e estados de completude |
 | `portfolio.portfolio_metrics` | `metric_date` | Valor de mercado total, AUM, P&L de posições, P&L de operações, P&L diário, P&L acumulado e estados de completude |
 | `portfolio.cash_balances` | `balance_date` | Saldo de caixa do dia e seus componentes: fluxo financeiro das operações, aportes e retiradas (OQ-21) |
 
 - Não persistir uma entidade de negócio `portfolio` nem `portfolio_id`.
 - Não criar simultaneamente tabelas PnL independentes duplicando exatamente os campos de `position_metrics`.
 - O módulo PnL calcula; Portfolio armazena os resultados publicados.
+- `position_metrics` não guarda PU de referência nem fonte: a leitura da Carteira os obtém da observação preferencial atual na tabela de preços (OQ-30).
 - O frontend obtém uma **visão consolidada** por ativo/data a partir do Portfolio Query Service, em uma chamada HTTP, com leitura eficiente e controle de consistência de referência.
 - **Não há tabelas de estágio** (OQ-23): cada data é gravada diretamente nas tabelas finais do escopo, na sua própria transação (§10.4). As tabelas finais ficam no schema `portfolio` e são de propriedade do módulo Portfolio (OQ-8).
 - O status atual de cada data e cadeia fica em `processing.date_status(date, portfolio, cash)`, de propriedade do Processing: é a única fonte de atualização dos resultados publicados (§10.4, OQ-23).
@@ -244,8 +244,9 @@ aum[D]                     = cash_balance[D] + positions_market_value[D]
 O usuário acessa **Central de Controle → Processamentos**, escolhe intervalo inclusivo de datas e o **escopo** — **Caixa**, **Posições** ou **Tudo** (OQ-21) — e confirma o processamento. Caixa processa só a cadeia de caixa; Posições, a de posições com avaliação e P&L; Tudo, as duas, publicadas juntas em cada data. **O processamento cobre exatamente o intervalo solicitado [A, B]**; não há expansão automática (OQ-11).
 
 - Cada data D de cada cadeia parte do resultado publicado de D−1 da própria cadeia, e o status de D−1 decide se D fica atualizado (§10.4, OQ-23). Sem operações antes de A (posições) ou sem lançamentos de qualquer tipo antes de A (caixa), o estado de A−1 da cadeia é o estado zero, válido (OQ-26).
-- **Posições** (OQ-11): se A−1 não está **Atualizado** (com ou sem pendências), o job ainda executa e publica [A, B]; esses dias ficam **Desatualizados**, o P&L fica `null` e uma pendência pede o processamento de um intervalo anterior.
+- **Posições** (OQ-11, OQ-30): se as posições de A−1 foram publicadas mas não estão **Atualizado** (com ou sem pendências), o job ainda executa e publica [A, B]; esses dias ficam **Desatualizados**, o P&L fica `null` e uma pendência pede o processamento de um intervalo anterior. Se as posições de A−1 **não foram publicadas** e há operação datada até A−1, o job de Posições ou Tudo é recusado ao iniciar, como o de caixa: não publica nada e termina `FAILED` com o código `POSITIONS_PREDECESSOR_MISSING`.
 - **Caixa** (OQ-22): se o caixa de A−1 está **desatualizado**, o job executa a partir dele e publica [A, B] marcado como desatualizado, com a mesma pendência. Se o caixa de A−1 **não foi publicado** e há lançamento datado até A−1, o job de Caixa ou Tudo é recusado ao iniciar: não publica nada e termina `FAILED` com o código `CASH_PREDECESSOR_MISSING` e a mensagem "Caixa do dia anterior não processado: processe primeiro um intervalo anterior." Enfileirar é sempre permitido.
+- Um pedido de processamento ou uma pré-visualização cujo intervalo termina **após hoje** é recusado com 422 `FUTURE_DATE` (OQ-29).
 - A pré-visualização avisa quando o estado de A−1 da cadeia do escopo está desatualizado ou ausente.
 
 ### 10.2 Fila, simultaneidade e cancelamento
@@ -254,7 +255,7 @@ O usuário acessa **Central de Controle → Processamentos**, escolhe intervalo 
 - **Somente um pedido é executado por vez** para a carteira única.
 - O usuário pode cancelar pedidos **na fila** imediatamente. Um pedido **enviado** (`DISPATCHED`) passa a `CANCELLING` e o worker o encerra `CANCELLED` ao reivindicá-lo, sem processar nenhuma data; cancelar um pedido já em `CANCELLING`, ou já terminado, é recusado (409 `JOB_NOT_CANCELLABLE`) (OQ-29).
 - Para pedido **em execução**, cancelar sinaliza interrupção; o worker verifica o sinal entre datas: a data em curso é concluída e publicada, as datas seguintes não são tocadas e o pedido termina `CANCELLED`. Um cancelamento que chega durante a última data deixa o pedido terminar `COMPLETED`, ou `COMPLETED_WITH_ISSUES` se alguma data gravada tem pendências (OQ-23, OQ-26).
-- O usuário pode registrar nova operação ou corrigir preço, enfileirar um novo intervalo e cancelar o job anterior. A UI oferece **Cancelar e criar novo processamento**, que faz os dois pedidos de forma coordenada (OQ-20).
+- O usuário pode registrar nova operação ou corrigir preço, enfileirar um novo intervalo e cancelar o job anterior, como **ações separadas**: não há ação combinada de cancelar e substituir (OQ-30, que reverte OQ-20 item 5).
 - A fila durável e os estados de jobs pertencem ao **PostgreSQL**. RabbitMQ transporta comandos de execução; não é a fonte de verdade sobre a ordem dos jobs.
 - O worker processa cronologicamente as datas com chamadas diretas aos módulos (Portfolio, Prices, PnL); não se publica uma mensagem para cada ativo ou dia.
 - Não há versões de inputs nem job descartado por mudança de dados (OQ-23). Uma gravação que chega durante um processamento espera os bloqueios das linhas de status de D−1 e D da data em curso e depois marca como desatualizado o que afeta (§10.4); o processamento não para por isso.
@@ -271,7 +272,7 @@ Um processamento (pedido) tem **oito** status (OQ-23); não existe `SUPERSEDED` 
 - `CANCELLED`: cancelado; as datas já concluídas continuam publicadas e as seguintes não são tocadas.
 - `COMPLETED`: todas as datas do intervalo publicadas como **Atualizado**.
 - `COMPLETED_WITH_ISSUES`: alguma data gravada pelo pedido ficou **Atualizado com pendências** (preço ausente ou contrato vencido com posição aberta) ou **Desatualizado**.
-- `FAILED`: falha técnica inesperada em uma data, que fica com status **Erro** (§10.4), ou caixa de A−1 não publicado (`CASH_PREDECESSOR_MISSING`, §10.1, OQ-22).
+- `FAILED`: falha técnica inesperada em uma data, que fica com status **Erro** (§10.4), ou predecessor de A−1 não publicado: caixa (`CASH_PREDECESSOR_MISSING`, OQ-22) ou posições (`POSITIONS_PREDECESSOR_MISSING`, OQ-30) (§10.1).
 
 Rótulos na interface (OQ-20, OQ-23): `QUEUED` **Na fila**, `DISPATCHED` **Enviado**, `RUNNING` **Processando**, `CANCELLING` **Cancelando**, `CANCELLED` **Cancelado**, `COMPLETED` **Concluído**, `COMPLETED_WITH_ISSUES` **Concluído com pendências**, `FAILED` **Falhou**. Não existe status "Bloqueado": preço ausente nunca interrompe um job.
 
@@ -314,7 +315,7 @@ Os designs existentes no **Aura Build** são a base visual e devem ser implement
 Duas abas: **Pendências** e **Processamentos**.
 
 - **Pendências:** problemas realmente identificados pela validação/processamento, não uma lista de todos os dias sem cotação. Somente os três tipos de §10.3; falha técnica (`FAILED`) aparece em Processamentos, não como pendência (OQ-19). Ação **Definir preço** conduz à entrada/correção da referência.
-- **Processamentos:** escolher datas e escopo (Caixa, Posições ou Tudo; OQ-21), pré-visualizar o intervalo exato [A, B] (dias a processar, com aviso quando o estado anterior está desatualizado; sem "período efetivo" expandido), enfileirar, acompanhar progresso e status, ver erros, cancelar pedidos, cancelar e substituir. Os jobs continuam existindo no histórico após conclusão/cancelamento (OQ-20). Os status dos pedidos são os oito de §10.3.
+- **Processamentos:** escolher datas e escopo (Caixa, Posições ou Tudo; OQ-21), pré-visualizar o intervalo exato [A, B] (dias a processar, com aviso quando o estado anterior está desatualizado; sem "período efetivo" expandido), enfileirar, acompanhar progresso e status, ver erros e cancelar pedidos; cancelar e enfileirar são ações separadas, sem cancelar e substituir (OQ-30). Os jobs continuam existindo no histórico após conclusão/cancelamento (OQ-20). Os status dos pedidos são os oito de §10.3.
   - Cada data é publicada na sua própria transação (§10.4, OQ-23): os detalhes de um job cancelado ou com falha informam a última data publicada, que as datas até ela continuam publicadas e que as seguintes não foram tocadas; na falha, mostram a data com **Erro**, o código e a mensagem.
   - Um job cancelado ou com falha oferece **Solicitar novo processamento**, que preenche o formulário a partir da data com falha ou, para um job cancelado, da primeira data não alcançada, até a data final original (OQ-23).
   - Pedidos sobrepostos ou repetidos continuam permitidos; não há coluna "Motivo".
@@ -343,8 +344,8 @@ Duas abas: **Pendências** e **Processamentos**.
 - Indicadores: **Saldo em caixa**, **AUM/Patrimônio**, **P&L diário**, **P&L de posições** e **P&L de operações**.
 - **Gráfico compacto de P&L acumulado** no nível da carteira, somente onde houver histórico completo e válido.
 - O gráfico termina sempre na data selecionada da Carteira (mesma publicação dos indicadores); o usuário escolhe apenas a **data inicial**, anterior a essa data. Padrão: os 30 dias corridos que terminam na data. A data inicial fica na URL (`?pnl_start=`); valor inválido é ignorado (OQ-27).
-- Tabela de posições consolida: ativo, vencimento, quantidade, PU médio, taxa média, PU de referência, taxa de referência (quando disponível), **valor de mercado** (`financial_total`), P&L posições e P&L operações.
-- Os resultados por ativo e o total do portfólio derivam da mesma publicação coerente; não juntar preço novo com P&L velho.
+- Tabela de posições consolida: ativo, vencimento, quantidade, PU médio, taxa média, PU de referência, taxa de referência (quando disponível), **valor de mercado** (`financial_total`), P&L posições e P&L operações. PU, taxa e fonte de referência vêm da observação preferencial atual na tabela de preços (OQ-30).
+- Os resultados calculados por ativo e o total do portfólio derivam da mesma publicação coerente. Se um preço mudou depois da publicação, a tabela mostra o PU novo ao lado dos valores antigos e a data fica **Desatualizada** até ser reprocessada (OQ-30).
 - Exibir claramente métricas ausentes/incompletas ou desatualizadas; oferecer caminho contextual para Pendências ou Processamentos.
 - Os indicadores de status **Caixa** e **Posições** da data vêm de `processing.date_status` (§10.4, OQ-23).
 - Não listar caixa como linha de posição de ativo. Não expor P&L realizado/não realizado ou P&L acumulado por ativo na tabela padrão.
@@ -374,14 +375,14 @@ Devem existir testes de unidade para calculadoras e testes de integração para 
 7. Sem PU do dia e/ou anterior, fim de semana, posição zero e round trip no mesmo dia; não fazer carry-forward.
 8. P&L parcial em ativo sem publicar total de carteira aparentemente completo.
 9. Mudança histórica em lançamento/PU e invalidação pelo status das datas (OQ-23): somente as datas ≥ W que já têm status ficam **Desatualizado**, só na cadeia afetada, e as datas sem status continuam **Não processado** (sem auto-job).
-10. Dois pedidos com intervalos sobrepostos, cancelamento na fila, cancelamento em execução (a data em curso é publicada, as seguintes não são tocadas, `CANCELLED`; durante a última data, `COMPLETED` ou `COMPLETED_WITH_ISSUES`) e reposição.
+10. Dois pedidos com intervalos sobrepostos, cancelamento na fila, cancelamento em execução (a data em curso é publicada, as seguintes não são tocadas, `CANCELLED`; durante a última data, `COMPLETED` ou `COMPLETED_WITH_ISSUES`) e novo pedido enfileirado como ação separada (sem cancelar e substituir, OQ-30). Cancelar pedido enviado o leva a `CANCELLING` e o worker o encerra `CANCELLED`; cancelar pedido em `CANCELLING` ou terminado é recusado (409); intervalo que termina após hoje é recusado (422) (OQ-29).
 11. Publicação por data (OQ-23): falha em D deixa D com **Erro**, mantém publicadas as datas anteriores e não toca as seguintes; regra do predecessor (D **Atualizado** somente com D−1 Atualizado, com ou sem pendências, ou estado zero; senão **Desatualizado** com pendência); uma gravação durante o job espera o bloqueio de D−1/D e marca o que afeta, sem interromper o job; idempotência/reentrega RabbitMQ; recuperação de worker a partir do último progresso; "Solicitar novo processamento" a partir da data com falha ou da primeira não alcançada.
 12. Resposta consolidada da Carteira coerente por data e status; mocks em conformidade com APIs.
 13. Cadeias separadas (OQ-21, OQ-23): um aporte marca Desatualizado somente o caixa, e uma operação, caixa e posições; um job Tudo grava as duas cadeias e o AUM de cada data na mesma transação; `aum = caixa + valor de mercado` após publicar só Caixa, só Posições e Tudo.
-14. Predecessor (OQ-22): Caixa com A−1 não publicado e lançamentos anteriores termina `FAILED` (`CASH_PREDECESSOR_MISSING`) sem publicar; com A−1 desatualizado publica marcado; um job Tudo registra as duas pendências de predecessor, uma por cadeia.
+14. Predecessor (OQ-22, OQ-30): Caixa com A−1 não publicado e lançamentos anteriores termina `FAILED` (`CASH_PREDECESSOR_MISSING`) sem publicar; Posições ou Tudo com posições de A−1 não publicadas e operações anteriores termina `FAILED` (`POSITIONS_PREDECESSOR_MISSING`) sem publicar; com A−1 desatualizado publica marcado; um job Tudo registra as duas pendências de predecessor, uma por cadeia.
 15. Dia sem ativo esperado (OQ-22): posição zerada em D e D+1 sem ativos publica P&L 0, AUM = caixa e P&L acumulado levado adiante.
 16. Lançamento único (OQ-24): operações e movimentações da mesma data seguem `(data, hora, seq)` entre os dois tipos; a exclusão múltipla mista é tudo ou nada, compartilha o identificador de lote e marca cada cadeia uma única vez, a partir da sua data mais antiga.
-17. Preços sem revisões (OQ-25): corrigir altera a observação no lugar; remover o MANUAL faz o B3 prevalecer; corrigir ou remover um preço já usado é permitido e marca as posições como Desatualizado da sua data em diante; a linha publicada guarda o PU e a fonte usados.
+17. Preços sem revisões (OQ-25): corrigir altera a observação no lugar; remover o MANUAL faz o B3 prevalecer; corrigir ou remover um preço já usado é permitido e marca as posições como Desatualizado da sua data em diante. Desde OQ-30, a Carteira mostra o PU, a taxa e a fonte atuais da tabela de preços ao lado dos valores antigos, com a data Desatualizada até o reprocessamento; corrigir o preço de D−1 depois de processado deixa D−1 e D Desatualizados.
 
 ## 14. Decisões fechadas e itens ainda abertos
 
@@ -408,9 +409,9 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - Limites operacionais simples e configuráveis (OQ-5).
 - Fins de semana e feriados aceitos; datas futuras rejeitadas; limites de valores apenas do schema (OQ-7, OQ-14).
 - Tabelas de resultados no schema `portfolio`, de propriedade do Portfolio (OQ-8); sem tabelas de estágio desde OQ-23.
-- PU `D-1` rastreado pela linha de `D-1`, que guarda PU e fonte usados (OQ-9, OQ-25).
+- PU `D-1` lido da tabela de preços; preço de `D-1` alterado depois do processamento deixa `D-1` e `D` desatualizados (OQ-9, OQ-30).
 - Ativo esperado: `Q[D-1] != 0` ou operação em D (OQ-10).
-- Intervalo exato [A, B], sem expansão; predecessor desatualizado publica como desatualizado (OQ-11).
+- Intervalo exato [A, B], sem expansão; predecessor desatualizado publica como desatualizado; posições de A−1 não publicadas recusam o job desde OQ-30 (OQ-11).
 - Atualização dos resultados pelo status de cada data (OQ-12, substituído por OQ-23).
 - Hora obrigatória em todo lançamento; ordem `(data, hora, seq)` entre operações e movimentações (OQ-13, OQ-24).
 - Erros em problem+json (RFC 9457) com catálogo de códigos (OQ-15).
@@ -418,16 +419,17 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - Gráfico de P&L acumulado da Carteira: só data inicial (anterior à data da Carteira, padrão 30 dias, na URL); termina sempre na data da Carteira (usuário, 18/10/2026, sessão do frontend; OQ-27).
 - Lane H é dona de `platform/**` (OQ-17).
 - Caixa e posições são duas cadeias processáveis separadamente (escopos Caixa, Posições e Tudo), cada uma com seu status por data (OQ-23); caixa publicado em `cash_balances`; AUM recalculado por quem publica (OQ-21).
-- Caixa de A−1 não publicado recusa o job ao iniciar; caixa desatualizado publica marcado; posições seguem OQ-11; pendência de predecessor indica a cadeia; dia sem ativo esperado é processado com P&L 0 e acumulado levado adiante; sem processo automático à meia-noite (OQ-22).
+- Caixa de A−1 não publicado recusa o job ao iniciar; caixa desatualizado publica marcado; posições seguem OQ-11 (não publicadas: recusa, OQ-30); pendência de predecessor indica a cadeia; dia sem ativo esperado é processado com P&L 0 e acumulado levado adiante; sem processo automático à meia-noite (OQ-22).
 - Arquitetura (usuário, 18/10/2026): `infrastructure/` contém persistência e outros adaptadores de saída; consumidores e handlers RabbitMQ de um módulo ficam em `presentation/messaging/`, a infraestrutura RabbitMQ compartilhada em `platform/messaging/`, e a lógica de processamento em `application/`. O domínio é determinístico e sem I/O nem efeitos colaterais (sem arquivo, rede, banco, mensageria, ambiente ou relógio do sistema); utilitários puros da biblioteca padrão (`datetime`, `Decimal`, `Enum`, `dataclasses`) são permitidos. O domínio não faz logging (que pertence às camadas de aplicação, infraestrutura e apresentação) e comunica falhas por exceções e resultados explícitos; não gera aleatoriedade internamente: um cálculo que precise dela (ex.: Monte Carlo) recebe uma semente explícita ou um gerador injetado.
 
 - Desvios e interpretações do enunciado registrados em §15 (OQ-18).
-- Design × especificação (usuário, 18/10/2026, sessão do frontend; OQ-19, OQ-20): dados e funcionalidades da especificação prevalecem sobre o design preliminar; Carteira com P&L de posições e de operações; três tipos de pendência; faixa Caixa D0/D−1 em Lançamentos; catálogo só com dados da API; última referência sempre com sua data; coluna Fonte no calendário, com menu Corrigir e Remover (OQ-25); sem calculadora taxa ↔ PU nem prévia (valor complementar calculado ao salvar); intervalo exato [A, B]; oito status com rótulos em português e sem "Bloqueado" (OQ-23); publicação por data (OQ-23); novo processamento a partir da data com falha ou da primeira data não alcançada (OQ-23); cancelar e substituir.
+- Design × especificação (usuário, 18/10/2026, sessão do frontend; OQ-19, OQ-20): dados e funcionalidades da especificação prevalecem sobre o design preliminar; Carteira com P&L de posições e de operações; três tipos de pendência; faixa Caixa D0/D−1 em Lançamentos; catálogo só com dados da API; última referência sempre com sua data; coluna Fonte no calendário, com menu Corrigir e Remover (OQ-25); sem calculadora taxa ↔ PU nem prévia (valor complementar calculado ao salvar); intervalo exato [A, B]; oito status com rótulos em português e sem "Bloqueado" (OQ-23); publicação por data (OQ-23); novo processamento a partir da data com falha ou da primeira data não alcançada (OQ-23); sem cancelar e substituir (OQ-30).
 - Processamento dia a dia (OQ-23): sem estágio, cada data publicada na sua própria transação; `processing.date_status` guarda o status atual de cada data por cadeia (Atualizado, Atualizado com pendências, Desatualizado, Processando, Erro; sem status = Não processado) e é a única fonte de atualização; gravações marcam Desatualizado as datas com status a partir da sua data; sem marcadores, revisões nem `SUPERSEDED`; falha em D deixa D com Erro e não toca as datas seguintes; cancelamento publica a data em curso; recuperação a partir do último progresso.
 - Lançamento único (OQ-24): `ledger.entries` para operações e movimentações de caixa, hora obrigatória, `seq` comum, valor de caixa com sinal; exclusão lógica sem motivo; exclusão múltipla em uma única transação, com identificador de lote; rotas `/ledger/entries`.
 - AUM sem status (OQ-28): `aum` é apenas o valor (caixa + valor de mercado, `null` se um lado falta); a tela mostra os status das duas cadeias.
 - Intervalo de processamento que termina após hoje é recusado (`FUTURE_DATE`); cancelar pedido enviado o leva a `CANCELLING`, e cancelar pedido em `CANCELLING` ou terminado é recusado (409) (OQ-29).
-- Preços de referência sem revisões (OQ-25): uma observação por instrumento, data e fonte; correção no lugar, remoção apaga; rastreio pelo PU e fonte gravados em `position_metrics`.
+- Preços de referência sem revisões (OQ-25): uma observação por instrumento, data e fonte; correção no lugar, remoção apaga; rastreio pela tabela de preços desde OQ-30.
+- Revisão dos contratos W0.3c (usuário, 19/10/2026, sessão do integrador; OQ-30): preços somente na tabela de preços (a Carteira mostra PU, taxa e fonte da observação preferencial atual; `position_metrics` sem PU de referência nem fonte; PU `D-1` da tabela de preços); posições de A−1 não publicadas recusam o job ao iniciar (`POSITIONS_PREDECESSOR_MISSING`); sem cancelar e substituir: cancelar e enfileirar são ações separadas.
 
 ### Aberto — requer decisão específica antes de codificar o comportamento
 

@@ -26,7 +26,7 @@ description: Build or change a Maravi DI1 screen or component (React, TypeScript
   - valid, missing/incomplete, stale and unprocessed data;
   - `COMPLETED_WITH_ISSUES`;
   - every job status;
-  - cancel, and cancel and replace;
+  - cancel (no cancel and replace, OQ-30);
   - `null` shown as unavailable;
   - the exact pt-BR formatted strings.
 

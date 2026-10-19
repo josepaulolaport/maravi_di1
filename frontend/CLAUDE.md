@@ -67,7 +67,7 @@ frontend/src/
   - **Processamentos** (OQ-20):
     - pick a date range and a scope (Caixa, Posições, Tudo; OQ-21) and preview exactly [A, B] (days to process), with the warning when the chain's status on the day before is not current or is missing (OQ-11, OQ-23); no "período efetivo";
     - queue the job, then follow its progress ("x / y dias") and status;
-    - cancel a job, or cancel and replace it;
+    - cancel a job; cancelling and queuing a new request are separate actions, with no "Cancelar e criar novo processamento" (OQ-30);
     - publication is per date (OQ-23): a cancelled or failed job keeps the dates it committed, and later dates are untouched; it offers "Solicitar novo processamento", prefilled from the failed date, or the first date not reached, to the original end;
     - finished and cancelled jobs stay in the history; no "Motivo" column, no duplicate blocking.
   - No financial KPIs on this screen.
@@ -86,7 +86,7 @@ frontend/src/
   - One date, showing published data only.
   - KPIs: Saldo em caixa, AUM/Patrimônio, P&L diário, P&L de posições, P&L de operações.
   - A compact cumulative P&L chart, shown only where the history is complete. It always ends on the selected date; the user picks only its start, which must be before that date (default: the 30 days ending on the date), kept in the URL as `?pnl_start=` and ignored when invalid (OQ-27).
-  - The positions table, with the columns of spec §11.4.
+  - The positions table, with the columns of spec §11.4. Its reference PU, rate and source are the current preferred price from the price table (OQ-30), as the API returns them; after a price correction the date shows the new PU next to the old figures and reads Desatualizado until reprocessed.
   - Only two data-status badges, Caixa and Posições, each showing that chain's status on the date (OQ-23), with links to Pendências and Processamentos; no badge per KPI and no stale or incomplete notice cards.
   - Cash is not a position row. No realized or unrealized P&L.
 

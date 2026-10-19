@@ -42,7 +42,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - **Exact date only. No carry-forward**, weekends included.
   - When both sources exist, MANUAL wins over B3.
   - There is one row per (asset, date, source) and no revisions (OQ-25): a correction updates it in place, a removal deletes it.
-  - The price used is traceable through the published row: `position_metrics` stores the `reference_pu` used and its `reference_source`.
+  - Prices live only in the price table (OQ-30): the Carteira shows each date's reference PU, rate and source from the current preferred price, and `position_metrics` stores no PU or source. D's position P&L uses the D−1 PU from the price table; a price changed after its date was processed leaves that date, and the next by the predecessor rule, `STALE` until reprocessed.
 - **Accounting:**
   - Starting state: zero cash, zero positions, zero P&L.
   - **Every calendar day** is processed.
@@ -87,11 +87,13 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - No automatic settlement. The user closes with a normal trade, at any PU, up to the maturity date inclusive. On the maturity date the PU is typed and the rate is stored as 0.
   - The maturity-day reference price is entered by the user.
   - After maturity the reference PU is 0 by definition, and trades and prices dated after it are rejected. An open position then raises the Pendência "contrato vencido com posição aberta".
-- **Processing ranges** (OQ-11, OQ-21, OQ-23):
+- **Processing ranges** (OQ-11, OQ-21, OQ-23, OQ-30):
   - A job has a scope: CASH, POSITIONS or ALL. Each scope reads and sets only its own chain's status; ALL writes both chains of a date, and its AUM, in one transaction.
   - A job processes exactly [A, B], with no expansion.
   - D is `FRESH` (or `FRESH_WITH_ISSUES`) only when D−1 is `FRESH` or `FRESH_WITH_ISSUES`, or is the chain's zero state (positions: no trade before D; cash: no entry of either type before D, OQ-26); otherwise the job still publishes D as `STALE`, with `null` P&L and a `STALE_PREDECESSOR` issue that names its chain.
   - Exception for cash (OQ-22): if A−1 has no published cash and something is dated on or before A−1, a CASH or ALL job publishes nothing and ends `FAILED` (`CASH_PREDECESSOR_MISSING`). Stale cash at A−1 publishes flagged stale.
+  - Same for positions (OQ-30): if A−1 has no published positions and a trade is dated on or before A−1, a POSITIONS or ALL job publishes nothing and ends `FAILED` (`POSITIONS_PREDECESSOR_MISSING`). Stale positions at A−1 publish flagged stale.
+  - There is no cancel-and-replace (OQ-30): cancel and queue are separate actions.
   - A day with no expected asset is still processed: P&L 0, AUM = cash, cumulative P&L carried forward (OQ-22).
   - There are no dirty markers: each published date sets its own status in `date_status` (OQ-23).
 - **All user-facing text is Brazilian Portuguese**, with Brazilian formats. Code and identifiers are English.
