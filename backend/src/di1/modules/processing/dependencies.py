@@ -18,7 +18,9 @@ from di1.modules.processing.application.interfaces.doorbell import DOORBELL_MESS
 from di1.modules.processing.application.services.chain_history import LedgerChainHistory
 from di1.modules.processing.application.services.processing import ProcessingService
 from di1.modules.processing.application.services.run_chains import DayReaders
-from di1.modules.processing.application.services.run_processor import PortfolioRangeProcessor
+from di1.modules.processing.application.services.run_processor import (
+    PortfolioRangeProcessor as PortfolioRangeProcessor,  # re-exported for the composition
+)
 from di1.modules.processing.infrastructure.messaging.outbox_doorbell import OutboxDoorbell
 from di1.modules.processing.infrastructure.persistence.repositories import (
     SqlDateStatusRepository,

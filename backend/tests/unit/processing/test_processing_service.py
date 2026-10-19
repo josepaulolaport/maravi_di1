@@ -559,3 +559,42 @@ def test_oq31_the_predecessor_has_no_stale_state() -> None:
         "NOT_PROCESSED",
         "ZERO_STATE",
     }
+
+
+@pytest.mark.parametrize(
+    "ended",
+    [
+        ProcessingStatus.CANCELLED,  # a queued run cancelled, then cancelled again
+        ProcessingStatus.COMPLETED,  # a cancel that arrived during the last date (OQ-23)
+        ProcessingStatus.FAILED,
+    ],
+)
+async def test_an_ended_run_with_a_cancel_on_record_answers_ended_not_requested(
+    harness: Harness, ended: ProcessingStatus
+) -> None:
+    run = await harness.enqueue()
+    harness.set_status(run.id, ProcessingStatus.RUNNING)
+    await harness.service.request_cancel(run.id, uow=FakeUnitOfWork())  # cancel on record
+    harness.set_status(run.id, ended)
+
+    with pytest.raises(DomainError) as raised:
+        await harness.service.request_cancel(run.id, uow=FakeUnitOfWork())
+
+    assert _error(raised) == (
+        ErrorDetail(
+            ErrorCode.JOB_NOT_CANCELLABLE,
+            "Este processamento já foi encerrado e não pode ser cancelado.",
+        ),
+    )
+
+
+async def test_a_queued_run_cancelled_twice_answers_ended(harness: Harness) -> None:
+    queued = await harness.enqueue()
+    await harness.service.request_cancel(queued.id, uow=FakeUnitOfWork())
+
+    with pytest.raises(DomainError) as raised:
+        await harness.service.request_cancel(queued.id, uow=FakeUnitOfWork())
+
+    assert _error(raised)[0].message == (
+        "Este processamento já foi encerrado e não pode ser cancelado."
+    )
