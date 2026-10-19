@@ -4,8 +4,8 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 import { ApiError } from '@/api/http';
 
 /**
- * A failed action in a drawer or dialog (OQ-15): every problem+json message, except those
- * bound to a field in `shownOnFields`, which the form shows on its own inputs.
+ * A failed action in a drawer or dialog (OQ-15): every problem+json message, except the one
+ * per field in `shownOnFields` that the form shows on its own input.
  */
 export function ActionError({
   error,
@@ -34,7 +34,14 @@ function errorMessages(error: unknown, shownOnFields: readonly string[]): string
   if (!(error instanceof ApiError)) return ['Ocorreu um erro inesperado. Tente novamente.'];
   const errors = error.problem.errors ?? [];
   if (errors.length === 0) return [error.message];
+  // A form shows one message per field (the first, as `ApiError.fieldErrors()` keeps); any
+  // further message for that field stays here, so none is lost.
+  const shown = new Set<string>();
   return errors
-    .filter((e) => !(e.field !== null && shownOnFields.includes(e.field)))
+    .filter((e) => {
+      if (e.field === null || !shownOnFields.includes(e.field) || shown.has(e.field)) return true;
+      shown.add(e.field);
+      return false;
+    })
     .map((e) => e.message);
 }
