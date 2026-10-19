@@ -87,6 +87,8 @@ Pure domain calculators (`portfolio/domain/`, frozen dataclasses). Two independe
 
 ## HTTP endpoints
 
+- `GET /health` (and `HEAD`): `200 {"status": "ok"}` when PostgreSQL answers `SELECT 1` within a short timeout (2 s); otherwise `503` problem+json ("Serviço indisponível", "O banco de dados não está acessível."), nothing of the error in the body. Served by `composition/health.py`; the app is built by `di1.main:create_app` (uvicorn `--factory`).
+
 - `POST /trades`, `DELETE /trades/{id}`, `GET /trades`
 - `POST /cash-movements`, `DELETE /cash-movements/{id}`, `GET /cash-movements`
 - `POST /reference-prices`, `GET /reference-prices`, `DELETE /reference-prices/{id}` (audit-preserving removal)
