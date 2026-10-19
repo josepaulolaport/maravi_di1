@@ -40,7 +40,7 @@ The user decided (2026-10-18) that cash and positions are two separately process
 - `ProcessingScope = CASH | POSITIONS | ALL`: required on `POST /processing/requests`, on cancel-and-replace and on the preview; echoed on every `ProcessingRequest`.
 - `ProcessingPreview.predecessor = {cash, positions}`, replacing `predecessor_state`.
 - `Issue.chain`: for `STALE_PREDECESSOR`, the chain whose day before is behind; `null` for the other types. A missing price and an expired open position are facts of the positions chain.
-- `PortfolioSummary = {date, cash, positions, aum}`, each with its own `status: FRESH | STALE | NOT_PROCESSED`:
+- `PortfolioSummary = {date, cash, positions, aum}`, each with its own `status: FRESH | STALE | NOT_PROCESSED`. The cash also carries its day's components: `trades_cash_flow`, `deposits` and `withdrawals` (user, 2026-10-18).
   - `cash.balance` comes from `portfolio.cash_balances`;
   - `positions` holds the market value, the valuation status and the P&L;
   - `aum.value` is `null` when either side is missing, and `aum.status` is the less current of the two.

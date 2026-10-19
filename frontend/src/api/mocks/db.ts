@@ -24,7 +24,13 @@ function createDb() {
       cash: new Map(
         fixtures.summaries.map((s) => [
           s.date,
-          { balance: s.cash_balance, published_at: s.published_at },
+          {
+            balance: s.cash_balance,
+            trades_cash_flow: s.trades_cash_flow,
+            deposits: s.deposits,
+            withdrawals: s.withdrawals,
+            published_at: s.published_at,
+          },
         ]),
       ),
       /** The positions chain: summary figures (`portfolio_metrics`), rows and P&L series. */

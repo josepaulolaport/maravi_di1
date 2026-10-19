@@ -70,9 +70,50 @@ describe('OQ-21 the summary keeps cash, positions and AUM apart', () => {
   it('§12 D3 a day never processed: both chains and AUM unprocessed, every figure null', async () => {
     const summary = await portfolioApi.getSummary('2026-10-17');
 
-    expect(summary.cash).toEqual({ status: 'NOT_PROCESSED', balance: null, published_at: null });
+    expect(summary.cash).toMatchObject({
+      status: 'NOT_PROCESSED',
+      balance: null,
+      published_at: null,
+    });
     expect(summary.positions).toMatchObject({ status: 'NOT_PROCESSED', market_value: null });
     expect(summary.aum).toEqual({ status: 'NOT_PROCESSED', value: null });
+  });
+});
+
+describe('OQ-21 the cash of a day carries its components (user, 2026-10-18)', () => {
+  it.each([
+    ['2026-10-14', '-890064.6254673500', '1500000.00', '0.00', '609935.3745326500'],
+    ['2026-10-15', '-410285.00', '0.00', '0.00', '199650.3745326500'],
+    ['2026-10-16', '356408.8906133732', '0.00', '50000.00', '506059.2651460232'],
+  ])(
+    '§7 %s: trades cash flow, deposits and withdrawals next to the balance',
+    async (date, flow, deposits, withdrawals, balance) => {
+      expect((await portfolioApi.getSummary(date)).cash).toMatchObject({
+        balance,
+        trades_cash_flow: flow,
+        deposits,
+        withdrawals,
+      });
+    },
+  );
+
+  it('§12 D3 a day never processed has no components either', async () => {
+    expect((await portfolioApi.getSummary('2026-10-17')).cash).toMatchObject({
+      trades_cash_flow: null,
+      deposits: null,
+      withdrawals: null,
+    });
+  });
+
+  it('§10.4 a CASH job publishes the components of its days', async () => {
+    await run('2026-10-17', '2026-10-17', 'CASH');
+
+    expect((await portfolioApi.getSummary('2026-10-17')).cash).toMatchObject({
+      balance: '506059.2651460232',
+      trades_cash_flow: '0.0000000000',
+      deposits: '0.00',
+      withdrawals: '0.00',
+    });
   });
 });
 

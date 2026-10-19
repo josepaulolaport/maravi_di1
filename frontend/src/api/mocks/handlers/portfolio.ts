@@ -41,6 +41,9 @@ export function summaryOf(date: string): PortfolioSummary {
     cash: {
       status: cashStatus,
       balance: cash?.balance ?? null,
+      trades_cash_flow: cash?.trades_cash_flow ?? null,
+      deposits: cash?.deposits ?? null,
+      withdrawals: cash?.withdrawals ?? null,
       published_at: cash?.published_at ?? null,
     },
     positions: {

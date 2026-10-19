@@ -35,6 +35,14 @@ export interface CashSummary {
   status: Freshness;
   /** `null` when not processed. */
   balance: Decimal | null;
+  /**
+   * The day's components (OQ-21; user 2026-10-18: "metrics we will need to calculate and
+   * keep"): −Σ(signed_qty × execution_PU), the day's deposits and withdrawals. `null` when
+   * not processed.
+   */
+  trades_cash_flow: Decimal | null;
+  deposits: Decimal | null;
+  withdrawals: Decimal | null;
   published_at: IsoDateTime | null;
 }
 

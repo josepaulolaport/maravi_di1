@@ -101,7 +101,13 @@ function publish(job: ProcessingRequest): void {
   db.issues = db.issues.filter((issue) => !replacedBy(chains, start, end, issue));
   for (const [date, day] of days) {
     if (chains.includes('CASH')) {
-      db.published.cash.set(date, { balance: day.summary.cash_balance, published_at: publishedAt });
+      db.published.cash.set(date, {
+        balance: day.summary.cash_balance,
+        trades_cash_flow: day.summary.trades_cash_flow,
+        deposits: day.summary.deposits,
+        withdrawals: day.summary.withdrawals,
+        published_at: publishedAt,
+      });
     }
     if (chains.includes('POSITIONS')) {
       db.published.summaries.set(date, { ...day.summary, published_at: publishedAt });

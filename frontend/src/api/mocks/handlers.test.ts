@@ -101,7 +101,11 @@ describe('mock portfolio', () => {
 
   it('§12 D3 reports a date that was never processed instead of inventing figures', async () => {
     const summary = await portfolioApi.getSummary('2026-10-17');
-    expect(summary.cash).toEqual({ status: 'NOT_PROCESSED', balance: null, published_at: null });
+    expect(summary.cash).toMatchObject({
+      status: 'NOT_PROCESSED',
+      balance: null,
+      published_at: null,
+    });
     expect(summary.positions.status).toBe('NOT_PROCESSED');
     expect(summary.positions.market_value).toBeNull();
   });

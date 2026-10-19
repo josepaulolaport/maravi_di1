@@ -251,6 +251,10 @@ export interface SeedSummary {
   publication: 'PUBLISHED';
   published_at: string;
   cash_balance: Decimal;
+  /** The day's cash components (OQ-21): −Σ(signed_qty × execution_PU), deposits, withdrawals. */
+  trades_cash_flow: Decimal;
+  deposits: Decimal;
+  withdrawals: Decimal;
   positions_market_value: Decimal | null;
   aum: Decimal | null;
   position_pnl: Decimal | null;
@@ -270,6 +274,9 @@ export const summaries: SeedSummary[] = [
     publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     cash_balance: '609935.3745326500',
+    trades_cash_flow: '-890064.6254673500',
+    deposits: '1500000.00',
+    withdrawals: '0.00',
     positions_market_value: '890064.6254673500',
     aum: '1500000.0000000000',
     position_pnl: '0',
@@ -284,6 +291,9 @@ export const summaries: SeedSummary[] = [
     publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     cash_balance: '199650.3745326500',
+    trades_cash_flow: '-410285.00',
+    deposits: '0.00',
+    withdrawals: '0.00',
     positions_market_value: '1292315.4909390840',
     aum: '1491965.8654717340',
     position_pnl: '1220.1988777680',
@@ -298,6 +308,9 @@ export const summaries: SeedSummary[] = [
     publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     cash_balance: '506059.2651460232',
+    trades_cash_flow: '356408.8906133732',
+    deposits: '0.00',
+    withdrawals: '50000.00',
     positions_market_value: null,
     aum: null,
     position_pnl: null,
@@ -486,6 +499,9 @@ function dayWithoutInputs(date: string): RecalculatedDay {
       publication: 'PUBLISHED',
       published_at: PUBLISHED_AT,
       cash_balance: '506059.2651460232',
+      trades_cash_flow: '0.0000000000',
+      deposits: '0.00',
+      withdrawals: '0.00',
       positions_market_value: null,
       aum: null,
       position_pnl: null,
@@ -523,6 +539,9 @@ export const recalculatedDays: Record<string, RecalculatedDay> = {
       publication: 'PUBLISHED',
       published_at: PUBLISHED_AT,
       cash_balance: '506059.2651460232',
+      trades_cash_flow: '356408.8906133732',
+      deposits: '0.00',
+      withdrawals: '50000.00',
       positions_market_value: null,
       aum: null,
       position_pnl: null,
@@ -574,6 +593,9 @@ export function zeroStateDay(date: string): RecalculatedDay {
       publication: 'PUBLISHED',
       published_at: PUBLISHED_AT,
       cash_balance: '0',
+      trades_cash_flow: '0.0000000000',
+      deposits: '0.00',
+      withdrawals: '0.00',
       positions_market_value: '0',
       aum: '0',
       position_pnl: '0',
