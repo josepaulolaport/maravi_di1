@@ -372,7 +372,7 @@ async def test_a_cancel_mid_run_commits_the_current_date_and_stops(worker: Worke
     async def cancel_during_d2(chain: str, day: date) -> None:
         if day == D2:
             pending.append(asyncio.create_task(request_cancel(worker, request_id)))
-            await asyncio.sleep(0.2)  # the cancel now waits on the run's row lock
+            await worker.wait_for_a_lock_waiter()  # the cancel waits on the run's row lock
 
     worker.writer.hook = cancel_during_d2
     pending: list[asyncio.Task[None]] = []
@@ -394,7 +394,7 @@ async def test_a_cancel_during_the_last_date_lets_the_run_complete(worker: Worke
     async def cancel_during_d2(chain: str, day: date) -> None:
         if day == D2:
             pending.append(asyncio.create_task(request_cancel(worker, request_id)))
-            await asyncio.sleep(0.2)  # the cancel now waits on the run's row lock
+            await worker.wait_for_a_lock_waiter()  # the cancel waits on the run's row lock
 
     worker.writer.hook = cancel_during_d2
     pending: list[asyncio.Task[None]] = []
@@ -605,7 +605,7 @@ async def test_a_cancelled_all_run_keeps_its_first_failure(worker: Worker) -> No
     async def cancel_during_d2(chain: str, day: date) -> None:
         if day == D2:
             pending.append(asyncio.create_task(request_cancel(worker, request_id)))
-            await asyncio.sleep(0.2)
+            await worker.wait_for_a_lock_waiter()
 
     worker.writer.hook = cancel_during_d2
     await worker.dispatch_and_run()
@@ -685,7 +685,7 @@ async def test_queue_a_backdated_trade_queue_b_cancel_a_finish_b(worker: Worker)
                     await service.request_cancel(first, uow=uow)
 
             pending.append(asyncio.create_task(cancel()))
-            await asyncio.sleep(0.2)  # the real cancel waits on A's row lock
+            await worker.wait_for_a_lock_waiter()  # the real cancel waits on A's row lock
 
     worker.writer.hook = cancel_a_during_d2
     worker.world.ledger.trades.append(trade(asset, D1, 3, "95000.0000000000"))  # backdated
@@ -727,7 +727,12 @@ async def test_case_26_an_earlier_failed_status_alone_fails_without_asking_the_l
     assert (await worker.statuses())[october_5] == (None, "FAILED")
     assert worker.world.ledger.asked == []
     run = await worker.run_row(request_id)
-    assert (run["status"], run["error_code"]) == ("FAILED", "CASH_PREDECESSOR_MISSING")
+    assert (run["status"], run["error_code"], run["failed_date"], run["failed_chain"]) == (
+        "FAILED",
+        "CASH_PREDECESSOR_MISSING",
+        october_5,
+        "CASH",
+    )
 
 
 async def test_a_command_lost_after_the_outbox_publish_is_re_dispatched(worker: Worker) -> None:

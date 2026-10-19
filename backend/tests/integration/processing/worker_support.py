@@ -4,6 +4,7 @@ rolled-back savepoint or date leaves no row."""
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -215,6 +216,22 @@ class Worker:
                 )
             )
             return [(row[0], row[1], row[2]) for row in result]
+
+    async def wait_for_a_lock_waiter(self) -> None:
+        """Returns once another session of this database waits on a lock (the cancel queued
+        behind the run's row lock); fails after 5 seconds."""
+        async with asyncio.timeout(5):
+            while True:
+                async with self.engine.connect() as connection:
+                    waiting = await connection.scalar(
+                        text(
+                            "SELECT count(*) FROM pg_stat_activity"
+                            " WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                        )
+                    )
+                if waiting:
+                    return
+                await asyncio.sleep(0.01)
 
     async def execute(self, statement: str, **params: Any) -> None:
         async with self.engine.begin() as connection:
