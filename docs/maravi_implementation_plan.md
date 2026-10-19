@@ -10,7 +10,7 @@
 - Ownership: Asset owns product/instrument hierarchy and futures specs; Pricing owns **pure** DI1 PU/rate calculations; Ledger owns the immutable ledger entries in `ledger.entries`, trades with their execution values and cash movements (OQ-24); Prices owns manual/B3 reference prices, one per asset, date and source, without revisions (OQ-25); Portfolio owns dated `positions`, `position_metrics`, `portfolio_metrics`, `cash_balances` and frontend read query; PnL owns **pure** attribution and aggregation; Processing owns user-requested jobs, cancellation, preflight, the per-date chain status `processing.date_status` and per-date publication (OQ-23).
 - No per-operation command classes, event-sourced rewrite, automatic P&L calculation, one RabbitMQ queue per module, separate Reader/Service class per operation or cross-module imports of private ORM/repositories. Service methods may combine reads and writes. Use narrow `Protocol` interfaces only where useful; dedicated `PortfolioQueryService` is warranted.
 - Financial conventions: DI1 challenge rate ↔ PU uses actual calendar days / 365, face value 100,000 (product-configured); source selection MANUAL > B3 exact day only; no price carry-forward; daily calendar processing; zero initial cash/positions/P&L; chronological trades incl. reversals; no deposits/withdrawals in trading P&L. `financial_total = signed_quantity × reference_PU`, AUM = cash + sum signed market value. Positions store just quantity; asset and portfolio metrics in separate tables. Missing prices can leave accounting available but valuation/P&L incomplete.
-- Input mutations immediately mark dependent financial state stale **in the same PostgreSQL transaction**; never automatically enqueue processing. Many overlapping queued requests permitted; only one active request; cancellation cooperative. Worker publishes each date in its own transaction while its claim token is valid, and sets that date's chain status in `processing.date_status` (OQ-23); there is no staging. RabbitMQ dispatches work, database owns status/order.
+- Input mutations only save the fact: nothing is marked stale and processing is never enqueued automatically; processed results stay as they are until the user processes again (OQ-31). Many overlapping queued requests permitted; only one active request; cancellation cooperative. Worker publishes each date in its own transaction while its claim token is valid, and sets that date's chain status and processing time in `processing.date_status` (OQ-23, OQ-31); there is no staging. RabbitMQ dispatches work, database owns status/order.
 - Maturity, multiplier and precision are decided (OQ-1, OQ-2, OQ-3 in `docs/open-questions.md`): no automatic settlement (the user closes with a trade, up to the maturity date; value 0 after it); multiplier stored, not applied; 34-digit `Decimal`, `ROUND_HALF_UP`, PU 10 dp, rate 12 dp. Do not assume anything beyond them.
 
 ## 1. Target repository layout
@@ -88,8 +88,8 @@ Recommended agents (a reviewer can be a second agent applied after each module P
 |---|---|---|---|
 | A — Asset | `modules/asset/**`, `tests/unit/asset/**` | Wave 1 | Frozen DTOs + schema |
 | B — Pricing | `modules/pricing/**`, `tests/unit/pricing/**` | Wave 1 | InstrumentDescriptor contract; can use fixtures |
-| C — Ledger | `modules/ledger/**`, `tests/unit/ledger/**` | Wave 2 | Asset & Pricing public interfaces; invalidator protocol |
-| D — Prices | `modules/prices/**`, `tests/unit/prices/**` | Wave 2 | Asset & Pricing public interfaces; invalidator protocol |
+| C — Ledger | `modules/ledger/**`, `tests/unit/ledger/**` | Wave 2 | Asset & Pricing public interfaces |
+| D — Prices | `modules/prices/**`, `tests/unit/prices/**` | Wave 2 | Asset & Pricing public interfaces |
 | E — Portfolio | `modules/portfolio/**`, `tests/unit/portfolio/**` | Wave 1 pure accounting; Wave 3 DB/read | Ledger DTOs; PnL result DTOs; schemas |
 | F — PnL | `modules/pnl/**`, `tests/unit/pnl/**` | Wave 1 | Position and Trade DTOs, fixed calculation formulas |
 | G — Processing | `modules/processing/**`, `tests/unit/processing/**` | Wave 2 queue API; Wave 4 worker integration | All module public interfaces + platform messaging |
@@ -120,7 +120,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 - Define stable public DTOs: `InstrumentDescriptor`, `TradeRecord`, `CashMovementRecord`, `ReferencePriceRecord`, `PositionState`, `AssetPnLResult`, `PortfolioPnLResult`, `CalculationCompleteness`, `ProcessingRequest`. Do not expose ORM types across modules.
 - Freeze rate units (rate `0.135` = 13.5%) and deterministic UTC timestamp vs local business-date semantics. Freeze precision as decided in OQ-3 (34-digit `Decimal`, `ROUND_HALF_UP`, PU 10 dp, rate 12 dp, excess decimals rejected), and the same-day order `(entry_date, entry_time, seq)` across trades and cash movements, with `entry_time` required (OQ-13, OQ-24), and the error contract (OQ-15, `interfaces.md` "Errors").
 - Define Unit of Work around one AsyncSession, SQLAlchemy database factory, API/worker bootstrap, error types, Pydantic API schemas, exceptions mapping.
-- Define public invalidation contract `trades_changed(effective_date, uow)`, `cash_movements_changed(effective_date, uow)` and `prices_changed(asset_id, date, uow)` (OQ-21), each setting the affected chain `STALE` in `processing.date_status` from the date on the dates that have a status (OQ-23); Processing agent owns implementation, but Ledger/Prices agents can use an in-memory fake now.
+- No invalidation contract (OQ-31): `FinancialResultInvalidator` (`trades_changed`, `cash_movements_changed`, `prices_changed`) is removed, and Ledger and Prices do not call Processing.
 - Add baseline lint/type/test commands (ruff, pytest, optional mypy/pyright, migration smoke test). Set import boundary tests.
 - Agree exact price input enum (`PU` or `RATE`) and source precedence; reference prices have no revisions: a correction updates in place, a removal deletes (OQ-25).
 
@@ -153,38 +153,39 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 
 ### I. Frontend (mock contracts)
 - Implement existing pt-BR screens using Mantine and TanStack Query against typed mock API fixtures: Ativos, Lançamentos, Carteira, Central de Controle/Pendências/Processamentos.
-- Handle stale/incomplete metric chips, the eight job statuses with their pt-BR labels (spec §10.3, OQ-20, OQ-23), the per-date Caixa and Posições statuses from `date_status` (spec §10.4), cancel and queue as separate actions (no cancel and replace, OQ-30), "Solicitar novo processamento" prefilled from the failed date or the first date not reached (OQ-23), exact-range preview and day progress. Design-vs-spec decisions: OQ-19, OQ-20.
+- Handle incomplete metric chips, the eight job statuses with their pt-BR labels (spec §10.3, OQ-20, OQ-23), the per-date Caixa and Posições statuses from `date_status` with "Processado em dd/mm/aaaa hh:mm" (spec §10.4, OQ-31), cancel and queue as separate actions (no cancel and replace, OQ-30), "Solicitar novo processamento" prefilled from the failed date or the first date not reached (OQ-23), exact-range preview and day progress. Design-vs-spec decisions: OQ-19, OQ-20.
 - **Done:** screens demonstrate full flows with mock adapters before backend integration.
 
 ## 5. Wave 2 — input persistence + processing request API (parallel)
 
 ### C. Ledger
 - `LedgerService` and repository over the one table `ledger.entries` (OQ-24): create entries (trade or cash movement), list them paginated, batch soft delete; deterministic order `(entry_date, entry_time, seq)` across both types; automatic PU/rate conversion via Pricing, product lookup via Asset.
-- Only immutable economic fields; soft delete without a reason, one `deletion_batch_id` per multi-delete. Each write invokes Processing invalidation by type inside SAME UoW (a mixed batch once per chain, from its earliest date); no recalculation enqueue.
-- Tests: atomic rollback if invalidation fails, multiple trades same date, trade and cash movement ordered by time and `seq`, mixed batch delete all or nothing, soft-delete idempotence, execution price not added to `prices.reference_prices`.
+- Only immutable economic fields; soft delete without a reason, one `deletion_batch_id` per multi-delete. Each write only saves the fact in its UoW: no Processing call, no invalidation (OQ-31), no recalculation enqueue.
+- Tests: multiple trades same date, trade and cash movement ordered by time and `seq`, mixed batch delete all or nothing, soft-delete idempotence, execution price not added to `prices.reference_prices`.
 
 ### D. Prices
 - `PriceService`: set a manual/B3 observation, correct it in place, remove it (DELETE), preferred-by-source exact-date batch reads, unique per `(asset, date, source)` (OQ-25).
-- Prefer MANUAL over B3; if removed, B3 becomes preferred. No silent older-date fallback. Price writes mark positions stale in same UoW.
+- Prefer MANUAL over B3; if removed, B3 becomes preferred. No silent older-date fallback. Price writes only save the price: nothing is marked (OQ-31).
 - Tests: correction keeps the id, removal lets B3 prevail, race/unique constraint, preferred-source priority, no carry-forward, absence of auto-processing.
 
 ### G. Processing (request API subset)
-- `ProcessingService` enqueue/list/get/cancel with a scope (no cancel-and-replace, OQ-30) (CASH, POSITIONS, ALL; OQ-21), `FinancialResultInvalidator` over `processing.date_status` (OQ-23), missing-price issue contract.
+- `ProcessingService` enqueue/list/get/cancel with a scope (no cancel-and-replace, OQ-30) (CASH, POSITIONS, ALL; OQ-21), `processing.date_status` reads with the processing times (OQ-23, OQ-31), issue contract (two types, OQ-31).
 - Support overlapping QUEUED ranges in PostgreSQL, one active global job invariant; queued cancel immediately, dispatched cancel moves to `CANCELLING` (the worker ends it `CANCELLED` on claim), running cancel sets the cancellation marker, a `CANCELLING` or finished job answers 409 (OQ-29); a range ending after today is 422 `FUTURE_DATE` on request, cancel-and-replace and preview (OQ-29).
-- Tests: concurrent enqueue, cancel then a separate new request, invalidation marks `STALE` only the dates that have a status, only in the affected chain.
+- Tests: concurrent enqueue, cancel then a separate new request.
 
 ### H. Platform (messaging subset)
 - UoW, outbox write/relay with publisher confirms, inbox idempotency, aio-pika consumers, retry and failure policy, SQL-controlled dispatch leases/fencing.
 - Tests: simulated relay crash and resend, duplicate delivery, ACK after durability, reconnect. Keep messaging adapters outside business services.
 
-**Gate 2:** Create manual reference price and trade, read back independently, verify invalidation but **no** processing request was automatically created. Concurrent queued jobs can be inserted/cancelled.
+**Gate 2:** Create manual reference price and trade, read back independently, verify that no date status changed and **no** processing request was automatically created (OQ-31). Concurrent queued jobs can be inserted/cancelled.
 
 ## 6. Wave 3 — portfolio persistence and consolidated reads
 
 **Portfolio lane E**, integrating with C, D, F and X:
 - Persist `positions(asset_id, position_date, quantity)`, `position_metrics(asset_id, metric_date, avg PU/rate, financial_total, position/trades/daily PnL, status)`, `portfolio_metrics(metric_date, positions market value, AUM, portfolio PnL/status)`, `cash_balances(balance_date, cash_balance, trades_cash_flow, deposits, withdrawals)` (OQ-21). `position_metrics` stores no reference PU or source: the position table read takes each date's PU, rate and source from the current preferred price through `PriceReader` (OQ-30).
-- `PortfolioQueryService` returns one assembled frontend table; indexed read SQL in Portfolio Infrastructure only. Join published asset records and metrics by asset+date; include processing validity status. Don't mix new/current reference price into old result.
-- Make read output distinguish `0`, `null` and each date's chain status from `processing.date_status` (not processed, `FRESH`, `FRESH_WITH_ISSUES`, `STALE`, `RUNNING`, `FAILED`; OQ-23).
+- `PortfolioQueryService` returns one assembled frontend table; indexed read SQL in Portfolio Infrastructure only. Join published asset records and metrics by asset+date; include processing validity status. Show the current reference price (price table) next to the last processed figures, with each chain's status and processing time (OQ-30, OQ-31).
+- `GET /portfolio/pnl` series (OQ-31 item 8): points carry only the positions chain's status and processing time (`published_at`), plus `range_cumulative_pnl` = Σ `daily_pnl` from the requested `start_date` to D, summed from the published rows on each request, `null` from the first date with a null `daily_pnl` or no published positions day; `cumulative_pnl` (since inception) stays in the point.
+- Make read output distinguish `0`, `null` and each date's chain status from `processing.date_status` (not processed, `PROCESSED`, `PROCESSED_WITH_ISSUES`, `RUNNING`, `FAILED`) and its processing time per chain (OQ-23, OQ-31).
 - Implement `PortfolioResultsWriter.write_positions_day` / `write_cash_day`, which upsert one date's published rows and its AUM; Processing calls them through `public.py` inside each date's transaction (OQ-8, OQ-23). There is no staging.
 - Tests: exact-day joins, null handling, average cost survives missing references, AUM computation, read consistency.
 
@@ -194,14 +195,14 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 
 **Processing lane G** with Platform lane H, Portfolio lane E, Integrator X:
 - `ProcessingDispatcher`: lock singleton calculation state; select oldest eligible queued job; set `DISPATCHED` and outbox command atomically. One active global job (even if broker duplicates messages).
-- `PortfolioRangeProcessor`: worker claim token + lease; process exactly the requested range and scope (OQ-11, OQ-21, OQ-22: each chain checks its own start−1; positions stale and cash stale still run and publish flagged stale, with null P&L for positions, and a `STALE_PREDECESSOR` issue naming the chain; cash never published at start−1 with entries before it ends `FAILED` with `CASH_PREDECESSOR_MISSING`, and positions never published at start−1 with a trade before it end `FAILED` with `POSITIONS_PREDECESSOR_MISSING` (OQ-30), publishing nothing; days with no expected asset still get a `portfolio_metrics` row); iterate **every calendar day**; order ledger events; for CASH call `CashCalculator`; for POSITIONS call `PositionsEngine`, preferred exact-day Prices for D and D−1 (the D−1 PU comes from the price table, OQ-30), `ValuationCalculator` and the PnL calculators; for ALL both (`PortfolioAccounting` runs the two chains together). Per date (OQ-23): a short transaction sets the chain's status `RUNNING`; then one transaction locks the `date_status` rows of D−1 and D, writes D's published rows and AUM, sets D's status by the predecessor rule (`FRESH` or `FRESH_WITH_ISSUES` when D−1 is current or the zero state, else `STALE` with `STALE_PREDECESSOR`) and `requests.progress_date`, and commits.
+- `PortfolioRangeProcessor`: worker claim token + lease; process exactly the requested range and scope (OQ-11, OQ-21; days with no expected asset still get a `portfolio_metrics` row, OQ-22); a run may start on any date, and for each date D each chain checks that D−1 is `PROCESSED` or `PROCESSED_WITH_ISSUES` or the chain's zero state, otherwise D gets `FAILED` with `CASH_PREDECESSOR_MISSING` or `POSITIONS_PREDECESSOR_MISSING` ("Dia anterior não processado") and the run ends `FAILED`, later dates untouched (OQ-31); for ALL, D's check covers both chains and, if either fails, nothing is written for D: each failing chain gets `FAILED`, the other is restored from `*_previous`, and `POSITIONS_PREDECESSOR_MISSING` when both fail (OQ-31 item 7); iterate **every calendar day**; order ledger events; for CASH call `CashCalculator`; for POSITIONS call `PositionsEngine`, preferred exact-day Prices for D and D−1 (the D−1 PU comes from the price table, OQ-30), `ValuationCalculator` and the PnL calculators; for ALL both (`PortfolioAccounting` runs the two chains together). Per date (OQ-23): a short transaction sets the chain's status `RUNNING`; then one transaction locks the `date_status` rows of D−1 and D, writes D's published rows and AUM, sets D's status (`PROCESSED`, or `PROCESSED_WITH_ISSUES` with a missing price or an expired open position), the chain's `*_processed_at` and `requests.progress_date`, and commits (OQ-31).
 - On cancellation request, check between dates: the current date commits, later dates are not touched, the run ends `CANCELLED` (`COMPLETED`, or `COMPLETED_WITH_ISSUES` when a date it wrote has issues, if the cancel arrives during the last date; OQ-26); queued requests can be cancelled without broker work.
 - In each date's transaction verify the claim token. On failure at D: roll back D, set D `FAILED` and the run's `error_code`/`error_message` in a short transaction, end `FAILED`, leave later dates untouched (OQ-23).
-- A write while running waits on the D−1/D row locks, then marks what it affects `STALE`; the run never stops for it (no `SUPERSEDED`). On missing prices: preserve accounting, record `issues`, the date is `FRESH_WITH_ISSUES` with null dependent metrics and the run ends `COMPLETED_WITH_ISSUES`; do not retry domain-data gaps.
+- A write while running only saves its fact and marks nothing; the run never stops for it (no `SUPERSEDED`, OQ-31). On missing prices: preserve accounting, record `issues`, the date is `PROCESSED_WITH_ISSUES` with null dependent metrics and the run ends `COMPLETED_WITH_ISSUES`; do not retry domain-data gaps.
 - On process death: lease expiry/recovery resumes after `requests.progress_date`; idempotent dispatch/inbox and fencing; no concurrent global workers even if multiple processes.
-- **Test adversarial sequences:** queue A, create backdated trade, queue B, cancel A, finish B; duplicate deliveries; crash after outbox publish; crash mid-date (resume after `progress_date`); cancellation mid-range (committed dates stay published); a write landing during a date waits, then marks `STALE`; failure at a date (earlier dates published, later untouched); missing Saturday price; a POSITIONS or ALL job with unpublished positions at start−1 and an earlier trade ends `POSITIONS_PREDECESSOR_MISSING` (OQ-30); a D−1 price corrected after D−1 was processed leaves D−1 and D `STALE` (OQ-9, OQ-30); both chains and the AUM of an ALL date in one transaction; a deposit during a POSITIONS job marks only cash; `aum = cash + market value` after CASH-only, POSITIONS-only and ALL publishes; no half-written date.
+- **Test adversarial sequences:** queue A, create backdated trade, queue B, cancel A, finish B; duplicate deliveries; crash after outbox publish; crash mid-date (resume after `progress_date`); cancellation mid-range (committed dates stay published); a write landing during a date changes no status; failure at a date (earlier dates published, later untouched); missing Saturday price; a run whose first date has an unprocessed or `FAILED` D−1 (and entries before it) sets that date `FAILED` and ends `CASH_PREDECESSOR_MISSING` or `POSITIONS_PREDECESSOR_MISSING` (OQ-31); a D−1 price corrected after D−1 was processed leaves D−1 and D processed (OQ-9, OQ-31); both chains and the AUM of an ALL date in one transaction; a deposit during a POSITIONS job changes no status; `aum = cash + market value` after CASH-only, POSITIONS-only and ALL publishes; no half-written date.
 
-**Gate 4:** Docker Compose e2e: new trade/price invalidates, user queues job, sees progress, cancels and queues a new request (OQ-30), published position table and AUM/PnL reflect the committed dates, each with its status from `date_status`.
+**Gate 4:** Docker Compose e2e: new trade/price only saves the fact (OQ-31), user queues job, sees progress, cancels and queues a new request (OQ-30), published position table and AUM/PnL reflect the committed dates, each with its status and processing time from `date_status`.
 
 ## 8. Wave 5 — integration, hardening, reviewer checks
 
@@ -216,7 +217,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 
 - **G0** contract-freeze / initial migration / app boot.
 - **G1** A+B+E(domain)+F unit tests green; no cross-module private imports.
-- **G2** C+D+G(request)+H broker plumbing, same-UoW invalidation tested; no auto-recalc.
+- **G2** C+D+G(request)+H broker plumbing; writes save only the fact (OQ-31); no auto-recalc.
 - **G3** Portfolio persistence/read models, dates+missing data correct.
 - **G4** dispatch → worker → per-date publication with `date_status`; cancel + overlapping requests, writes during a run, failure and recovery tested.
 - **G5** frontend integrated, all e2e/constraints/documentation, Docker run reproducible.
@@ -225,13 +226,13 @@ Do not merge branches merely because code compiles. Require reviewer sign-off an
 
 ## 10. Agent handoff template (copy for each lane)
 
-> You are the **[LANE]** implementation agent for Maravi DI1. Read `docs/maravi_business_specification.md`, `docs/schema.md`, `docs/schema.sql`, `docs/interfaces.md`, `docs/maravi_implementation_plan.md` and `docs/open-questions.md`. Own ONLY `[allowed directories]`. Implement Wave `[N]` deliverables for `[module]`. Preserve single-portfolio, exact-date prices (MANUAL > B3), DC/365, no automatic processing and transactional invalidation. Communicate only through frozen `public.py`/DTO contracts; no private cross-module imports; domain calculators pure; SQL in Infrastructure; `Depends` HTTP-only. Do not create/edit Alembic revisions or shared composition config: raise an integration request to X. Add focused unit tests and contract tests. Report changed files, commands/tests run, unresolved contract questions, deviations from spec, and edge cases. Stop if you discover ambiguity in settlement/multiplier rules; don't invent conventions.
+> You are the **[LANE]** implementation agent for Maravi DI1. Read `docs/maravi_business_specification.md`, `docs/schema.md`, `docs/schema.sql`, `docs/interfaces.md`, `docs/maravi_implementation_plan.md` and `docs/open-questions.md`. Own ONLY `[allowed directories]`. Implement Wave `[N]` deliverables for `[module]`. Preserve single-portfolio, exact-date prices (MANUAL > B3), DC/365, no automatic processing and no invalidation (OQ-31). Communicate only through frozen `public.py`/DTO contracts; no private cross-module imports; domain calculators pure; SQL in Infrastructure; `Depends` HTTP-only. Do not create/edit Alembic revisions or shared composition config: raise an integration request to X. Add focused unit tests and contract tests. Report changed files, commands/tests run, unresolved contract questions, deviations from spec, and edge cases. Stop if you discover ambiguity in settlement/multiplier rules; don't invent conventions.
 
-**Reviewer prompt:** Independently compare the agent diff to its frozen interfaces, schema and acceptance tests. Search for invisible auto-recalculation, race conditions, stale published results, duplicates, incorrect Decimal/365 math, incorrect sign on shorts, missing-price zero fallbacks, direct module-internal imports, and unauthorized edits outside the lane. Produce prioritized actionable findings; request correction and re-review.
+**Reviewer prompt:** Independently compare the agent diff to its frozen interfaces, schema and acceptance tests. Search for invisible auto-recalculation, race conditions, results published by a fenced-out worker, duplicates, incorrect Decimal/365 math, incorrect sign on shorts, missing-price zero fallbacks, direct module-internal imports, and unauthorized edits outside the lane. Produce prioritized actionable findings; request correction and re-review.
 
 ## 11. Open decisions requiring human sign-off before relevant code
 
-None. OQ-1 to OQ-28 are answered (`docs/open-questions.md`); a new gap goes through the `spec-gap` skill before any code depends on it.
+None. OQ-1 to OQ-31 are answered (`docs/open-questions.md`); a new gap goes through the `spec-gap` skill before any code depends on it.
 
 **Post-completion TODO:** asynchronous CSV reference-price import and optional B3 extraction feeding `PriceService` via RabbitMQ adapter, not part of initial implementation.
 
@@ -248,7 +249,7 @@ Verified on `main` at `81cbbb7`: `make lint-backend` clean; `make test-backend` 
 | Shared | decimals (OQ-3), clock, calendar, error catalogue (OQ-15), `InputKind` |
 | Platform (H) | config, system clock, async engine/session, Unit of Work; messaging: envelope, outbox, relay with confirms, inbox, publisher, consumer, topology |
 | Composition (X) | app factory `main.py`, `/health`, problem+json handlers, empty router and dependency wiring |
-| Contracts (`public.py`) | asset, ledger, prices, processing (invalidator, scope, statuses, request); fake invalidator in `tests/fakes/processing.py` |
+| Contracts (`public.py`) | asset, ledger, prices, processing (invalidator, scope, statuses, request); fake invalidator in `tests/fakes/processing.py` (the invalidator and its fake are removed by OQ-31) |
 | Domain | pricing DI1 calculator (B); portfolio positions, average cost, cash, valuation, accounting (E); P&L position, trades, asset, portfolio (F), one file per metric |
 | CI | path-scoped backend and frontend jobs, `ci-ok`, CodeRabbit review |
 | Frontend (I) | Carteira, Lançamentos, Ativos, Central de Controle on MSW, against the OQ-26 contract |
@@ -262,9 +263,9 @@ Gates: G0 met except Compose; G1 waits on lane A (Asset).
 | X | `pricing/public.py`, `portfolio/public.py` (`PortfolioResultsWriter`, `PortfolioQueryService`), `pnl/public.py`; RabbitMQ service in CI (`TEST_RABBITMQ_URL`, `TEST_RABBITMQ_MANAGEMENT_URL`, `REQUIRE_BROKER_TESTS=1`); Compose with PostgreSQL, RabbitMQ, a migrate job and the api, plus the Dockerfile (workers later); wire each lane's router in `composition/`; README demo with the challenge example dated today (D4) | — |
 | A Asset | models and repository over `asset.*`, `AssetService`, `AssetReader` implementation, HTTP (`/instrument-types`, `/products`, `/instruments`) | — |
 | B Pricing | `PricingService.calculate(instrument_id, reference_date, quote)` over the calculator, reading the instrument through `AssetReader` | `pricing/public.py` |
-| C Ledger | `ledger.entries` persistence, `LedgerService` create and batch soft delete (`deletion_batch_id`), `LedgerReader.get_trades`/`get_cash_movements`, invalidation by type in the same UoW, HTTP `/ledger/entries` (paginated) and `/ledger/entries/deletions` | asset and pricing public contracts (fakes until they land) |
-| D Prices | one observation per asset, date and source; `PriceService` set, correct in place, remove; `PriceReader` exact-date preferred reads (MANUAL > B3); `prices_changed` in the same UoW; HTTP | asset and pricing public contracts |
-| G Processing | request API: preview, enqueue, paginated history, cancel (no cancel-and-replace, OQ-30), `FinancialResultInvalidator` over `processing.date_status`, issues. Then Wave 4: dispatcher, claim and lease, one transaction per date, `RUNNING` restore, recovery from `progress_date` | request API: none; worker: E's writer, H's workers |
+| C Ledger | `ledger.entries` persistence, `LedgerService` create and batch soft delete (`deletion_batch_id`), `LedgerReader.get_trades`/`get_cash_movements`, no invalidation (OQ-31), HTTP `/ledger/entries` (paginated) and `/ledger/entries/deletions` | asset and pricing public contracts (fakes until they land) |
+| D Prices | one observation per asset, date and source; `PriceService` set, correct in place, remove; `PriceReader` exact-date preferred reads (MANUAL > B3); no invalidation (OQ-31); HTTP | asset and pricing public contracts |
+| G Processing | request API: preview, enqueue, paginated history, cancel (no cancel-and-replace, OQ-30), `processing.date_status` reads with the processing times (no invalidator, OQ-31), issues. Then Wave 4: dispatcher, claim and lease, one transaction per date with the per-day predecessor rule (OQ-31), `RUNNING` restore, recovery from `progress_date` | request API: none; worker: E's writer, H's workers |
 | E Portfolio | Wave 3: `PortfolioResultsWriter.write_positions_day`/`write_cash_day` with the AUM recomputation, `PortfolioQueryService` (summary, positions, P&L series), mapping `ledger.public.TradeRecord` onto the domain trade | `portfolio/public.py` |
 | F PnL | free: spec §13 acceptance fixtures across portfolio and P&L, or pair with G on the worker | — |
 | H Platform | H3 logging and `workers/outbox_relay.py` bootstrap; worker entry points for G; Compose infra with X | — |

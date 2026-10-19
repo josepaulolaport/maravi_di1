@@ -63,9 +63,9 @@ frontend/src/
 ## Screens (spec §11)
 
 - **Central de Controle**, with two tabs:
-  - **Pendências:** actionable issues only, with "Definir preço". Only the three issue types of spec §10.3; a `FAILED` job is shown in Processamentos, not here (OQ-19).
+  - **Pendências:** actionable issues only, with "Definir preço". Only the two issue types of spec §10.3 (OQ-31); a `FAILED` job, including "Dia anterior não processado", is shown in Processamentos, not here (OQ-19).
   - **Processamentos** (OQ-20):
-    - pick a date range and a scope (Caixa, Posições, Tudo; OQ-21) and preview exactly [A, B] (days to process), with the warning when the chain's status on the day before is not current or is missing (OQ-11, OQ-23); no "período efetivo";
+    - pick a date range and a scope (Caixa, Posições, Tudo; OQ-21) and preview exactly [A, B] (days to process), with the warning when the chain's day before is not processed (nor the zero state), so the run would fail on its first date (OQ-11, OQ-23, OQ-31); no "período efetivo";
     - queue the job, then follow its progress ("x / y dias") and status;
     - cancel a job; cancelling and queuing a new request are separate actions, with no "Cancelar e criar novo processamento" (OQ-30);
     - publication is per date (OQ-23): a cancelled or failed job keeps the dates it committed, and later dates are untouched; it offers "Solicitar novo processamento", prefilled from the failed date, or the first date not reached, to the original end;
@@ -85,9 +85,9 @@ frontend/src/
 - **Carteira:**
   - One date, showing published data only.
   - KPIs: Saldo em caixa, AUM/Patrimônio, P&L diário, P&L de posições, P&L de operações.
-  - A compact cumulative P&L chart, shown only where the history is complete. It always ends on the selected date; the user picks only its start, which must be before that date (default: the 30 days ending on the date), kept in the URL as `?pnl_start=` and ignored when invalid (OQ-27).
-  - The positions table, with the columns of spec §11.4. Its reference PU, rate and source are the current preferred price from the price table (OQ-30), as the API returns them; after a price correction the date shows the new PU next to the old figures and reads Desatualizado until reprocessed.
-  - Only two data-status badges, Caixa and Posições, each showing that chain's status on the date (OQ-23), with links to Pendências and Processamentos; no badge per KPI and no stale or incomplete notice cards.
+  - A compact cumulative P&L chart, shown only where the history is complete. It always ends on the selected date; the user picks only its start, which must be before that date (default: the 30 days ending on the date), kept in the URL as `?pnl_start=` and ignored when invalid (OQ-27). It draws each point's `range_cumulative_pnl` from `GET /portfolio/pnl` (the backend's sum of `daily_pnl` from the start date) and never sums; the stored `cumulative_pnl` stays in the KPIs. Series points carry the positions chain's status and processing time only (OQ-31 item 8).
+  - The positions table, with the columns of spec §11.4. Its reference PU, rate and source are the current preferred price from the price table (OQ-30), as the API returns them; after a price correction the date shows the new PU next to the old figures and keeps its status until reprocessed (OQ-31).
+  - Only two data-status badges, Caixa and Posições, each showing that chain's status on the date (OQ-23) and, when processed, "Processado em dd/mm/aaaa hh:mm" from the chain's processing time (OQ-31), with links to Pendências and Processamentos; no badge per KPI and no incomplete notice cards.
   - Cash is not a position row. No realized or unrealized P&L.
 
 ## Rules
@@ -95,7 +95,7 @@ frontend/src/
 - **The backend is the only calculator.** The browser never computes PU, rate, P&L, cash or averages. Forms take PU **or** rate (a toggle and one input); there is no preview for now, and the complementary value appears once the entry is saved (OQ-19). A future preview would call the pricing endpoint.
 - **Decimals are strings end to end.** Format them with `Intl.NumberFormat('pt-BR', …)` from the string. Never use `parseFloat` or `Math.round` on money.
 - **`null` means unavailable.** Show it as unavailable ("—"), never as `0`.
-- **Distinguish the states:** each date has one status per chain (OQ-23): Atualizado, Atualizado com pendências, Desatualizado, Processando, Erro, Não processado; missing values are `null`, never zero.
+- **Distinguish the states:** each date has one status per chain (OQ-23, OQ-31): Processado, Processado com pendências, Processando, Erro, Não processado, with "Processado em dd/mm/aaaa hh:mm" when processed; there is no Desatualizado; missing values are `null`, never zero.
 - **Job statuses** are shown in Portuguese (spec §10.3, OQ-20): QUEUED Na fila, DISPATCHED Enviado, RUNNING Processando, CANCELLING Cancelando, CANCELLED Cancelado, COMPLETED Concluído, COMPLETED_WITH_ISSUES Concluído com pendências, FAILED Falhou. There is no "Bloqueado" and, since OQ-23, no Obsoleto (SUPERSEDED).
 - **Polling:** status is polled only while a job is queued or running.
 - **All visible text is pt-BR**, with Brazilian number and date formats. Identifiers are English.
