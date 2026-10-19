@@ -23,8 +23,9 @@ on the run's ``requests`` row:
 
 **Recovery at worker start** (`recover_at_startup`, before the worker consumes): the run left
 DISPATCHED, RUNNING or CANCELLING was interrupted. Its dates left RUNNING are restored from
-``*_previous`` (a row left empty is deleted); a CANCELLING run then ends CANCELLED, any other is
-run to its end in place, after ``progress_date`` (from ``start_date`` when NULL).
+``*_previous`` (a row left empty is deleted); a run being cancelled (CANCELLING, or a cancel
+request recorded) then ends CANCELLED before any date, any other is run to its end in place,
+after ``progress_date`` (from ``start_date`` when NULL).
 """
 
 from __future__ import annotations
@@ -196,14 +197,19 @@ class PortfolioRangeProcessor:
 
     async def recover_at_startup(self) -> None:
         """Called once when the worker starts, before it consumes: the run left DISPATCHED,
-        RUNNING or CANCELLING was interrupted. Its dates left RUNNING are restored; a CANCELLING
-        run ends CANCELLED, any other is run to its end here, after ``progress_date``."""
+        RUNNING or CANCELLING was interrupted. Its dates left RUNNING are restored; a run being
+        cancelled (CANCELLING, or a cancel request recorded) ends CANCELLED before any date, in the
+        same transaction that frees the slot; any other is run to its end here, after
+        ``progress_date``. Idempotent: a second call finds no active run and changes nothing."""
         async with self._uow_factory() as uow:
             interrupted = await self._store.lock_active_runs(uow=uow)
             now = self._clock.now()
             to_resume: list[UUID] = []
             for request in interrupted:
-                if request.status is ProcessingStatus.CANCELLING:
+                if (
+                    request.status is ProcessingStatus.CANCELLING
+                    or request.cancel_requested_at is not None
+                ):
                     await end_run(self._store, request, ProcessingStatus.CANCELLED, now, uow=uow)
                     logger.info("processing request %s cancelled at worker start", request.id)
                     continue

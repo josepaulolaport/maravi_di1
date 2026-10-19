@@ -822,3 +822,67 @@ async def test_a_cancelling_run_at_the_worker_start_ends_cancelled(worker: Worke
     run = await worker.run_row(request_id)
     assert (run["status"], run["finished_at"]) == ("CANCELLED", worker.clock.now())
     assert await worker.statuses() == {}
+
+
+async def test_a_running_run_with_a_cancel_request_at_the_worker_start_ends_cancelled(
+    worker: Worker,
+) -> None:
+    await seed_statuses(worker.engine, {D0: (None, "PROCESSED"), D1: (None, "PROCESSED")})
+    worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("0"))
+    request_id = await worker.enqueue("CASH", D1, D2)
+
+    async def crash(chain: str, day: date) -> None:
+        raise asyncio.CancelledError
+
+    worker.writer.hook = crash
+    with pytest.raises(asyncio.CancelledError):
+        await worker.dispatch_and_run()
+    worker.writer.hook = None
+    # The cancel was recorded while the run kept its RUNNING status.
+    await worker.execute(
+        "UPDATE processing.requests SET cancel_requested_at = now() WHERE id = :id",
+        id=request_id,
+    )
+    writes_before = await worker.writes()
+
+    await worker.restart()
+
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["progress_date"]) == ("CANCELLED", None)
+    rows = await worker.status_rows()
+    assert (rows[D1]["cash"], rows[D1]["cash_previous"]) == ("PROCESSED", None)  # restored
+    assert D2 not in rows
+    assert await worker.writes() == writes_before  # no date processed
+    assert await worker.active_request_id() is None
+
+
+async def test_recovery_at_the_worker_start_is_idempotent(worker: Worker) -> None:
+    await seed_statuses(worker.engine, {D0: (None, "PROCESSED")})
+    worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("0"))
+    request_id = await worker.enqueue("CASH", D1, D2)
+
+    async def crash_on_d2(chain: str, day: date) -> None:
+        if day == D2:
+            raise asyncio.CancelledError
+
+    worker.writer.hook = crash_on_d2
+    with pytest.raises(asyncio.CancelledError):
+        await worker.dispatch_and_run()
+    worker.writer.hook = None
+
+    await worker.restart()
+    after_first = (
+        await worker.run_row(request_id),
+        await worker.status_rows(),
+        await worker.writes(),
+        await worker.active_request_id(),
+    )
+    await worker.restart()  # e.g. a stop raced with the end and the hook runs again
+
+    assert after_first[0]["status"] == "COMPLETED"
+    assert (
+        await worker.run_row(request_id),
+        await worker.status_rows(),
+        await worker.writes(),
+        await worker.active_request_id(),
+    ) == after_first
