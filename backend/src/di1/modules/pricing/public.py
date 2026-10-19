@@ -23,9 +23,15 @@ class PricingService(Protocol):
         """The complete PU and rate pair for ``quote`` on ``reference_date``.
 
         The service reads the instrument through ``asset.public.AssetReader``, so no caller
-        passes a stale face value. It raises ``DomainError``: ``NOT_FOUND`` for an unknown
-        instrument, ``CONTRACT_MATURED`` after the maturity date, ``VALIDATION_ERROR`` for a quote
-        out of bounds or with too many decimals. On the maturity date the PU is typed and the
-        rate is 0.
+        passes a stale face value. It prices only instruments of product code ``DI1``
+        (case-insensitive); another product, or an instrument without a maturity or a face value,
+        is ``VALIDATION_ERROR`` on ``asset_id`` (OQ-34). It raises ``DomainError``: ``NOT_FOUND``
+        for an unknown instrument, ``CONTRACT_MATURED`` after the maturity date,
+        ``VALIDATION_ERROR`` for a quote out of bounds or with too many decimals. On the maturity
+        date the PU is typed and the rate is 0.
+
+        Error fields use Pricing's names, ``asset_id``, ``reference_date``, ``pu`` and ``rate``;
+        each caller remaps them to its request fields (Ledger: ``date``, ``execution_pu``,
+        ``execution_rate``) (OQ-34).
         """
         ...
