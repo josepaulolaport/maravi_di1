@@ -17,7 +17,8 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 - Asset validates product/class/type hierarchy and maturity requirements. Futures' shared specs in `asset.futures`, contract maturity in `asset.instruments`.
 
 ### Pricing
-- `PricingService.calculate(instrument_id, reference_date, quote: Quote) -> Price`: the service reads the instrument through `asset.public.AssetReader.get_instrument` and builds the calculator's terms from it, so no caller passes a stale face value (lane B's approved contract request).
+- `PricingService.calculate(instrument_id, reference_date, quote: Quote) -> Price`: the service reads the instrument through `asset.public.AssetReader.get_instrument` and builds the calculator's terms from it, so no caller passes a stale face value (lane B's approved contract request). It prices only instruments of product code `DI1` (case-insensitive); another product, or an instrument without a maturity or a face value, is 422 `VALIDATION_ERROR` on `asset_id` (OQ-34).
+- Pricing's error `field` names are `asset_id`, `reference_date`, `pu` and `rate`; each caller remaps them to its own request fields (Ledger: `date`, `execution_pu`, `execution_rate`; Prices: unchanged). The calculator raises `DomainError` directly (OQ-34).
 - `Quote` is what was typed, the single authoritative input: a rate or a PU. `Price` is the complete pair: PU, rate and input_kind, neither optional. The only convention is DC/365 (spec §4.1).
 - `DI1Calculator` is pure and returns a value. Calculators never publish messages or persist results. `PriceService` and `LedgerService` can both call Pricing's public interface; P&L does **not** belong here.
 
