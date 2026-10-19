@@ -50,8 +50,10 @@ export function useProcessingRequests() {
         : false,
   });
 
-  // `null` until the first load: the jobs already finished then are not news.
-  const lastSeen = useRef<{ statuses: Map<string, JobStatus>; newest: string } | null>(null);
+  // `null` until the first load: the jobs already finished then are not news. `newest` is an
+  // instant (ms): timestamps may carry any offset, "Z" included (#93), so they are never
+  // compared as strings.
+  const lastSeen = useRef<{ statuses: Map<string, JobStatus>; newest: number } | null>(null);
   useEffect(() => {
     const items = query.data?.items;
     if (!items) return;
@@ -64,12 +66,13 @@ export function useProcessingRequests() {
       items.some((job) => {
         const before = seen.statuses.get(job.id);
         if (!isFinal(job.status)) return false;
-        return before === undefined ? job.created_at > seen.newest : isActive(before);
+        return before === undefined ? Date.parse(job.created_at) > seen.newest : isActive(before);
       });
-    const newest = items.reduce(
-      (latest, job) => (job.created_at > latest ? job.created_at : latest),
-      seen?.newest ?? '',
-    );
+    const newest = items.reduce((latest, job) => {
+      // An unreadable timestamp is skipped: NaN would end every later comparison.
+      const created = Date.parse(job.created_at);
+      return Number.isFinite(created) ? Math.max(latest, created) : latest;
+    }, seen?.newest ?? Number.NEGATIVE_INFINITY);
     lastSeen.current = { statuses: new Map(items.map((job) => [job.id, job.status])), newest };
     if (finished) void invalidateAfterJobFinished(queryClient);
   }, [query.data, queryClient]);

@@ -13,7 +13,7 @@ import { SCOPE_LABELS } from '@/shared/processing/scope';
 
 import { formatPeriod, formatProgress, shortId } from '../format';
 import type { useProcessingRequests } from '../hooks/useProcessing';
-import { canCancel, jobStatusBadge, progressOf, retryRequests } from '../jobStatus';
+import { canCancel, runBadge, progressOf, retryRequests } from '../jobStatus';
 import type { RetryRequest } from '../jobStatus';
 
 /**
@@ -34,7 +34,7 @@ function matchesSearch(job: ProcessingRequest, search: string): boolean {
     shortId(job.id),
     formatPeriod(job.start_date, job.end_date),
     SCOPE_LABELS[job.scope],
-    jobStatusBadge(job.status).label,
+    runBadge(job).label,
   ].some((value) => value.toLocaleLowerCase('pt-BR').includes(needle));
 }
 
@@ -135,7 +135,7 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
 }
 
 function JobRow({ job, actions }: { job: ProcessingRequest; actions: JobActions }) {
-  const badge = jobStatusBadge(job.status);
+  const badge = runBadge(job);
   const id = shortId(job.id);
   return (
     <Table.Tr>
@@ -161,7 +161,7 @@ function JobRow({ job, actions }: { job: ProcessingRequest; actions: JobActions 
             >
               Ver detalhes
             </Menu.Item>
-            {canCancel(job.status) && (
+            {canCancel(job) && (
               <Menu.Item
                 color="red"
                 onClick={() => {

@@ -28,8 +28,27 @@ export function jobStatusBadge(status: JobStatus): { label: string; color: Manti
   return BADGES[status];
 }
 
+/**
+ * Whether the user asked to cancel a run that is still running (OQ-46): the API keeps it
+ * RUNNING with `cancel_requested_at` set until the current date commits.
+ */
+const isCancelling = (job: Pick<ProcessingRequest, 'status' | 'cancel_requested_at'>) =>
+  job.status === 'RUNNING' && job.cancel_requested_at !== null;
+
+/**
+ * A run's badge: its status label, or Cancelando for a running run whose cancel was asked
+ * (OQ-46, user decision). DISPATCHED and CANCELLING keep their labels but the API never sends
+ * them since OQ-46.
+ */
+export function runBadge(job: Pick<ProcessingRequest, 'status' | 'cancel_requested_at'>): {
+  label: string;
+  color: MantineColor;
+} {
+  return isCancelling(job) ? BADGES.CANCELLING : BADGES[job.status];
+}
+
+// DISPATCHED and CANCELLING are never sent since OQ-46; they stay listed only as a safe default.
 const ACTIVE: readonly JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING', 'CANCELLING'];
-const CANCELLABLE: readonly JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING'];
 /** Ended before their last date: what is left of the range may be asked again (OQ-23). */
 const UNFINISHED: readonly JobStatus[] = ['CANCELLED', 'FAILED'];
 /** Where a Tudo run may end with one chain failed and the other gone on (OQ-36, OQ-40). */
@@ -40,8 +59,12 @@ export const isActive = (status: JobStatus) => ACTIVE.includes(status);
 
 export const isFinal = (status: JobStatus) => !isActive(status);
 
-/** Cancel (§10.2). */
-export const canCancel = (status: JobStatus) => CANCELLABLE.includes(status);
+/**
+ * Cancel (§10.2): a queued run, or a running one whose cancel was not asked yet; asking twice
+ * answers 409 (OQ-46).
+ */
+export const canCancel = (job: Pick<ProcessingRequest, 'status' | 'cancel_requested_at'>) =>
+  job.status === 'QUEUED' || (job.status === 'RUNNING' && !isCancelling(job));
 
 /**
  * The date a run processes next, or failed on: the day after its last commit, or its start
