@@ -86,8 +86,8 @@ Recommended agents (a reviewer can be a second agent applied after each module P
 
 | Lane | Ownership | Starts | Dependencies |
 |---|---|---|---|
-| A — Asset | `modules/asset/**`, `tests/unit/asset/**` | Wave 1 | Frozen DTOs + schema |
-| B — Pricing | `modules/pricing/**`, `tests/unit/pricing/**` | Wave 1 | InstrumentDescriptor contract; can use fixtures |
+| A — Asset | `modules/asset/**`, `tests/unit/asset/**`, `tests/integration/asset/**` | Wave 1 | Frozen DTOs + schema |
+| B — Pricing | `modules/pricing/**`, `tests/unit/pricing/**`, `tests/integration/pricing/**` | Wave 1 | InstrumentDescriptor contract; can use fixtures |
 | C — Ledger | `modules/ledger/**`, `tests/unit/ledger/**` | Wave 2 | Asset & Pricing public interfaces |
 | D — Prices | `modules/prices/**`, `tests/unit/prices/**` | Wave 2 | Asset & Pricing public interfaces |
 | E — Portfolio | `modules/portfolio/**`, `tests/unit/portfolio/**` | Wave 1 pure accounting; Wave 3 DB/read | Ledger DTOs; PnL result DTOs; schemas |
@@ -97,7 +97,7 @@ Recommended agents (a reviewer can be a second agent applied after each module P
 | I — Frontend | `frontend/**` | Wave 1 mock API | Drafts the HTTP response types and MSW fixtures from the spec and the Figma, as a contract proposal the integrator reconciles with the backend; backend not required |
 | X — Integrator | `composition/**`, `main.py`, migrations, global tests, shared contracts, CI, compose | Throughout | Owns all cross-module wiring |
 
-If fewer agents: combine A+B, C+D, E+F; **do not** combine G with platform+integration until there are stable endpoints. A coding agent should not modify another lane's folder to make its tests pass: raise a contract change request to X.
+If fewer agents: combine A+B, C+D, E+F; **do not** combine G with platform+integration until there are stable endpoints. A coding agent should not modify another lane's folder to make its tests pass: raise a contract change request to X. A lane's integration tests may import another lane's test seed read-only (lane B imports lane A's catalogue seed from `tests/integration/asset/conftest.py`; user, 2026-10-19); the owner changes that seed, and a change that breaks an importer goes through X.
 
 ### Worktree steps (example)
 
