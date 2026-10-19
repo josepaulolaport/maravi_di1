@@ -47,6 +47,7 @@ export function runBadge(job: Pick<ProcessingRequest, 'status' | 'cancel_request
   return isCancelling(job) ? BADGES.CANCELLING : BADGES[job.status];
 }
 
+// DISPATCHED and CANCELLING are never sent since OQ-46; they stay listed only as a safe default.
 const ACTIVE: readonly JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING', 'CANCELLING'];
 /** Ended before their last date: what is left of the range may be asked again (OQ-23). */
 const UNFINISHED: readonly JobStatus[] = ['CANCELLED', 'FAILED'];

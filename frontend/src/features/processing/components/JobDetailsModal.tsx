@@ -103,6 +103,7 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
             {/* Counts of calendar days from the range and progress_date, never money. */}
             <Field label="Dias restantes">{formatDays(progress.total - progress.done)}</Field>
           </SimpleGrid>
+          {/* CANCELLING is never sent since OQ-46; kept as a safe default. */}
           {(job.status === 'RUNNING' || job.status === 'CANCELLING') && (
             <Stack gap="xs">
               <Field label="Data em processamento">{formatDate(nextDate(job))}</Field>

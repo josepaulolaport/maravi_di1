@@ -68,10 +68,11 @@ export function useProcessingRequests() {
         if (!isFinal(job.status)) return false;
         return before === undefined ? Date.parse(job.created_at) > seen.newest : isActive(before);
       });
-    const newest = items.reduce(
-      (latest, job) => Math.max(latest, Date.parse(job.created_at)),
-      seen?.newest ?? Number.NEGATIVE_INFINITY,
-    );
+    const newest = items.reduce((latest, job) => {
+      // An unreadable timestamp is skipped: NaN would end every later comparison.
+      const created = Date.parse(job.created_at);
+      return Number.isFinite(created) ? Math.max(latest, created) : latest;
+    }, seen?.newest ?? Number.NEGATIVE_INFINITY);
     lastSeen.current = { statuses: new Map(items.map((job) => [job.id, job.status])), newest };
     if (finished) void invalidateAfterJobFinished(queryClient);
   }, [query.data, queryClient]);

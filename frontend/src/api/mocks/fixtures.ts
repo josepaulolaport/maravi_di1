@@ -615,7 +615,8 @@ function job(
     failed_chain: null,
     created_at: createdAt,
     updated_at: createdAt,
-    dispatched_at: createdAt,
+    // No dispatcher (OQ-46 item 3): the column stays, unused.
+    dispatched_at: null,
     started_at: createdAt,
     finished_at: createdAt,
     cancel_requested_at: null,

@@ -791,6 +791,35 @@ describe('mock processing', () => {
     });
   });
 
+  it('OQ-46 the worker takes the oldest queued run by instant, whatever the offset', async () => {
+    const [template] = (await processingApi.listRequests()).items;
+    if (!template) throw new Error('the fixtures have runs');
+    const queued = (id: string, created_at: string) => ({
+      ...template,
+      id,
+      status: 'QUEUED' as const,
+      start_date: '2026-10-14',
+      end_date: '2026-10-15',
+      progress_date: null,
+      created_at,
+    });
+    // 12:00Z is earlier than 10:00-03:00 (13:00Z), though its string sorts later.
+    db.requests.push(
+      queued('cc000000-0000-4000-8000-000000000002', '2026-10-18T10:00:00-03:00'),
+      queued('cc000000-0000-4000-8000-000000000001', '2026-10-18T12:00:00Z'),
+    );
+
+    await processingApi.listRequests(); // one worker step
+
+    expect(db.requests.find((r) => r.id.startsWith('cc') && r.status === 'RUNNING')?.id).toBe(
+      'cc000000-0000-4000-8000-000000000001',
+    );
+    const listed = (await processingApi.listRequests()).items.map((r) => r.id);
+    expect(listed.indexOf('cc000000-0000-4000-8000-000000000002')).toBeLessThan(
+      listed.indexOf('cc000000-0000-4000-8000-000000000001'),
+    );
+  });
+
   it('OQ-46 a second cancel of a running run answers 409 JOB_NOT_CANCELLABLE', async () => {
     const job = await processingApi.enqueue({
       start_date: '2026-10-14',

@@ -66,6 +66,11 @@ Recorded by lane X in PR #54 (OQ-32 to OQ-40), #59 (OQ-41) and #68 (OQ-42); the 
 - OQ-41: `GET /portfolio/pnl` returns one point per calendar date. `range_cumulative_pnl` is never `null`: a day adds its `daily_pnl` only when its positions status is `PROCESSED` or `PROCESSED_WITH_ISSUES` and `daily_pnl` is not null, and 0 otherwise. A `NOT_PROCESSED`, `FAILED` or `RUNNING` day has `daily_pnl`, `cumulative_pnl` and `pnl_status` null, even over an older published row. The chart draws every point; its tooltip says why a day adds nothing, and the card notes when any day is incomplete.
 - OQ-42: `GET /reference-prices` accepts any range, dates after today included; those days come back empty. Writes still refuse dates after today (OQ-14). The contract page's calendar still ends on min(today, maturity) (§11.2): it never asks for days that cannot have a price.
 
+## OQ-44 to OQ-46
+
+- OQ-44: a technical failure on a date, of a chain or of no chain, sets `error_code` `PROCESSING_ERROR`, "Erro técnico ao processar a data."; the job details show it like the run's other errors. OQ-45 retires `RECOVERY_EXHAUSTED`.
+- OQ-46: there is no dispatcher. A run goes `QUEUED` → `RUNNING`; `DISPATCHED`, `CANCELLING` and `dispatched_at` are never used. Cancelling a queued run ends it `CANCELLED` at once; a running run stays `RUNNING` with `cancel_requested_at` set until the current date commits, and the screens show it as Cancelando (item 11). A second cancel is 409 `JOB_NOT_CANCELLABLE`, "O cancelamento deste processamento já foi solicitado." The mock orders runs by `(created_at, id)` as instants, since the seed's `-03:00` and new runs' UTC "Z" strings do not sort in time order.
+
 ## Decided gap
 
 - **GAP-I-1**, reversed (user, 2026-10-18): cash entries now carry a time like trades, and every entry is ordered by (date, time, seq) (P20). The earlier ruling was "date only".

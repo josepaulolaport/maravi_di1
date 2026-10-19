@@ -45,6 +45,13 @@ export function chainsOf(scope: ProcessingScope): ProcessingChain[] {
 
 const now = () => new Date().toISOString();
 
+/**
+ * Oldest first by (created_at, id), comparing instants: the seed carries "-03:00" offsets and
+ * new runs UTC "Z", so the strings do not sort in time order.
+ */
+const byCreation = (a: ProcessingRequest, b: ProcessingRequest) =>
+  Date.parse(a.created_at) - Date.parse(b.created_at) || a.id.localeCompare(b.id);
+
 const isProcessed = (status: PredecessorState) =>
   status === 'PROCESSED' || status === 'PROCESSED_WITH_ISSUES';
 
@@ -269,7 +276,7 @@ function tick(): void {
   // straight to RUNNING and starts its first date.
   const next = db.requests
     .filter((r) => r.status === 'QUEUED')
-    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
+    .sort((a, b) => byCreation(a, b))
     .at(0);
   if (!next) return;
   Object.assign(next, { status: 'RUNNING', started_at: now(), updated_at: now() });
@@ -346,9 +353,7 @@ export const processingHandlers = [
   http.get(url('/processing/requests'), async ({ request }) => {
     await latency();
     tick();
-    const items = [...db.requests].sort(
-      (a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id),
-    );
+    const items = [...db.requests].sort((a, b) => byCreation(b, a));
     const page = paginate(items, request);
     return page instanceof Response ? page : HttpResponse.json<Page<ProcessingRequest>>(page);
   }),
