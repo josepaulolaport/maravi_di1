@@ -6,10 +6,10 @@ publishes daily positions and P&L for one portfolio on request. The specificatio
 
 ## Setup in 30 seconds
 
-Needs [uv](https://docs.astral.sh/uv/) 0.13+, Docker and GNU Make (Node 24 once `frontend/` exists).
+Needs [uv](https://docs.astral.sh/uv/) 0.13+, Node 24 LTS with npm, Docker and GNU Make.
 
 ```bash
-make install   # cd backend && uv sync --frozen; npm ci once frontend/package.json exists
+make install   # cd backend && uv sync --frozen; cd frontend && npm ci
 make lint      # uv lock --check, ruff check, ruff format --check, mypy (strict);
                # frontend: eslint, tsc --noEmit, prettier --check
 make test      # one Alembic head, alembic upgrade head, pytest with coverage on PostgreSQL 16

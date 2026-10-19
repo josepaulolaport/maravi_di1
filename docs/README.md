@@ -12,6 +12,8 @@ These files are the whole specification. They replaced the earlier `docs/` on 20
 | [open-questions.md](open-questions.md) | Questions the docs left open and the user's answers (OQ-1 to OQ-47; none open) | en |
 | [desafio_tecnico_di1_1.pdf](desafio_tecnico_di1_1.pdf) | The challenge text (authority 1) | pt-BR |
 
+[qa/](qa/) is not specification: it holds dated QA reports (the real-API QA of 2026-10-19), records of what was checked and found. They define no behaviour and are outside the order of authority below.
+
 ## Order of authority
 
 1. The challenge text ([desafio_tecnico_di1_1.pdf](desafio_tecnico_di1_1.pdf)) sets the minimum requirements. Every interpretation of it and every deliberate deviation from it is in spec §15.

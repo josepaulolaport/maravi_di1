@@ -10,7 +10,7 @@ These rules add to the root CLAUDE.md. The authorities are:
 ```text
 backend/
   pyproject.toml  uv.lock  alembic.ini
-  migrations/{env.py, versions/, sql/}  # integrator (X) only; sql/ holds each revision's reviewed SQL; 0001 + 0002 + 0003 + 0004 = docs/schema.sql
+  migrations/{env.py, versions/, sql/}  # integrator (X) only; sql/ holds each revision's reviewed SQL; revisions 0001–0006 (head 0006) = docs/schema.sql
   src/di1/
     main.py                              # integrator
     composition/{routers,dependencies,consumers}.py   # integrator
@@ -27,10 +27,12 @@ backend/
       presentation/http/{router.py, schemas.py}
       presentation/messaging/            # this module's RabbitMQ consumers and handlers
     workers/{main.py, outbox_relay.py}   # lane H; no dispatcher (OQ-46)
-  tests/{unit/<module>/, integration/, architecture/, e2e/}
+  tests/{unit/<module>/, integration/, architecture/, fakes/}
   tests/acceptance/                  # spec §13 phase 1, pure; acceptance-tests session
   tests/integration/acceptance/      # spec §13 phase 2; acceptance-tests session
 ```
+
+There is no `tests/e2e/`: the end-to-end smoke is `scripts/e2e.sh` + `scripts/e2e_smoke.py`, run by `make e2e` from the repository root.
 
 Create only the files and packages that are used. Initially only Processing has a messaging consumer. Its handlers parse the message and call `application/`, and hold no business logic. Shared RabbitMQ infrastructure (connection, publisher, consumer base, envelope, outbox, inbox, topology) lives in `platform/messaging/`.
 
@@ -92,11 +94,11 @@ Create only the files and packages that are used. Initially only Processing has 
 
 ## Commands (from `backend/`)
 
-The integrator fixes these commands in Wave 0. Until the scaffold exists, they are the expected set:
+The full suite is `make test-backend` from the repository root (`scripts/test-backend.sh`): it starts throwaway `postgres:16` and `rabbitmq:4.1-management` containers on free ports (or uses `TEST_DATABASE_URL` / `TEST_RABBITMQ_URL`), sets `REQUIRE_DATABASE_TESTS=1` and `REQUIRE_BROKER_TESTS=1`, and so never skips a database or broker test (README, Setup). Bare `uv run pytest` is for quick local runs:
 
 ```bash
 uv sync
-uv run pytest -q                # unit + architecture; database tests are skipped (reported) without TEST_DATABASE_URL
+uv run pytest -q                # bare run only: database tests are skipped (reported, not verified) without TEST_DATABASE_URL
 TEST_DATABASE_URL=postgresql+psycopg://postgres:x@localhost:55432/postgres uv run pytest -q
                                 # adds the integration tests; each test creates and drops its own database
 uv run ruff check . && uv run ruff format --check .

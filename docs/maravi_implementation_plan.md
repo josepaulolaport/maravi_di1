@@ -235,36 +235,32 @@ Do not merge branches merely because code compiles. Require reviewer sign-off an
 
 ## 11. Open decisions requiring human sign-off before relevant code
 
-None. OQ-1 to OQ-46 are answered (`docs/open-questions.md`); a new gap goes through the `spec-gap` skill before any code depends on it.
+None. OQ-1 to OQ-47 are answered (`docs/open-questions.md`); a new gap goes through the `spec-gap` skill before any code depends on it.
 
 **Post-completion TODO:** asynchronous CSV reference-price import and optional B3 extraction feeding `PriceService` via RabbitMQ adapter, not part of initial implementation.
 
 ## 12. Progress and remaining work (2026-10-19)
 
-Every lane's code is merged. Decisions OQ-1 to OQ-46 are answered and none is open.
+Every lane's code is merged. Decisions OQ-1 to OQ-47 are answered and none is open. OQ-47 records the user's answer to the pre-delivery code review ("all recommended"): robustness fixes, single-sourced rules, dead code removed and one frontend fix land in their own PRs; the rest is known debt, listed in the README ("Known limitations / technical debt").
 
-### Verified on `main` at `dde3dd6`
+### Verified on `main` at `bbf7027`
 
-Run locally on 2026-10-19 (GitHub Actions is down; the user decided merges go on local results):
+Run locally on 2026-10-19 on `bbf7027` (#108) plus this PR's docs-only commits (GitHub Actions is down; the user decided merges go on local results):
 
-- `make lint-backend`: `uv lock --check` ok; ruff "All checks passed!", "340 files already formatted"; mypy "Success: no issues found in 336 source files".
-- `make test-backend` (throwaway PostgreSQL 16 and RabbitMQ 4.1): `alembic heads: 0006 (head)`, `alembic current after upgrade head: 0006 (head)`; "1325 passed in 195.83s", 0 skipped; coverage 99%.
-- `make lint-frontend`: eslint and `tsc --noEmit` clean, "All matched files use Prettier code style!".
-- `make test-frontend`: "Test Files 31 passed (31)", "Tests 537 passed (537)".
-- `npm run build`: "✓ built in 717ms".
-- `make e2e` (throwaway Compose stack: postgres, rabbitmq, migrate, api, outbox-relay, worker): the challenge example dated today, 11 checks ok (PU 90909.0909090909, run `COMPLETED`, cash and positions `PROCESSED`, cash 109090.9090909091, AUM 200000, one position), "E2E SMOKE PASSED".
-
-Since then `9f9c40d` merged #99 (the Compose `web` service); its reviewer reported the frontend at 540 tests passed. Not rerun here.
+- `make lint`: ruff format "348 files already formatted"; mypy "Success: no issues found in 343 source files"; eslint and `tsc --noEmit` clean, "All matched files use Prettier code style!".
+- `make test-backend` (throwaway PostgreSQL 16 and RabbitMQ 4.1): `alembic heads: 0006 (head)`, `alembic current after upgrade head: 0006 (head)`; "1366 passed in 252.88s", 0 skipped; coverage 99%.
+- `make test-frontend`: "Test Files 33 passed (33)", "Tests 554 passed (554)". A first run in parallel with `make test-backend` and `make e2e` had 2 timeouts in `ProcessingTab.test.tsx`; the rerun alone passed.
+- `make e2e` (throwaway Compose stack, its own project: postgres, rabbitmq, migrate, seed, api, demo, outbox-relay, worker, web): the challenge example dated today, 14 checks ok (PU 90909.0909090909, run `COMPLETED`, cash and positions `PROCESSED`, cash 109090.9090909091, AUM 200000, one position of quantity 1), "E2E SMOKE PASSED", and the `web` service serves the UI and forwards the API.
 
 ### Done, by area
 
 | Area | On `main` (merged PRs) |
 |---|---|
-| Docs and decisions | spec, schema, interfaces, plan and challenge audit (#1–#3, #8); OQ-19/OQ-20 (#12); OQ-21/OQ-22 (#36); OQ-23–OQ-26 (#43); OQ-27 (#40); OQ-28 (#46); OQ-29–OQ-31 (#49); OQ-32–OQ-40 (#54); OQ-41 (#59); OQ-42 (#68); OQ-43/OQ-44 (#82); OQ-45 (#85, reverses OQ-43); OQ-46 (#91); commit freely, review at PR time (#67) |
+| Docs and decisions | spec, schema, interfaces, plan and challenge audit (#1–#3, #8); OQ-19/OQ-20 (#12); OQ-21/OQ-22 (#36); OQ-23–OQ-26 (#43); OQ-27 (#40); OQ-28 (#46); OQ-29–OQ-31 (#49); OQ-32–OQ-40 (#54); OQ-41 (#59); OQ-42 (#68); OQ-43/OQ-44 (#82); OQ-45 (#85, reverses OQ-43); OQ-46 (#91); commit freely, review at PR time (#67); plan §12 and status lines (#98); process docs (#102); 4-decimal rate display (#107); OQ-47, the code-review decisions (this PR) |
 | Schema | Alembic 0001 to 0006, head `0006` = `docs/schema.sql`, equivalence-tested (#6, #36, #43, #50, #53, #58) |
 | Backend scaffold and shared | scaffold and import-boundary tests (#4, #5); decimals and clock (#7); error catalogue and problem+json (#26) |
 | Platform (H) | config, clock, async database, Unit of Work (#23); messaging: envelope, outbox, inbox, publisher, relay, consumer (#31); logging and relay process (#57); worker processes (#74) and startup recovery hook (#89); publish test fix (#80) |
-| Composition (X) | public contracts (#37, #49); app factory, `/health` (#45); routes under `/api` (#61, #62, #77); backend image, Compose and API logging (#75); worker and relay wired to Processing and run in Compose (#92); `make e2e` and README demo (#86); RabbitMQ in CI (#69) |
+| Composition (X) | public contracts (#37, #49); app factory, `/health` (#45); routes under `/api` (#61, #62, #77); backend image, Compose and API logging (#75); worker and relay wired to Processing and run in Compose (#92); `make e2e` and README demo (#86); RabbitMQ in CI (#69); DI1 catalogue seeded on every `docker compose up` by the one-shot `seed` service, ledger timestamps in UTC (#102); two weeks of demo history loaded on `up` by the one-shot `demo` service through the HTTP API, `scripts/seed_demo.py` (#104); `make e2e` safe in several worktrees at once, project from `DI1_E2E_PROJECT` (#106, #108) |
 | A Asset | catalogue, `AssetReader`, HTTP (#47) |
 | B Pricing | DI1 calculator (#24); `PricingService` over `AssetReader` (#52) |
 | C Ledger | `ledger.entries`, batch hard delete, keyset list, HTTP (#48, #63) |
@@ -272,8 +268,8 @@ Since then `9f9c40d` merged #99 (the Compose `web` service); its reviewer report
 | E Portfolio | positions, cash and valuation chains (#28); source tracing (#44); writer, queries and P&L series with every date (#73) |
 | F PnL | pure P&L calculators (#34); predecessor rule after OQ-31 (#70) |
 | G Processing | request API and `DateStatusReader` (#56); worker, one transaction per date (#78); first failure exposed (#79); OQ-46 doorbell and FIFO drain, no dispatcher (#93, #96, #97) |
-| Acceptance (spec §13) | phase 1, domain level, in the pre-commit hook (#64, #66); phase 2 over HTTP and PostgreSQL: catalogue, ledger, prices, errors, the challenge example (#81) |
-| I Frontend | shell, Carteira, Lançamentos, Ativos, Central de Controle on MSW (#13, #15, #16, #19, #20, #22, #25, #27, #29, #30, #32, #33); contract review and OQ-26–OQ-42 (#38, #41, #42, #51, #72); no dispatcher and `PROCESSING_ERROR` (#95); dev-server proxy to the real backend, `VITE_API_MOCKS=false` (#88); `web` service in Compose, nginx on 127.0.0.1:8080 proxying `/api` and `/health`, no MSW in the production build (#99) |
+| Acceptance (spec §13) | phase 1, domain level, in the pre-commit hook (#64, #66); phase 2 over HTTP and PostgreSQL: catalogue, ledger, prices, errors, the challenge example (#81); follow-ups: case 17, setup checks, Decimal (#100); the §13 scenarios end to end with the worker: the challenge example through a run, queue, recovery, predecessor rule, maturity (#101); `failed_chain` when both chains fail on one date (#103) |
+| I Frontend | shell, Carteira, Lançamentos, Ativos, Central de Controle on MSW (#13, #15, #16, #19, #20, #22, #25, #27, #29, #30, #32, #33); contract review and OQ-26–OQ-42 (#38, #41, #42, #51, #72); no dispatcher and `PROCESSING_ERROR` (#95); dev-server proxy to the real backend, `VITE_API_MOCKS=false` (#88); `web` service in Compose, nginx on 127.0.0.1:8080 proxying `/api` and `/health`, no MSW in the production build (#99); post-QA fixes: 404 on deletion, KPI layout, future dates refused out loud, queued vs running cancel copy, rates with 4 decimals, Definir preço period (#105) |
 | CI | path-scoped jobs, `ci-ok`, CodeRabbit review (#9–#11, #21) |
 
 Gates: G0–G5 are met (Gate 4 by `make e2e` on Compose: challenge example, run `COMPLETED`, cash, AUM and position checked; G5 by #99: the UI runs on the real API from the Compose `web` service).
@@ -282,7 +278,7 @@ Gates: G0–G5 are met (Gate 4 by `make e2e` on Compose: challenge example, run 
 
 | Item | State |
 |---|---|
-| Acceptance phase 2 processing scenarios (spec §13: the challenge example through a run, missing price, predecessor rule, P&L chart, the second halves of cases 9, 16 and 17) | in flight (acceptance follow-ups session); phase 2 today covers catalogue, ledger, prices, errors and the challenge example without a run |
-| QA against the real API | in flight (read-only QA session); its findings are not triaged yet |
+| Code-review follow-ups (OQ-47): robustness fixes (inbox retention among them), single-sourced rules, dead code, one frontend fix | in flight, in their own PRs |
+| Known technical debt (OQ-47 item 5) | deferred by the user; listed in the README, "Known limitations / technical debt" |
 | `POST /pricing/calculate` | deliberately not built: OQ-19 keeps it "if needed", and the backend computes the complementary PU or rate when an entry is saved (OQ-19 item 7) |
 | CSV and B3 reference-price import | post-delivery TODO (§11, spec §14) |
