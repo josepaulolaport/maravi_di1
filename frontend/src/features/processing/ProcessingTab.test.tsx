@@ -951,11 +951,42 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     expect(modal.getByRole('alert')).toHaveTextContent('Dia anterior não processado');
     expect(field(modal, 'Data com erro').getByText('17/10/2026')).toBeInTheDocument();
     expect(field(modal, 'Cadeia com erro').getByText('Posições')).toBeInTheDocument();
+    // What each chain published (OQ-36 item 1): positions stopped on 17/10, cash reached the end.
+    expect(
+      modal.getByText('Caixa: as datas de 16/10/2026 a 18/10/2026 foram publicadas.'),
+    ).toBeInTheDocument();
     expect(
       modal.getByText(
-        'O fechamento das posições falhou em 17/10/2026; suas datas seguintes não foram processadas. O fechamento do caixa foi processado até o fim do período.',
+        'Posições: as datas de 16/10/2026 a 16/10/2026 foram publicadas; as seguintes não foram processadas.',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('OQ-36 a Falhou Tudo run where the chains failed on different dates says what each published', async () => {
+    seedJob({
+      ...PARTIAL,
+      status: 'FAILED',
+      progress_date: '2026-10-17',
+      error_code: 'MOCK_INPUTS_CHANGED',
+      error_message: 'Falha nas posições de 17/10/2026.',
+    });
+    const { user } = renderApp(PAGE);
+
+    const menu = within(await openMenu(user, '16/10/2026 a 18/10/2026', 'Falhou'));
+    await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
+
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    expect(
+      modal.getByText(
+        'Caixa: as datas de 16/10/2026 a 17/10/2026 foram publicadas; as seguintes não foram processadas.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      modal.getByText(
+        'Posições: as datas de 16/10/2026 a 16/10/2026 foram publicadas; as seguintes não foram processadas.',
+      ),
+    ).toBeInTheDocument();
+    expect(modal.queryByText(/^As datas de/)).not.toBeInTheDocument();
   });
 
   it('OQ-40 the failed-chain retry prefills that chain from failed_date to the original end', async () => {
@@ -1002,6 +1033,18 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
     expect(modal.getByRole('alert')).toHaveTextContent('Falha ao processar o caixa de 16/10/2026.');
     expect(field(modal, 'Cadeia com erro').getByText('Caixa')).toBeInTheDocument();
+    // Cash read Erro on 16/10, so only positions published it (OQ-36 item 10).
+    expect(
+      modal.getByText(
+        'Caixa: as datas de 15/10/2026 a 15/10/2026 foram publicadas; as seguintes não foram processadas.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      modal.getByText(
+        'Posições: as datas de 15/10/2026 a 16/10/2026 foram publicadas; as seguintes não foram processadas.',
+      ),
+    ).toBeInTheDocument();
+    expect(modal.queryByText(/^As datas de/)).not.toBeInTheDocument();
     await user.click(modal.getByRole('button', { name: 'Solicitar novo processamento' }));
     expect(router.state.location.search).toBe(
       '?tab=processamentos&inicio=2026-10-17&fim=2026-10-18&escopo=tudo',
