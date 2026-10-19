@@ -28,6 +28,7 @@ from di1.modules.ledger.domain.listing import EntryCursor, ListOrder, validate_p
 from di1.modules.pricing.public import PricingService, Quote
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
+from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 
 logger = logging.getLogger(__name__)
@@ -77,9 +78,12 @@ class LedgerService:
         descriptor = await self._instrument(draft.asset_id)
         known = KnownInstrument(descriptor.maturity_date) if descriptor is not None else None
         trade = validate_trade(draft, today=today, instrument=known)
-        price = await self._pricing.calculate(
-            trade.asset_id, trade.entry_date, Quote(trade.input_kind, trade.typed_value)
-        )
+        try:
+            price = await self._pricing.calculate(
+                trade.asset_id, trade.entry_date, Quote(trade.input_kind, trade.typed_value)
+            )
+        except DomainError as error:
+            raise _as_request_error(error) from error
         # The typed value is stored as typed (OQ-3); only the other one comes from Pricing.
         typed_pu = trade.input_kind is InputKind.PU
         entry = await repository.add_trade(
@@ -149,6 +153,28 @@ class LedgerService:
         if asset_id is None:
             return None
         return (await self._assets.get_instruments([asset_id])).get(asset_id)
+
+
+_REQUEST_FIELDS: Mapping[str | None, str | None] = {
+    "reference_date": "date",
+    "pu": "execution_pu",
+    "rate": "execution_rate",
+}
+"""Pricing's parameter names → the request fields the client keys on (lane B, PR #52)."""
+
+
+def _as_request_error(error: DomainError) -> DomainError:
+    """Pricing's refusal, named after the request's fields. An instrument Pricing cannot find is
+    a body field, so a validation error on ``asset_id``, never a 404."""
+    details = [
+        ErrorDetail(ErrorCode.VALIDATION_ERROR, "Selecione um contrato.", "asset_id")
+        if detail.code is ErrorCode.NOT_FOUND
+        else ErrorDetail(
+            detail.code, detail.message, _REQUEST_FIELDS.get(detail.field, detail.field)
+        )
+        for detail in error.errors
+    ]
+    return DomainError(*details, detail=error.detail if len(details) > 1 else None)
 
 
 def _view(entry: LedgerEntry, instruments: Mapping[UUID, InstrumentDescriptor]) -> LedgerEntryView:

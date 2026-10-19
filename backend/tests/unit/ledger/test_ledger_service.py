@@ -12,16 +12,16 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date, time
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.domain.entries import EntryDraft, EntryType
 from di1.modules.ledger.domain.listing import ListOrder
-from di1.modules.pricing.public import Quote
+from di1.modules.pricing.public import Price, Quote
 from di1.shared.clock import FixedClock
-from di1.shared.errors import DomainError, ErrorCode
+from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 from tests.unit.ledger.fakes import (
     DI1F28,
@@ -209,6 +209,64 @@ async def test_a_pricing_refusal_writes_nothing(harness: Harness) -> None:
 
     assert harness.repository.rows == []
     assert uow.commits == 0
+
+
+class RefusingPricing:
+    """A `PricingService` that refuses every quote with one error, as lane B's service does."""
+
+    def __init__(self, error: ErrorDetail) -> None:
+        self.error = error
+
+    async def calculate(self, instrument_id: UUID, reference_date: date, quote: Quote) -> Price:
+        raise DomainError(self.error)
+
+
+@pytest.mark.parametrize(
+    ("code", "pricing_field", "ledger_field"),
+    [
+        (ErrorCode.VALIDATION_ERROR, "rate", "execution_rate"),
+        (ErrorCode.VALIDATION_ERROR, "pu", "execution_pu"),
+        (ErrorCode.CONTRACT_MATURED, "reference_date", "date"),
+        (ErrorCode.VALIDATION_ERROR, "asset_id", "asset_id"),
+    ],
+)
+async def test_a_pricing_error_names_the_request_field(
+    harness: Harness, code: ErrorCode, pricing_field: str, ledger_field: str
+) -> None:
+    # Pricing names its own parameters; the client keys on the request's fields (lane B, PR #52).
+    service = LedgerService(
+        clock=FixedClock(TODAY),
+        assets=harness.assets,
+        pricing=RefusingPricing(ErrorDetail(code, "Mensagem do Pricing.", pricing_field)),
+        repository_for=lambda _uow: harness.repository,
+    )
+
+    with pytest.raises(DomainError) as error:
+        await service.create_entry(buy_rate(), uow=FakeUnitOfWork())
+
+    assert [(e.code, e.message, e.field) for e in error.value.errors] == [
+        (code, "Mensagem do Pricing.", ledger_field)
+    ]
+    assert harness.repository.rows == []
+
+
+async def test_an_instrument_pricing_cannot_find_is_a_validation_error_on_asset_id(
+    harness: Harness,
+) -> None:
+    # A body field never answers 404 (contract-mismatch rule E2).
+    service = LedgerService(
+        clock=FixedClock(TODAY),
+        assets=harness.assets,
+        pricing=RefusingPricing(ErrorDetail(ErrorCode.NOT_FOUND, "Instrumento não encontrado.")),
+        repository_for=lambda _uow: harness.repository,
+    )
+
+    with pytest.raises(DomainError) as error:
+        await service.create_entry(buy_rate(), uow=FakeUnitOfWork())
+
+    assert [(e.code, e.field) for e in error.value.errors] == [
+        (ErrorCode.VALIDATION_ERROR, "asset_id")
+    ]
 
 
 # --- delete -------------------------------------------------------------------------------------
