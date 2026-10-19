@@ -21,6 +21,8 @@ from di1.modules.portfolio.public import (
     PositionsDay,
     PreviousPositionsDay,
 )
+from di1.modules.processing.application.services.chain_history import LedgerChainHistory
+from di1.modules.processing.application.services.processing import ProcessingPreview
 from di1.modules.processing.application.services.run_chains import DayReaders
 from di1.modules.processing.application.services.run_processor import (
     FINISHED,
@@ -130,7 +132,8 @@ class Worker:
         self._date_transactions = 0
         self.uow_factory = unit_of_work_factory(session_factory)
         self.store = FlakyRunStore(self.clock)
-        self.service = make_service(clock=self.clock)
+        # The preview reads the same Ledger as the run, so the two can be compared.
+        self.service = make_service(clock=self.clock, history=LedgerChainHistory(self.world.ledger))
         self.processor = PortfolioRangeProcessor(
             uow_factory=self.uow_factory,
             store=self.store,
@@ -160,6 +163,11 @@ class Worker:
         async with self.uow_factory() as uow:
             request = await self.service.enqueue_range(ProcessingScope(scope), start, end, uow=uow)
         return request.id
+
+    async def preview(self, scope: str, start: date, end: date) -> ProcessingPreview:
+        """`ProcessingService.preview_range`, in its own transaction."""
+        async with self.uow_factory() as uow:
+            return await self.service.preview_range(ProcessingScope(scope), start, end, uow=uow)
 
     async def cancel(self, request_id: UUID) -> None:
         """`ProcessingService.request_cancel`, in its own transaction."""

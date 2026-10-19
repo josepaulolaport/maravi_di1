@@ -47,7 +47,6 @@ from datetime import date, datetime, timedelta
 from functools import partial
 from uuid import UUID
 
-from di1.modules.ledger.public import EntryType
 from di1.modules.portfolio.public import PortfolioResultsWriter
 from di1.modules.processing.application.interfaces.repositories import (
     DateStatusRepository,
@@ -58,12 +57,15 @@ from di1.modules.processing.application.interfaces.run_store import (
     NewIssue,
     RunStore,
 )
+from di1.modules.processing.application.services.chain_history import LedgerChainHistory
+from di1.modules.processing.application.services.predecessor import read_predecessor
 from di1.modules.processing.application.services.run_chains import (
     DayReaders,
     ReadersFactory,
     process_cash_day,
     process_positions_day,
 )
+from di1.modules.processing.domain.predecessor import PredecessorState, allows_run
 from di1.modules.processing.public import (
     ChainStatus,
     ProcessingRequest,
@@ -367,7 +369,7 @@ class PortfolioRangeProcessor:
                 other_processed = self._other_chain_processed(chain, alive, outcomes, current)
                 try:
                     async with self._store.savepoint(uow=uow):
-                        zero_state = await self._predecessor(chain, previous, day, readers, uow)
+                        zero_state = await self._predecessor(chain, previous, readers, uow)
                         if zero_state is None:
                             failures.append(
                                 ChainFailure(chain, PREDECESSOR_CODES[chain], PREDECESSOR_MESSAGE)
@@ -513,21 +515,19 @@ class PortfolioRangeProcessor:
         self,
         chain: ProcessingChain,
         previous: DateStatusRow,
-        day: date,
         readers: DayReaders,
         uow: UnitOfWork,
     ) -> bool | None:
-        """The predecessor rule (OQ-31 item 4, OQ-37 item 4, OQ-40 item 5): ``False`` to start
-        from the published D−1, ``True`` from the zero state, ``None`` when D must fail. Ledger
-        is asked only when the chain has no status on any date before D."""
-        status = previous.status(chain)
-        if status in PROCESSED_STATUSES:
-            return False
-        if status is not None:  # FAILED or RUNNING
+        """The predecessor rule (`domain.predecessor`, the preview's too): ``False`` to start
+        from the published D−1, ``True`` from the zero state, ``None`` when D must fail."""
+        state = await read_predecessor(
+            chain,
+            previous.day,
+            previous.status(chain),
+            date_statuses=self._date_statuses,
+            history=LedgerChainHistory(readers.ledger),
+            uow=uow,
+        )
+        if not allows_run(state):
             return None
-        if await self._date_statuses.has_status_before(chain, day, uow=uow):
-            return None  # a gap: every day must be processed
-        entry_type = EntryType.TRADE if chain is ProcessingChain.POSITIONS else None
-        if await readers.ledger.has_entries_on_or_before(day - ONE_DAY, entry_type=entry_type):
-            return None
-        return True
+        return state is PredecessorState.ZERO_STATE

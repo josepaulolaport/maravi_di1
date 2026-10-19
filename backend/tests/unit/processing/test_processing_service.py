@@ -15,9 +15,7 @@ from di1.modules.processing.application.interfaces.repositories import (
     ProcessingChain,
 )
 from di1.modules.processing.application.services.cursor import decode_cursor, encode_cursor
-from di1.modules.processing.application.services.processing import (
-    PredecessorState,
-)
+from di1.modules.processing.domain.predecessor import PredecessorState
 from di1.modules.processing.public import (
     ChainStatus,
     ProcessingScope,
@@ -548,17 +546,6 @@ async def test_10_3_one_row_per_obligation_with_its_earliest_affected_date(
 
 def test_oq31_there_are_two_issue_types() -> None:
     assert {t.value for t in IssueType} == {"MISSING_REFERENCE_PRICE", "EXPIRED_OPEN_POSITION"}
-
-
-def test_oq31_the_predecessor_has_no_stale_state() -> None:
-    assert {s.value for s in PredecessorState} == {
-        "PROCESSED",
-        "PROCESSED_WITH_ISSUES",
-        "RUNNING",
-        "FAILED",
-        "NOT_PROCESSED",
-        "ZERO_STATE",
-    }
 
 
 @pytest.mark.parametrize(

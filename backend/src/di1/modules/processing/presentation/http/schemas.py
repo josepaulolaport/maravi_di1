@@ -17,10 +17,10 @@ from di1.modules.processing.application.interfaces.repositories import (
 )
 from di1.modules.processing.application.services.processing import (
     IssueView,
-    PredecessorState,
     ProcessingPreview,
     RequestPage,
 )
+from di1.modules.processing.domain.predecessor import PredecessorState
 from di1.modules.processing.public import ProcessingRequest, ProcessingScope, ProcessingStatus
 
 

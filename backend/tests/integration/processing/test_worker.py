@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from di1.modules.ledger.public import EntryType
 from di1.modules.portfolio.public import CashBalance
 from di1.modules.prices.public import PriceSource
+from di1.modules.processing.domain.predecessor import PredecessorState, allows_run
 from tests.integration.processing.support import seed_instrument, seed_statuses
 from tests.integration.processing.worker_support import Worker
 from tests.unit.processing.run_fakes import cash_movement, trade
@@ -359,6 +360,53 @@ async def test_an_all_run_failing_both_predecessors_keeps_the_positions_code(
 
 
 # --- ALL: one chain fails, the other continues (OQ-36, OQ-38, OQ-40) -----------------------
+
+
+AGREEMENT_CASES = [
+    # (scope, date_status seeded as {date: (portfolio, cash)}, cash on D0, trade on D0, state)
+    ("CASH", {D0: (None, "PROCESSED")}, True, False, PredecessorState.PROCESSED),
+    ("CASH", {D0: (None, "PROCESSED_WITH_ISSUES")}, True, False, "PROCESSED_WITH_ISSUES"),
+    ("CASH", {D0: (None, "FAILED")}, False, False, PredecessorState.FAILED),
+    ("CASH", {D0: (None, "RUNNING")}, False, False, PredecessorState.RUNNING),
+    ("CASH", {date(2026, 10, 1): (None, "PROCESSED")}, False, False, "NOT_PROCESSED"),
+    ("CASH", {}, True, False, PredecessorState.NOT_PROCESSED),  # a deposit on D0
+    ("CASH", {}, False, False, PredecessorState.ZERO_STATE),
+    ("POSITIONS", {}, True, False, PredecessorState.ZERO_STATE),  # cash entries only
+    ("POSITIONS", {}, False, True, PredecessorState.NOT_PROCESSED),
+    ("POSITIONS", {D0: ("FAILED", None)}, False, False, PredecessorState.FAILED),
+]
+
+
+@pytest.mark.parametrize(("scope", "seeded", "cash_on_d0", "trade_on_d0", "state"), AGREEMENT_CASES)
+async def test_the_preview_and_the_run_apply_the_same_predecessor_rule(
+    worker: Worker,
+    scope: str,
+    seeded: dict[date, tuple[str | None, str | None]],
+    cash_on_d0: bool,
+    trade_on_d0: bool,
+    state: str,
+) -> None:
+    """H2: one rule. Whatever the preview reports for D1−1, the run of D1 follows it: it runs
+    exactly when the preview's state allows it (OQ-31, OQ-37 item 4, OQ-40 item 5)."""
+    await seed_statuses(worker.engine, seeded)
+    if cash_on_d0:
+        worker.world.ledger.movements.append(cash_movement(D0, "10.00"))
+        worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("10.00"))
+    if trade_on_d0:
+        asset = await priced_asset(worker, D0, D1)
+        worker.world.ledger.trades.append(trade(asset, D0, 1, "95000.0000000000"))
+
+    preview = await worker.preview(scope, D1, D1)
+    reported = preview.cash if scope == "CASH" else preview.positions
+    request_id = await worker.enqueue(scope, D1, D1)
+    await worker.ring()
+
+    assert reported == state
+    portfolio, cash = (await worker.statuses())[D1]
+    ran = (cash if scope == "CASH" else portfolio) == "PROCESSED"
+    assert ran is allows_run(reported)
+    if not ran:
+        assert (await worker.run_row(request_id))["error_code"] == f"{scope}_PREDECESSOR_MISSING"
 
 
 async def test_a_technical_error_in_one_chain_rolls_back_only_that_chain(worker: Worker) -> None:
