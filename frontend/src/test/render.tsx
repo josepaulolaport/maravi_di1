@@ -8,9 +8,12 @@ import { ApiError } from '@/api/http';
 import { AppProviders } from '@/app/providers';
 import { routes } from '@/app/routes';
 
+import { reportTrailsFor } from './mswTrace';
+
 /**
  * A client for one test: no retries, and a network failure (status 0) logs the error behind it
- * with its query key, so a failure seen only on another machine (CI) can be read from its log.
+ * with its query key and what MSW saw of that endpoint, so a failure seen only on another
+ * machine (CI) can be read from its log.
  */
 function testQueryClient(): QueryClient {
   return new QueryClient({
@@ -18,6 +21,8 @@ function testQueryClient(): QueryClient {
       onError: (error, query) => {
         if (error instanceof ApiError && error.status === 0) {
           console.error('Network failure in', JSON.stringify(query.queryKey), error.cause);
+          const [area, resource] = query.queryKey;
+          reportTrailsFor(`/${String(area)}/${String(resource)}`);
         }
       },
     }),
