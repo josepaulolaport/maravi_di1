@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 
+from di1.modules.ledger.domain import entries as domain_entries
 from di1.modules.ledger.public import CashMovementRecord, EntryType, LedgerReader, TradeRecord
 from di1.shared.clock import SAO_PAULO
 from di1.shared.input_kind import InputKind
@@ -77,6 +78,11 @@ def test_records_are_frozen() -> None:
         trade.signed_quantity = 5  # type: ignore[misc]
     with pytest.raises(dataclasses.FrozenInstanceError):
         movement.amount = Decimal("1")  # type: ignore[misc]
+
+
+def test_the_public_entry_type_is_ledger_domain_one() -> None:
+    # One definition (OQ-37): public.py re-exports Ledger's domain enum.
+    assert EntryType is domain_entries.EntryType
 
 
 def test_entry_type_names_the_schema_types() -> None:

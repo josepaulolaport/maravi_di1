@@ -12,18 +12,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
-from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
+from di1.modules.ledger.domain.entries import EntryType as EntryType  # one definition (OQ-37)
 from di1.shared.input_kind import InputKind
-
-
-class EntryType(StrEnum):
-    """The type of a ledger entry (OQ-24; schema ``entries_type_check``)."""
-
-    TRADE = "TRADE"
-    CASH = "CASH"
 
 
 @dataclass(frozen=True, slots=True)
