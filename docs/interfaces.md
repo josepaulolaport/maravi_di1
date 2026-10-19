@@ -90,7 +90,7 @@ Pure domain calculators (`portfolio/domain/`, frozen dataclasses). Two independe
 - `POST /trades`, `DELETE /trades/{id}`, `GET /trades`
 - `POST /cash-movements`, `DELETE /cash-movements/{id}`, `GET /cash-movements`
 - `POST /reference-prices`, `GET /reference-prices`, `DELETE /reference-prices/{id}` (audit-preserving removal)
-- `GET /portfolio/positions?date=YYYY-MM-DD`, `GET /portfolio/summary?date=YYYY-MM-DD`, `GET /portfolio/pnl?start_date=&end_date=` (the published `portfolio_metrics` series: per date `cumulative_pnl`, `daily_pnl`, statuses and stale flag; feeds the Carteira cumulative chart, no per-asset data; OQ-16; the chart calls it with `end_date` = the Carteira date and a user-chosen earlier `start_date`, OQ-23)
+- `GET /portfolio/positions?date=YYYY-MM-DD`, `GET /portfolio/summary?date=YYYY-MM-DD`, `GET /portfolio/pnl?start_date=&end_date=` (the published `portfolio_metrics` series: per date `cumulative_pnl`, `daily_pnl`, statuses and stale flag; feeds the Carteira cumulative chart, no per-asset data; OQ-16; the chart calls it with `end_date` = the Carteira date and a user-chosen earlier `start_date`, OQ-27)
 - `POST /processing/requests`, `GET /processing/requests`, `GET /processing/requests/{id}`, `POST /processing/requests/{id}/cancel`, `POST /processing/requests/{id}/cancel-and-replace`
 - `GET /instruments`, `POST /instruments`, `GET /products`, `POST /products`; direct `POST /pricing/calculate` for previews if needed (the current UI shows no preview: the complementary PU or rate is computed when an entry is saved, OQ-19).
 - **UI read needs (OQ-19, OQ-20).** The frontend's draft contract (lane I) proposes how each is served; the integrator fixes route names and shapes:
