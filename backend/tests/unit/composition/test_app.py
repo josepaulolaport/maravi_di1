@@ -7,9 +7,9 @@ to ``/health``, which must answer 503 problem+json without leaking the error.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import socket
-import time
 from collections.abc import Iterator
 
 import pytest
@@ -52,17 +52,49 @@ def test_health_is_a_503_problem_when_the_database_does_not_answer(
     assert "secret-password" not in caplog.text
 
 
-def test_a_hung_database_answers_503_within_the_timeout(silent_server: int) -> None:
+def test_a_silent_server_answers_503(silent_server: int) -> None:
     hung = Settings(
         database_url=SecretStr(f"postgresql+psycopg://di1:x@127.0.0.1:{silent_server}/di1")
     )
     with TestClient(create_app(hung, health_timeout=0.5)) as client:
-        started = time.monotonic()
         response = client.get("/health")
-        elapsed = time.monotonic() - started
 
     assert response.status_code == 503
-    assert elapsed < 3
+
+
+class _SlowConnection:
+    """A connection whose ``SELECT 1`` answers only after ``delay`` seconds."""
+
+    def __init__(self, delay: float) -> None:
+        self._delay = delay
+
+    async def __aenter__(self) -> _SlowConnection:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+    async def execute(self, _: object) -> None:
+        await asyncio.sleep(self._delay)
+
+
+class _SlowEngine:
+    def __init__(self, delay: float) -> None:
+        self._delay = delay
+
+    def connect(self) -> _SlowConnection:
+        return _SlowConnection(self._delay)
+
+
+@pytest.mark.parametrize(("delay", "status"), [(0.0, 200), (30.0, 503)])
+def test_the_health_timeout_bounds_the_probe(delay: float, status: int) -> None:
+    app = create_app(UNREACHABLE, health_timeout=0.05)
+    with TestClient(app) as client:
+        app.state.engine, real = _SlowEngine(delay), app.state.engine
+        response = client.get("/health")
+        app.state.engine = real
+
+    assert response.status_code == status
 
 
 def test_head_is_answered_like_get() -> None:
