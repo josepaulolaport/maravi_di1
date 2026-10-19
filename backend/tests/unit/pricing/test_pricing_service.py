@@ -155,7 +155,7 @@ async def test_a_typed_value_with_too_many_decimals_is_rejected() -> None:
         )
 
     assert refusal(caught) == ErrorDetail(
-        ErrorCode.VALIDATION_ERROR, "A taxa aceita no máximo 12 casas decimais.", "rate"
+        ErrorCode.VALIDATION_ERROR, "Use no máximo 12 casas decimais.", "rate"
     )
 
 
