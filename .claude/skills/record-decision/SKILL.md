@@ -23,5 +23,5 @@ Only the **user** decides. Record a decision only when you have the user's words
    - check every relative link.
 5. **Hand it over:**
    - commit (skill `commit`, type `docs`, scope `docs`); the recorded words must be the user's;
-   - open a PR, which the user or the merger session the user authorised merges (CLAUDE.md §4);
+   - open a PR, which a human merges;
    - tell the affected lanes what changed.

@@ -1,6 +1,6 @@
 ---
 name: pr-ready
-description: Run the Maravi DI1 definition of done before opening a GitHub pull request — ownership check, all checks for the touched areas, history check, independent reviewer, honest PR description — then push the branch and open the PR for review. A lane never merges (CLAUDE.md §4). Use before every PR.
+description: Run the Maravi DI1 definition of done before opening a GitHub pull request — ownership check, all checks for the touched areas, history check, independent reviewer, honest PR description — then push the branch and open the PR for human review. Never merges. Use before every PR.
 ---
 
 # Get a change ready and open the PR
@@ -48,7 +48,7 @@ git diff --name-only origin/main...HEAD
 
 Run the `reviewer` subagent in a fresh context, on the diff, with your lane, your wave and the spec sections. Fix every Blocker and Major finding. Answer the others in the PR description.
 
-## 4. Push and open the PR (lanes never merge)
+## 4. Push and open the PR (no merge, ever)
 
 ```bash
 git push -u origin HEAD                # never --force
@@ -73,4 +73,4 @@ Not verified / known limits:
 - …
 ```
 
-The user, or the merger session the user authorised ("Code reviewer and merge agent"), merges it on GitHub once a reviewer finds it ready (CLAUDE.md §4). While GitHub Actions is down that gate is the real local results, so the "Verified" lines must come from runs on your branch merged with `origin/main`. A lane never runs `git merge` into `main` or `gh pr merge`; bringing `origin/main` into your own branch is allowed (CLAUDE.md §4). Give the user the PR URL.
+A human reviews and merges it on GitHub. While GitHub Actions is down the merge gate is the real local results (CLAUDE.md §4), so the "Verified" lines must come from runs on your branch merged with `origin/main`. Never `git merge` into `main` and never `gh pr merge`; bringing `origin/main` into your own branch is allowed (CLAUDE.md §4). Give the user the PR URL.

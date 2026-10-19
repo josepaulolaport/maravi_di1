@@ -72,7 +72,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - A write saves the fact. **Nothing else** (OQ-31): nothing is marked stale, Ledger and Prices do not call Processing, and there is no `FinancialResultInvalidator`. Processed results stay as they are until the user processes again; after changing history, the user reprocesses.
   - Processing runs only when the user requests a date range.
 - **Jobs:**
-  - PostgreSQL holds the queue and the job statuses; RabbitMQ only carries the doorbell ("there is work", OQ-46).
+  - PostgreSQL holds the queue and the job statuses; RabbitMQ only carries dispatch commands.
   - Many jobs may be queued, and only one runs at a time, because there is one worker and it drains the queue serially (OQ-46).
   - No dispatcher (OQ-46). `POST /processing/requests` saves the request `QUEUED` and, in the same transaction, one outbox message that is only a doorbell ("there is work"). On every doorbell, and at startup after recovery, the worker repeats until nothing is `QUEUED`: in one transaction it row-locks the oldest `QUEUED` request by `(created_at, id)` and sets it `RUNNING`; then it runs it. A lost doorbell is covered by any later one or a restart; duplicates are harmless. `DISPATCHED` and `CANCELLING` are never set (a run goes `QUEUED` → `RUNNING`), and `calculation_state.active_request_id` and `requests.dispatched_at` are unused; all stay in the schema with no migration.
   - Cancellation is cooperative.
@@ -131,10 +131,10 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 
   Edit only your lane's paths. To change anything else, raise a contract-change request to the integrator (X).
 - **Commit freely; review happens at PR time** (user, 2026-10-19: "Yes: all lanes may commit, push their own branch and open or update PRs without asking me per commit; review happens at PR time via the reviewer session. Safety rules unchanged."). Commit, push your branch and open or update your PR without asking for approval of each commit; the reviewer session reviews the PR. Still binding: every commit green (the hook runs ruff, mypy, unit, architecture and phase-1 acceptance tests; never `--no-verify`), tests first, one logical change per commit, Conventional Commits with a why and `Refs:`, no force-push, an honest PR description with real result lines. Spec gaps, decisions and new dependencies still go to the user or lane X.
-- **No lane merges.** Not you, not the integrator.
+- **Nobody merges.** Not you, not the integrator.
   - When a branch is ready, push it and open a GitHub pull request with `gh pr create` (skill `pr-ready`). Bringing `origin/main` into your own branch is allowed (integrator choice): before the first push you may rebase your own unpushed commits; after it, merge `origin/main` in and add fixes as new commits, since a rewrite would need a force-push.
-  - The PR is merged on GitHub by the user, or by the one session the user authorised for it: the "Code reviewer and merge agent" (merger) session, for which the user re-enabled `gh pr merge`. It merges only a PR that a reviewer found ready, may bring an approved PR up to date with `gh pr update-branch`, and is the only exception to this rule.
-  - Lanes (A–I and X): never `git merge` into `main`, never `gh pr merge`. Everyone, the merger included: never force-push, never `--no-verify`.
+  - A human reviews and merges it on GitHub.
+  - Never `git merge` into `main`, never `gh pr merge`, never force-push, never `--no-verify`.
 - **Merge gate while GitHub Actions is down** (user, 2026-10-19: "github actions is down. Report this to the reviewers. We will only use the tests locally. We need to move fast"). Merges do not wait for the `ci-ok` check: they go on the reviewer's real local results on the PR head merged with `origin/main` (ruff, mypy, unit, architecture, acceptance and the relevant integration tests on a fresh PostgreSQL, `make e2e` when relevant), with no unresolved review thread. Phase-2 acceptance tests then run only through `make test-backend`. The `ci-ok` gate comes back when the user says Actions works again.
 - **Commits** (skill `commit`):
   - Conventional Commits, `<type>(<scope>): <summary>`, with a body that explains why and a `Refs:` line citing the spec section.
