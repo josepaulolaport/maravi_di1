@@ -12,7 +12,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
-from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
@@ -21,12 +20,12 @@ from di1.shared.input_kind import InputKind
 
 @dataclass(frozen=True, slots=True)
 class TradeRecord:
-    """One immutable trade (schema ``ledger.trades``).
+    """One active trade: a TRADE row of ``ledger.entries`` (OQ-24).
 
     ``signed_quantity`` is positive for a buy and negative for a sell, never 0 (spec §7.2).
     ``execution_pu``/``execution_rate`` are the execution price, never a reference price
     (spec §4.2); on the maturity date the PU is typed and the rate is 0 (OQ-1). ``trade_time``
-    is São Paulo local time. ``deleted_at``/``delete_reason`` record a soft delete.
+    is São Paulo local time. Its cash effect, −signed_quantity × execution_pu, is not stored.
     """
 
     id: UUID
@@ -39,38 +38,37 @@ class TradeRecord:
     execution_rate: Decimal
     input_kind: InputKind
     created_at: datetime
-    deleted_at: datetime | None
-    delete_reason: str | None
 
     @property
     def order_key(self) -> tuple[date, time, int]:
-        """Chronological order of trades: (trade_date, trade_time, seq) (OQ-13)."""
+        """Chronological order of ledger entries: (date, time, seq) (OQ-13, OQ-24)."""
         return (self.trade_date, self.trade_time, self.seq)
-
-
-class CashMovementType(StrEnum):
-    """Schema ``cash_movements_type_check``. Deposits and withdrawals are never P&L."""
-
-    DEPOSIT = "DEPOSIT"
-    WITHDRAWAL = "WITHDRAWAL"
 
 
 @dataclass(frozen=True, slots=True)
 class CashMovementRecord:
-    """One immutable cash movement (schema ``ledger.cash_movements``); ``amount`` > 0, exact."""
+    """One active cash movement: a CASH row of ``ledger.entries`` (OQ-24).
+
+    ``amount`` is exact and signed: positive for a deposit (aporte), negative for a withdrawal
+    (retirada), never 0. Deposits and withdrawals are never P&L.
+    """
 
     id: UUID
     movement_date: date
-    movement_type: CashMovementType
+    movement_time: time
+    seq: int
     amount: Decimal
-    description: str | None
     created_at: datetime
-    deleted_at: datetime | None
-    delete_reason: str | None
+
+    @property
+    def order_key(self) -> tuple[date, time, int]:
+        """Chronological order of ledger entries: (date, time, seq) (OQ-13, OQ-24)."""
+        return (self.movement_date, self.movement_time, self.seq)
 
 
 class LedgerReader(Protocol):
-    """Read access for Portfolio and Processing. Ranges are inclusive calendar dates."""
+    """Read access for Portfolio and Processing over ``ledger.entries``. Ranges are inclusive
+    calendar dates; deleted entries are never returned."""
 
     async def get_trades(self, start_date: date, end_date: date) -> Sequence[TradeRecord]:
         """Active trades dated in [start_date, end_date], ordered by `TradeRecord.order_key`."""
@@ -80,5 +78,5 @@ class LedgerReader(Protocol):
         self, start_date: date, end_date: date
     ) -> Sequence[CashMovementRecord]:
         """Active cash movements dated in [start_date, end_date], ordered by
-        (movement_date, created_at, id)."""
+        `CashMovementRecord.order_key`."""
         ...

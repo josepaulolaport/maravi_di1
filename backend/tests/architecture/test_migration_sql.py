@@ -1,10 +1,10 @@
 """The reviewed SQL of the Alembic revisions (skill `db-migration`; plan §3).
 
-`migrations/sql/0001_initial.sql` is the initial schema as reviewed and applied: a released
-revision never changes, so its content is pinned here. Since 0002, `docs/schema.sql` is the
-result of all revisions, not the text of one; `tests/integration/test_migrations_match_schema.py`
-checks on PostgreSQL that 0001 + 0002 build exactly what `docs/schema.sql` builds. No database
-is needed here, so this runs in the pre-commit hook.
+Released revisions never change, so the SQL of 0001 and 0002 is pinned here by hash.
+`docs/schema.sql` is the result of all revisions, not the text of one;
+`tests/integration/test_migrations_match_schema.py` checks on PostgreSQL that the revisions build
+exactly what `docs/schema.sql` builds. No database is needed here, so this runs in the pre-commit
+hook.
 """
 
 from __future__ import annotations
@@ -14,12 +14,18 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[2]
 SQL = BACKEND / "migrations" / "sql"
-INITIAL_SHA256 = "302d46335f931f92ead97da292e9858bd5be9b6a4d9cecbd93bf9f714dbb849f"
+RELEASED_SHA256 = {
+    "0001_initial.sql": "302d46335f931f92ead97da292e9858bd5be9b6a4d9cecbd93bf9f714dbb849f",
+    "0002_cash_chain.sql": "24e558e4eff422e63debecdd3c6111d2a5c30147858dc6c7f81829bcb00e640f",
+    "0002_cash_chain_downgrade.sql": (
+        "9b0c987dc9b14df71d99339207c43ce6460a0757bd8ef7cce15b9a4a7712737b"
+    ),
+}
 
 
-def test_the_initial_revision_sql_is_never_edited() -> None:
-    digest = hashlib.sha256((SQL / "0001_initial.sql").read_bytes()).hexdigest()
-    assert digest == INITIAL_SHA256
+def test_released_revision_sql_is_never_edited() -> None:
+    for name, expected in RELEASED_SHA256.items():
+        assert hashlib.sha256((SQL / name).read_bytes()).hexdigest() == expected, name
 
 
 def test_every_revision_sql_runs_inside_alembics_transaction() -> None:

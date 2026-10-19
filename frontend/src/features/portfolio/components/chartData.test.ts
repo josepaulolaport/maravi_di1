@@ -26,9 +26,9 @@ describe('toChartData (§11.4, OQ-16)', () => {
 
     const points = toChartData(items, '2026-10-13', '2026-10-18');
 
-    expect(points[2]?.cumulativeText).toBe('-8034.1345282660');
+    expect(points[1]?.cumulativeText).toBe('-8034.1345282660');
+    // 13/10 comes before the first published day, so the chart starts on 14/10.
     expect(points.map((p) => [p.label, p.cumulative])).toEqual([
-      ['13/10', null], // not published
       ['14/10', 0],
       ['15/10', -8034.134528266],
       ['16/10', null], // incomplete
@@ -45,6 +45,22 @@ describe('toChartData (§11.4, OQ-16)', () => {
     );
 
     expect(points.map((p) => p.cumulative)).toEqual([0]);
+  });
+
+  it('§11.4 starts at the first published day, so a very early start costs nothing', () => {
+    const items = [point('2026-10-14', '0'), point('2026-10-15', '-8034.1345282660')];
+
+    const points = toChartData(items, '0001-01-01', '2026-10-16');
+
+    expect(points.map((p) => [p.label, p.cumulative])).toEqual([
+      ['14/10', 0],
+      ['15/10', -8034.134528266],
+      ['16/10', null], // not published
+    ]);
+  });
+
+  it('§11.4 draws nothing when nothing in the range was published', () => {
+    expect(toChartData([], '0001-01-01', '2026-10-16')).toEqual([]);
   });
 
   it('reports when there is no complete history to draw', () => {

@@ -2,7 +2,7 @@
 
 - 0001 + 0002 build exactly what `docs/schema.sql` builds (checked column by column in
   `test_migrations_match_schema.py`).
-- Upgrade to head on a fresh PostgreSQL 16 database creates the six schemas and 21 tables, with
+- Upgrade to head on a fresh PostgreSQL 16 database creates the six schemas and 17 tables, with
   the singleton `processing.calculation_state` row. Downgrade to base removes them, and a second
   upgrade works again.
 - Downgrade refuses to drop a database that holds business data unless ``-x allow_data_loss=true``
@@ -34,12 +34,11 @@ BACKEND = Path(__file__).resolve().parents[2]
 SCHEMAS = {"asset", "ledger", "prices", "portfolio", "processing", "platform"}
 TABLES = {
     "asset.instrument_types", "asset.asset_classes", "asset.products", "asset.futures",
-    "asset.instruments", "ledger.trades", "ledger.cash_movements", "prices.reference_prices",
+    "asset.instruments", "ledger.entries", "prices.reference_prices",
     "processing.requests", "processing.calculation_state", "processing.issues",
-    "portfolio.positions", "portfolio.position_metrics", "portfolio.portfolio_metrics",
-    "portfolio.staged_positions", "portfolio.staged_position_metrics",
-    "portfolio.staged_portfolio_metrics", "portfolio.cash_balances",
-    "portfolio.staged_cash_balances", "platform.outbox_messages", "platform.inbox_messages",
+    "processing.date_status", "portfolio.positions", "portfolio.position_metrics",
+    "portfolio.portfolio_metrics", "portfolio.cash_balances", "platform.outbox_messages",
+    "platform.inbox_messages",
 }  # fmt: skip
 
 
@@ -112,8 +111,8 @@ def test_downgrade_removes_everything_and_upgrade_works_again(database_url: str)
 def _insert_cash_movement(database_url: str) -> None:
     with psycopg.connect(psycopg_url(database_url)) as connection:
         connection.execute(
-            "INSERT INTO ledger.cash_movements (movement_date, movement_type, amount) "
-            "VALUES ('2026-10-16', 'DEPOSIT', 400000)"
+            "INSERT INTO ledger.entries (type, entry_date, entry_time, cash_amount) "
+            "VALUES ('CASH', '2026-10-16', '00:00', 400000)"
         )
 
 
