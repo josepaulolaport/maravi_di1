@@ -51,11 +51,15 @@ export function NewContractModal({ product, opened, onClose }: NewContractModalP
           notifications.show({ color: 'teal', message: `Contrato ${instrument.code} cadastrado.` });
           close();
         },
+        // On the form, so editing a field clears its message (Mantine clears on change).
+        onError: (error) => {
+          form.setErrors(splitProblem(error, FIELD_MAP).fields);
+        },
       },
     );
   });
 
-  const { fields, page } = splitProblem(create.error, FIELD_MAP);
+  const { page } = splitProblem(create.error, FIELD_MAP);
 
   return (
     <Modal
@@ -77,7 +81,6 @@ export function NewContractModal({ product, opened, onClose }: NewContractModalP
             placeholder="DI1F31"
             withAsterisk
             {...form.getInputProps('code')}
-            error={fields.code}
           />
           <DateInput
             label="Vencimento"
@@ -87,7 +90,6 @@ export function NewContractModal({ product, opened, onClose }: NewContractModalP
             withAsterisk
             leftSection={<IconCalendar size={16} stroke={1.5} />}
             {...form.getInputProps('maturity')}
-            error={fields.maturity}
           />
           <MessageAlert messages={page} />
           <Group justify="flex-end" gap="sm">

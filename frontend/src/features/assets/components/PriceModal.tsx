@@ -109,12 +109,15 @@ function PriceForm({ instrument, initialDate, save, onDone }: PriceFormProps) {
           save.reset();
           onDone(price.reference_date);
         },
+        // On the form, so editing a field clears its message (Mantine clears on change).
+        onError: (error) => {
+          form.setErrors(splitProblem(error, FIELD_MAP).fields);
+        },
       },
     );
   });
 
-  const { fields, page } = splitProblem(save.error, FIELD_MAP);
-  const errorOf = (field: keyof PriceValues) => form.errors[field] ?? fields[field];
+  const { page } = splitProblem(save.error, FIELD_MAP);
 
   return (
     <form onSubmit={submit} noValidate>
@@ -128,7 +131,6 @@ function PriceForm({ instrument, initialDate, save, onDone }: PriceFormProps) {
           maxDate={maxDate}
           leftSection={<IconCalendar size={16} stroke={1.5} />}
           {...form.getInputProps('date')}
-          error={errorOf('date')}
         />
         <PriceInput
           kind={form.values.kind}
@@ -136,7 +138,7 @@ function PriceForm({ instrument, initialDate, save, onDone }: PriceFormProps) {
             form.setValues({ kind, price: '' });
             form.clearFieldError('price');
           }}
-          inputProps={{ ...form.getInputProps('price'), error: errorOf('price') }}
+          inputProps={form.getInputProps('price')}
           placeholder={{ PU: '89.250,31', RATE: '9,80' }}
         />
         <Alert color="gray" variant="light" icon={<IconInfoCircle size={18} />}>

@@ -359,6 +359,12 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
     await user.click(modal.getByRole('button', { name: 'Salvar' }));
 
     expect(await modal.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+
+    // Editing the field drops its server message at once, before the next submit.
+    const dateInput = modal.getByRole('textbox', { name: 'Data de referência' });
+    await user.clear(dateInput);
+    await user.type(dateInput, '18/10/2026');
+    expect(modal.queryByText('A data não pode ser posterior a hoje.')).not.toBeInTheDocument();
   });
 
   it('OQ-1 shows CONTRACT_MATURED on the date field', async () => {
