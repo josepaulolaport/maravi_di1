@@ -1,7 +1,7 @@
 import { AppShell, Center, Loader } from '@mantine/core';
 import { useLocalStorage } from '@mantine/hooks';
 import { Suspense } from 'react';
-import { Outlet } from 'react-router';
+import { Outlet, ScrollRestoration } from 'react-router';
 
 import { type NavItem, Sidebar } from './Sidebar';
 
@@ -36,6 +36,9 @@ export function AppLayout({ navItems }: { navItems: NavItem[] }) {
           <Outlet />
         </Suspense>
       </AppShell.Main>
+      {/* A new screen opens at its top; back and forward return to where the user was. Keyed
+          by path, so a screen changing only its query (search, date, range) keeps its place. */}
+      <ScrollRestoration getKey={(location) => location.pathname} />
     </AppShell>
   );
 }

@@ -1,14 +1,14 @@
-import { Alert, Anchor, Stack, Text } from '@mantine/core';
-import { IconAlertCircle, IconClockExclamation, IconInfoCircle } from '@tabler/icons-react';
+import { Alert, Anchor, Text } from '@mantine/core';
+import { IconInfoCircle } from '@tabler/icons-react';
 import { Link } from 'react-router';
 
 import type { IsoDate } from '@/api/contract';
 import { controlCenterLinks } from '@/app/paths';
 import { formatDate } from '@/shared/format';
 
-// The three states the screen must tell apart from "valid" (§8.3, §11.4): never processed,
-// stale (inputs changed after publication) and incomplete (a required price is missing).
-// Each offers the contextual path to Processamentos or Pendências.
+// A date with nothing published on either chain (§11.4). Stale or partly processed dates show
+// no card: the two DataStatus badges tell the state (user, 2026-10-18), and missing figures
+// read "—" with the asset marked in the table (§8.3).
 
 export function NotProcessedNotice({ date }: { date: IsoDate }) {
   return (
@@ -24,63 +24,11 @@ export function NotProcessedNotice({ date }: { date: IsoDate }) {
       </Text>
       <Anchor
         component={Link}
-        to={controlCenterLinks.processing({ start: date, end: date })}
+        to={controlCenterLinks.processing({ start: date, end: date, scope: 'ALL' })}
         size="sm"
       >
         Solicitar processamento
       </Anchor>
     </Alert>
-  );
-}
-
-interface PublishedNoticesProps {
-  date: IsoDate;
-  stale: boolean;
-  incomplete: boolean;
-}
-
-export function PublishedNotices({ date, stale, incomplete }: PublishedNoticesProps) {
-  if (!stale && !incomplete) return null;
-  return (
-    <Stack gap="xs">
-      {stale && (
-        <Alert
-          color="yellow"
-          variant="light"
-          icon={<IconClockExclamation size={18} />}
-          title="Resultados desatualizados"
-        >
-          <Text size="sm">
-            Os dados de origem mudaram depois da publicação desta data, ou o dia anterior não estava
-            atualizado quando ela foi processada. Os valores abaixo são os últimos publicados e
-            podem não refletir os dados atuais.
-          </Text>
-          <Anchor
-            component={Link}
-            to={controlCenterLinks.processing({ start: date, end: date })}
-            size="sm"
-          >
-            Ir para Processamentos
-          </Anchor>
-        </Alert>
-      )}
-      {incomplete && (
-        <Alert
-          color="red"
-          variant="light"
-          icon={<IconAlertCircle size={18} />}
-          title="Resultados incompletos"
-        >
-          <Text size="sm">
-            O valor de mercado ou o P&L de ao menos um ativo está indisponível nesta data. Os
-            valores que dependem dele aparecem como indisponíveis (—), e os totais da carteira não
-            estão completos. As pendências mostram o motivo.
-          </Text>
-          <Anchor component={Link} to={controlCenterLinks.issues()} size="sm">
-            Ver pendências
-          </Anchor>
-        </Alert>
-      )}
-    </Stack>
   );
 }

@@ -1,10 +1,11 @@
 import { useSearchParams } from 'react-router';
 
-import type { IsoDate } from '@/api/contract';
+import type { IsoDate, ProcessingScope } from '@/api/contract';
 import { isIsoDate, todayInSaoPaulo } from '@/shared/format';
+import { scopeFromUrl, scopeToUrl } from '@/shared/processing/scope';
 
 // Central de Controle keeps its URL state in the query string (frontend/CLAUDE.md), with the
-// keys `controlCenterLinks` builds: `tab`, `inicio`, `fim`, plus `busca` for the search.
+// keys `controlCenterLinks` builds: `tab`, `inicio`, `fim`, `escopo`, plus `busca` for the search.
 
 export type ControlCenterTab = 'pendencias' | 'processamentos';
 
@@ -48,9 +49,14 @@ export function useControlCenterParams() {
     setEnd: (date: IsoDate | null) => {
       update({ fim: date });
     },
-    /** Prefills the request form with a range ("Solicitar novo processamento", OQ-20). */
-    setRange: (start: IsoDate, end: IsoDate) => {
-      update({ tab: 'processamentos', inicio: start, fim: end });
+    /** The request's scope (OQ-21 draft): Tudo unless the URL says otherwise. */
+    scope: scopeFromUrl(params.get('escopo')) ?? 'ALL',
+    setScope: (scope: ProcessingScope) => {
+      update({ escopo: scopeToUrl(scope) });
+    },
+    /** Prefills the request form ("Solicitar novo processamento", OQ-20, OQ-21 draft). */
+    setRange: (start: IsoDate, end: IsoDate, scope: ProcessingScope) => {
+      update({ tab: 'processamentos', inicio: start, fim: end, escopo: scopeToUrl(scope) });
     },
     search: params.get('busca') ?? '',
     setSearch: (text: string) => {

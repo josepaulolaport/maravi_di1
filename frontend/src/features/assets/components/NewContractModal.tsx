@@ -1,4 +1,4 @@
-import { Alert, Button, Drawer, Group, Stack, Text, TextInput } from '@mantine/core';
+import { Alert, Button, Modal, Group, Stack, Text, TextInput } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
 import { IconAlertTriangle, IconCalendar } from '@tabler/icons-react';
@@ -12,7 +12,7 @@ import { formErrors } from './formErrors';
 
 const SHOWN_FIELDS = ['code', 'maturity_date'] as const;
 
-interface NewContractDrawerProps {
+interface NewContractModalProps {
   product: Product;
   opened: boolean;
   onClose: () => void;
@@ -22,12 +22,12 @@ interface NewContractDrawerProps {
  * "Novo contrato" (§3): a contract of this product with its own maturity. The backend
  * validates it (unique code, case-insensitive); its messages are shown on their fields.
  */
-export function NewContractDrawer({ product, opened, onClose }: NewContractDrawerProps) {
+export function NewContractModal({ product, opened, onClose }: NewContractModalProps) {
   const [code, setCode] = useState('');
   const [maturity, setMaturity] = useState<string | null>(null);
   const create = useCreateInstrument();
 
-  // While a save runs the drawer stays open, so its confirmation is never lost.
+  // While a save runs the modal stays open, so its confirmation is never lost.
   const close = () => {
     if (create.isPending) return;
     setCode('');
@@ -51,11 +51,12 @@ export function NewContractDrawer({ product, opened, onClose }: NewContractDrawe
   const { fields: fieldErrors, page: pageErrors } = formErrors(create.error, SHOWN_FIELDS);
 
   return (
-    <Drawer
+    <Modal
       opened={opened}
       onClose={close}
       title="Novo contrato"
-      position="right"
+      centered
+      size="lg"
       closeOnClickOutside={!create.isPending}
       closeOnEscape={!create.isPending}
       withCloseButton={!create.isPending}
@@ -107,6 +108,6 @@ export function NewContractDrawer({ product, opened, onClose }: NewContractDrawe
           </Group>
         </Stack>
       </form>
-    </Drawer>
+    </Modal>
   );
 }

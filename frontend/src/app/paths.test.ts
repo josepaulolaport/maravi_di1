@@ -11,7 +11,7 @@ describe('paths and deep links', () => {
     expect(assetLinks.contract(IDS.di1f28)).toBe(`/ativos/contratos/${IDS.di1f28}`);
   });
 
-  it('§11.1 "Definir preço" opens the contract page with the price drawer on the missing date', () => {
+  it('§11.1 "Definir preço" opens the contract page with the price modal on the missing date', () => {
     expect(assetLinks.contract(IDS.di1f29, { register: '2026-10-16' })).toBe(
       `/ativos/contratos/${IDS.di1f29}?registrar=2026-10-16`,
     );

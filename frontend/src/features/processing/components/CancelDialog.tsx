@@ -6,8 +6,8 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { formatPeriod, formatProgress, shortId } from '../format';
 import { useCancel } from '../hooks/useProcessing';
-import { jobStatusBadge } from '../jobStatus';
-import { Field } from './Field';
+import { jobStatusBadge, progressOf } from '../jobStatus';
+import { Field } from '@/shared/ui/Field';
 
 interface CancelDialogProps {
   /** The job to cancel; `null` keeps the dialog closed. */
@@ -40,16 +40,16 @@ export function CancelDialog({ job, onClose }: CancelDialogProps) {
       {job && (
         <Stack gap="sm">
           <Field label="Processamento">{shortId(job.id)}</Field>
-          <Field label="Período">
-            {formatPeriod(job.requested_start_date, job.requested_end_date)}
+          <Field label="Período">{formatPeriod(job.start_date, job.end_date)}</Field>
+          <Field label="Progresso">
+            {formatProgress(progressOf(job).done, progressOf(job).total)}
           </Field>
-          <Field label="Progresso">{formatProgress(job.processed_days, job.total_days)}</Field>
           <Field label="Status atual">
             <StatusBadge {...jobStatusBadge(job.status)} />
           </Field>
           <Text size="sm">
-            O processamento será interrompido assim que o sistema puder fazê-lo com segurança. Os
-            resultados já válidos não serão apagados.
+            O processamento será interrompido ao fim da data em andamento. As datas já processadas
+            continuam publicadas; as seguintes não serão processadas.
           </Text>
         </Stack>
       )}

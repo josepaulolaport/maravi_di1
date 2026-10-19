@@ -1,12 +1,13 @@
-import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 
-import type {
-  CreateCashMovementRequest,
-  CreateTradeRequest,
-  DeleteEntriesRequest,
-  IsoDate,
-} from '@/api/contract';
+import type { CreateLedgerEntryRequest, IsoDate, LedgerOrder } from '@/api/contract';
 import { assetsApi, ledgerApi, portfolioApi } from '@/api/endpoints';
 import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
 import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
@@ -17,14 +18,13 @@ import type { LedgerEntry } from '../entries';
 // portfolio summary under the same key Carteira uses, so a finished job refreshes both.
 export const ledgerKeys = {
   all: queryRoots.ledger,
-  trades: (start: IsoDate, end: IsoDate, search: string) =>
-    [...queryRoots.ledger, 'trades', start, end, search] as const,
-  cashMovements: (start: IsoDate, end: IsoDate, search: string) =>
-    [...queryRoots.ledger, 'cash-movements', start, end, search] as const,
+  entries: (start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) =>
+    [...queryRoots.ledger, 'entries', start, end, search, order] as const,
   summary: (date: IsoDate) => [...queryRoots.portfolio, 'summary', date] as const,
   instruments: () => [...queryRoots.assets, 'instruments', 'all'] as const,
+  products: () => [...queryRoots.assets, 'products', 'all'] as const,
   instrumentTypes: () => [...queryRoots.assets, 'instrument-types'] as const,
-  /** Mutation key of the drawers' saves, so the page knows a save is running. */
+  /** Mutation key of the new-entry saves, so the page knows a save is running. */
   create: () => [...queryRoots.ledger, 'create'] as const,
 };
 
@@ -85,23 +85,36 @@ export function useLedgerFilters(): LedgerFilters {
   };
 }
 
-export function useTrades(start: IsoDate, end: IsoDate, search: string) {
-  return useQuery({
-    queryKey: ledgerKeys.trades(start, end, search),
-    queryFn: () =>
-      ledgerApi.listTrades({ start_date: start, end_date: end, ...(search ? { search } : {}) }),
-  });
-}
+/** Entries per page of the list (P21); "Carregar mais" reads the next one. */
+export const LEDGER_PAGE_SIZE = 50;
 
-export function useCashMovements(start: IsoDate, end: IsoDate, search: string) {
-  return useQuery({
-    queryKey: ledgerKeys.cashMovements(start, end, search),
-    queryFn: () =>
-      ledgerApi.listCashMovements({
+/**
+ * The list, filtered and ordered by the backend (P18), read page by page (P21); `data.items`
+ * holds every page read so far. A new order is a new request, from the first page.
+ */
+export function useEntries(start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) {
+  return useInfiniteQuery({
+    queryKey: ledgerKeys.entries(start, end, search, order),
+    queryFn: ({ pageParam }) =>
+      ledgerApi.listEntries({
         start_date: start,
         end_date: end,
         ...(search ? { search } : {}),
+        order,
+        limit: LEDGER_PAGE_SIZE,
+        ...(pageParam ? { cursor: pageParam } : {}),
       }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.next_cursor,
+    select: (data) => ({ items: data.pages.flatMap((page) => page.items) }),
+    // Only a new order keeps the rows on screen while it loads; a new range or search shows
+    // the loading state, so rows of another filter are never listed (or selected).
+    placeholderData: (previous, previousQuery) => {
+      const key = previousQuery?.queryKey;
+      const sameFilter =
+        key !== undefined && key[2] === start && key[3] === end && key[4] === search;
+      return sameFilter ? previous : undefined;
+    },
   });
 }
 
@@ -116,6 +129,14 @@ export function useInstruments() {
   return useQuery({
     queryKey: ledgerKeys.instruments(),
     queryFn: () => assetsApi.listInstruments(),
+  });
+}
+
+/** Products carry the asset class of their contracts (the trade form's class filter). */
+export function useProducts() {
+  return useQuery({
+    queryKey: ledgerKeys.products(),
+    queryFn: () => assetsApi.listProducts(),
   });
 }
 
@@ -139,32 +160,18 @@ function useLedgerWrite<TVariables, TResult>(
   });
 }
 
-export const useCreateTrade = () =>
-  useLedgerWrite((body: CreateTradeRequest) => ledgerApi.createTrade(body), ledgerKeys.create());
-
-export const useCreateCashMovement = () =>
+/** Compra, venda, aporte or retirada: `POST /ledger/entries`. */
+export const useCreateEntry = () =>
   useLedgerWrite(
-    (body: CreateCashMovementRequest) => ledgerApi.createCashMovement(body),
+    (body: CreateLedgerEntryRequest) => ledgerApi.createEntry(body),
     ledgerKeys.create(),
   );
 
-/** A drawer's save is running: the drawer must stay open until its result is shown. */
+/** A new entry's save is running: the modal must stay open until its result is shown. */
 export const useIsSavingEntry = () => useIsMutating({ mutationKey: ledgerKeys.create() }) > 0;
 
-/** One entry: `DELETE /trades/{id}` or `DELETE /cash-movements/{id}`. */
-export const useDeleteEntry = () =>
-  useLedgerWrite((entry: LedgerEntry) =>
-    entry.kind === 'trade'
-      ? ledgerApi.deleteTrade(entry.id)
-      : ledgerApi.deleteCashMovement(entry.id),
-  );
-
-/** Several entries, all or nothing (§6.1). */
+/** One or several entries, of either type, all or nothing (§6.1): `POST /ledger/entries/deletions`. */
 export const useDeleteEntries = () =>
-  useLedgerWrite((entries: LedgerEntry[]) => {
-    const body: DeleteEntriesRequest = {
-      trade_ids: entries.filter((e) => e.kind === 'trade').map((e) => e.id),
-      cash_movement_ids: entries.filter((e) => e.kind === 'cash').map((e) => e.id),
-    };
-    return ledgerApi.deleteEntries(body);
-  });
+  useLedgerWrite((entries: LedgerEntry[]) =>
+    ledgerApi.deleteEntries({ ids: entries.map((e) => e.id) }),
+  );

@@ -23,3 +23,18 @@ export function isIsoDate(value: unknown): value is string {
     new Date(toUtc(value)).toISOString().startsWith(value)
   );
 }
+
+/**
+ * Today in São Paulo by the clock the app uses, so the fake backend never disagrees with the
+ * screens about which dates are in the future (OQ-14). The fixtures' story is set on
+ * MOCK_TODAY; the tests pin the clock there.
+ */
+export function today(now: Date = new Date()): string {
+  // en-CA formats as YYYY-MM-DD.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}

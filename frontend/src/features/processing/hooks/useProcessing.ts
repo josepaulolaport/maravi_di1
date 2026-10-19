@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 
-import type { IsoDate, JobStatus, ProcessingRangeRequest } from '@/api/contract';
+import type { JobStatus, ProcessingRangeRequest } from '@/api/contract';
 import { processingApi } from '@/api/endpoints';
 import { invalidateAfterJobFinished, queryRoots } from '@/api/queryRoots';
 
@@ -11,59 +11,67 @@ export const processingKeys = {
   all: queryRoots.processing,
   requests: () => [...processingKeys.all, 'requests'] as const,
   issues: () => [...processingKeys.all, 'issues'] as const,
-  preview: (start: IsoDate, end: IsoDate) =>
-    [...processingKeys.all, 'preview', start, end] as const,
 };
 
 /** How often the history is read while a job is active (§12). */
 export const POLL_INTERVAL_MS = 2_000;
+
+/** Jobs per page of the history (P21); "Carregar mais" reads the next one. */
+export const JOBS_PAGE_SIZE = 20;
 
 export function useIssues() {
   return useQuery({ queryKey: processingKeys.issues(), queryFn: processingApi.listIssues });
 }
 
 /**
- * The job history, newest first. It is polled only while some job is queued, dispatched,
- * running or cancelling (§11.1, §12). When a job reaches a final status, the published
- * results and the job views are refreshed once (§10.4).
+ * The job history, newest first, read page by page (P21); `data.items` holds every page read
+ * so far. It is polled only while some loaded job is queued, dispatched, running or
+ * cancelling (§11.1, §12); a poll rereads the loaded pages. When a job reaches a final
+ * status, the published results and the job views are refreshed once (§10.4).
  */
 export function useProcessingRequests() {
   const queryClient = useQueryClient();
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: processingKeys.requests(),
-    queryFn: processingApi.listRequests,
+    queryFn: ({ pageParam }) =>
+      processingApi.listRequests({
+        limit: JOBS_PAGE_SIZE,
+        ...(pageParam ? { cursor: pageParam } : {}),
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.next_cursor,
+    select: (data) => ({ items: data.pages.flatMap((page) => page.items) }),
     refetchInterval: (q) =>
-      q.state.data?.items.some((job) => isActive(job.status)) ? POLL_INTERVAL_MS : false,
+      q.state.data?.pages.some((page) => page.items.some((job) => isActive(job.status)))
+        ? POLL_INTERVAL_MS
+        : false,
   });
 
   // `null` until the first load: the jobs already finished then are not news.
-  const lastSeen = useRef<Map<string, JobStatus> | null>(null);
+  const lastSeen = useRef<{ statuses: Map<string, JobStatus>; newest: string } | null>(null);
   useEffect(() => {
     const items = query.data?.items;
     if (!items) return;
     const seen = lastSeen.current;
-    // A job seen active that is now final, or a new job that finished between two reads
-    // (queued elsewhere, or too short to be seen running).
+    // A job seen active that is now final, or a job newer than any seen before that is
+    // already final (queued elsewhere, or too short to be seen running). An older job that
+    // "Carregar mais" brings in is history, not news (P21).
     const finished =
       seen !== null &&
       items.some((job) => {
-        const before = seen.get(job.id);
-        return isFinal(job.status) && (before === undefined || isActive(before));
+        const before = seen.statuses.get(job.id);
+        if (!isFinal(job.status)) return false;
+        return before === undefined ? job.created_at > seen.newest : isActive(before);
       });
-    lastSeen.current = new Map(items.map((job) => [job.id, job.status]));
+    const newest = items.reduce(
+      (latest, job) => (job.created_at > latest ? job.created_at : latest),
+      seen?.newest ?? '',
+    );
+    lastSeen.current = { statuses: new Map(items.map((job) => [job.id, job.status])), newest };
     if (finished) void invalidateAfterJobFinished(queryClient);
   }, [query.data, queryClient]);
 
   return query;
-}
-
-/** The exact range [A, B] to process and the state before it (OQ-11). */
-export function usePreview(range: ProcessingRangeRequest | null) {
-  return useQuery({
-    queryKey: processingKeys.preview(range?.start_date ?? '', range?.end_date ?? ''),
-    queryFn: () => processingApi.preview(range as ProcessingRangeRequest),
-    enabled: range !== null,
-  });
 }
 
 function useProcessingMutation<TVariables, TData>(fn: (variables: TVariables) => Promise<TData>) {
@@ -72,10 +80,6 @@ function useProcessingMutation<TVariables, TData>(fn: (variables: TVariables) =>
     mutationFn: fn,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: processingKeys.all }),
   });
-}
-
-export function useEnqueue() {
-  return useProcessingMutation((range: ProcessingRangeRequest) => processingApi.enqueue(range));
 }
 
 export function useCancel() {

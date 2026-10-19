@@ -1,15 +1,21 @@
 import { Stack } from '@mantine/core';
 import { useState } from 'react';
 
-import type { IsoDate, ProcessingRangeRequest, ProcessingRequest } from '@/api/contract';
+import type {
+  IsoDate,
+  ProcessingRangeRequest,
+  ProcessingRequest,
+  ProcessingScope,
+} from '@/api/contract';
 
 import type { useProcessingRequests } from '../hooks/useProcessing';
 import { CancelDialog } from './CancelDialog';
-import { ConfirmDrawer } from './ConfirmDrawer';
+import { ConfirmProcessingModal } from './ConfirmProcessingModal';
 import { HistoryTable } from './HistoryTable';
-import { JobDetailsDrawer } from './JobDetailsDrawer';
-import { isValidRange } from './RangeFields';
+import { JobDetailsModal } from './JobDetailsModal';
+import { isValidRange } from '@/shared/processing/RangeFields';
 import { ReplaceDialog } from './ReplaceDialog';
+import { nextDate } from '../jobStatus';
 import { RequestCard } from './RequestCard';
 
 type Dialog = { kind: 'details' | 'cancel' | 'replace'; jobId: string } | null;
@@ -20,7 +26,9 @@ interface ProcessingTabProps {
   end: IsoDate | null;
   onStartChange: (date: IsoDate | null) => void;
   onEndChange: (date: IsoDate | null) => void;
-  onRequestAgain: (start: IsoDate, end: IsoDate) => void;
+  scope: ProcessingScope;
+  onScopeChange: (scope: ProcessingScope) => void;
+  onRequestAgain: (start: IsoDate, end: IsoDate, scope: ProcessingScope) => void;
   search: string;
   onSearchChange: (text: string) => void;
   today: IsoDate;
@@ -36,6 +44,8 @@ export function ProcessingTab({
   end,
   onStartChange,
   onEndChange,
+  scope,
+  onScopeChange,
   onRequestAgain,
   search,
   onSearchChange,
@@ -56,7 +66,8 @@ export function ProcessingTab({
   };
   const requestAgain = (job: ProcessingRequest) => {
     setDialog(null);
-    onRequestAgain(job.requested_start_date, job.requested_end_date);
+    // From where the run stopped to its original end (OQ-23 item 10).
+    onRequestAgain(nextDate(job), job.end_date, job.scope);
   };
 
   return (
@@ -66,10 +77,12 @@ export function ProcessingTab({
         end={end}
         onStartChange={onStartChange}
         onEndChange={onEndChange}
+        scope={scope}
+        onScopeChange={onScopeChange}
         today={today}
         onRequest={() => {
           if (start && end && isValidRange(start, end)) {
-            setConfirming({ start_date: start, end_date: end });
+            setConfirming({ start_date: start, end_date: end, scope });
           }
         }}
       />
@@ -82,7 +95,7 @@ export function ProcessingTab({
         onReplace={open('replace')}
         onRequestAgain={requestAgain}
       />
-      <ConfirmDrawer
+      <ConfirmProcessingModal
         range={confirming}
         onClose={() => {
           setConfirming(null);
@@ -91,7 +104,7 @@ export function ProcessingTab({
           setConfirming(null);
         }}
       />
-      <JobDetailsDrawer
+      <JobDetailsModal
         job={jobFor('details')}
         onClose={close}
         onCancel={open('cancel')}

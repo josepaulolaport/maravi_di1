@@ -1,15 +1,17 @@
 import type {
-  CashMovement,
+  CashLedgerEntry,
+  CompletenessStatus,
+  Decimal,
   Instrument,
   InstrumentType,
   Issue,
+  LedgerEntry,
   PnlPoint,
   PortfolioPositions,
-  PortfolioSummary,
   ProcessingRequest,
   Product,
   ReferencePrice,
-  Trade,
+  TradeLedgerEntry,
 } from '../contract';
 
 // One coherent demo scenario for the MSW mocks. Every figure was computed offline with the
@@ -21,11 +23,12 @@ import type {
 //   14/10  Aporte 1.500.000,00; compra 10 DI1F28 a 10,00% a.a.
 //   15/10  Compra 5 DI1F29 a PU 82.057,00 (B3 price for DI1F28)
 //   16/10  Venda 4 DI1F28 a 9,95% a.a.; retirada 50.000,00
-//          A job started at 17:20 is SUPERSEDED: the withdrawal was recorded at 17:30, mid-run.
+//          A run started at 17:20 was cancelled after committing 14/10 and 15/10 (OQ-23).
 //          No DI1F29 price  → Pendência, P&L incomplete (null), job COMPLETED_WITH_ISSUES.
-//          DI1F28 price corrected after publication (revision 2) → 16/10 is stale.
+//          DI1F28 price corrected after publication (replaced) → 16/10 is stale.
 //   17/10, 18/10  not processed (weekend; no prices).
 
+/** The day the fixtures' story is told from. The fake backend follows the real clock; tests pin it here. */
 export const MOCK_TODAY = '2026-10-18';
 
 export const IDS = {
@@ -80,15 +83,20 @@ export const instruments: Omit<Instrument, 'last_reference'>[] = [
   created_at: '2026-10-01T09:00:00-03:00',
 }));
 
-export const trades: Trade[] = [
+/**
+ * The ledger (§6): trades and cash entries in one list, `seq` in the order they were recorded.
+ * Cash entries carry a time like trades (user, 2026-10-18).
+ */
+export const tradeEntries: TradeLedgerEntry[] = [
   {
+    type: 'TRADE',
     id: '7a000000-0000-4000-8000-000000000001',
     asset_id: IDS.di1f28,
     asset_code: 'DI1F28',
     instrument_type_code: 'FUTURE',
-    trade_date: '2026-10-14',
-    trade_time: '14:10:00',
-    seq: 1,
+    date: '2026-10-14',
+    time: '14:10:00',
+    seq: 2,
     signed_quantity: 10,
     execution_pu: '89006.4625467350',
     execution_rate: '0.10',
@@ -97,13 +105,14 @@ export const trades: Trade[] = [
     created_at: '2026-10-14T14:11:02-03:00',
   },
   {
+    type: 'TRADE',
     id: '7a000000-0000-4000-8000-000000000002',
     asset_id: IDS.di1f29,
     asset_code: 'DI1F29',
     instrument_type_code: 'FUTURE',
-    trade_date: '2026-10-15',
-    trade_time: '10:30:00',
-    seq: 2,
+    date: '2026-10-15',
+    time: '10:30:00',
+    seq: 3,
     signed_quantity: 5,
     execution_pu: '82057.00',
     execution_rate: '0.093203413834',
@@ -112,13 +121,14 @@ export const trades: Trade[] = [
     created_at: '2026-10-15T10:31:40-03:00',
   },
   {
+    type: 'TRADE',
     id: '7a000000-0000-4000-8000-000000000003',
     asset_id: IDS.di1f28,
     asset_code: 'DI1F28',
     instrument_type_code: 'FUTURE',
-    trade_date: '2026-10-16',
-    trade_time: '15:00:00',
-    seq: 3,
+    date: '2026-10-16',
+    time: '15:00:00',
+    seq: 4,
     signed_quantity: -4,
     execution_pu: '89102.2226533433',
     execution_rate: '0.0995',
@@ -128,24 +138,29 @@ export const trades: Trade[] = [
   },
 ];
 
-export const cashMovements: CashMovement[] = [
+/** Aporte: positive `cash_amount`; retirada: negative. */
+export const cashEntries: CashLedgerEntry[] = [
   {
+    type: 'CASH',
     id: '7c000000-0000-4000-8000-000000000001',
-    movement_date: '2026-10-14',
-    movement_type: 'DEPOSIT',
-    amount: '1500000.00',
-    description: 'Aporte inicial',
+    date: '2026-10-14',
+    time: '09:00:00',
+    seq: 1,
+    cash_amount: '1500000.00',
     created_at: '2026-10-14T09:00:00-03:00',
   },
   {
+    type: 'CASH',
     id: '7c000000-0000-4000-8000-000000000002',
-    movement_date: '2026-10-16',
-    movement_type: 'WITHDRAWAL',
-    amount: '50000.00',
-    description: 'Retirada parcial',
+    date: '2026-10-16',
+    time: '17:30:00',
+    seq: 5,
+    cash_amount: '-50000.00',
     created_at: '2026-10-16T17:30:00-03:00',
   },
 ];
+
+export const ledgerEntries: LedgerEntry[] = [...tradeEntries, ...cashEntries];
 
 function price(
   n: number,
@@ -154,8 +169,6 @@ function price(
   source: ReferencePrice['source'],
   pu: string,
   rate: string,
-  revision = 1,
-  supersededAt: string | null = null,
   createdAt = `${date}T18:00:00-03:00`,
 ): ReferencePrice {
   return {
@@ -166,21 +179,18 @@ function price(
     input_kind: 'RATE',
     pu,
     rate,
-    revision,
     created_at: createdAt,
-    superseded_at: supersededAt,
   };
 }
 
 export const PRICE_IDS = {
   f28_1014: '7e000000-0000-4000-8000-000000000006',
   f28_1015: '7e000000-0000-4000-8000-000000000007',
-  f28_1016_r1: '7e000000-0000-4000-8000-000000000008',
-  f28_1016_r2: '7e000000-0000-4000-8000-000000000009',
+  f28_1016: '7e000000-0000-4000-8000-000000000008',
   f29_1015: '7e000000-0000-4000-8000-000000000011',
 } as const;
 
-/** All revisions, current and superseded. Gaps between dates are real: no carry-forward. */
+/** One price per (asset, date, source). Gaps between dates are real: no carry-forward. */
 export const referencePrices: ReferencePrice[] = [
   price(1, IDS.di1f28, '2026-09-24', 'B3', '88215.0712246655', '0.1032'),
   price(2, IDS.di1f28, '2026-09-30', 'MANUAL', '88509.2489449811', '0.1017'),
@@ -189,25 +199,14 @@ export const referencePrices: ReferencePrice[] = [
   price(5, IDS.di1f28, '2026-10-09', 'MANUAL', '88910.3037976557', '0.0998'),
   price(6, IDS.di1f28, '2026-10-14', 'MANUAL', '89006.4625467350', '0.10'),
   price(7, IDS.di1f28, '2026-10-15', 'B3', '89128.4824345118', '0.0990'),
+  // Corrected on 17/10 from 89.200,9008841512 (9,85%), after 16/10 was published: replaced.
   price(
     8,
     IDS.di1f28,
     '2026-10-16',
     'MANUAL',
-    '89200.9008841512',
-    '0.0985',
-    1,
-    '2026-10-17T10:00:00-03:00',
-  ),
-  price(
-    9,
-    IDS.di1f28,
-    '2026-10-16',
-    'MANUAL',
     '89250.3147019396',
     '0.0980',
-    2,
-    null,
     '2026-10-17T10:00:00-03:00',
   ),
   price(
@@ -217,8 +216,6 @@ export const referencePrices: ReferencePrice[] = [
     'B3',
     '89240.4279488087',
     '0.0981',
-    1,
-    null,
     '2026-10-16T19:00:00-03:00',
   ),
   price(11, IDS.di1f29, '2026-10-15', 'MANUAL', '80206.1333187932', '0.1045'),
@@ -227,24 +224,61 @@ export const referencePrices: ReferencePrice[] = [
 /** First date with an input; the day before it is the valid zero state (OQ-11). */
 export const FIRST_ENTRY_DATE = '2026-10-14';
 
-/** Dirty markers (`processing.calculation_state`): the 16/10 price correction. */
-export const initialDirty = {
-  accounting: null as string | null,
-  valuation: '2026-10-16' as string | null,
+/**
+ * Dirty markers (`processing.calculation_state`), one set per chain (OQ-21 draft): `cash` for
+ * the cash chain; `accounting` and `valuation` for the positions chain. The seed has only the
+ * 16/10 price correction, which affects positions, never cash.
+ */
+/** Per chain, the first seed date that reads stale: the 16/10 price was corrected after publication. */
+export const seedStaleFrom: Record<'CASH' | 'POSITIONS', string | null> = {
+  CASH: null,
+  POSITIONS: '2026-10-16',
 };
 
 const PUBLISHED_AT = '2026-10-16T18:40:00-03:00';
 
-type PublishedSummary = Extract<PortfolioSummary, { publication: 'PUBLISHED' }>;
-type PublishedPositions = Extract<PortfolioPositions, { publication: 'PUBLISHED' }>;
+/**
+ * One published day of the seed, for both chains (OQ-21 draft): the handlers serve its cash
+ * (`cash_balance`, the cash chain) and the rest (the positions chain) separately. `aum` is
+ * the scenario's cash + market value, served only when both chains are published.
+ */
+export interface SeedSummary {
+  date: string;
+  publication: 'PUBLISHED';
+  published_at: string;
+  cash_balance: Decimal;
+  /** The day's cash components (OQ-21): −Σ(signed_qty × execution_PU), deposits, withdrawals. */
+  trades_cash_flow: Decimal;
+  deposits: Decimal;
+  withdrawals: Decimal;
+  positions_market_value: Decimal | null;
+  aum: Decimal | null;
+  position_pnl: Decimal | null;
+  trades_pnl: Decimal | null;
+  daily_pnl: Decimal | null;
+  cumulative_pnl: Decimal | null;
+  valuation_status: CompletenessStatus;
+  pnl_status: CompletenessStatus;
+}
 
-/** Published `portfolio_metrics`; `stale` is set by the handlers from the dirty markers. */
-export const summaries: Omit<PublishedSummary, 'stale'>[] = [
+/** A published positions day of the seed; the handlers add its freshness. */
+interface PublishedPositions {
+  date: string;
+  publication: 'PUBLISHED';
+  published_at: string;
+  items: PortfolioPositions['items'];
+}
+
+/** Published days of the seed; freshness is set by the handlers from the dirty markers. */
+export const summaries: SeedSummary[] = [
   {
     date: '2026-10-14',
     publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     cash_balance: '609935.3745326500',
+    trades_cash_flow: '-890064.6254673500',
+    deposits: '1500000.00',
+    withdrawals: '0.00',
     positions_market_value: '890064.6254673500',
     aum: '1500000.0000000000',
     position_pnl: '0',
@@ -259,6 +293,9 @@ export const summaries: Omit<PublishedSummary, 'stale'>[] = [
     publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     cash_balance: '199650.3745326500',
+    trades_cash_flow: '-410285.00',
+    deposits: '0.00',
+    withdrawals: '0.00',
     positions_market_value: '1292315.4909390840',
     aum: '1491965.8654717340',
     position_pnl: '1220.1988777680',
@@ -273,6 +310,9 @@ export const summaries: Omit<PublishedSummary, 'stale'>[] = [
     publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     cash_balance: '506059.2651460232',
+    trades_cash_flow: '356408.8906133732',
+    deposits: '0.00',
+    withdrawals: '50000.00',
     positions_market_value: null,
     aum: null,
     position_pnl: null,
@@ -284,7 +324,7 @@ export const summaries: Omit<PublishedSummary, 'stale'>[] = [
   },
 ];
 
-export const positions: Omit<PublishedPositions, 'stale'>[] = [
+export const positions: PublishedPositions[] = [
   {
     date: '2026-10-14',
     publication: 'PUBLISHED',
@@ -297,7 +337,6 @@ export const positions: Omit<PublishedPositions, 'stale'>[] = [
         quantity: 10,
         average_entry_pu: '89006.4625467350',
         average_entry_rate: '0.10',
-        reference_price_id: PRICE_IDS.f28_1014,
         reference_source: 'MANUAL',
         reference_pu: '89006.4625467350',
         reference_rate: '0.10',
@@ -322,7 +361,6 @@ export const positions: Omit<PublishedPositions, 'stale'>[] = [
         quantity: 10,
         average_entry_pu: '89006.4625467350',
         average_entry_rate: '0.10',
-        reference_price_id: PRICE_IDS.f28_1015,
         reference_source: 'B3',
         reference_pu: '89128.4824345118',
         reference_rate: '0.0990',
@@ -340,7 +378,6 @@ export const positions: Omit<PublishedPositions, 'stale'>[] = [
         quantity: 5,
         average_entry_pu: '82057.00',
         average_entry_rate: '0.093203413834',
-        reference_price_id: PRICE_IDS.f29_1015,
         reference_source: 'MANUAL',
         reference_pu: '80206.1333187932',
         reference_rate: '0.1045',
@@ -359,14 +396,13 @@ export const positions: Omit<PublishedPositions, 'stale'>[] = [
     published_at: PUBLISHED_AT,
     items: [
       {
-        // Published with revision 1 of the 16/10 price; revision 2 came later → stale.
+        // Published with the 16/10 price before its correction (89.200,90) → stale.
         asset_id: IDS.di1f28,
         asset_code: 'DI1F28',
         maturity_date: '2028-01-03',
         quantity: 6,
         average_entry_pu: '89006.4625467350',
         average_entry_rate: '0.10',
-        reference_price_id: PRICE_IDS.f28_1016_r1,
         reference_source: 'MANUAL',
         reference_pu: '89200.9008841512',
         reference_rate: '0.0985',
@@ -385,7 +421,6 @@ export const positions: Omit<PublishedPositions, 'stale'>[] = [
         quantity: 5,
         average_entry_pu: '82057.00',
         average_entry_rate: '0.093203413834',
-        reference_price_id: null,
         reference_source: null,
         reference_pu: null,
         reference_rate: null,
@@ -401,7 +436,7 @@ export const positions: Omit<PublishedPositions, 'stale'>[] = [
 ];
 
 /** `stale` is set by the handlers. */
-export const pnlSeries: Omit<PnlPoint, 'stale'>[] = [
+export const pnlSeries: Omit<PnlPoint, 'status'>[] = [
   {
     date: '2026-10-14',
     daily_pnl: '0.0000000000',
@@ -419,7 +454,7 @@ export const pnlSeries: Omit<PnlPoint, 'stale'>[] = [
 
 // What a job publishes when it processes a day of this scenario with its inputs unchanged.
 // The fake backend does not calculate: these were computed offline with the same formulas
-// and precision as the published fixtures above (re-checked: the 16/10 revision-1 figures
+// and precision as the published fixtures above (re-checked: the 16/10 pre-correction figures
 // reproduce exactly). 14/10 and 15/10 republish as they are; days before FIRST_ENTRY_DATE
 // are the zero state (§7).
 
@@ -440,7 +475,6 @@ function unpricedRow(
     maturity_date: maturity,
     quantity,
     ...averages,
-    reference_price_id: null,
     reference_source: null,
     reference_pu: null,
     reference_rate: null,
@@ -453,14 +487,17 @@ function unpricedRow(
   };
 }
 
-/** A day after the last input (17/10, 18/10): no trades, no cash, no prices. */
-function dayWithoutInputs(date: string): RecalculatedDay {
+/** A day after the last input (17/10 on): no trades, no cash, no prices. */
+export function dayWithoutInputs(date: string): RecalculatedDay {
   return {
     summary: {
       date,
       publication: 'PUBLISHED',
       published_at: PUBLISHED_AT,
       cash_balance: '506059.2651460232',
+      trades_cash_flow: '0.0000000000',
+      deposits: '0.00',
+      withdrawals: '0.00',
       positions_market_value: null,
       aum: null,
       position_pnl: null,
@@ -484,20 +521,23 @@ function dayWithoutInputs(date: string): RecalculatedDay {
 }
 
 export interface RecalculatedDay {
-  summary: Omit<PublishedSummary, 'stale'>;
-  positions: Omit<PublishedPositions, 'stale'>;
-  pnl: Omit<PnlPoint, 'stale'>;
+  summary: SeedSummary;
+  positions: PublishedPositions;
+  pnl: Omit<PnlPoint, 'status'>;
 }
 
 /** Republished results that differ from the published fixtures (`published_at` is replaced). */
 export const recalculatedDays: Record<string, RecalculatedDay> = {
-  // DI1F28 now uses revision 2 of its 16/10 price; DI1F29 still has none, so incomplete.
+  // DI1F28 now uses its corrected 16/10 price; DI1F29 still has none, so incomplete.
   '2026-10-16': {
     summary: {
       date: '2026-10-16',
       publication: 'PUBLISHED',
       published_at: PUBLISHED_AT,
       cash_balance: '506059.2651460232',
+      trades_cash_flow: '356408.8906133732',
+      deposits: '0.00',
+      withdrawals: '50000.00',
       positions_market_value: null,
       aum: null,
       position_pnl: null,
@@ -518,7 +558,6 @@ export const recalculatedDays: Record<string, RecalculatedDay> = {
           maturity_date: '2028-01-03',
           quantity: 6,
           ...DI1F28_AVERAGES,
-          reference_price_id: PRICE_IDS.f28_1016_r2,
           reference_source: 'MANUAL',
           reference_pu: '89250.3147019396',
           reference_rate: '0.0980',
@@ -549,6 +588,9 @@ export function zeroStateDay(date: string): RecalculatedDay {
       publication: 'PUBLISHED',
       published_at: PUBLISHED_AT,
       cash_balance: '0',
+      trades_cash_flow: '0.0000000000',
+      deposits: '0.00',
+      withdrawals: '0.00',
       positions_market_value: '0',
       aum: '0',
       position_pnl: '0',
@@ -563,85 +605,77 @@ export function zeroStateDay(date: string): RecalculatedDay {
   };
 }
 
-// Distinct first blocks: the history shows a job by the first 8 characters of its id.
+// Distinct in their first 8 characters, which the UI shows as the short id, as random
+// UUIDs would be.
 const REQUEST_IDS = {
-  completed: '3c1e8a20-0000-4000-8000-000000000001',
-  withIssues: '5b7d2f41-0000-4000-8000-000000000002',
-  cancelled: '8e2a6c93-0000-4000-8000-000000000003',
-  failed: 'a4f09d15-0000-4000-8000-000000000004',
-  superseded: 'd61b37e8-0000-4000-8000-000000000005',
+  completed: '7f3c9a01-0000-4000-8000-000000000001',
+  withIssues: '7f3c9a02-0000-4000-8000-000000000002',
+  cancelled: '7f3c9a03-0000-4000-8000-000000000003',
+  failed: '7f3c9a04-0000-4000-8000-000000000004',
+  cancelledMidway: '7f3c9a05-0000-4000-8000-000000000005',
 } as const;
 
 function job(
   id: string,
   start: string,
   end: string,
-  total: number,
   status: ProcessingRequest['status'],
   createdAt: string,
   extra: Partial<ProcessingRequest> = {},
 ): ProcessingRequest {
   return {
     id,
-    requested_start_date: start,
-    requested_end_date: end,
+    scope: 'ALL',
+    start_date: start,
+    end_date: end,
     status,
+    progress_date: end,
+    error_code: null,
+    error_message: null,
     created_at: createdAt,
+    updated_at: createdAt,
     dispatched_at: createdAt,
     started_at: createdAt,
     finished_at: createdAt,
     cancel_requested_at: null,
-    processed_days: total,
-    total_days: total,
-    progress_date: null,
-    error_code: null,
-    error_message: null,
     ...extra,
   };
 }
 
-/** Oldest first; the handlers return them newest first. No job is active at start. */
+/**
+ * Oldest first; the handlers return them newest first. No job is active at start. Each run
+ * publishes its dates one by one (OQ-23): `progress_date` is the last one it committed.
+ */
 export const processingRequests: ProcessingRequest[] = [
-  job(REQUEST_IDS.failed, '2026-10-01', '2026-10-05', 5, 'FAILED', '2026-10-14T08:00:00-03:00', {
-    processed_days: 2,
+  job(REQUEST_IDS.failed, '2026-10-01', '2026-10-05', 'FAILED', '2026-10-14T08:00:00-03:00', {
+    progress_date: null,
     error_code: 'UNEXPECTED_ERROR',
-    error_message:
-      'Falha inesperada ao gravar os resultados. Nenhum dia foi publicado; tente novamente.',
+    error_message: 'Falha inesperada ao gravar os resultados de 01/10/2026. Tente novamente.',
   }),
+  job(REQUEST_IDS.cancelled, '2026-10-10', '2026-10-12', 'CANCELLED', '2026-10-14T08:30:00-03:00', {
+    progress_date: null,
+    started_at: null,
+    cancel_requested_at: '2026-10-14T08:30:05-03:00',
+  }),
+  job(REQUEST_IDS.completed, '2026-10-14', '2026-10-15', 'COMPLETED', '2026-10-15T18:00:00-03:00'),
+  // Cancelled after committing 14/10 and 15/10, which stay published; 16/10 was not reached.
   job(
-    REQUEST_IDS.cancelled,
-    '2026-10-10',
-    '2026-10-12',
-    3,
-    'CANCELLED',
-    '2026-10-14T08:30:00-03:00',
-    {
-      processed_days: 1,
-      cancel_requested_at: '2026-10-14T08:30:05-03:00',
-    },
-  ),
-  job(
-    REQUEST_IDS.completed,
-    '2026-10-14',
-    '2026-10-15',
-    2,
-    'COMPLETED',
-    '2026-10-15T18:00:00-03:00',
-  ),
-  job(
-    REQUEST_IDS.superseded,
+    REQUEST_IDS.cancelledMidway,
     '2026-10-14',
     '2026-10-16',
-    3,
-    'SUPERSEDED',
+    'CANCELLED',
     '2026-10-16T17:20:00-03:00',
-    { finished_at: '2026-10-16T17:31:00-03:00' },
+    {
+      progress_date: '2026-10-15',
+      cancel_requested_at: '2026-10-16T17:30:40-03:00',
+      finished_at: '2026-10-16T17:31:00-03:00',
+      updated_at: '2026-10-16T17:31:00-03:00',
+    },
   ),
   job(
     REQUEST_IDS.withIssues,
     '2026-10-14',
     '2026-10-16',
-    3,
     'COMPLETED_WITH_ISSUES',
     '2026-10-16T18:35:00-03:00',
   ),
@@ -655,6 +689,7 @@ export const issues: Issue[] = [
     asset_code: 'DI1F29',
     affected_date: '2026-10-16',
     required_price_date: '2026-10-16',
+    chain: null,
     request_id: REQUEST_IDS.withIssues,
   },
 ];

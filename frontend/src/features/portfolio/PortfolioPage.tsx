@@ -6,9 +6,10 @@ import type { IsoDate } from '@/api/contract';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
 import { CumulativePnlCard } from './components/CumulativePnlCard';
+import { DataStatus } from './components/DataStatus';
 import { KpiGrid } from './components/KpiGrid';
 import { PositionsTable } from './components/PositionsTable';
-import { NotProcessedNotice, PublishedNotices } from './components/StatusNotices';
+import { NotProcessedNotice } from './components/StatusNotices';
 import {
   useChartStart,
   useEvaluationDate,
@@ -17,8 +18,9 @@ import {
 } from './hooks/usePortfolio';
 
 /**
- * Carteira (spec §11.4): one evaluation date, published data only. KPIs, positions and the
- * cumulative P&L headline come from the same publication; nothing is recalculated here.
+ * Carteira (spec §11.4): one evaluation date, published data only; nothing is recalculated
+ * here. Cash and positions are published by separate chains (OQ-21 draft), so each KPI and
+ * notice follows its own chain's freshness; AUM joins both.
  */
 export function PortfolioPage() {
   const [date, setDate, today] = useEvaluationDate();
@@ -30,7 +32,7 @@ export function PortfolioPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between">
+      <Group justify="space-between" align="flex-end">
         <DatePickerInput
           label="Data de avaliação"
           value={date}
@@ -42,6 +44,7 @@ export function PortfolioPage() {
           leftSection={<IconCalendar size={16} stroke={1.5} />}
           w={220}
         />
+        {summary.data && <DataStatus summary={summary.data} />}
       </Group>
       <PortfolioBody chartStart={chartStart} date={date} summary={summary} positions={positions} />
     </Stack>
@@ -78,25 +81,25 @@ function PortfolioBody({ date, chartStart, summary, positions }: BodyProps) {
   }
 
   const data = summary.data;
-  if (data.publication === 'NOT_PROCESSED' || positions.data.publication === 'NOT_PROCESSED') {
+  const rows = positions.data;
+  if (data.cash.status === 'NOT_PROCESSED' && data.positions.status === 'NOT_PROCESSED') {
     return <NotProcessedNotice date={date} />;
   }
 
   return (
     <Stack gap="md">
-      <PublishedNotices
-        date={date}
-        stale={data.stale || positions.data.stale}
-        incomplete={data.valuation_status === 'MISSING' || data.pnl_status === 'MISSING'}
-      />
-      <KpiGrid kpis={data} />
-      <CumulativePnlCard
-        date={date}
-        cumulative={data.cumulative_pnl}
-        start={chartStart[0]}
-        onStartChange={chartStart[1]}
-      />
-      <PositionsTable rows={positions.data.items} />
+      <KpiGrid summary={data} />
+      {rows.status !== 'NOT_PROCESSED' && (
+        <>
+          <CumulativePnlCard
+            date={date}
+            cumulative={data.positions.cumulative_pnl}
+            start={chartStart[0]}
+            onStartChange={chartStart[1]}
+          />
+          <PositionsTable rows={rows.items} />
+        </>
+      )}
     </Stack>
   );
 }

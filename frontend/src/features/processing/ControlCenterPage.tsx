@@ -55,6 +55,8 @@ export function ControlCenterPage() {
             end={params.end}
             onStartChange={params.setStart}
             onEndChange={params.setEnd}
+            scope={params.scope}
+            onScopeChange={params.setScope}
             onRequestAgain={params.setRange}
             search={params.search}
             onSearchChange={params.setSearch}

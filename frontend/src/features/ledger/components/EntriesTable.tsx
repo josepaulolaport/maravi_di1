@@ -22,28 +22,16 @@ import {
 
 import { ENTRY_TYPE_LABELS, type LedgerEntry, type SortDirection } from '../entries';
 
-const recordedTime = new Intl.DateTimeFormat('pt-BR', {
-  timeZone: 'America/Sao_Paulo',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-});
-
 /**
  * Names a row for screen readers and the delete dialogs, with enough of its figures to tell
  * same-day entries apart: "Venda DI1F28 -4 16/10/2026 15:00 PU 89.102,22",
- * "Retirada 16/10/2026 -R$ 50.000,00 registrada às 17:30". A cash movement has no effective
- * time (GAP-I-1), so the moment it was recorded (São Paulo) breaks ties.
+ * "Retirada 16/10/2026 17:30 -R$ 50.000,00".
  */
 export function entryLabel(entry: LedgerEntry): string {
   const type = ENTRY_TYPE_LABELS[entry.entryType];
-  if (entry.kind === 'cash') {
-    const recorded = entry.entryType === 'DEPOSIT' ? 'registrado' : 'registrada';
-    const at = recordedTime.format(new Date(entry.createdAt));
-    return `${type} ${formatDate(entry.date)} ${formatSignedMoney(entry.signedAmount)} ${recorded} às ${at}`;
-  }
-  const quantity = formatSignedQuantity(entry.signedQuantity);
   const when = `${formatDate(entry.date)} ${formatTime(entry.time)}`;
+  if (entry.kind === 'cash') return `${type} ${when} ${formatSignedMoney(entry.signedAmount)}`;
+  const quantity = formatSignedQuantity(entry.signedQuantity);
   return `${type} ${entry.assetCode} ${quantity} ${when} PU ${formatPu(entry.pu)}`;
 }
 
@@ -57,7 +45,7 @@ interface EntriesTableProps {
   sort: SortDirection;
   onToggleSort: () => void;
   selected: Set<string>;
-  onToggle: (key: string) => void;
+  onToggle: (id: string) => void;
   onToggleAll: () => void;
   onDelete: (entry: LedgerEntry) => void;
 }
@@ -65,7 +53,7 @@ interface EntriesTableProps {
 /**
  * The columns of §11.3: instrument type ("Futuros", "Caixa") and entry type (Compra, Venda,
  * Aporte, Retirada) are separate. A trade shows PU and rate (the typed one and the one the
- * backend computed, OQ-19 item 7); a cash movement has neither, nor an asset or quantity.
+ * backend computed, OQ-19 item 7); a cash entry has neither, nor an asset or quantity.
  */
 export function EntriesTable({
   entries,
@@ -77,7 +65,7 @@ export function EntriesTable({
   onToggleAll,
   onDelete,
 }: EntriesTableProps) {
-  const selectedCount = entries.filter((e) => selected.has(e.key)).length;
+  const selectedCount = entries.filter((e) => selected.has(e.id)).length;
   const allSelected = entries.length > 0 && selectedCount === entries.length;
 
   return (
@@ -130,22 +118,20 @@ export function EntriesTable({
             const trade = entry.kind === 'trade' ? entry : null;
             return (
               <Table.Tr
-                key={entry.key}
-                {...(selected.has(entry.key) ? { bg: 'var(--mantine-primary-color-light)' } : {})}
+                key={entry.id}
+                {...(selected.has(entry.id) ? { bg: 'var(--mantine-primary-color-light)' } : {})}
               >
                 <Table.Td>
                   <Checkbox
                     aria-label={`Selecionar ${label}`}
-                    checked={selected.has(entry.key)}
+                    checked={selected.has(entry.id)}
                     onChange={() => {
-                      onToggle(entry.key);
+                      onToggle(entry.id);
                     }}
                   />
                 </Table.Td>
                 <Table.Td style={{ whiteSpace: 'nowrap' }}>
-                  {trade
-                    ? `${formatDate(trade.date)} ${formatTime(trade.time)}`
-                    : formatDate(entry.date)}
+                  {`${formatDate(entry.date)} ${formatTime(entry.time)}`}
                 </Table.Td>
                 <Table.Td>
                   {trade
