@@ -19,8 +19,13 @@ INSERT INTO asset.products (asset_class_id, code, name)
     FROM asset.asset_classes AS c
     WHERE c.code = 'INTEREST_RATE_FUTURE'
       AND NOT EXISTS (SELECT 1 FROM asset.products WHERE upper(code) = 'DI1');
-INSERT INTO asset.futures (product_id, face_value, contract_multiplier, settlement_method)
-    SELECT p.id, 100000, 1, 'CASH'
+INSERT INTO asset.futures (
+        product_id, face_value, contract_multiplier, settlement_method, settlement_description)
+    SELECT p.id, 100000, 1, 'CASH', 'Liquidação financeira'
     FROM asset.products AS p
-    WHERE upper(p.code) = 'DI1'
+    -- Only under FUTURE (schema.sql: a futures row needs a FUTURE product; the seed bypasses the
+    -- Asset service that checks it).
+    JOIN asset.asset_classes AS c ON c.id = p.asset_class_id
+    JOIN asset.instrument_types AS t ON t.id = c.instrument_type_id
+    WHERE upper(p.code) = 'DI1' AND t.code = 'FUTURE'
       AND NOT EXISTS (SELECT 1 FROM asset.futures WHERE product_id = p.id);

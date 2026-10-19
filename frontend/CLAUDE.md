@@ -40,7 +40,7 @@ Each package is the current stable major published before 2026-10-04, the same c
 ```text
 frontend/src/
   app/          # composition only: providers, theme, routes, paths
-  api/          # typed HTTP client, draft contract types, MSW handlers and fixtures (mocks/)
+  api/          # typed HTTP client, the adopted contract types (`contract/`), MSW handlers and fixtures (mocks/)
   features/<f>/ # one folder per screen: assets, ledger, prices, portfolio, processing
     <F>Page.tsx #   the route component (lazy-loaded)
     components/ #   components used only by this feature
