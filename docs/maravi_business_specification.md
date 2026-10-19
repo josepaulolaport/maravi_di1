@@ -199,7 +199,7 @@ positions_market_value[D]  = Σ financial_total[a,D]
 aum[D]                     = cash_balance[D] + positions_market_value[D]
 ```
 
-- `cash_balance[D]` vem da cadeia de caixa (`cash_balances`) e `positions_market_value[D]` da cadeia de posições (`portfolio_metrics`) (OQ-21). O AUM é `null` quando qualquer dos lados falta e aparece como desatualizado quando qualquer dos lados está desatualizado. Quem publica qualquer das cadeias recalcula o AUM de cada data na transação dessa data, com o valor publicado da outra (OQ-23).
+- `cash_balance[D]` vem da cadeia de caixa (`cash_balances`) e `positions_market_value[D]` da cadeia de posições (`portfolio_metrics`) (OQ-21). O AUM é `null` quando qualquer dos lados falta e não tem status próprio: a tela mostra os status do caixa e das posições (OQ-28). Quem publica qualquer das cadeias recalcula o AUM de cada data na transação dessa data, com o valor publicado da outra (OQ-23).
 
 - `financial_total` significa **valor de mercado** da posição, **não** valor histórico investido.
 - A quantidade é assinada, então uma posição vendida produz valor de mercado assinado negativo.
@@ -424,6 +424,7 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - Design × especificação (usuário, 18/10/2026, sessão do frontend; OQ-19, OQ-20): dados e funcionalidades da especificação prevalecem sobre o design preliminar; Carteira com P&L de posições e de operações; três tipos de pendência; faixa Caixa D0/D−1 em Lançamentos; catálogo só com dados da API; última referência sempre com sua data; coluna Fonte no calendário, com menu Corrigir e Remover (OQ-25); sem calculadora taxa ↔ PU nem prévia (valor complementar calculado ao salvar); intervalo exato [A, B]; oito status com rótulos em português e sem "Bloqueado" (OQ-23); publicação por data (OQ-23); novo processamento a partir da data com falha ou da primeira data não alcançada (OQ-23); cancelar e substituir.
 - Processamento dia a dia (OQ-23): sem estágio, cada data publicada na sua própria transação; `processing.date_status` guarda o status atual de cada data por cadeia (Atualizado, Atualizado com pendências, Desatualizado, Processando, Erro; sem status = Não processado) e é a única fonte de atualização; gravações marcam Desatualizado as datas com status a partir da sua data; sem marcadores, revisões nem `SUPERSEDED`; falha em D deixa D com Erro e não toca as datas seguintes; cancelamento publica a data em curso; recuperação a partir do último progresso.
 - Lançamento único (OQ-24): `ledger.entries` para operações e movimentações de caixa, hora obrigatória, `seq` comum, valor de caixa com sinal; exclusão lógica sem motivo; exclusão múltipla em uma única transação, com identificador de lote; rotas `/ledger/entries`.
+- AUM sem status (OQ-28): `aum` é apenas o valor (caixa + valor de mercado, `null` se um lado falta); a tela mostra os status das duas cadeias.
 - Preços de referência sem revisões (OQ-25): uma observação por instrumento, data e fonte; correção no lugar, remoção apaga; rastreio pelo PU e fonte gravados em `position_metrics`.
 
 ### Aberto — requer decisão específica antes de codificar o comportamento
