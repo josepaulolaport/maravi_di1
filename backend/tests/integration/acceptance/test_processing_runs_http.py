@@ -278,10 +278,13 @@ def test_all_with_both_chains_failing_on_the_same_date(desk: Desk, di1f28: str) 
 
     run = desk.process("ALL", TUE, WED)
 
-    assert (run["status"], run["error_code"], run["failed_date"]) == (
+    # failed_chain is POSITIONS when both chains fail on the same date (OQ-40, OQ-36 item 5).
+    assert _failure(run) == (
         "FAILED",
         POSITIONS_MISSING,
+        PREDECESSOR_MESSAGE,
         TUE.isoformat(),
+        "POSITIONS",
     ), run
     assert desk.statuses() == {TUE: ("FAILED", "FAILED")}
 
