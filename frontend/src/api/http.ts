@@ -94,7 +94,8 @@ async function toApiError(response: Response): Promise<ApiError> {
 async function request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   const init: RequestInit = { method, headers };
-  if (options.signal) init.signal = options.signal;
+  // Experiment (CI only fails with it): the AbortSignal is not passed to fetch, to test whether
+  // it lets reads bypass MSW on the GitHub runner. Superseded reads then complete unused.
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(options.body);
