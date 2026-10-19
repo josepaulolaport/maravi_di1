@@ -534,6 +534,27 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     expect(seen).toEqual(['limit=20', 'limit=20&cursor=page-2']);
   });
 
+  it('P21 a search with no match among the loaded jobs points to "Carregar mais"', async () => {
+    server.use(
+      http.get(url('/processing/requests'), () => {
+        const jobs = [...db.requests]
+          .filter((job) => isFinal(job.status))
+          .sort((a, b) => b.created_at.localeCompare(a.created_at));
+        return HttpResponse.json({ items: jobs.slice(0, 2), next_cursor: 'page-2' });
+      }),
+    );
+    const { user } = renderApp(PAGE);
+    await screen.findByText('2 processamentos exibidos');
+
+    await user.type(screen.getByRole('textbox', { name: 'Buscar processamento' }), 'falhou');
+
+    expect(
+      await screen.findByText(
+        'Nenhum processamento entre os exibidos. Use “Carregar mais” para buscar nos anteriores.',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('OQ-20 offers only the actions each status allows', async () => {
     seedJob({});
     seedJob({

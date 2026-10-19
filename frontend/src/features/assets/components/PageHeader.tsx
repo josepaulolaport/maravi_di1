@@ -1,6 +1,8 @@
-import { Anchor, Breadcrumbs, Group, Stack, Text, Title } from '@mantine/core';
+import { Anchor, Breadcrumbs, Group, Stack, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
+
+import { PageTitle } from '@/shared/ui/PageTitle';
 
 interface Crumb {
   label: string;
@@ -40,9 +42,7 @@ export function PageHeader({ crumbs, title, badge, subtitle, actions }: PageHead
       <Group justify="space-between" align="flex-start">
         <Stack gap={4}>
           <Group gap="sm">
-            <Title order={1} size="h2" fw={500}>
-              {title}
-            </Title>
+            <PageTitle>{title}</PageTitle>
             {badge}
           </Group>
           {subtitle && (

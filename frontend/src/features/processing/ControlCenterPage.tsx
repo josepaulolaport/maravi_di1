@@ -1,5 +1,6 @@
-import { Badge, Stack, Tabs, Title, VisuallyHidden } from '@mantine/core';
+import { Badge, Stack, Tabs, VisuallyHidden } from '@mantine/core';
 
+import { PageTitle } from '@/shared/ui/PageTitle';
 import { countLabel, formatQuantity } from '@/shared/format';
 
 import { IssuesTab } from './components/IssuesTab';
@@ -20,9 +21,7 @@ export function ControlCenterPage() {
 
   return (
     <Stack gap="md">
-      <Title order={1} size="h3" fw={500}>
-        Central de Controle
-      </Title>
+      <PageTitle>Central de Controle</PageTitle>
       <Tabs
         value={params.tab}
         onChange={(value) => {

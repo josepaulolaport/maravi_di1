@@ -103,7 +103,10 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
               <Table.Tr>
                 <Table.Td colSpan={6}>
                   <Text size="sm" c="dimmed" ta="center" py="md">
-                    Nenhum processamento encontrado.
+                    {/* The search covers the pages read so far; older ones may still match. */}
+                    {requests.hasNextPage && search.trim()
+                      ? 'Nenhum processamento entre os exibidos. Use “Carregar mais” para buscar nos anteriores.'
+                      : 'Nenhum processamento encontrado.'}
                   </Text>
                 </Table.Td>
               </Table.Tr>

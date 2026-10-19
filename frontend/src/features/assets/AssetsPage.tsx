@@ -1,6 +1,7 @@
-import { Paper, Stack, Tabs, Text, Title } from '@mantine/core';
+import { Paper, Stack, Tabs, Text } from '@mantine/core';
 import { useSearchParams } from 'react-router';
 
+import { PageTitle } from '@/shared/ui/PageTitle';
 import { SearchInput } from '@/shared/ui/SearchInput';
 import { useInstrumentTypes } from '@/shared/queries';
 import { Loading } from '@/shared/ui/Loading';
@@ -37,9 +38,7 @@ export function AssetsPage() {
 
   return (
     <Stack gap="md">
-      <Title order={1} size="h2" fw={500}>
-        Ativos
-      </Title>
+      <PageTitle>Ativos</PageTitle>
       {types.isError ? (
         <ErrorState error={types.error} onRetry={() => void types.refetch()} />
       ) : types.isPending ? (

@@ -4,6 +4,7 @@ import { notifications } from '@mantine/notifications';
 import { IconCalendar, IconPlayerPlay, IconPlus, IconTrash } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
+import { PageTitle } from '@/shared/ui/PageTitle';
 import { SearchInput } from '@/shared/ui/SearchInput';
 import { useInstrumentTypes } from '@/shared/queries';
 import { Loading } from '@/shared/ui/Loading';
@@ -92,6 +93,7 @@ export function LedgerPage() {
 
   return (
     <Stack gap="md">
+      <PageTitle>Lançamentos</PageTitle>
       <Group justify="space-between" align="flex-end" wrap="wrap">
         <Group align="flex-end" gap="sm" wrap="wrap">
           <RangePicker

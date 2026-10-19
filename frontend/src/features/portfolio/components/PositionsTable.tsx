@@ -2,6 +2,7 @@ import {
   Badge,
   Group,
   Paper,
+  Stack,
   Table,
   Text,
   Title,
@@ -45,22 +46,23 @@ const columns: Column[] = [
     label: 'Ativo',
     numeric: false,
     render: (row) => (
-      <Group gap="xs" wrap="nowrap">
-        <Text inherit fw={500}>
+      // The badge sits under the code: the column stays narrow and the badge is never cut.
+      <Stack gap={2} align="flex-start">
+        <Text span inherit fw={500}>
           {row.asset_code}
         </Text>
         {row.valuation_status === 'MISSING' ? (
-          <Badge color="red" variant="light" size="sm">
+          <Badge color="red" variant="light" size="sm" className={table.badge}>
             Sem preço
           </Badge>
         ) : (
           row.pnl_status === 'MISSING' && (
-            <Badge color="orange" variant="light" size="sm">
+            <Badge color="orange" variant="light" size="sm" className={table.badge}>
               P&L indisponível
             </Badge>
           )
         )}
-      </Group>
+      </Stack>
     ),
   },
   {

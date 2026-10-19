@@ -2,6 +2,7 @@ import { Group, Stack } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { IconCalendar } from '@tabler/icons-react';
 
+import { PageTitle } from '@/shared/ui/PageTitle';
 import { useSummary } from '@/shared/queries';
 import { Loading } from '@/shared/ui/Loading';
 import type { IsoDate } from '@/api/contract';
@@ -29,6 +30,7 @@ export function PortfolioPage() {
 
   return (
     <Stack gap="md">
+      <PageTitle>Carteira</PageTitle>
       <Group justify="space-between" align="flex-end">
         <DatePickerInput
           label="Data de avaliação"

@@ -2,3 +2,8 @@
 .nowrap {
   white-space: nowrap;
 }
+
+/* A badge inside a cell counts at its full width, so the column fits it ("Sem preço"). */
+.badge {
+  min-width: max-content;
+}

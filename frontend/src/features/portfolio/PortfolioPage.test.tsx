@@ -93,6 +93,13 @@ async function openCarteira(date: string) {
 }
 
 describe('Carteira (§11.4)', () => {
+  it('§11 names the page and the browser tab', async () => {
+    await openCarteira('2026-10-15');
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Carteira' })).toBeInTheDocument();
+    expect(document.title).toBe('Carteira · Maravi Backoffice');
+  });
+
   it('§11.4 shows the five KPIs of a complete day, formatted in pt-BR', async () => {
     await openCarteira('2026-10-15');
 
@@ -233,6 +240,40 @@ describe('Carteira (§11.4)', () => {
       expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Atualizado']);
     });
     expect(reads).toBe(2);
+  });
+
+  it("§11.4 a stale chain's badge leads to Processamentos for that date and chain", async () => {
+    await openCarteira('2026-10-16');
+
+    const status = within(screen.getByRole('group', { name: 'Situação dos dados' }));
+    expect(
+      status.getByRole('link', { name: 'Posições: Desatualizado. Ir para Processamentos' }),
+    ).toHaveAttribute(
+      'href',
+      '/central-de-controle?tab=processamentos&inicio=2026-10-16&fim=2026-10-16&escopo=posicoes',
+    );
+    // A current chain needs nothing: its badge is no link.
+    expect(status.queryByRole('link', { name: /^Caixa/ })).not.toBeInTheDocument();
+  });
+
+  it('OQ-21 shows what moved the cash on the date under Saldo em caixa', async () => {
+    await openCarteira('2026-10-16');
+
+    const movement = within(
+      kpi('Saldo em caixa').getByRole('group', { name: 'Movimentação do caixa no dia' }),
+    );
+    expect(movement.getByText('Operações').nextSibling).toHaveTextContent('+R$ 356.408,89');
+    expect(movement.getByText('Aportes').nextSibling).toHaveTextContent('R$ 0,00');
+    expect(movement.getByText('Retiradas').nextSibling).toHaveTextContent('R$ 50.000,00');
+  });
+
+  it('§11.4 a badge with issues leads to Pendências', async () => {
+    override15({ positions: { status: 'FRESH_WITH_ISSUES' } });
+    await openCarteira('2026-10-15');
+
+    expect(
+      screen.getByRole('link', { name: 'Posições: Atualizado com pendências. Ver pendências' }),
+    ).toHaveAttribute('href', '/central-de-controle?tab=pendencias');
   });
 
   it('§11.4 OQ-21 both chains stale: both badges say so, no card', async () => {
