@@ -62,6 +62,12 @@ class SqlReferencePriceRepository:
         result = await self._session.execute(queries.select_prices(asset_ids, dates))
         return [_record(row) for row in result]
 
+    async def find_on_latest_date(
+        self, asset_ids: Collection[UUID]
+    ) -> Sequence[ReferencePriceRecord]:
+        result = await self._session.execute(queries.select_prices_on_latest_date(asset_ids))
+        return [_record(row) for row in result]
+
     async def find_in_range(
         self, asset_id: UUID, start_date: date, end_date: date
     ) -> Sequence[ReferencePriceRecord]:

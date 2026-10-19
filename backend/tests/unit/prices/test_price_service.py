@@ -370,3 +370,41 @@ class TestPreferredReader:
     async def test_nothing_asked_reads_nothing(self, world: World) -> None:
         assert await world.reader.get_preferred_many([], [DAY]) == {}
         assert await world.reader.get_preferred_many([world.asset.id], []) == {}
+
+
+class TestLatestPreferred:
+    """`get_latest_preferred_many`, for ``Instrument.last_reference`` (OQ-48)."""
+
+    async def test_the_latest_date_wins_over_the_source(self, world: World) -> None:
+        # MANUAL on 14/10 is older than B3 on 16/10: the latest date comes first, then MANUAL > B3.
+        await world.service.set_reference_price(
+            world.request(reference_date=date(2026, 10, 14)), uow=FakeUnitOfWork()
+        )
+        b3 = await world.service.set_reference_price(
+            world.request(source=PriceSource.B3, pu="89240.4279488087"), uow=FakeUnitOfWork()
+        )
+
+        assert await world.reader.get_latest_preferred_many([world.asset.id]) == {
+            world.asset.id: b3
+        }
+
+    async def test_on_the_latest_date_manual_wins_over_b3(self, world: World) -> None:
+        await world.service.set_reference_price(
+            world.request(source=PriceSource.B3, pu="89240.4279488087"), uow=FakeUnitOfWork()
+        )
+        manual = await world.service.set_reference_price(world.request(), uow=FakeUnitOfWork())
+
+        assert await world.reader.get_latest_preferred_many([world.asset.id]) == {
+            world.asset.id: manual
+        }
+
+    async def test_assets_without_a_price_are_absent(self, world: World) -> None:
+        other = world.assets.add(instrument(maturity_date=date(2029, 1, 2)))
+        price = await world.service.set_reference_price(world.request(), uow=FakeUnitOfWork())
+
+        found = await world.reader.get_latest_preferred_many([world.asset.id, other.id, uuid4()])
+
+        assert found == {world.asset.id: price}
+
+    async def test_nothing_asked_reads_nothing(self, world: World) -> None:
+        assert await world.reader.get_latest_preferred_many([]) == {}
