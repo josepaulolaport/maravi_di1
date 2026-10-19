@@ -81,8 +81,9 @@ def test_a_name_of_128_characters_is_accepted() -> None:
 async def test_work_submitted_after_the_runner_stopped_never_runs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A delivery that outlived the worker's shutdown commits its claim late: its run must not
-    start while the connection and the engine close. The lease recovers it."""
+    """A delivery that outlived the worker's shutdown commits its run's start late: the run must
+    not begin while the connection and the engine close. The worker recovers it when it starts
+    again (OQ-45)."""
     runner = AfterAckRunner()
     ran: list[str] = []
 
