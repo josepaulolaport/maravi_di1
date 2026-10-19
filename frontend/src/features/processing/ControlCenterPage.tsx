@@ -15,8 +15,8 @@ import { useIssues, useProcessingRequests } from './hooks/useProcessing';
 export function ControlCenterPage() {
   const params = useControlCenterParams();
   const issues = useIssues();
-  // Read here, not in the tab, so a job followed from Processamentos is still polled, and
-  // its end still refreshes the results, while Pendências is open.
+  // Read here, not in the tab, so the history stays loaded while Pendências is open. The
+  // polling and the refresh at a job's end belong to the app-wide JobWatcher.
   const requests = useProcessingRequests();
 
   return (

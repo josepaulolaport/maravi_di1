@@ -1,6 +1,7 @@
 import { lazy } from 'react';
 import { Navigate, type RouteObject } from 'react-router';
 
+import { JobWatcher } from '@/features/processing/JobWatcher';
 import { AppLayout } from '@/shared/layout/AppLayout';
 import { NotFoundPage } from '@/shared/layout/NotFoundPage';
 import { RouteErrorPage } from '@/shared/layout/RouteErrorPage';
@@ -30,7 +31,13 @@ const LedgerPage = lazy(() =>
 
 export const routes: RouteObject[] = [
   {
-    element: <AppLayout navItems={navItems} />,
+    // The job watcher lives as long as the shell, so a job's end refreshes every screen.
+    element: (
+      <>
+        <JobWatcher />
+        <AppLayout navItems={navItems} />
+      </>
+    ),
     // Last resort, if the shell itself fails.
     errorElement: <RouteErrorPage />,
     children: [
