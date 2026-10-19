@@ -241,7 +241,7 @@ None. OQ-1 to OQ-46 are answered (`docs/open-questions.md`); a new gap goes thro
 
 ## 12. Progress and remaining work (2026-10-19)
 
-Every lane's code is merged; there are no open PRs. Decisions OQ-1 to OQ-46 are answered and none is open.
+Every lane's code is merged. Decisions OQ-1 to OQ-46 are answered and none is open.
 
 ### Verified on `main` at `dde3dd6`
 
@@ -253,6 +253,8 @@ Run locally on 2026-10-19 (GitHub Actions is down; the user decided merges go on
 - `make test-frontend`: "Test Files 31 passed (31)", "Tests 537 passed (537)".
 - `npm run build`: "✓ built in 717ms".
 - `make e2e` (throwaway Compose stack: postgres, rabbitmq, migrate, api, outbox-relay, worker): the challenge example dated today, 12 checks ok (PU 90909.0909090909, run `COMPLETED`, cash and positions `PROCESSED`, cash 109090.9090909091, AUM 200000, one position), "E2E SMOKE PASSED".
+
+Since then `9f9c40d` merged #99 (the Compose `web` service); its reviewer reported the frontend at 540 tests passed. Not rerun here.
 
 ### Done, by area
 
@@ -271,16 +273,15 @@ Run locally on 2026-10-19 (GitHub Actions is down; the user decided merges go on
 | F PnL | pure P&L calculators (#34); predecessor rule after OQ-31 (#70) |
 | G Processing | request API and `DateStatusReader` (#56); worker, one transaction per date (#78); first failure exposed (#79); OQ-46 doorbell and FIFO drain, no dispatcher (#93, #96, #97) |
 | Acceptance (spec §13) | phase 1, domain level, in the pre-commit hook (#64, #66); phase 2 over HTTP and PostgreSQL: catalogue, ledger, prices, errors, the challenge example (#81) |
-| I Frontend | shell, Carteira, Lançamentos, Ativos, Central de Controle on MSW (#13, #15, #16, #19, #20, #22, #25, #27, #29, #30, #32, #33); contract review and OQ-26–OQ-42 (#38, #41, #42, #51, #72); no dispatcher and `PROCESSING_ERROR` (#95); dev-server proxy to the real backend, `VITE_API_MOCKS=false` (#88) |
+| I Frontend | shell, Carteira, Lançamentos, Ativos, Central de Controle on MSW (#13, #15, #16, #19, #20, #22, #25, #27, #29, #30, #32, #33); contract review and OQ-26–OQ-42 (#38, #41, #42, #51, #72); no dispatcher and `PROCESSING_ERROR` (#95); dev-server proxy to the real backend, `VITE_API_MOCKS=false` (#88); `web` service in Compose, nginx on 127.0.0.1:8080 proxying `/api` and `/health`, no MSW in the production build (#99) |
 | CI | path-scoped jobs, `ci-ok`, CodeRabbit review (#9–#11, #21) |
 
-Gates: G0–G4 are met (Gate 4 by `make e2e` on Compose: challenge example, run `COMPLETED`, cash, AUM and position checked). G5 is partly met: the frontend runs against the real API through the dev-server proxy, but Compose has no frontend service yet.
+Gates: G0–G5 are met (Gate 4 by `make e2e` on Compose: challenge example, run `COMPLETED`, cash, AUM and position checked; G5 by #99: the UI runs on the real API from the Compose `web` service).
 
 ### Remaining
 
 | Item | State |
 |---|---|
-| Frontend service in Compose (`compose.yaml`, frontend Dockerfile, README) | in flight (compose-web session); until it lands the UI runs with `npm run dev` and `VITE_API_MOCKS=false` |
 | Acceptance phase 2 processing scenarios (spec §13: the challenge example through a run, missing price, predecessor rule, P&L chart, the second halves of cases 9, 16 and 17) | in flight (acceptance follow-ups session); phase 2 today covers catalogue, ledger, prices, errors and the challenge example without a run |
 | QA against the real API | in flight (read-only QA session); its findings are not triaged yet |
 | `POST /pricing/calculate` | deliberately not built: OQ-19 keeps it "if needed", and the UI computes the complementary PU or rate when an entry is saved |
