@@ -38,18 +38,22 @@ class InMemoryPortfolioRepository:
         self.snapshots += 1
 
     async def replace_positions_day(
-        self, day: PublishedPortfolioDay, positions: Sequence[PublishedPosition]
+        self,
+        day: PublishedPortfolioDay,
+        positions: Sequence[PublishedPosition],
+        *,
+        cash_processed: bool,
     ) -> None:
-        self.days[day.date] = replace(day, aum=self._aum(day.date, day.positions_market_value))
+        aum = self._aum(day.date, day.positions_market_value) if cash_processed else None
+        self.days[day.date] = replace(day, aum=aum)
         self.positions[day.date] = tuple(sorted(positions, key=lambda p: p.asset_id))
 
-    async def upsert_cash_day(self, cash: PublishedCash) -> None:
+    async def upsert_cash_day(self, cash: PublishedCash, *, positions_processed: bool) -> None:
         self.cash[cash.date] = cash
         day = self.days.get(cash.date)
         if day is not None:
-            self.days[cash.date] = replace(
-                day, aum=self._aum(cash.date, day.positions_market_value)
-            )
+            aum = self._aum(cash.date, day.positions_market_value) if positions_processed else None
+            self.days[cash.date] = replace(day, aum=aum)
 
     async def get_cash(self, on: date) -> PublishedCash | None:
         return self.cash.get(on)

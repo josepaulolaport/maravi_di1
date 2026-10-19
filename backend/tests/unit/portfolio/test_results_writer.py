@@ -96,7 +96,12 @@ async def test_a_positions_day_maps_onto_the_published_rows(
     writer: ResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     await writer.write_positions_day(
-        _positions(DI1F27), _valuation(DI1F27), _asset_pnl(DI1F27), PNL, uow=FakeUnitOfWork()
+        _positions(DI1F27),
+        _valuation(DI1F27),
+        _asset_pnl(DI1F27),
+        PNL,
+        uow=FakeUnitOfWork(),
+        other_chain_processed=True,
     )
 
     assert repository.positions[DAY] == (
@@ -133,9 +138,14 @@ async def test_the_valuation_aum_is_ignored_and_recomputed_from_the_published_ca
     cash = CashDay(
         DAY, Decimal("0"), Decimal("-950000"), Decimal("999000"), Decimal("0"), Decimal("49000")
     )
-    await writer.write_cash_day(cash, uow=FakeUnitOfWork())
+    await writer.write_cash_day(cash, uow=FakeUnitOfWork(), other_chain_processed=True)
     await writer.write_positions_day(
-        _positions(DI1F27), _valuation(DI1F27), _asset_pnl(DI1F27), PNL, uow=FakeUnitOfWork()
+        _positions(DI1F27),
+        _valuation(DI1F27),
+        _asset_pnl(DI1F27),
+        PNL,
+        uow=FakeUnitOfWork(),
+        other_chain_processed=True,
     )
 
     assert repository.days[DAY].aum == Decimal("1000000")
@@ -150,6 +160,7 @@ async def test_a_missing_market_value_is_stored_missing(
         _asset_pnl(DI1F27),
         PNL,
         uow=FakeUnitOfWork(),
+        other_chain_processed=True,
     )
 
     assert repository.days[DAY].positions_market_value is None
@@ -163,7 +174,7 @@ async def test_a_cash_day_maps_onto_its_row(
         DAY, Decimal("10"), Decimal("-5"), Decimal("100.25"), Decimal("0.25"), Decimal("105")
     )
 
-    await writer.write_cash_day(cash, uow=FakeUnitOfWork())
+    await writer.write_cash_day(cash, uow=FakeUnitOfWork(), other_chain_processed=True)
 
     assert repository.cash[DAY] == PublishedCash(
         date=DAY,
@@ -182,7 +193,12 @@ async def test_a_day_with_no_expected_asset_writes_only_the_portfolio_row(
         Decimal("0"), Decimal("0"), Decimal("0"), Decimal("1500"), COMPLETE, COMPLETE, frozenset()
     )
     await writer.write_positions_day(
-        PositionsDay(DAY, ()), _valuation(market_value="0"), {}, carried, uow=FakeUnitOfWork()
+        PositionsDay(DAY, ()),
+        _valuation(market_value="0"),
+        {},
+        carried,
+        uow=FakeUnitOfWork(),
+        other_chain_processed=True,
     )
 
     day = repository.days[DAY]
@@ -215,6 +231,7 @@ async def test_the_three_inputs_must_cover_the_same_assets(
             _asset_pnl(*with_pnl),
             PNL,
             uow=FakeUnitOfWork(),
+            other_chain_processed=True,
         )
 
 
@@ -224,7 +241,12 @@ async def test_the_valuation_must_be_of_the_same_date(writer: ResultsWriter) -> 
     )
     with pytest.raises(ValueError):
         await writer.write_positions_day(
-            PositionsDay(DAY, ()), other_day, {}, PNL, uow=FakeUnitOfWork()
+            PositionsDay(DAY, ()),
+            other_day,
+            {},
+            PNL,
+            uow=FakeUnitOfWork(),
+            other_chain_processed=True,
         )
 
 
@@ -241,5 +263,73 @@ async def test_a_market_value_must_match_its_status(
     )
     with pytest.raises(ValueError):
         await writer.write_positions_day(
-            PositionsDay(DAY, ()), inconsistent, {}, PNL, uow=FakeUnitOfWork()
+            PositionsDay(DAY, ()),
+            inconsistent,
+            {},
+            PNL,
+            uow=FakeUnitOfWork(),
+            other_chain_processed=True,
         )
+
+
+class TestOtherChainProcessed:
+    """OQ-38: AUM is cash + market value only when the other chain of the date is processed
+    (PROCESSED or PROCESSED_WITH_ISSUES); otherwise it is written null."""
+
+    CASH = CashDay(
+        DAY, Decimal("0"), Decimal("0"), Decimal("49000"), Decimal("0"), Decimal("49000")
+    )
+
+    async def _positions_day(self, writer: ResultsWriter, other_chain_processed: bool) -> None:
+        await writer.write_positions_day(
+            _positions(DI1F27),
+            _valuation(DI1F27),
+            _asset_pnl(DI1F27),
+            PNL,
+            uow=FakeUnitOfWork(),
+            other_chain_processed=other_chain_processed,
+        )
+
+    async def test_positions_with_unprocessed_cash_write_a_null_aum(
+        self, writer: ResultsWriter, repository: InMemoryPortfolioRepository
+    ) -> None:
+        # Cash rows of D exist (e.g. kept from before) but D's cash chain is FAILED.
+        await writer.write_cash_day(self.CASH, uow=FakeUnitOfWork(), other_chain_processed=False)
+        await self._positions_day(writer, other_chain_processed=False)
+
+        assert repository.days[DAY].aum is None
+
+    async def test_positions_with_processed_cash_write_cash_plus_market_value(
+        self, writer: ResultsWriter, repository: InMemoryPortfolioRepository
+    ) -> None:
+        await writer.write_cash_day(self.CASH, uow=FakeUnitOfWork(), other_chain_processed=False)
+        await self._positions_day(writer, other_chain_processed=True)
+
+        assert repository.days[DAY].aum == Decimal("1000000")  # 49000 + 951000
+
+    async def test_cash_with_unprocessed_positions_writes_a_null_aum(
+        self, writer: ResultsWriter, repository: InMemoryPortfolioRepository
+    ) -> None:
+        await self._positions_day(writer, other_chain_processed=True)
+        await writer.write_cash_day(self.CASH, uow=FakeUnitOfWork(), other_chain_processed=False)
+
+        assert repository.days[DAY].aum is None
+
+    async def test_cash_with_processed_positions_writes_cash_plus_market_value(
+        self, writer: ResultsWriter, repository: InMemoryPortfolioRepository
+    ) -> None:
+        await self._positions_day(writer, other_chain_processed=False)
+        await writer.write_cash_day(self.CASH, uow=FakeUnitOfWork(), other_chain_processed=True)
+
+        assert repository.days[DAY].aum == Decimal("1000000")
+
+    async def test_an_all_run_writes_aum_on_its_second_call(
+        self, writer: ResultsWriter, repository: InMemoryPortfolioRepository
+    ) -> None:
+        # OQ-38, OQ-40: ALL writes positions first, passed False, then cash, passed the positions
+        # outcome; AUM is set by the second call.
+        await self._positions_day(writer, other_chain_processed=False)
+        assert repository.days[DAY].aum is None
+        await writer.write_cash_day(self.CASH, uow=FakeUnitOfWork(), other_chain_processed=True)
+
+        assert repository.days[DAY].aum == Decimal("1000000")

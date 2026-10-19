@@ -103,17 +103,7 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID) -> None:
         writer = results_writer()
         buy = Trade(di1f28, OCT_14, time(10), 1, 10, Decimal("89006.4625467350"), Decimal("0.10"))
         async with SqlAlchemyUnitOfWork(factory) as uow:
-            await writer.write_cash_day(
-                CashDay(
-                    OCT_14,
-                    Decimal("0"),
-                    Decimal("-890064.6254673500"),
-                    Decimal("1500000.00"),
-                    Decimal("0.00"),
-                    Decimal("609935.3745326500"),
-                ),
-                uow=uow,
-            )
+            # OQ-38, OQ-40: an ALL date writes positions first, then cash.
             await writer.write_positions_day(
                 PositionsDay(
                     OCT_14,
@@ -157,6 +147,19 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID) -> None:
                     frozenset(),
                 ),
                 uow=uow,
+                other_chain_processed=False,
+            )
+            await writer.write_cash_day(
+                CashDay(
+                    OCT_14,
+                    Decimal("0"),
+                    Decimal("-890064.6254673500"),
+                    Decimal("1500000.00"),
+                    Decimal("0.00"),
+                    Decimal("609935.3745326500"),
+                ),
+                uow=uow,
+                other_chain_processed=True,
             )
             await uow.commit()
         async with SqlAlchemyUnitOfWork(factory) as uow:
@@ -177,6 +180,7 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID) -> None:
                     frozenset(),
                 ),
                 uow=uow,
+                other_chain_processed=False,
             )
             await uow.commit()
     finally:

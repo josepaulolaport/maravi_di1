@@ -23,7 +23,9 @@ class ResultsWriter:
     """Implements `di1.modules.portfolio.public.PortfolioResultsWriter`.
 
     ``repository_for`` builds the repository on the caller's Unit of Work, so the rows land in
-    Processing's transaction for the date.
+    Processing's transaction for the date. ``other_chain_processed`` is Processing's answer
+    for the other chain of the date (PROCESSED or PROCESSED_WITH_ISSUES); when ``False`` the
+    written AUM is null (OQ-38).
     """
 
     def __init__(self, repository_for: Callable[[UnitOfWork], PortfolioRepository]) -> None:
@@ -37,6 +39,7 @@ class ResultsWriter:
         pnl: PortfolioPnLResult,
         *,
         uow: UnitOfWork,
+        other_chain_processed: bool,
     ) -> None:
         if valuation.date != day.date:
             raise ValueError(f"the valuation is of {valuation.date}, the positions of {day.date}")
@@ -78,9 +81,13 @@ class ResultsWriter:
             ),
             pnl_status=pnl.status,
         )
-        await self._repository_for(uow).replace_positions_day(portfolio_day, positions)
+        await self._repository_for(uow).replace_positions_day(
+            portfolio_day, positions, cash_processed=other_chain_processed
+        )
 
-    async def write_cash_day(self, day: CashDay, *, uow: UnitOfWork) -> None:
+    async def write_cash_day(
+        self, day: CashDay, *, uow: UnitOfWork, other_chain_processed: bool
+    ) -> None:
         await self._repository_for(uow).upsert_cash_day(
             PublishedCash(
                 date=day.date,
@@ -88,5 +95,6 @@ class ResultsWriter:
                 trades_cash_flow=day.trades_cash_flow,
                 deposits=day.deposits,
                 withdrawals=day.withdrawals,
-            )
+            ),
+            positions_processed=other_chain_processed,
         )

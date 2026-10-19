@@ -66,16 +66,22 @@ class PortfolioRepository(Protocol):
         ...
 
     async def replace_positions_day(
-        self, day: PublishedPortfolioDay, positions: Sequence[PublishedPosition]
+        self,
+        day: PublishedPortfolioDay,
+        positions: Sequence[PublishedPosition],
+        *,
+        cash_processed: bool,
     ) -> None:
         """Replace ``day.date``'s ``positions``, ``position_metrics`` and ``portfolio_metrics``
         rows (rows of assets not in ``positions`` are deleted, OQ-10) and set its AUM from the
-        date's published cash, ``NULL`` when either side is missing."""
+        date's published cash: ``NULL`` when either side is missing or when the date's cash
+        chain is not processed (OQ-38)."""
         ...
 
-    async def upsert_cash_day(self, cash: PublishedCash) -> None:
+    async def upsert_cash_day(self, cash: PublishedCash, *, positions_processed: bool) -> None:
         """Insert or replace ``cash.date``'s ``cash_balances`` row and recompute that date's AUM
-        when its ``portfolio_metrics`` row exists."""
+        when its ``portfolio_metrics`` row exists: ``NULL`` when the date's positions chain is
+        not processed (OQ-38)."""
         ...
 
     async def get_cash(self, on: date) -> PublishedCash | None: ...

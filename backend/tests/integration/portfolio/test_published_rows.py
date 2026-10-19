@@ -101,6 +101,8 @@ class Publisher:
         rows: list[tuple[PositionDay, AssetValuation, AssetPnLResult]],
         market_value: str | None,
         pnl: PortfolioPnLResult,
+        *,
+        cash_processed: bool = True,
     ) -> None:
         valuation = PortfolioValuation(
             date=on,
@@ -118,15 +120,18 @@ class Publisher:
                 {p.asset_id: r for p, _, r in rows},
                 pnl,
                 uow=uow,
+                other_chain_processed=cash_processed,
             )
             await uow.commit()
 
-    async def cash(self, on: date, balance: str) -> None:
+    async def cash(self, on: date, balance: str, *, positions_processed: bool = True) -> None:
         day = CashDay(
             on, Decimal("0"), Decimal("0"), Decimal(balance), Decimal("0"), Decimal(balance)
         )
         async with SqlAlchemyUnitOfWork(self._session_factory) as uow:
-            await results_writer().write_cash_day(day, uow=uow)
+            await results_writer().write_cash_day(
+                day, uow=uow, other_chain_processed=positions_processed
+            )
             await uow.commit()
 
 
@@ -271,6 +276,64 @@ class TestAum:
         assert await _aum(session_factory, D) is None
 
 
+class TestAumNeedsTheOtherChainProcessed:
+    """OQ-38: a chain's write nulls AUM when the other chain of the date is not processed."""
+
+    async def test_positions_written_while_cash_is_not_processed(
+        self,
+        di1: Di1Catalogue,
+        publish: Publisher,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        f28, _ = _ids(di1)
+        await publish.cash(D, "100", positions_processed=False)
+        await publish.positions(
+            D,
+            [(_position(f28, 10), _valued(f28, "1", ValuationStatus.COMPLETE), _pnl("0", "0"))],
+            "1",
+            _portfolio_pnl("0", "0"),
+            cash_processed=False,
+        )
+
+        assert await _aum(session_factory, D) is None
+
+    async def test_cash_written_while_positions_are_not_processed(
+        self,
+        di1: Di1Catalogue,
+        publish: Publisher,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        # A positions row kept from an earlier run does not complete AUM while its chain is FAILED.
+        f28, _ = _ids(di1)
+        await publish.positions(
+            D,
+            [(_position(f28, 10), _valued(f28, "1", ValuationStatus.COMPLETE), _pnl("0", "0"))],
+            "1",
+            _portfolio_pnl("0", "0"),
+        )
+        await publish.cash(D, "100", positions_processed=False)
+
+        assert await _aum(session_factory, D) is None
+
+    async def test_cash_written_while_positions_are_processed(
+        self,
+        di1: Di1Catalogue,
+        publish: Publisher,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        f28, _ = _ids(di1)
+        await publish.positions(
+            D,
+            [(_position(f28, 10), _valued(f28, "1", ValuationStatus.COMPLETE), _pnl("0", "0"))],
+            "1",
+            _portfolio_pnl("0", "0"),
+            cash_processed=False,
+        )
+        await publish.cash(D, "100", positions_processed=True)
+
+        assert await _aum(session_factory, D) == Decimal("101")
+
+
 async def test_rewriting_a_date_deletes_assets_no_longer_expected(
     di1: Di1Catalogue, publish: Publisher, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -404,6 +467,7 @@ async def test_the_writer_never_commits(
         await results_writer().write_cash_day(
             CashDay(D, Decimal("0"), Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1")),
             uow=uow,
+            other_chain_processed=True,
         )
 
     async with session_factory() as session:

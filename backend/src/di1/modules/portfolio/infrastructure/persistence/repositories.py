@@ -72,7 +72,11 @@ class SqlAlchemyPortfolioRepository:
         await self._session.execute(published.READ_SNAPSHOT)
 
     async def replace_positions_day(
-        self, day: PublishedPortfolioDay, positions: Sequence[PublishedPosition]
+        self,
+        day: PublishedPortfolioDay,
+        positions: Sequence[PublishedPosition],
+        *,
+        cash_processed: bool,
     ) -> None:
         await self._session.execute(published.delete_positions(day.date))
         if positions:
@@ -118,9 +122,11 @@ class SqlAlchemyPortfolioRepository:
                 }
             )
         )
-        await self._session.execute(published.recompute_aum(day.date))
+        await self._session.execute(
+            published.recompute_aum(day.date, other_chain_processed=cash_processed)
+        )
 
-    async def upsert_cash_day(self, cash: PublishedCash) -> None:
+    async def upsert_cash_day(self, cash: PublishedCash, *, positions_processed: bool) -> None:
         await self._session.execute(
             published.upsert_cash_balance(
                 {
@@ -132,7 +138,9 @@ class SqlAlchemyPortfolioRepository:
                 }
             )
         )
-        await self._session.execute(published.recompute_aum(cash.date))
+        await self._session.execute(
+            published.recompute_aum(cash.date, other_chain_processed=positions_processed)
+        )
 
     async def get_cash(self, on: date) -> PublishedCash | None:
         row = await self._session.scalar(published.cash_balance(on))

@@ -68,8 +68,15 @@ def upsert_cash_balance(values: Mapping[str, Any]) -> Insert:
     )
 
 
-def recompute_aum(on: date) -> Update:
-    """AUM = the date's cash + its market value; NULL propagates from either side."""
+def recompute_aum(on: date, *, other_chain_processed: bool) -> Update:
+    """AUM = the date's cash + its market value; NULL propagates from either side, and AUM is
+    NULL while the other chain of the date is not processed (OQ-38)."""
+    if not other_chain_processed:
+        return (
+            update(PortfolioMetricsRow)
+            .where(PortfolioMetricsRow.metric_date == on)
+            .values(aum=None, updated_at=func.now())
+        )
     cash = (
         select(CashBalanceRow.cash_balance)
         .where(CashBalanceRow.balance_date == on)
