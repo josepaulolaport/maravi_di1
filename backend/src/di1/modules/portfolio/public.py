@@ -229,17 +229,21 @@ class PnLPointView:
     every date of [start_date, end_date] is a point, processed or not. ``cumulative_pnl`` is the
     stored since-inception figure (``None`` from the first gap, spec §8.3); ``range_cumulative_pnl``
     is Σ ``daily_pnl`` from the requested start date to this date, summed in the backend on
-    request, where a date not processed or with ``daily_pnl`` ``None`` counts as 0."""
+    request. A date adds its ``daily_pnl`` only when its positions status is ``PROCESSED`` or
+    ``PROCESSED_WITH_ISSUES`` and ``daily_pnl`` is not ``None``; otherwise (not processed,
+    ``FAILED``, ``RUNNING``, a missing price) it adds 0 (OQ-41). A ``FAILED`` or ``RUNNING``
+    point shows its status with ``daily_pnl`` ``None``, even if older published rows exist."""
 
     date: date
     daily_pnl: Decimal | None
     cumulative_pnl: Decimal | None
     range_cumulative_pnl: Decimal
-    """Never ``None``: a missing or incomplete date adds 0 (OQ-41)."""
+    """Never ``None``: a date without a usable daily P&L adds 0 (OQ-41)."""
     pnl_status: CalculationCompleteness | None
     """``None`` on a date not processed."""
     status: ChainStatus | None
-    """The positions chain status of the date; ``None`` is "não processado" (OQ-41)."""
+    """The positions chain status of the date; ``None`` is not processed, which the HTTP layer
+    renames to ``NOT_PROCESSED`` as in every other read (OQ-41)."""
     published_at: datetime | None
     """When the positions chain of the date was last processed (OQ-31); ``None`` if never."""
 
