@@ -67,7 +67,8 @@ CREATE INDEX instruments_product_idx ON asset.instruments (product_id);
 -- Whether maturity_date is required depends on the product's instrument type;
 -- enforce via Asset domain validation, not a CHECK across separate tables.
 
--- LEDGER: one immutable entry per trade or cash movement (OQ-24); soft deletion keeps the audit trail.
+-- LEDGER: one immutable entry per trade or cash movement (OQ-24), never edited; a delete removes
+-- the row (OQ-32).
 -- Order (entry_date, entry_time, seq) across both types; `seq` is one identity shared by both (OQ-13).
 -- A trade's cash effect is not stored: it is -signed_quantity * execution_pu, computed on read.
 -- On the maturity date (d = 0) the PU is typed and execution_rate is stored as 0 (OQ-1).
@@ -84,8 +85,6 @@ CREATE TABLE ledger.entries (
     input_kind VARCHAR(8),                                               -- TRADE only
     cash_amount NUMERIC(20,2),         -- CASH only: positive = deposit (aporte), negative = withdrawal
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    deleted_at TIMESTAMPTZ,
-    deletion_batch_id UUID,            -- shared by the entries of one multi-delete
     CONSTRAINT entries_type_check CHECK (type IN ('TRADE','CASH')),
     CONSTRAINT entries_trade_shape CHECK (type <> 'TRADE' OR (
         asset_id IS NOT NULL AND signed_quantity IS NOT NULL AND signed_quantity <> 0
@@ -95,11 +94,10 @@ CREATE TABLE ledger.entries (
     CONSTRAINT entries_cash_shape CHECK (type <> 'CASH' OR (
         cash_amount IS NOT NULL AND cash_amount <> 0
         AND asset_id IS NULL AND signed_quantity IS NULL AND execution_pu IS NULL
-        AND execution_rate IS NULL AND input_kind IS NULL)),
-    CONSTRAINT entries_deletion_batch_tied CHECK (deletion_batch_id IS NULL OR deleted_at IS NOT NULL)
+        AND execution_rate IS NULL AND input_kind IS NULL))
 );
-CREATE INDEX entries_ordered_active_idx ON ledger.entries (entry_date, entry_time, seq) WHERE deleted_at IS NULL;
-CREATE INDEX entries_asset_date_active_idx ON ledger.entries (asset_id, entry_date, seq) WHERE deleted_at IS NULL AND type = 'TRADE';
+CREATE INDEX entries_ordered_idx ON ledger.entries (entry_date, entry_time, seq);
+CREATE INDEX entries_trade_asset_date_idx ON ledger.entries (asset_id, entry_date, seq) WHERE type = 'TRADE';
 
 -- PRICES: one observation per asset, date and source (OQ-25). A correction updates the row in place;
 -- a removal deletes it. MANUAL > B3 is read policy, not an overwrite of the lower-priority source.
@@ -253,7 +251,7 @@ CREATE TABLE portfolio.portfolio_metrics (
 
 -- The cash chain (OQ-21), one row per processed calendar day:
 --   cash_balance[D] = cash_balance[D-1] + trades_cash_flow[D] + deposits[D] - withdrawals[D]
---   trades_cash_flow[D] = -sum(signed_quantity * execution_pu) over the day's active trades
+--   trades_cash_flow[D] = -sum(signed_quantity * execution_pu) over the day's trades
 -- Owned by Portfolio, like the other published tables (OQ-8).
 CREATE TABLE portfolio.cash_balances (
     balance_date DATE PRIMARY KEY,

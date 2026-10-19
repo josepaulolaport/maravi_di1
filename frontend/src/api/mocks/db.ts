@@ -1,44 +1,34 @@
-import type { Freshness, ProcessingChain } from '../contract';
+import type { DateStatus, ProcessingChain } from '../contract';
 import * as fixtures from './fixtures';
 
 // In-memory state of the fake backend. Mutations (POST/DELETE) change it for the session;
 // tests call `resetDb()` before each test so every test starts from the fixtures.
 //
-// Cash and positions are two chains (OQ-21). Each date has one status per chain, as in
-// `processing.date_status` (OQ-23): the only source of freshness; there are no dirty markers
-// and no revision counters.
+// Cash and positions are two chains (OQ-21). Each date has one processing status per chain, as
+// in `processing.date_status` (OQ-23, OQ-31). There is no staleness: a write never changes a
+// status. A chain's processing time is its published row's `published_at`.
 
 type PerChain<T> = Record<ProcessingChain, T>;
 
 /** A chain's status on a date; `null` is Não processado. */
-export type ChainStatus = Exclude<Freshness, 'NOT_PROCESSED'> | null;
+export type ChainStatus = Exclude<DateStatus, 'NOT_PROCESSED'> | null;
 
-export interface DateStatus {
+interface StatusRow {
   CASH: ChainStatus;
   POSITIONS: ChainStatus;
-  /** A chain's status before it became RUNNING, put back if the date is not committed (OQ-26). */
-  previous: PerChain<ChainStatus>;
 }
 
 /**
- * The seed's statuses, as migration 0003 backfills them (OQ-23 item 11): every published date
- * FRESH, FRESH_WITH_ISSUES when its valuation or P&L is missing, STALE from the seed's stale
- * date on.
+ * The seed's statuses: every published date PROCESSED, PROCESSED_WITH_ISSUES for positions when
+ * its valuation or P&L is missing.
  */
-function seedStatuses(): Map<string, DateStatus> {
-  const statuses = new Map<string, DateStatus>();
-  const staleFrom = fixtures.seedStaleFrom;
+function seedStatuses(): Map<string, StatusRow> {
+  const statuses = new Map<string, StatusRow>();
   for (const summary of fixtures.summaries) {
-    const date = summary.date;
     const incomplete = summary.valuation_status === 'MISSING' || summary.pnl_status === 'MISSING';
-    const at = (chain: ProcessingChain, fresh: ChainStatus): ChainStatus => {
-      const from = staleFrom[chain];
-      return from !== null && date >= from ? 'STALE' : fresh;
-    };
-    statuses.set(date, {
-      CASH: at('CASH', 'FRESH'),
-      POSITIONS: at('POSITIONS', incomplete ? 'FRESH_WITH_ISSUES' : 'FRESH'),
-      previous: { CASH: null, POSITIONS: null },
+    statuses.set(summary.date, {
+      CASH: 'PROCESSED',
+      POSITIONS: incomplete ? 'PROCESSED_WITH_ISSUES' : 'PROCESSED',
     });
   }
   return statuses;
@@ -72,7 +62,7 @@ function createDb() {
       positions: new Map(fixtures.positions.map((p) => [p.date, structuredClone(p)])),
       pnl: new Map(fixtures.pnlSeries.map((p) => [p.date, structuredClone(p)])),
     },
-    /** `processing.date_status`: one status per date and chain (OQ-23). */
+    /** `processing.date_status`: one status per date and chain (OQ-23, OQ-31). */
     dateStatus: seedStatuses(),
     /**
      * Per chain, the earliest date touched by a write since the seed. From it on, that chain's
@@ -103,31 +93,24 @@ export function newId(): string {
 }
 
 /** A chain's status on a date (OQ-23); no status is Não processado. */
-export function statusOf(date: string, chain: ProcessingChain): Freshness {
+export function statusOf(date: string, chain: ProcessingChain): DateStatus {
   return db.dateStatus.get(date)?.[chain] ?? 'NOT_PROCESSED';
 }
 
-/** Sets a chain's status on a date, keeping what it was when it becomes RUNNING (OQ-26). */
+/**
+ * Sets a chain's status on a date. The fake never leaves a date RUNNING without committing it
+ * (a cancel lets the current date commit; a failure sets it FAILED), so unlike the backend it
+ * keeps no earlier status to put back (OQ-26 item 4).
+ */
 export function setStatus(date: string, chain: ProcessingChain, status: ChainStatus): void {
-  const row = db.dateStatus.get(date) ?? {
-    CASH: null,
-    POSITIONS: null,
-    previous: { CASH: null, POSITIONS: null },
-  };
-  if (status === 'RUNNING') row.previous[chain] = row[chain];
+  const row: StatusRow = db.dateStatus.get(date) ?? { CASH: null, POSITIONS: null };
   row[chain] = status;
   db.dateStatus.set(date, row);
 }
 
-/** Puts back what a chain's date was before a run that did not commit it (OQ-26 item 4). */
-export function restoreStatus(date: string, chain: ProcessingChain): void {
-  const row = db.dateStatus.get(date);
-  if (row?.[chain] === 'RUNNING') row[chain] = row.previous[chain];
-}
-
 /**
- * The chains a write changes (OQ-23 item 3): a trade changes cash and positions; a cash
- * movement only cash; a reference price only positions (valuation and P&L).
+ * The chains a write changes: a trade changes cash and positions; a cash movement only cash; a
+ * reference price only positions (valuation and P&L).
  */
 const CHAINS_OF_WRITE = {
   trade: ['CASH', 'POSITIONS'],
@@ -136,23 +119,12 @@ const CHAINS_OF_WRITE = {
 } as const satisfies Record<string, readonly ProcessingChain[]>;
 
 /**
- * A write dated `date` marks its chains STALE on every date ≥ `date` that already has a
- * status, in the same step (OQ-23 item 3); dates without a status stay Não processado. A date
- * being processed keeps RUNNING, and the status it will go back to becomes STALE (OQ-26).
+ * Records that a write dated `date` changed its chains' inputs. No status changes (OQ-31): the
+ * fake only remembers, so it can refuse to republish its precomputed results for those dates.
  */
-export function markDirty(write: keyof typeof CHAINS_OF_WRITE, date: string): void {
+export function markChanged(write: keyof typeof CHAINS_OF_WRITE, date: string): void {
   for (const chain of CHAINS_OF_WRITE[write]) {
     const changed = db.changedFrom[chain];
     if (changed === null || date < changed) db.changedFrom[chain] = date;
-    for (const [day, row] of db.dateStatus) {
-      if (day < date || row[chain] === null) continue;
-      if (row[chain] === 'RUNNING') row.previous[chain] = 'STALE';
-      else row[chain] = 'STALE';
-    }
   }
-}
-
-/** Whether a chain has published results for `date`. */
-export function isPublished(date: string, chain: ProcessingChain): boolean {
-  return chain === 'CASH' ? db.published.cash.has(date) : db.published.summaries.has(date);
 }

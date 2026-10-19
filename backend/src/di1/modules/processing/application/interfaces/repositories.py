@@ -95,6 +95,6 @@ class ChainHistory(Protocol):
     """The zero state of a chain (OQ-22, OQ-26 item 3), read from the Ledger."""
 
     async def has_entries_on_or_before(self, chain: ProcessingChain, day: date) -> bool:
-        """Positions: an active trade dated on or before ``day``; cash: an active entry of
-        either type."""
+        """Positions: a trade dated on or before ``day``; cash: an entry of either type
+        (OQ-32: every ledger row is live)."""
         ...

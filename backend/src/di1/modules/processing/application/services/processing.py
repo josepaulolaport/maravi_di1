@@ -280,6 +280,8 @@ class ProcessingService:
             error_code=None,
             error_message=None,
             updated_at=now,
+            failed_date=None,
+            failed_chain=None,
         )
         await self._requests.add(request, uow=uow)
         return request

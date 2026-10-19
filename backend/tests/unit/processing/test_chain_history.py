@@ -1,5 +1,5 @@
-"""The zero state of each chain, read from the Ledger (OQ-22, OQ-26 item 3): positions have
-nothing before them without a trade; cash, without an entry of either type."""
+"""The zero state of each chain, read from the Ledger's existence read (OQ-26 item 3, OQ-37):
+positions have nothing before them without a trade; cash, without an entry of either type."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import uuid4
 
-from di1.modules.ledger.public import CashMovementRecord, TradeRecord
+from di1.modules.ledger.public import CashMovementRecord, EntryType, TradeRecord
 from di1.modules.processing.application.interfaces.repositories import ProcessingChain
 from di1.modules.processing.application.services.chain_history import LedgerChainHistory
 from di1.shared.clock import SAO_PAULO
@@ -22,6 +22,7 @@ class FakeLedger:
     ) -> None:
         self.trades = trades or []
         self.cash = cash or []
+        self.asked: list[tuple[date, EntryType | None]] = []
 
     async def get_trades(self, start_date: date, end_date: date) -> list[TradeRecord]:
         return [t for t in self.trades if start_date <= t.trade_date <= end_date]
@@ -30,6 +31,14 @@ class FakeLedger:
         self, start_date: date, end_date: date
     ) -> list[CashMovementRecord]:
         return [m for m in self.cash if start_date <= m.movement_date <= end_date]
+
+    async def has_entries_on_or_before(
+        self, day: date, *, entry_type: EntryType | None = None
+    ) -> bool:
+        self.asked.append((day, entry_type))
+        trades = any(t.trade_date <= day for t in self.trades)
+        cash = any(m.movement_date <= day for m in self.cash)
+        return trades if entry_type is EntryType.TRADE else trades or cash
 
 
 def _trade(day: date) -> TradeRecord:
@@ -72,3 +81,13 @@ async def test_oq26_a_trade_ends_the_zero_state_of_both_chains() -> None:
     for chain in ProcessingChain:
         assert await history.has_entries_on_or_before(chain, date(2026, 10, 5))
         assert not await history.has_entries_on_or_before(chain, date(2026, 10, 4))
+
+
+async def test_oq37_positions_ask_for_trades_and_cash_for_any_entry() -> None:
+    ledger = FakeLedger()
+    history = LedgerChainHistory(ledger)
+
+    await history.has_entries_on_or_before(ProcessingChain.POSITIONS, date(2026, 10, 4))
+    await history.has_entries_on_or_before(ProcessingChain.CASH, date(2026, 10, 4))
+
+    assert ledger.asked == [(date(2026, 10, 4), EntryType.TRADE), (date(2026, 10, 4), None)]

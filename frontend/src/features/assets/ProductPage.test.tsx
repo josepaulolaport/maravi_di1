@@ -112,7 +112,9 @@ describe('Ativos: produto (§11.2)', () => {
     await user.click(modal.getByRole('button', { name: 'Cadastrar contrato' }));
     expect(await modal.findByText('Já existe um contrato com este código.')).toBeInTheDocument();
 
+    // Editing the field drops its server message at once, before the next submit.
     await user.clear(modal.getByRole('textbox', { name: 'Código' }));
+    expect(modal.queryByText('Já existe um contrato com este código.')).not.toBeInTheDocument();
     await user.type(modal.getByRole('textbox', { name: 'Código' }), 'DI1F31');
     await user.click(modal.getByRole('button', { name: 'Cadastrar contrato' }));
 

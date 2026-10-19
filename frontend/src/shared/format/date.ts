@@ -23,7 +23,7 @@ const dateTimeParts = new Intl.DateTimeFormat('pt-BR', {
 });
 
 /**
- * An instant (job or revision timestamp) in São Paulo time, where the business day is
+ * An instant (a job or price timestamp) in São Paulo time, where the business day is
  * defined: 2026-10-16T21:35:00Z → 16/10/2026 18:35.
  */
 export function formatDateTime(value: IsoDateTime | null | undefined): string {

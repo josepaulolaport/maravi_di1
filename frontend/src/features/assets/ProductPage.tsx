@@ -1,15 +1,17 @@
-import { Button, Paper, Skeleton, Stack, Text, TextInput, Title } from '@mantine/core';
-import { IconPlus, IconSearch } from '@tabler/icons-react';
+import { Button, Paper, Stack, Text, Title } from '@mantine/core';
+import { IconPlus } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useParams } from 'react-router';
 
+import { SearchInput } from '@/shared/ui/SearchInput';
+import { Loading } from '@/shared/ui/Loading';
 import type { Product } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { ContractsTable } from './components/ContractsTable';
-import { countLabel } from './components/countLabel';
+import { countLabel } from '@/shared/format';
 import { NewContractModal } from './components/NewContractModal';
 import { PageHeader } from './components/PageHeader';
 import { useInstruments, useProduct, useSearchParam } from './hooks/useAssets';
@@ -26,13 +28,13 @@ export function ProductPage() {
     return <ErrorState error={product.error} onRetry={() => void product.refetch()} />;
   }
   if (product.isPending) {
-    return <Skeleton h={320} role="status" aria-label="Carregando produto" />;
+    return <Loading label="Carregando produto" h={320} />;
   }
   return <ProductBody key={product.data.id} product={product.data} />;
 }
 
 function ProductBody({ product }: { product: Product }) {
-  const [text, setSearch, search] = useSearchParam();
+  const [search, setSearch] = useSearchParam();
   const [modalOpen, setModalOpen] = useState(false);
   const instruments = useInstruments(product.id, search);
 
@@ -59,20 +61,17 @@ function ProductBody({ product }: { product: Product }) {
           <Title order={2} size="h4" fw={500} p="md" pb={0}>
             Contratos
           </Title>
-          <TextInput
-            aria-label="Buscar contratos"
+          <SearchInput
+            label="Buscar contratos"
             placeholder="Buscar contrato por código..."
-            leftSection={<IconSearch size={16} stroke={1.5} />}
-            value={text}
-            onChange={(event) => {
-              setSearch(event.currentTarget.value);
-            }}
+            value={search}
+            onChange={setSearch}
             m="md"
           />
           {instruments.isError ? (
             <ErrorState error={instruments.error} onRetry={() => void instruments.refetch()} />
           ) : instruments.isPending ? (
-            <Skeleton h={160} m="md" role="status" aria-label="Carregando contratos" />
+            <Loading label="Carregando contratos" h={160} m="md" />
           ) : (
             <ContractsTable instruments={instruments.data.items} />
           )}

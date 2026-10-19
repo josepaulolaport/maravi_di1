@@ -1,5 +1,4 @@
 import type {
-  CancelAndReplaceResponse,
   CreateInstrumentRequest,
   CreateLedgerEntryRequest,
   DeleteLedgerEntriesRequest,
@@ -56,7 +55,9 @@ export const ledgerApi = {
 
 export const pricesApi = {
   listReferencePrices: (query: DateRange & { asset_id: string }) =>
-    http.get<ListResponse<ReferencePriceDay>>('/reference-prices', { query }),
+    http.get<ListResponse<ReferencePriceDay>>('/reference-prices', {
+      query,
+    }),
   setReferencePrice: (body: SetReferencePriceRequest) =>
     http.post<ReferencePrice>('/reference-prices', body),
   removeReferencePrice: (priceId: string) => http.delete(`/reference-prices/${id(priceId)}`),
@@ -66,26 +67,27 @@ export const portfolioApi = {
   getSummary: (date: IsoDate) =>
     http.get<PortfolioSummary>('/portfolio/summary', { query: { date } }),
   getPositions: (date: IsoDate) =>
-    http.get<PortfolioPositions>('/portfolio/positions', { query: { date } }),
+    http.get<PortfolioPositions>('/portfolio/positions', {
+      query: { date },
+    }),
   getPnlSeries: (query: DateRange) => http.get<ListResponse<PnlPoint>>('/portfolio/pnl', { query }),
 };
 
 export const processingApi = {
   /** Newest first, by (created_at, id). */
   listRequests: (query: PageQuery = {}) =>
-    http.get<Page<ProcessingRequest>>('/processing/requests', { query: { ...query } }),
+    http.get<Page<ProcessingRequest>>('/processing/requests', {
+      query: { ...query },
+    }),
   getRequest: (requestId: string) =>
     http.get<ProcessingRequest>(`/processing/requests/${id(requestId)}`),
   preview: (query: ProcessingRangeRequest) =>
-    http.get<ProcessingPreview>('/processing/preview', { query: { ...query } }),
+    http.get<ProcessingPreview>('/processing/preview', {
+      query: { ...query },
+    }),
   enqueue: (body: ProcessingRangeRequest) =>
     http.post<ProcessingRequest>('/processing/requests', body),
   cancel: (requestId: string) =>
     http.post<ProcessingRequest>(`/processing/requests/${id(requestId)}/cancel`),
-  cancelAndReplace: (requestId: string, body: ProcessingRangeRequest) =>
-    http.post<CancelAndReplaceResponse>(
-      `/processing/requests/${id(requestId)}/cancel-and-replace`,
-      body,
-    ),
   listIssues: () => http.get<ListResponse<Issue>>('/processing/issues'),
 };

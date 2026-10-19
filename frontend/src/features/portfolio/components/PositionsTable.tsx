@@ -2,27 +2,30 @@ import {
   Badge,
   Group,
   Paper,
+  Stack,
   Table,
   Text,
-  TextInput,
   Title,
   UnstyledButton,
   VisuallyHidden,
 } from '@mantine/core';
-import { IconArrowDown, IconArrowsSort, IconArrowUp, IconSearch } from '@tabler/icons-react';
-import { useState } from 'react';
+import { IconArrowDown, IconArrowsSort, IconArrowUp } from '@tabler/icons-react';
 
+import table from '@/shared/ui/table.module.css';
 import type { PositionRow } from '@/api/contract';
 import {
+  UNAVAILABLE,
+  countLabel,
   formatDate,
   formatMoney,
   formatPu,
   formatQuantity,
   formatRate,
-  UNAVAILABLE,
 } from '@/shared/format';
+import { SearchInput } from '@/shared/ui/SearchInput';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
 
+import { usePositionsView } from '../hooks/usePortfolio';
 import { type Sort, type SortKey, sortPositions } from './sortPositions';
 
 interface Column {
@@ -43,22 +46,23 @@ const columns: Column[] = [
     label: 'Ativo',
     numeric: false,
     render: (row) => (
-      <Group gap="xs" wrap="nowrap">
-        <Text inherit fw={500}>
+      // The badge sits under the code: the column stays narrow and the badge is never cut.
+      <Stack gap={2} align="flex-start">
+        <Text span inherit fw={500}>
           {row.asset_code}
         </Text>
         {row.valuation_status === 'MISSING' ? (
-          <Badge color="red" variant="light" size="sm">
+          <Badge color="red" variant="light" size="sm" className={table.badge}>
             Sem preço
           </Badge>
         ) : (
           row.pnl_status === 'MISSING' && (
-            <Badge color="orange" variant="light" size="sm">
+            <Badge color="orange" variant="light" size="sm" className={table.badge}>
               P&L indisponível
             </Badge>
           )
         )}
-      </Group>
+      </Stack>
     ),
   },
   {
@@ -122,8 +126,7 @@ function SortIcon({ active, direction }: { active: boolean; direction: Sort['dir
 }
 
 export function PositionsTable({ rows }: { rows: PositionRow[] }) {
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<Sort>({ key: 'maturity_date', direction: 'asc' });
+  const { search, setSearch, sort, setSort } = usePositionsView();
 
   const needle = search.trim().toLocaleUpperCase('pt-BR');
   const visible = sortPositions(
@@ -132,9 +135,9 @@ export function PositionsTable({ rows }: { rows: PositionRow[] }) {
   );
 
   const toggleSort = (key: SortKey) => {
-    setSort((current) =>
-      current.key === key
-        ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+    setSort(
+      sort.key === key
+        ? { key, direction: sort.direction === 'asc' ? 'desc' : 'asc' }
         : { key, direction: 'asc' },
     );
   };
@@ -145,19 +148,16 @@ export function PositionsTable({ rows }: { rows: PositionRow[] }) {
         <Title order={2} size="h5" fw={500}>
           Posições
         </Title>
-        <TextInput
-          aria-label="Buscar ativo"
+        <SearchInput
+          label="Buscar ativo"
           placeholder="Buscar ativo..."
-          leftSection={<IconSearch size={16} stroke={1.5} />}
           value={search}
-          onChange={(event) => {
-            setSearch(event.currentTarget.value);
-          }}
+          onChange={setSearch}
           w={260}
         />
       </Group>
       <Table.ScrollContainer minWidth={980}>
-        <Table highlightOnHover verticalSpacing="sm">
+        <Table highlightOnHover verticalSpacing="sm" aria-label="Posições">
           <Table.Thead bg="gray.0">
             <Table.Tr>
               {columns.map((column) => {
@@ -166,7 +166,7 @@ export function PositionsTable({ rows }: { rows: PositionRow[] }) {
                   <Table.Th
                     key={column.key}
                     ta={column.numeric ? 'right' : 'left'}
-                    style={{ whiteSpace: 'nowrap' }}
+                    className={table.nowrap}
                     aria-sort={
                       active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'
                     }
@@ -212,7 +212,7 @@ export function PositionsTable({ rows }: { rows: PositionRow[] }) {
         </Text>
       )}
       <VisuallyHidden role="status">
-        {visible.length} {visible.length === 1 ? 'posição exibida' : 'posições exibidas'}
+        {countLabel(visible.length, 'posição exibida', 'posições exibidas')}
       </VisuallyHidden>
     </Paper>
   );

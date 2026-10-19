@@ -4,7 +4,7 @@ import type { Decimal, IsoDate, IsoTime, LedgerEntry as ApiLedgerEntry } from '@
 // filters and orders the rows and signs every cash effect (P18); nothing is merged, sorted or
 // calculated here. Instrument type and entry type are kept apart.
 
-export type EntryType = 'BUY' | 'SELL' | 'DEPOSIT' | 'WITHDRAWAL';
+type EntryType = 'BUY' | 'SELL' | 'DEPOSIT' | 'WITHDRAWAL';
 
 export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
   BUY: 'Compra',
@@ -23,7 +23,7 @@ interface BaseEntry {
   signedAmount: Decimal;
 }
 
-export interface TradeEntry extends BaseEntry {
+interface TradeEntry extends BaseEntry {
   kind: 'trade';
   instrumentTypeCode: string;
   assetCode: string;
@@ -32,7 +32,7 @@ export interface TradeEntry extends BaseEntry {
   rate: Decimal;
 }
 
-export interface CashEntry extends BaseEntry {
+interface CashEntry extends BaseEntry {
   kind: 'cash';
 }
 
