@@ -23,18 +23,33 @@ row lock on the run's ``requests`` row:
 3. the end: COMPLETED, COMPLETED_WITH_ISSUES or FAILED; any date of the range still RUNNING is
    restored from ``*_previous`` (OQ-26).
 
-**A step that cannot be recorded.** The end of a run (step 3) and the failure of a date
-(step 2c) are retried after short pauses (``end_retry_delays``), since a database blip there
-would leave the run RUNNING, and no later run is taken while it is. If they still fail, or any
-other step outside a date's chains fails, the error escapes `run`: the worker process stops
-with status 1 and restarts (`di1.platform.messaging.consumer.AfterAckRunner`), and recovery at
-its start finishes the run.
+**A step that cannot be recorded.** A run left RUNNING blocks the queue: no later run is
+taken while it is. An error in D's transaction outside every chain's savepoint always takes
+step 2c, whatever its kind (a lock timeout there fails D). Any other error of the run's steps
+(2a, 2c, 3, and the run's start) is handled by its kind (`RunStore.is_transient`):
+
+- a transient database error (a dropped connection, a timeout) may clear. The end of a run
+  (step 3) and the failure of a date (step 2c) are retried after short pauses
+  (``end_retry_delays``); if they still fail, or another step fails that way, the error
+  escapes `run`: the worker process stops with status 1 and restarts
+  (`di1.platform.messaging.consumer.AfterAckRunner`), and recovery at its start finishes the
+  run. A step that committed before its error finds the run ended on the retry and writes
+  nothing (`RunEndedError`);
+- any other error (a bug, a CHECK violation) would recur on every retry and every restart, a
+  crash loop with the queue blocked behind the run. It is not retried: the run ends FAILED
+  with ``PROCESSING_ERROR`` in a fresh short transaction (`_abort`), its RUNNING dates restored
+  and the dates it committed kept, and the worker goes on with the queue. Only if that write
+  fails too does the error escape for a restart.
+
+A known limit: a bug that breaks that FAILED end too (in restoring the dates, say) also breaks
+recovery at the worker start, which nothing catches, so it would still loop on restarts; so
+would a non-transient error classified transient (`is_transient` lists its limits).
 
 **Recovery at worker start** (`recover_at_startup`, before the worker consumes): the run left
-RUNNING (or DISPATCHED/CANCELLING, from before OQ-46) was interrupted. Its dates left RUNNING
-are restored from ``*_previous`` (a row left empty is deleted); a run being cancelled (a cancel
-request recorded, or CANCELLING) then ends CANCELLED before any date, any other is run to its end,
-after ``progress_date`` (from ``start_date`` when NULL). Then the queue is drained.
+RUNNING was interrupted. Its dates left RUNNING are restored from ``*_previous`` (a row left
+empty is deleted); a run with a cancel request then ends CANCELLED before any date, any other is
+run to its end, after ``progress_date`` (from ``start_date`` when NULL). Then the queue is
+drained. DISPATCHED and CANCELLING are never written (OQ-46), so no row holds them.
 """
 
 from __future__ import annotations
@@ -47,7 +62,6 @@ from datetime import date, datetime, timedelta
 from functools import partial
 from uuid import UUID
 
-from di1.modules.ledger.public import EntryType
 from di1.modules.portfolio.public import PortfolioResultsWriter
 from di1.modules.processing.application.interfaces.repositories import (
     DateStatusRepository,
@@ -58,12 +72,15 @@ from di1.modules.processing.application.interfaces.run_store import (
     NewIssue,
     RunStore,
 )
+from di1.modules.processing.application.services.chain_history import LedgerChainHistory
+from di1.modules.processing.application.services.predecessor import read_predecessor
 from di1.modules.processing.application.services.run_chains import (
     DayReaders,
     ReadersFactory,
     process_cash_day,
     process_positions_day,
 )
+from di1.modules.processing.domain.predecessor import PredecessorState, allows_run
 from di1.modules.processing.public import (
     ChainStatus,
     ProcessingRequest,
@@ -183,7 +200,7 @@ class PortfolioRangeProcessor:
         or while a run is still RUNNING: one stopped by an error it could not record waits for
         the worker's next start, so two runs never overlap."""
         async with self._uow_factory() as uow:
-            if await self._store.lock_active_runs(uow=uow):
+            if await self._store.lock_running_runs(uow=uow):
                 await uow.commit()
                 return None
             while (queued := await self._store.lock_oldest_queued(uow=uow)) is None:
@@ -206,34 +223,22 @@ class PortfolioRangeProcessor:
     # --- recovery at worker start (OQ-45) -------------------------------------------------
 
     async def recover_at_startup(self) -> None:
-        """Called once when the worker starts, before it consumes: the run left RUNNING (or
-        DISPATCHED/CANCELLING, from before OQ-46) was interrupted. Its dates left RUNNING are
-        restored; a run being cancelled (a cancel request recorded, or CANCELLING) ends CANCELLED
-        before any date; any other is run to its end here, after ``progress_date``. Then the
-        queue is drained, so a request whose doorbell was lost runs too. Idempotent: a second
-        call finds nothing to recover or run."""
+        """Called once when the worker starts, before it consumes: the run left RUNNING was
+        interrupted. Its dates left RUNNING are restored; a run with a cancel request ends
+        CANCELLED before any date; any other is run to its end here, after ``progress_date``.
+        Then the queue is drained, so a request whose doorbell was lost runs too. Idempotent: a
+        second call finds nothing to recover or run."""
         async with self._uow_factory() as uow:
-            interrupted = await self._store.lock_active_runs(uow=uow)
+            interrupted = await self._store.lock_running_runs(uow=uow)
             now = self._clock.now()
             to_resume: list[UUID] = []
             for request in interrupted:
-                if (
-                    request.status is ProcessingStatus.CANCELLING
-                    or request.cancel_requested_at is not None
-                ):
+                if request.cancel_requested_at is not None:
                     await end_run(self._store, request, ProcessingStatus.CANCELLED, now, uow=uow)
                     logger.info("processing request %s cancelled at worker start", request.id)
                     continue
                 await restore_running_dates(self._store, request, uow=uow)
-                await self._store.save_run(
-                    replace(
-                        request,
-                        status=ProcessingStatus.RUNNING,
-                        started_at=request.started_at or now,
-                        updated_at=now,
-                    ),
-                    uow=uow,
-                )
+                await self._store.save_run(replace(request, updated_at=now), uow=uow)
                 to_resume.append(request.id)
             await uow.commit()
         for request_id in to_resume:
@@ -244,19 +249,52 @@ class PortfolioRangeProcessor:
     # --- 2. the dates ----------------------------------------------------------------------
 
     async def run(self, request_id: UUID) -> None:
-        """Processes the claimed run to its end. An error that escapes left the run RUNNING
-        (even recording its end failed): the worker must restart, and recovery at its start
-        resumes the run after ``progress_date``."""
+        """Processes the claimed run to its end. A transient error that escapes left the run
+        RUNNING: the worker must restart, and recovery at its start resumes the run after
+        ``progress_date``. Any other error ends the run FAILED (`_abort`)."""
         try:
             await self._run(request_id)
         except RunEndedError:
             logger.info("processing request %s has already ended", request_id)
+        except Exception as error:
+            if self._store.is_transient(error):
+                logger.exception(
+                    "processing request %s left RUNNING: the worker must restart to resume it",
+                    request_id,
+                )
+                raise
+            logger.exception(
+                "processing request %s: unexpected error; ending it FAILED", request_id
+            )
+            await self._abort(request_id, error)
+
+    async def _abort(self, request_id: UUID, error: Exception) -> None:
+        """Ends the run FAILED after a non-transient error, in a fresh short transaction: its
+        dates left RUNNING are restored (OQ-26), the dates it committed keep their statuses, and
+        a first failure already recorded (an ALL run's chain, OQ-36) is kept; otherwise the
+        run's error is ``PROCESSING_ERROR`` with no ``failed_date``, since no date failed. If
+        this write fails too, ``error`` escapes and the worker restarts."""
+        try:
+            async with self._uow_factory() as uow:
+                request = await self._lock_run(request_id, uow)
+                if request.error_code is None:
+                    request = replace(
+                        request,
+                        error_code=TECHNICAL_ERROR_CODE,
+                        error_message=TECHNICAL_ERROR_MESSAGE,
+                    )
+                await end_run(
+                    self._store, request, ProcessingStatus.FAILED, self._clock.now(), uow=uow
+                )
+                await uow.commit()
+        except RunEndedError:
+            return
         except Exception:
             logger.exception(
-                "processing request %s left RUNNING: the worker must restart to resume it",
-                request_id,
+                "processing request %s left RUNNING: ending it FAILED failed too", request_id
             )
-            raise
+            raise error from None
+        logger.warning("processing request %s ended FAILED (%s)", request_id, TECHNICAL_ERROR_CODE)
 
     async def _run(self, request_id: UUID) -> None:
         request, alive = await self._start(request_id)
@@ -287,15 +325,18 @@ class PortfolioRangeProcessor:
         self, step: Callable[[], Awaitable[None]], request_id: UUID, what: str
     ) -> None:
         """Runs ``step``, its own Unit of Work, again after each pause of
-        ``end_retry_delays`` while it fails; the last failure is raised. A step that committed
-        before its error finds the run ended on the retry (`RunEndedError`)."""
+        ``end_retry_delays`` while it fails with a transient error; the last failure, or the
+        first non-transient one, is raised. A step that committed before its error finds the
+        run ended on the retry (`RunEndedError`)."""
         for delay in self._end_retry_delays:
             try:
                 await step()
                 return
             except RunEndedError:
                 raise
-            except Exception:
+            except Exception as error:
+                if not self._store.is_transient(error):
+                    raise
                 logger.warning(
                     "processing request %s: recording %s failed; retrying in %s s",
                     request_id,
@@ -367,7 +408,7 @@ class PortfolioRangeProcessor:
                 other_processed = self._other_chain_processed(chain, alive, outcomes, current)
                 try:
                     async with self._store.savepoint(uow=uow):
-                        zero_state = await self._predecessor(chain, previous, day, readers, uow)
+                        zero_state = await self._predecessor(chain, previous, readers, uow)
                         if zero_state is None:
                             failures.append(
                                 ChainFailure(chain, PREDECESSOR_CODES[chain], PREDECESSOR_MESSAGE)
@@ -513,21 +554,19 @@ class PortfolioRangeProcessor:
         self,
         chain: ProcessingChain,
         previous: DateStatusRow,
-        day: date,
         readers: DayReaders,
         uow: UnitOfWork,
     ) -> bool | None:
-        """The predecessor rule (OQ-31 item 4, OQ-37 item 4, OQ-40 item 5): ``False`` to start
-        from the published D−1, ``True`` from the zero state, ``None`` when D must fail. Ledger
-        is asked only when the chain has no status on any date before D."""
-        status = previous.status(chain)
-        if status in PROCESSED_STATUSES:
-            return False
-        if status is not None:  # FAILED or RUNNING
+        """The predecessor rule (`domain.predecessor`, the preview's too): ``False`` to start
+        from the published D−1, ``True`` from the zero state, ``None`` when D must fail."""
+        state = await read_predecessor(
+            chain,
+            previous.day,
+            previous.status(chain),
+            date_statuses=self._date_statuses,
+            history=LedgerChainHistory(readers.ledger),
+            uow=uow,
+        )
+        if not allows_run(state):
             return None
-        if await self._date_statuses.has_status_before(chain, day, uow=uow):
-            return None  # a gap: every day must be processed
-        entry_type = EntryType.TRADE if chain is ProcessingChain.POSITIONS else None
-        if await readers.ledger.has_entries_on_or_before(day - ONE_DAY, entry_type=entry_type):
-            return None
-        return True
+        return state is PredecessorState.ZERO_STATE

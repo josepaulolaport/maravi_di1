@@ -160,8 +160,9 @@ rather than refactor before delivery (OQ-47); none changes a business result.
 
 - **Two repositories for `processing.requests` (M1):** `SqlRequestRepository` (HTTP side) and the
   worker's run store both read and write the table.
-- **Import cycle and no processing domain (M8):** portfolio and processing import each other's
-  `public.py`, and processing's run state machine lives in `application/`, with no `domain/` package.
+- **Import cycle and a thin processing domain (M8):** portfolio and processing import each
+  other's `public.py`, and processing's run state machine lives in `application/`; only the
+  predecessor rule is in its `domain/`.
 - **Wiring differs per module (M10):** routers and dependency providers are not built the same way
   in every module.
 - **Three decimal-string types (M11):** the HTTP schemas of asset, ledger and prices each define
@@ -175,6 +176,10 @@ rather than refactor before delivery (OQ-47); none changes a business result.
 - **Unused schema columns and statuses (H5):** `DISPATCHED`, `CANCELLING`, `claim_token`,
   `lease_expires_at`, `attempt_count`, `dispatched_at` and `calculation_state` stay in the schema,
   unused, with no migration to drop them (OQ-45, OQ-46, OQ-47; [docs/schema.md](docs/schema.md)).
+  No backend logic sets them or branches on them; the API still exposes `dispatched_at` as null,
+  and the frontend keeps the two status labels as a safe default.
+- **Inbox retention is unbatched (M9):** the retention `DELETE` of old `platform.inbox_messages`
+  rows runs as one statement, and `processed_at` has no index; fine at doorbell volume.
 
 ## CI
 

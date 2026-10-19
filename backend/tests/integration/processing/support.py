@@ -9,6 +9,7 @@ from datetime import date, datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from di1.modules.processing.application.interfaces.repositories import ChainHistory
 from di1.modules.processing.application.services.processing import ProcessingService
 from di1.modules.processing.infrastructure.messaging.outbox_doorbell import OutboxDoorbell
 from di1.modules.processing.infrastructure.persistence.repositories import (
@@ -23,7 +24,7 @@ from tests.unit.processing.fakes import FakeAssets, FakeChainHistory, SteppingCl
 def make_service(
     *,
     assets: FakeAssets | None = None,
-    history: FakeChainHistory | None = None,
+    history: ChainHistory | None = None,
     requests: SqlRequestRepository | None = None,
     clock: Clock | None = None,
 ) -> ProcessingService:

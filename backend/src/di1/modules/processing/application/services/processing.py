@@ -12,7 +12,6 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from enum import StrEnum
 from uuid import UUID
 
 from di1.modules.asset.public import AssetReader
@@ -28,6 +27,8 @@ from di1.modules.processing.application.interfaces.repositories import (
     status_of,
 )
 from di1.modules.processing.application.services.cursor import decode_cursor, encode_cursor
+from di1.modules.processing.application.services.predecessor import read_predecessor
+from di1.modules.processing.domain.predecessor import PredecessorState
 from di1.modules.processing.public import (
     ProcessingRequest,
     ProcessingScope,
@@ -44,20 +45,6 @@ MAX_PAGE_SIZE = 200
 
 CANCELLABLE = frozenset({ProcessingStatus.QUEUED, ProcessingStatus.RUNNING})
 """A run that has not finished and whose cancellation was not already requested."""
-
-
-class PredecessorState(StrEnum):
-    """The day before a range, for one chain (OQ-26 item 8, OQ-31): its status in
-    ``date_status``, NOT_PROCESSED without one, or ZERO_STATE when the chain has nothing on or
-    before it. Unless it is PROCESSED, PROCESSED_WITH_ISSUES or ZERO_STATE, a run of that chain
-    fails on its first date with the chain's ``*_PREDECESSOR_MISSING``."""
-
-    PROCESSED = "PROCESSED"
-    PROCESSED_WITH_ISSUES = "PROCESSED_WITH_ISSUES"
-    RUNNING = "RUNNING"
-    FAILED = "FAILED"
-    NOT_PROCESSED = "NOT_PROCESSED"
-    ZERO_STATE = "ZERO_STATE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,11 +127,8 @@ def _not_found() -> DomainError:
 
 def _not_cancellable(request: ProcessingRequest) -> DomainError:
     """An ended run answers "encerrado", whatever cancel it has on record; "já foi solicitado"
-    only for a run still going whose cancel is pending (OQ-46: RUNNING with
-    ``cancel_requested_at``, or CANCELLING from before)."""
-    pending = request.status is ProcessingStatus.CANCELLING or (
-        request.status is ProcessingStatus.RUNNING and request.cancel_requested_at is not None
-    )
+    only for a RUNNING run whose cancel is pending (OQ-46)."""
+    pending = request.status is ProcessingStatus.RUNNING and request.cancel_requested_at is not None
     message = (
         "O cancelamento deste processamento já foi solicitado."
         if pending
@@ -265,19 +249,17 @@ class ProcessingService:
     async def _predecessor_state(
         self, chain: ProcessingChain, day: date, uow: UnitOfWork
     ) -> PredecessorState:
-        """The run's predecessor rule (interfaces.md "Predecessor rule, per day", OQ-37 item 4):
-        a status on ``day`` is reported as is; no status while an earlier date of the chain has
-        one is a gap, not processed; only when nothing of the chain is processed before is the
-        Ledger asked for the zero state."""
+        """The run's predecessor rule on ``day`` (`domain.predecessor`): the state the run's first
+        date would find (a FAILED or RUNNING one included)."""
         row = (await self._date_statuses.get_date_statuses(day, day, uow=uow)).get(day)
-        status = status_of(row, chain) if row is not None else None
-        if status is not None:
-            return PredecessorState(status)
-        if await self._date_statuses.has_status_before(chain, day, uow=uow):
-            return PredecessorState.NOT_PROCESSED
-        if await self._chain_history.has_entries_on_or_before(chain, day):
-            return PredecessorState.NOT_PROCESSED
-        return PredecessorState.ZERO_STATE
+        return await read_predecessor(
+            chain,
+            day,
+            status_of(row, chain) if row is not None else None,
+            date_statuses=self._date_statuses,
+            history=self._chain_history,
+            uow=uow,
+        )
 
     async def _add(
         self, scope: ProcessingScope, start_date: date, end_date: date, uow: UnitOfWork

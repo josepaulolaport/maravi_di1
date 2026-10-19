@@ -93,6 +93,12 @@ class NewIssue:
 
 
 class RunStore(Protocol):
+    def is_transient(self, error: Exception) -> bool:
+        """Whether ``error``, raised by a call of this store or by its Unit of Work, may clear on
+        a retry or a restart (a dropped connection, a timeout); any other fails the same way on
+        every try."""
+        ...
+
     async def lock_oldest_queued(self, *, uow: UnitOfWork) -> ProcessingRequest | None:
         """The oldest QUEUED run by ``(created_at, id)``, row-locked (OQ-5 item 4, OQ-46)."""
         ...
@@ -101,9 +107,9 @@ class RunStore(Protocol):
         """Whether any run is QUEUED (a plain read)."""
         ...
 
-    async def lock_active_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
-        """The runs RUNNING (or DISPATCHED/CANCELLING, from before OQ-46), oldest first,
-        row-locked: the run the worker is processing, or at its start the one it was (OQ-45)."""
+    async def lock_running_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
+        """The RUNNING runs, oldest first, row-locked: the run the worker is processing, or at
+        its start the one it was (OQ-45). DISPATCHED and CANCELLING are never written (OQ-46)."""
         ...
 
     async def get_run(
