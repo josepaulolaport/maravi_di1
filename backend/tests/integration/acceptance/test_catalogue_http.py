@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -48,7 +49,7 @@ def test_product_search_ignores_case_and_accents(client: TestClient) -> None:
     found = client.get("/api/products", params={"search": "DEPOSITO"}).json()["items"]
 
     assert [p["id"] for p in found] == [product_id]
-    assert found[0]["futures"]["face_value"] == "100000"
+    assert Decimal(found[0]["futures"]["face_value"]) == Decimal("100000")
 
 
 def test_an_unknown_product_is_a_field_error(client: TestClient) -> None:
