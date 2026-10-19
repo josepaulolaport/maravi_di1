@@ -12,7 +12,9 @@ import pytest
 from pydantic import ValidationError
 
 from di1.platform.config import (
+    ENV_FILES,
     BrokerSettings,
+    HeartbeatSettings,
     LoggingSettings,
     Settings,
     get_broker_settings,
@@ -303,3 +305,79 @@ def test_heartbeat_values_come_from_the_environment(monkeypatch: pytest.MonkeyPa
 
     assert settings.heartbeat_file == Path("/tmp/di1-worker.heartbeat")
     assert (settings.heartbeat_interval_seconds, settings.heartbeat_max_age_seconds) == (2.0, 60.0)
+
+
+SETTINGS_CLASSES = (Settings, BrokerSettings, HeartbeatSettings, LoggingSettings)
+
+
+@pytest.fixture
+def env_files_enabled(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Turn the `.env` files back on (tests/conftest.py turns them off) in a fake checkout:
+    the working directory is ``<tmp>/backend``, as for every ``uv run`` in the Makefile."""
+    for cls in SETTINGS_CLASSES:
+        monkeypatch.setitem(cls.model_config, "env_file", ENV_FILES)
+    backend = tmp_path / "backend"
+    backend.mkdir()
+    monkeypatch.chdir(backend)
+    return tmp_path
+
+
+def test_every_settings_class_reads_the_same_env_files() -> None:
+    """The repository root's `.env` (shared with Compose), then ``backend/.env``, relative to
+    the working directory ``backend/``."""
+    assert ENV_FILES == ("../.env", ".env")
+    for cls in SETTINGS_CLASSES:
+        assert cls.model_config.get("env_file_encoding") == "utf-8"
+
+
+def test_tests_never_read_a_developers_env_file() -> None:
+    for cls in SETTINGS_CLASSES:
+        assert cls.model_config.get("env_file") is None
+
+
+def test_settings_read_the_root_env_file(
+    env_files_enabled: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (env_files_enabled / ".env").write_text(
+        f"DATABASE_URL={URL}\nRABBITMQ_URL={BROKER_URL}\nLOG_LEVEL=debug\n"
+        "HEARTBEAT_FILE=/tmp/hb\nDI1_DB_USER=ignored\n",
+        encoding="utf-8",
+    )
+    for name in ("RABBITMQ_URL", "LOG_LEVEL", "HEARTBEAT_FILE"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert get_settings().database_url.get_secret_value() == URL
+    assert get_broker_settings().rabbitmq_url.get_secret_value() == BROKER_URL
+    assert get_logging_settings().log_level == "DEBUG"
+    assert get_heartbeat_settings().heartbeat_file == Path("/tmp/hb")
+
+
+def test_backend_env_file_overrides_the_root_one(env_files_enabled: Path) -> None:
+    (env_files_enabled / ".env").write_text(f"DATABASE_URL={URL}\n", encoding="utf-8")
+    other = "postgresql+psycopg://local:pw@127.0.0.1:5432/local"
+    (env_files_enabled / "backend" / ".env").write_text(f"DATABASE_URL={other}\n", encoding="utf-8")
+
+    assert get_settings().database_url.get_secret_value() == other
+
+
+def test_the_process_environment_overrides_the_env_files(
+    env_files_enabled: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (env_files_enabled / ".env").write_text(
+        f"DATABASE_URL={URL}\nDATABASE_POOL_SIZE=3\n", encoding="utf-8"
+    )
+    other = "postgresql+psycopg://other:pw@db:5432/other"
+    monkeypatch.setenv("DATABASE_URL", other)
+
+    settings = get_settings()
+
+    assert settings.database_url.get_secret_value() == other
+    assert settings.database_pool_size == 3
+
+
+def test_missing_env_files_are_ignored(
+    env_files_enabled: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", URL)
+
+    assert get_settings().database_url.get_secret_value() == URL

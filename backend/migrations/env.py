@@ -1,6 +1,7 @@
 """Alembic environment for async SQLAlchemy with psycopg 3 (skill `db-migration`).
 
-The URL is ``sqlalchemy.url`` when the caller sets it, otherwise ``DATABASE_URL``.
+The URL is ``sqlalchemy.url`` when the caller sets it, otherwise ``DATABASE_URL`` as the
+processes read it (`di1.platform.config.Settings`: the environment, then the `.env` files).
 
 A caller that already runs an event loop (an async test or fixture) cannot let this module call
 ``asyncio.run``. It passes its own connection instead, through ``connection.run_sync``: a sync
@@ -14,21 +15,29 @@ the modules' ORM models exist (then autogenerate compares them, with ``compare_t
 from __future__ import annotations
 
 import asyncio
-import os
 
 from alembic import context
+from pydantic import ValidationError
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.pool import NullPool
+
+from di1.platform.config import get_settings
 
 config = context.config
 
 
 def _database_url() -> str:
-    url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATABASE_URL")
-    if not url:
-        raise RuntimeError("Set DATABASE_URL (postgresql+psycopg://user:password@host:port/db)")
-    return url
+    url = config.get_main_option("sqlalchemy.url")
+    if url:
+        return url
+    try:
+        return get_settings().database_url.get_secret_value()
+    except ValidationError as error:
+        raise RuntimeError(
+            "DATABASE_URL is missing or invalid: set it, in the environment or .env, to"
+            " postgresql+psycopg://user:password@host:port/db"
+        ) from error
 
 
 def _configure(connection: Connection | None = None, url: str | None = None) -> None:
