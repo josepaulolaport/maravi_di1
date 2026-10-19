@@ -43,6 +43,7 @@ from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
+from di1.shared.clock import FixedClock
 from tests.integration.asset.conftest import Di1Catalogue, seed_di1
 from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
 
@@ -219,7 +220,11 @@ def client(
     async def provide(request: Request) -> AsyncIterator[PortfolioQueryService]:
         async with SqlAlchemyUnitOfWork(get_session_factory(request)) as uow:
             yield portfolio_query_service(
-                uow, assets=asset_reader(uow.session), prices=prices, date_statuses=statuses
+                uow,
+                assets=asset_reader(uow.session),
+                prices=prices,
+                date_statuses=statuses,
+                clock=FixedClock(OCT_16),
             )
 
     app = create_app(settings)
@@ -326,4 +331,21 @@ def test_a_start_after_the_end_is_an_invalid_range(client: TestClient) -> None:
             "message": "A data inicial deve ser anterior ou igual à data final.",
             "field": "start_date",
         }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("path", "field"),
+    [
+        ("/portfolio/summary?date=2026-10-17", "date"),
+        ("/portfolio/positions?date=2026-10-17", "date"),
+        ("/portfolio/pnl?start_date=2026-10-14&end_date=2026-10-17", "end_date"),
+    ],
+)
+def test_a_read_after_today_is_a_future_date(client: TestClient, path: str, field: str) -> None:
+    # OQ-35, with the clock fixed at 16/10/2026.
+    body = _get(client, path, status=422)
+
+    assert body["errors"] == [
+        {"code": "FUTURE_DATE", "message": "A data não pode ser posterior a hoje.", "field": field}
     ]

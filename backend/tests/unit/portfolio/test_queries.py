@@ -19,6 +19,7 @@ from di1.modules.portfolio.application.services.query_service import PortfolioQu
 from di1.modules.portfolio.domain.valuation import ReferenceSource, ValuationStatus
 from di1.modules.prices.public import PriceSource
 from di1.modules.processing.public import ChainStatus, DateStatus
+from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode
 from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28, DI1F29
 from tests.unit.portfolio.fakes import (
@@ -29,6 +30,7 @@ from tests.unit.portfolio.fakes import (
     InMemoryPortfolioRepository,
 )
 
+TODAY = DAY + timedelta(days=10)
 COMPLETE = CalculationCompleteness.COMPLETE
 MISSING = CalculationCompleteness.MISSING
 CASH_AT = datetime(2027, 1, 4, 21, 0, tzinfo=UTC)
@@ -108,7 +110,12 @@ def queries(
         (DI1F29, "DI1F29", date(2029, 1, 2)),
     )
     return PortfolioQueries(
-        repository, uow=uow, assets=assets, prices=prices, date_statuses=statuses
+        repository,
+        uow=uow,
+        assets=assets,
+        prices=prices,
+        date_statuses=statuses,
+        clock=FixedClock(TODAY),
     )
 
 
@@ -310,3 +317,48 @@ class TestPnLSeries:
         (detail,) = raised.value.errors
         assert detail.code is ErrorCode.INVALID_RANGE
         assert detail.field == "start_date"
+
+
+class TestFutureDates:
+    """OQ-35: a read dated after today (São Paulo, injected clock) is 422 FUTURE_DATE; today and
+    earlier read as published."""
+
+    FUTURE_MESSAGE = "A data não pode ser posterior a hoje."
+
+    async def test_a_summary_or_table_after_today_is_rejected_on_date(
+        self, queries: PortfolioQueries
+    ) -> None:
+        for read in (queries.get_summary, queries.get_position_table):
+            with pytest.raises(DomainError) as raised:
+                await read(TODAY + timedelta(days=1))
+            (detail,) = raised.value.errors
+            assert (detail.code, detail.message, detail.field) == (
+                ErrorCode.FUTURE_DATE,
+                self.FUTURE_MESSAGE,
+                "date",
+            )
+
+    async def test_today_is_read(self, queries: PortfolioQueries) -> None:
+        assert (await queries.get_summary(TODAY)).date == TODAY
+        assert (await queries.get_position_table(TODAY)).items == ()
+        assert await queries.get_pnl_series(DAY, TODAY) == ()
+
+    async def test_a_pnl_series_ending_after_today_is_rejected_on_end_date(
+        self, queries: PortfolioQueries
+    ) -> None:
+        with pytest.raises(DomainError) as raised:
+            await queries.get_pnl_series(DAY, TODAY + timedelta(days=1))
+
+        (detail,) = raised.value.errors
+        assert (detail.code, detail.field) == (ErrorCode.FUTURE_DATE, "end_date")
+
+    async def test_a_reversed_range_ending_after_today_reports_both(
+        self, queries: PortfolioQueries
+    ) -> None:
+        with pytest.raises(DomainError) as raised:
+            await queries.get_pnl_series(TODAY + timedelta(days=3), TODAY + timedelta(days=2))
+
+        assert [(e.code, e.field) for e in raised.value.errors] == [
+            (ErrorCode.INVALID_RANGE, "start_date"),
+            (ErrorCode.FUTURE_DATE, "end_date"),
+        ]

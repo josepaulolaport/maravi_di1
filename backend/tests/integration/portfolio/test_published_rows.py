@@ -31,6 +31,7 @@ from di1.modules.portfolio.domain.valuation import (
     ValuationStatus,
 )
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
+from di1.shared.clock import FixedClock
 from tests.integration.asset.conftest import Di1Catalogue
 from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
 
@@ -427,6 +428,7 @@ async def test_a_read_keeps_one_snapshot_while_a_date_is_published(
             assets=asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=FakeDateStatusReader(),
+            clock=FixedClock(D),
         )
         before = await queries.get_summary(D)
 
@@ -440,6 +442,7 @@ async def test_a_read_keeps_one_snapshot_while_a_date_is_published(
             assets=asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=FakeDateStatusReader(),
+            clock=FixedClock(D),
         ).get_summary(D)
 
     assert before.cash.balance is None

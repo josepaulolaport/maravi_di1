@@ -21,6 +21,7 @@ from di1.modules.portfolio.public import (
 from di1.modules.prices.public import PriceReader
 from di1.modules.processing.public import DateStatusReader
 from di1.platform.database.unit_of_work import UnitOfWork
+from di1.shared.clock import Clock
 
 
 def portfolio_repository(session: AsyncSession) -> SqlAlchemyPortfolioRepository:
@@ -43,15 +44,18 @@ def portfolio_query_service(
     assets: AssetReader,
     prices: PriceReader,
     date_statuses: DateStatusReader,
+    clock: Clock,
 ) -> PortfolioQueryService:
     """The read models on one fresh Unit of Work: its first statement makes the transaction one
     read-only REPEATABLE READ snapshot, in which the published rows and the date statuses are
     read (OQ-23). ``assets`` and ``prices`` should be built on the same session, and nothing may
-    run on it before the service."""
+    run on it before the service. ``clock`` gives "today" in São Paulo: a read dated after it is
+    refused with FUTURE_DATE (OQ-35)."""
     return PortfolioQueries(
         SqlAlchemyPortfolioRepository(uow.session),
         uow=uow,
         assets=assets,
         prices=prices,
         date_statuses=date_statuses,
+        clock=clock,
     )

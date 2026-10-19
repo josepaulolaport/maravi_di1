@@ -9,7 +9,8 @@
 Published data only, never recalculated on GET (spec §11.4). The composition root builds the
 router with its provider of the query service, which wires Asset, Prices and Processing's
 readers on the request's Unit of Work. A malformed date is answered 422 ``VALIDATION_ERROR`` by
-the app's handlers; a start after the end is the service's ``INVALID_RANGE``.
+the app's handlers; a start after the end is the service's ``INVALID_RANGE``, and a ``date`` or
+``end_date`` after today its ``FUTURE_DATE`` (OQ-35).
 """
 
 from __future__ import annotations

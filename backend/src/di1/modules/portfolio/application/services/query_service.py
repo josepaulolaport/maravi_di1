@@ -30,6 +30,7 @@ from di1.modules.portfolio.public import (
 from di1.modules.prices.public import PriceReader
 from di1.modules.processing.public import DateStatus, DateStatusReader
 from di1.platform.database.unit_of_work import UnitOfWork
+from di1.shared.clock import Clock
 from di1.shared.decimals import financial_context
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 
@@ -47,15 +48,18 @@ class PortfolioQueries:
         assets: AssetReader,
         prices: PriceReader,
         date_statuses: DateStatusReader,
+        clock: Clock,
     ) -> None:
         self._repository = repository
         self._uow = uow
         self._assets = assets
         self._prices = prices
         self._date_statuses = date_statuses
+        self._clock = clock
         self._snapshot_started = False
 
     async def get_summary(self, on: date) -> PortfolioSummaryView:
+        self._reject_future(on, "date")
         await self._snapshot()
         status = await self._status(on)
         cash = await self._repository.get_cash(on)
@@ -85,6 +89,7 @@ class PortfolioQueries:
         )
 
     async def get_position_table(self, on: date) -> PositionTableView:
+        self._reject_future(on, "date")
         await self._snapshot()
         status = await self._status(on)
         published = await self._repository.get_positions(on)
@@ -112,14 +117,19 @@ class PortfolioQueries:
         )
 
     async def get_pnl_series(self, start_date: date, end_date: date) -> tuple[PnLPointView, ...]:
+        errors = []
         if start_date > end_date:
-            raise DomainError(
+            errors.append(
                 ErrorDetail(
                     ErrorCode.INVALID_RANGE,
                     "A data inicial deve ser anterior ou igual à data final.",
                     "start_date",
                 )
             )
+        if end_date > self._clock.today():
+            errors.append(_future_date("end_date"))
+        if errors:
+            raise DomainError(*errors)
         await self._snapshot()
         statuses = await self._date_statuses.get_date_statuses(start_date, end_date, uow=self._uow)
         days = {d.date: d for d in await self._repository.get_portfolio_days(start_date, end_date)}
@@ -153,6 +163,11 @@ class PortfolioQueries:
             )
         return tuple(points)
 
+    def _reject_future(self, on: date, field: str) -> None:
+        """A read dated after today in São Paulo is refused (OQ-35)."""
+        if on > self._clock.today():
+            raise DomainError(_future_date(field))
+
     async def _snapshot(self) -> None:
         """Every read of this Unit of Work, the statuses included, sees one snapshot."""
         if not self._snapshot_started:
@@ -161,6 +176,10 @@ class PortfolioQueries:
 
     async def _status(self, on: date) -> DateStatus | None:
         return (await self._date_statuses.get_date_statuses(on, on, uow=self._uow)).get(on)
+
+
+def _future_date(field: str) -> ErrorDetail:
+    return ErrorDetail(ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", field)
 
 
 def _row(
