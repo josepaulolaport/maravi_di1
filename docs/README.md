@@ -9,7 +9,7 @@ These files are the whole specification. They replaced the earlier `docs/` on 20
 | [schema.sql](schema.sql) | The PostgreSQL 16 DDL (applies cleanly; see schema.md Status) | SQL |
 | [interfaces.md](interfaces.md) | Module contracts, transaction boundaries, HTTP endpoints, DI composition | en |
 | [maravi_implementation_plan.md](maravi_implementation_plan.md) | Architecture, repository layout, agent lanes, waves and gates | en |
-| [open-questions.md](open-questions.md) | Questions the docs left open and the user's answers (OQ-1 to OQ-46; none open) | en |
+| [open-questions.md](open-questions.md) | Questions the docs left open and the user's answers (OQ-1 to OQ-47; none open) | en |
 | [desafio_tecnico_di1_1.pdf](desafio_tecnico_di1_1.pdf) | The challenge text (authority 1) | pt-BR |
 
 ## Order of authority
