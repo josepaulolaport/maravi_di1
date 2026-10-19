@@ -28,8 +28,7 @@ answered yet. On a stop the worker stops consuming and cancels what is in progre
   queue; one that arrives during the stop is left for the next worker the same way;
 - the run in progress is cancelled: its open date transaction rolls back, the dates it
   committed stay published, and the startup hook resumes it on the next start (one worker,
-  OQ-45; interfaces.md still describes recovery by lease and re-dispatch, pending its update
-  by the integrator); a run still waiting is dropped and resumed the same way;
+  OQ-45); a run still waiting is dropped and resumed the same way;
 - a startup hook in progress is cancelled, and runs again on the next start.
 
 Then it closes the broker connection and the engine. A failure is logged through the
