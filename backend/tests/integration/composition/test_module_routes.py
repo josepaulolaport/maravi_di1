@@ -2,10 +2,14 @@
 registered under ``/api`` and reaches its service with the composition's providers (interfaces.md
 "DI composition", "HTTP endpoints"; the frontend's ``API_BASE``).
 
-One smoke path per router, with no fakes: Asset over its repository; Ledger over Asset's reader,
-the real Pricing and the app's clock (OQ-14). The expected PU is spec §4.1's
-``PU = 100000 / (1 + taxa)^(dias_corridos/365)`` for DI1F28 (maturity 03/01/2028) at 10% a.a. on
-14/10/2026: 446 calendar days, 100000 / 1.10^(446/365) = 89006.4625467350 at 10 dp (OQ-3), the
+One smoke path per router, with no fakes: Asset over its repository; Ledger and Prices over Asset's
+reader, the real Pricing and the app's clock (OQ-14); Portfolio's read models on the request's
+fresh Unit of Work (OQ-23, OQ-35); Processing's queue (OQ-29). Each module that reads "today"
+proves it is the app's `FixedClock` (18/10/2026): the system date, 19/10/2026, is refused.
+
+The expected PU is spec §4.1's ``PU = 100000 / (1 + taxa)^(dias_corridos/365)`` for DI1F28
+(maturity 03/01/2028) at 10% a.a. on 14/10/2026: 446 calendar days,
+100000 / 1.10^(446/365) = 89006.4625467350 at 10 dp (OQ-3), the
 same as the frontend fixture (``frontend/src/api/mocks/fixtures.ts``). The behaviour of each
 route is the modules' own tests' business; these tests only prove the wiring.
 """
@@ -148,3 +152,74 @@ def test_ledger_reads_today_from_the_app_clock(client: TestClient) -> None:
 def test_module_routes_are_not_served_at_the_root(client: TestClient) -> None:
     assert client.get("/instrument-types").status_code == 404
     assert client.get("/health").status_code == 200
+
+
+def test_prices_sets_a_reference_price_priced_by_pricing(client: TestClient) -> None:
+    asset_id = _create_di1f28(client)
+    body = {
+        "asset_id": asset_id,
+        "reference_date": "2026-10-14",
+        "input_kind": "RATE",
+        "rate": "0.10",
+    }
+
+    created = client.post("/api/reference-prices", json=body)
+    listed = client.get(
+        "/api/reference-prices",
+        params={"asset_id": asset_id, "start_date": "2026-10-14", "end_date": "2026-10-14"},
+    )
+
+    assert created.status_code == 201, created.text
+    assert (created.json()["source"], created.json()["pu"]) == ("MANUAL", "89006.4625467350")
+    assert listed.status_code == 200, listed.text
+    assert len(listed.json()["items"]) == 1
+
+
+def test_prices_reads_today_from_the_app_clock(client: TestClient) -> None:
+    asset_id = _create_di1f28(client)
+    body = {"asset_id": asset_id, "reference_date": "2026-10-19", "input_kind": "RATE"}
+
+    response = client.post("/api/reference-prices", json={**body, "rate": "0.10"})
+
+    assert response.status_code == 422
+    assert [e["code"] for e in response.json()["errors"]] == ["FUTURE_DATE"]
+
+
+def test_portfolio_summary_of_an_unprocessed_date(client: TestClient) -> None:
+    response = client.get("/api/portfolio/summary", params={"date": "2026-10-14"})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["cash"]["status"], body["positions"]["status"]) == (
+        "NOT_PROCESSED",
+        "NOT_PROCESSED",
+    )
+    assert body["aum"] is None
+
+
+def test_portfolio_reads_today_from_the_app_clock(client: TestClient) -> None:
+    response = client.get("/api/portfolio/summary", params={"date": "2026-10-19"})
+
+    assert response.status_code == 422
+    assert [e["code"] for e in response.json()["errors"]] == ["FUTURE_DATE"]
+
+
+def test_processing_queues_and_lists_a_request(client: TestClient) -> None:
+    body = {"start_date": "2026-10-14", "end_date": "2026-10-18", "scope": "ALL"}
+
+    created = client.post("/api/processing/requests", json=body)
+    listed = client.get("/api/processing/requests")
+
+    assert created.status_code == 201, created.text
+    assert created.json()["status"] == "QUEUED"
+    assert [r["id"] for r in listed.json()["items"]] == [created.json()["id"]]
+
+
+def test_processing_reads_today_from_the_app_clock(client: TestClient) -> None:
+    body = {"start_date": "2026-10-14", "end_date": "2026-10-19", "scope": "ALL"}
+
+    response = client.post("/api/processing/requests", json=body)
+
+    assert response.status_code == 422
+    errors = [(e["code"], e["field"]) for e in response.json()["errors"]]
+    assert errors == [("FUTURE_DATE", "end_date")]
