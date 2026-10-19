@@ -62,6 +62,7 @@ backend/
     unit/
     integration/
     architecture/
+    acceptance/      # spec §13 phase 1: pure Portfolio + PnL compositions, no I/O
     e2e/
 frontend/
   src/
@@ -96,6 +97,8 @@ Recommended agents (a reviewer can be a second agent applied after each module P
 | H — Platform | `platform/**`, `workers/**` shared bootstrap | Wave 0 | Schema and dispatch contract |
 | I — Frontend | `frontend/**` | Wave 1 mock API | Drafts the HTTP response types and MSW fixtures from the spec and the Figma, as a contract proposal the integrator reconciles with the backend; backend not required |
 | X — Integrator | `composition/**`, `main.py`, migrations, global tests, shared contracts, CI, compose | Throughout | Owns all cross-module wiring |
+
+`tests/acceptance/**` (spec §13 acceptance tests, phase 1: pure Portfolio and PnL compositions, no I/O) and `tests/integration/acceptance/**` (phase 2: the same scenarios over HTTP and PostgreSQL) belong to the acceptance-tests session (user, 2026-10-19); it touches nothing else. Only phase 1 runs in the pre-commit hook; CI runs both.
 
 If fewer agents: combine A+B, C+D, E+F; **do not** combine G with platform+integration until there are stable endpoints. A coding agent should not modify another lane's folder to make its tests pass: raise a contract change request to X. A lane's integration tests may import another lane's test seed read-only (lane B imports lane A's catalogue seed from `tests/integration/asset/conftest.py`; user, 2026-10-19); the owner changes that seed, and a change that breaks an importer goes through X.
 
