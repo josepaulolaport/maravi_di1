@@ -10,7 +10,7 @@ from sqlalchemy import TextClause, text
 RUN_COLUMNS = (
     "id, scope, start_date, end_date, status, created_at, dispatched_at, started_at,"
     " finished_at, cancel_requested_at, progress_date, error_code, error_message, updated_at,"
-    " failed_date, failed_chain, claim_token, lease_expires_at, attempt_count"
+    " failed_date, failed_chain, attempt_count"
 )
 
 LOCK_CALCULATION_STATE = text(
@@ -38,8 +38,8 @@ UPDATE_RUN = text(
     " started_at = :started_at, finished_at = :finished_at,"
     " cancel_requested_at = :cancel_requested_at, progress_date = :progress_date,"
     " error_code = :error_code, error_message = :error_message, updated_at = :updated_at,"
-    " failed_date = :failed_date, failed_chain = :failed_chain, claim_token = :claim_token,"
-    " lease_expires_at = :lease_expires_at, attempt_count = :attempt_count WHERE id = :id"
+    " failed_date = :failed_date, failed_chain = :failed_chain, attempt_count = :attempt_count"
+    " WHERE id = :id"
 )
 
 DATE_STATUS_COLUMNS = (

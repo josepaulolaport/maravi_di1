@@ -24,12 +24,11 @@ from di1.platform.database.unit_of_work import UnitOfWork
 
 @dataclass(frozen=True, slots=True)
 class RunRecord:
-    """A run as the worker sees it: the public request plus the claim token, the lease and the
-    attempt count, which stay inside Processing."""
+    """A run as the worker sees it: the public request plus the number of times it was claimed,
+    which stays inside Processing (the recovery cap counts it). There is one worker, so no claim
+    token or lease (user decision, 2026-10-19)."""
 
     request: ProcessingRequest
-    claim_token: UUID | None
-    lease_expires_at: datetime | None
     attempt_count: int
 
 
@@ -121,7 +120,7 @@ class RunStore(Protocol):
     ) -> RunRecord | None: ...
 
     async def save_run(self, run: RunRecord, *, uow: UnitOfWork) -> None:
-        """Stores every mutable column of the run, claim and failure included."""
+        """Stores every mutable column of the run, its failure and attempt count included."""
         ...
 
     async def lock_date_statuses(

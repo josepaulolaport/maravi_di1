@@ -3,8 +3,9 @@ the dates back to run after the acknowledgement (interfaces.md "Transaction boun
 
 The claim is the durable state change: it commits in the consumer's Unit of Work with the inbox
 record, the delivery is then acknowledged, and only then does the returned callable process the
-dates, each in its own Unit of Work. A long range therefore never holds a delivery; recovery
-after a crash comes from the lease and the dispatcher's re-dispatch, not from redelivery.
+dates, each in its own Unit of Work. A long range therefore never holds a delivery; a run
+interrupted by a crash is resumed when the worker starts again (``recover_interrupted``), not by
+redelivery.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ class RangeProcessor(Protocol):
 
     async def claim(self, request_id: UUID, *, uow: UnitOfWork) -> Claim | None: ...
 
-    async def run(self, request_id: UUID, token: UUID) -> None: ...
+    async def run(self, request_id: UUID) -> None: ...
 
 
 class RunRequestHandler:
@@ -56,6 +57,6 @@ class RunRequestHandler:
             return None
 
         async def run_dates() -> None:
-            await self._processor.run(claim.request_id, claim.token)
+            await self._processor.run(claim.request_id)
 
         return run_dates

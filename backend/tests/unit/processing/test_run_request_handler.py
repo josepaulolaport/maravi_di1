@@ -19,21 +19,20 @@ from di1.platform.messaging.envelope import Envelope
 from tests.unit.processing.fakes import FakeUnitOfWork
 
 REQUEST_ID = UUID(int=7)
-TOKEN = UUID(int=8)
 
 
 @dataclass
 class FakeProcessor:
     claimable: bool = True
     claimed: list[UUID] = field(default_factory=list)
-    ran: list[tuple[UUID, UUID]] = field(default_factory=list)
+    ran: list[UUID] = field(default_factory=list)
 
     async def claim(self, request_id: UUID, *, uow: UnitOfWork) -> Claim | None:
         self.claimed.append(request_id)
-        return Claim(request_id, TOKEN) if self.claimable else None
+        return Claim(request_id) if self.claimable else None
 
-    async def run(self, request_id: UUID, token: UUID) -> None:
-        self.ran.append((request_id, token))
+    async def run(self, request_id: UUID) -> None:
+        self.ran.append(request_id)
 
 
 def envelope(
@@ -58,7 +57,7 @@ async def test_the_claim_happens_in_the_handler_and_the_dates_after_it_returns()
     assert processor.ran == []
     assert after_ack is not None
     await after_ack()
-    assert processor.ran == [(REQUEST_ID, TOKEN)]
+    assert processor.ran == [REQUEST_ID]
 
 
 async def test_nothing_to_run_when_the_claim_is_refused() -> None:

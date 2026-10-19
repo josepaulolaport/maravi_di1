@@ -79,7 +79,7 @@ class RealWorker:
         async with self.uow_factory() as uow:
             claim = await self.processor.claim(request_id, uow=uow)
         assert claim is not None
-        await self.processor.run(claim.request_id, claim.token)
+        await self.processor.run(claim.request_id)
         await self.dispatcher.dispatch_next()  # frees the slot
         async with self.engine.connect() as connection:
             row = (

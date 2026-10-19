@@ -405,50 +405,33 @@ async def test_a_cancel_during_the_last_date_lets_the_run_complete(worker: Worke
     assert (await worker.run_row(request_id))["status"] == "COMPLETED"
 
 
-# --- lease, crash and recovery --------------------------------------------------------------
+# --- one worker: crash and recovery at startup (user decision, 2026-10-19) ----------------
 
 
-async def test_a_duplicate_command_does_not_claim_a_run_already_claimed(worker: Worker) -> None:
+async def test_a_command_for_a_run_that_ended_does_nothing(worker: Worker) -> None:
+    request_id = await worker.enqueue("CASH", D1, D1)
+    await worker.dispatch_and_run()
+
+    assert await worker.claim(request_id) is None
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["attempt_count"]) == ("COMPLETED", 1)
+
+
+async def test_the_dispatcher_never_re_dispatches_an_active_run(worker: Worker) -> None:
     request_id = await worker.enqueue("CASH", D1, D1)
     await worker.dispatcher.dispatch_next()
     assert await worker.claim(request_id) is not None
+    worker.clock.advance(3600)
 
-    assert await worker.claim(request_id) is None
-    assert (await worker.run_row(request_id))["attempt_count"] == 1
-
-
-async def test_a_worker_that_lost_its_lease_writes_nothing(worker: Worker) -> None:
-    request_id = await worker.enqueue("CASH", D1, D3)
-    await worker.dispatcher.dispatch_next()
-    claim = await worker.claim(request_id)
-    assert claim is not None
-
-    worker.clock.advance(61)
-    await worker.processor.run(claim.request_id, claim.token)
-
-    assert await worker.statuses() == {}
-    assert await worker.writes() == []
-    assert (await worker.run_row(request_id))["status"] == "RUNNING"
+    assert await worker.dispatcher.dispatch_next() is None
+    assert len(await worker.outbox()) == 1
 
 
-async def test_an_expired_lease_is_re_dispatched_and_the_old_claim_fenced(worker: Worker) -> None:
-    request_id = await worker.enqueue("CASH", D1, D2)
-    await worker.dispatcher.dispatch_next()
-    old = await worker.claim(request_id)
-    assert old is not None
-    worker.clock.advance(61)
+async def test_startup_with_nothing_active_recovers_nothing(worker: Worker) -> None:
+    await worker.enqueue("CASH", D1, D1)
 
-    assert await worker.dispatcher.dispatch_next() == request_id
-    assert len(await worker.outbox()) == 2
-    new = await worker.claim(request_id)
-    assert new is not None and new.token != old.token
-
-    await worker.processor.run(old.request_id, old.token)  # fenced: nothing happens
-    assert await worker.statuses() == {}
-    await worker.processor.run(new.request_id, new.token)
-
-    run = await worker.run_row(request_id)
-    assert (run["status"], run["attempt_count"]) == ("COMPLETED", 2)
+    assert await worker.dispatcher.recover_interrupted() is None
+    assert await worker.outbox() == []
 
 
 async def test_a_crash_mid_date_resumes_after_progress_date(worker: Worker) -> None:
@@ -468,10 +451,9 @@ async def test_a_crash_mid_date_resumes_after_progress_date(worker: Worker) -> N
     assert (rows[D2]["cash"], rows[D2]["cash_previous"]) == ("RUNNING", "PROCESSED")
     assert (await worker.run_row(request_id))["progress_date"] == D1
 
-    # The recovery: the lease expires, the dispatcher re-dispatches, a new claim resumes at D2.
+    # The worker starts again: the run's command is sent again and the claim resumes at D2.
     worker.writer.hook = None
-    worker.clock.advance(61)
-    await worker.dispatch_and_run()
+    assert await worker.restart_and_run() == request_id
 
     assert await worker.statuses() == {
         D0: (None, "PROCESSED"),
@@ -501,9 +483,8 @@ async def test_a_cancel_after_a_crash_restores_the_running_date(worker: Worker) 
         id=request_id,
     )
     worker.writer.hook = None
-    worker.clock.advance(61)
 
-    await worker.dispatch_and_run()
+    await worker.restart_and_run()
 
     rows = await worker.status_rows()
     assert (rows[D1]["cash"], rows[D1]["cash_previous"]) == ("PROCESSED", None)
@@ -525,9 +506,8 @@ async def test_a_crash_on_a_new_date_deletes_its_row_when_the_run_ends(worker: W
         " WHERE id = :id",
         id=request_id,
     )
-    worker.clock.advance(61)
 
-    await worker.dispatch_and_run()
+    await worker.restart_and_run()
 
     assert await worker.statuses() == {}
 
@@ -545,8 +525,7 @@ async def test_recovery_of_an_all_run_keeps_a_failed_chain_stopped(worker: Worke
         await worker.dispatch_and_run()
 
     worker.writer.hook = None
-    worker.clock.advance(61)
-    await worker.dispatch_and_run()
+    await worker.restart_and_run()
 
     assert await worker.statuses() == {
         D1: ("PROCESSED", "FAILED"),
@@ -640,19 +619,6 @@ async def test_a_failure_outside_the_chains_after_one_stopped_fails_only_the_liv
     )
 
 
-async def test_the_lease_is_renewed_per_date(worker: Worker) -> None:
-    async def slow_date(chain: str, day: date) -> None:
-        worker.clock.advance(50)  # each date takes 50 s; the range takes 150 s > 60 s
-
-    worker.writer.hook = slow_date
-    request_id = await worker.enqueue("CASH", D1, D3)
-
-    await worker.dispatch_and_run()
-
-    run = await worker.run_row(request_id)
-    assert (run["status"], run["attempt_count"]) == ("COMPLETED", 1)
-
-
 async def test_a_deposit_landing_during_a_positions_run_changes_no_status(
     worker: Worker,
 ) -> None:
@@ -690,7 +656,7 @@ async def test_queue_a_backdated_trade_queue_b_cancel_a_finish_b(worker: Worker)
     worker.writer.hook = cancel_a_during_d2
     worker.world.ledger.trades.append(trade(asset, D1, 3, "95000.0000000000"))  # backdated
     second = await worker.enqueue("POSITIONS", D1, D2)
-    await worker.processor.run(claim.request_id, claim.token)
+    await worker.processor.run(claim.request_id)
     await asyncio.gather(*pending)
     worker.writer.hook = None
 
@@ -735,21 +701,19 @@ async def test_case_26_an_earlier_failed_status_alone_fails_without_asking_the_l
     )
 
 
-async def test_a_command_lost_after_the_outbox_publish_is_re_dispatched(worker: Worker) -> None:
+async def test_a_command_lost_after_the_outbox_publish_is_sent_again_at_startup(
+    worker: Worker,
+) -> None:
     request_id = await worker.enqueue("CASH", D1, D1)
     assert await worker.dispatcher.dispatch_next() == request_id
     # The relay published the command and the worker never claimed it (lost, or it crashed).
-    assert await worker.dispatcher.dispatch_next() is None  # the dispatch lease still holds
-    worker.clock.advance(61)
+    assert await worker.dispatcher.dispatch_next() is None
 
-    assert await worker.dispatcher.dispatch_next() == request_id
+    assert await worker.restart_and_run() == request_id
+
     assert len(await worker.outbox()) == 2
-    assert (await worker.run_row(request_id))["status"] == "DISPATCHED"
-    claim = await worker.claim(request_id)
-    assert claim is not None
-    await worker.processor.run(claim.request_id, claim.token)
-
-    assert (await worker.run_row(request_id))["status"] == "COMPLETED"
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["attempt_count"]) == ("COMPLETED", 1)
 
 
 # --- recovery cap (user decision, 2026-10-19) -------------------------------------------
@@ -757,7 +721,7 @@ async def test_a_command_lost_after_the_outbox_publish_is_re_dispatched(worker: 
 
 async def crashed_run(worker: Worker, *, attempts: int) -> UUID:
     """A CASH run over D1..D2 that crashed on D1, leaving D1 RUNNING over PROCESSED, after
-    ``attempts`` claims; its lease has expired."""
+    ``attempts`` claims."""
     await seed_statuses(worker.engine, {D0: (None, "PROCESSED"), D1: (None, "PROCESSED")})
     worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("0"))
     request_id = await worker.enqueue("CASH", D1, D2)
@@ -774,7 +738,6 @@ async def crashed_run(worker: Worker, *, attempts: int) -> UUID:
         n=attempts,
         id=request_id,
     )
-    worker.clock.advance(61)
     return request_id
 
 
@@ -785,7 +748,7 @@ async def test_a_run_past_the_recovery_cap_ends_failed_and_frees_the_slot(
     queued = await worker.enqueue("CASH", D2, D2)
     outbox_before = len(await worker.outbox())
 
-    assert await worker.dispatcher.dispatch_next() == queued
+    assert await worker.dispatcher.recover_interrupted() == queued
 
     run = await worker.run_row(stuck)
     assert (run["status"], run["error_code"], run["error_message"]) == (
@@ -794,7 +757,6 @@ async def test_a_run_past_the_recovery_cap_ends_failed_and_frees_the_slot(
         "Processamento interrompido após repetidas falhas de recuperação.",
     )
     assert run["finished_at"] == worker.clock.now()
-    assert run["claim_token"] is None and run["lease_expires_at"] is None
     rows = await worker.status_rows()
     assert (rows[D1]["cash"], rows[D1]["cash_previous"]) == ("PROCESSED", None)  # restored
     assert await worker.active_request_id() == queued
@@ -805,7 +767,7 @@ async def test_a_run_past_the_recovery_cap_ends_failed_and_frees_the_slot(
 async def test_a_run_below_the_recovery_cap_is_still_re_dispatched(worker: Worker) -> None:
     stuck = await crashed_run(worker, attempts=3)
 
-    assert await worker.dispatcher.dispatch_next() == stuck
+    assert await worker.dispatcher.recover_interrupted() == stuck
     assert (await worker.run_row(stuck))["status"] == "RUNNING"
 
 
@@ -820,7 +782,7 @@ async def test_the_recovery_cap_is_configurable(
         max_recovery_attempts=1,
     )
 
-    assert await dispatcher.dispatch_next() is None
+    assert await dispatcher.recover_interrupted() is None
 
     run = await worker.run_row(stuck)
     assert (run["status"], run["error_code"]) == ("FAILED", "RECOVERY_EXHAUSTED")
@@ -839,9 +801,8 @@ async def test_a_crash_on_a_new_date_past_the_cap_deletes_its_empty_row(worker: 
     await worker.execute(
         "UPDATE processing.requests SET attempt_count = 4 WHERE id = :id", id=request_id
     )
-    worker.clock.advance(61)
 
-    await worker.dispatcher.dispatch_next()
+    await worker.dispatcher.recover_interrupted()
 
     assert await worker.statuses() == {}
     assert (await worker.run_row(request_id))["status"] == "FAILED"

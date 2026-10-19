@@ -51,8 +51,6 @@ def _to_run(row: Row[Any]) -> RunRecord:
             failed_date=row.failed_date,
             failed_chain=None if row.failed_chain is None else ProcessingScope(row.failed_chain),
         ),
-        claim_token=row.claim_token,
-        lease_expires_at=row.lease_expires_at,
         attempt_count=row.attempt_count,
     )
 
@@ -121,8 +119,6 @@ class SqlRunStore:
                 "failed_chain": None
                 if request.failed_chain is None
                 else request.failed_chain.value,
-                "claim_token": run.claim_token,
-                "lease_expires_at": run.lease_expires_at,
                 "attempt_count": run.attempt_count,
             },
         )
