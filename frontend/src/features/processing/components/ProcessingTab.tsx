@@ -14,7 +14,7 @@ import { ConfirmProcessingModal } from './ConfirmProcessingModal';
 import { HistoryTable } from './HistoryTable';
 import { JobDetailsModal } from './JobDetailsModal';
 import { isValidRange } from '@/shared/processing/RangeFields';
-import { nextDate } from '../jobStatus';
+import type { RetryRequest } from '../jobStatus';
 import { RequestCard } from './RequestCard';
 
 type Dialog = { kind: 'details' | 'cancel'; jobId: string } | null;
@@ -63,10 +63,11 @@ export function ProcessingTab({
   const close = () => {
     setDialog(null);
   };
-  const requestAgain = (job: ProcessingRequest) => {
+  const requestAgain = (retry: RetryRequest) => {
     setDialog(null);
-    // From where the run stopped to its original end (OQ-23 item 10).
-    onRequestAgain(nextDate(job), job.end_date, job.scope);
+    // From where the run stopped, or the failed chain from its failed date, to the original end
+    // (OQ-23 item 10, OQ-40 items 3 and 6).
+    onRequestAgain(retry.start, retry.end, retry.scope);
   };
 
   return (

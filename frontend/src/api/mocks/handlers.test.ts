@@ -1,6 +1,13 @@
-import type { PortfolioPositions, PortfolioSummary, ProcessingRequest } from '../contract';
+import type {
+  PortfolioPositions,
+  PortfolioSummary,
+  ProcessingChain,
+  ProcessingRequest,
+  ProcessingScope,
+} from '../contract';
 import { assetsApi, ledgerApi, portfolioApi, pricesApi, processingApi } from '../endpoints';
 import { ApiError } from '../http';
+import { db, setStatus } from './db';
 import { IDS, PRICE_IDS } from './fixtures';
 
 // The MSW fake backend must honour the documented rules, so screens built against it behave
@@ -109,16 +116,39 @@ describe('mock portfolio', () => {
     expect(summary.positions.market_value).toBeNull();
   });
 
-  it('OQ-16 returns the cumulative series with the gap as null', async () => {
+  it('OQ-41 returns one point per calendar date; the stored cumulative P&L stays null on gaps', async () => {
     const { items } = await portfolioApi.getPnlSeries({
-      start_date: '2026-10-01',
+      start_date: '2026-10-12',
       end_date: '2026-10-18',
     });
 
     expect(items.map((p) => [p.date, p.cumulative_pnl])).toEqual([
+      ['2026-10-12', null],
+      ['2026-10-13', null],
       ['2026-10-14', '0.0000000000'],
       ['2026-10-15', '-8034.1345282660'],
       ['2026-10-16', null],
+      ['2026-10-17', null],
+      ['2026-10-18', null],
+    ]);
+  });
+
+  it('OQ-41 an unprocessed date reads NOT_PROCESSED with every figure null but the range sum', async () => {
+    const { items } = await portfolioApi.getPnlSeries({
+      start_date: '2026-10-17',
+      end_date: '2026-10-17',
+    });
+
+    expect(items).toEqual([
+      {
+        date: '2026-10-17',
+        status: 'NOT_PROCESSED',
+        published_at: null,
+        pnl_status: null,
+        daily_pnl: null,
+        cumulative_pnl: null,
+        range_cumulative_pnl: '0',
+      },
     ]);
   });
 });
@@ -171,38 +201,119 @@ describe('OQ-21 positions and the P&L series use the same status as the summary'
     });
   });
 
-  it('OQ-16 OQ-31 each P&L point carries its status and processing time', async () => {
+  it('OQ-16 OQ-31 OQ-41 each P&L point carries its status and processing time', async () => {
     const { items } = await portfolioApi.getPnlSeries({
       start_date: '2026-10-14',
-      end_date: '2026-10-16',
+      end_date: '2026-10-17',
     });
 
     expect(items.map((p) => [p.date, p.status, p.published_at])).toEqual([
       ['2026-10-14', 'PROCESSED', '2026-10-16T18:40:00-03:00'],
       ['2026-10-15', 'PROCESSED', '2026-10-16T18:40:00-03:00'],
       ['2026-10-16', 'PROCESSED_WITH_ISSUES', '2026-10-16T18:40:00-03:00'],
+      ['2026-10-17', 'NOT_PROCESSED', null],
     ]);
   });
 
-  it('OQ-31 range_cumulative_pnl sums the daily P&L from the start date, null from the first gap', async () => {
+  it('OQ-41 range_cumulative_pnl sums the daily P&L from the start; a missing or null day adds 0', async () => {
     const fromFifteenth = await portfolioApi.getPnlSeries({
       start_date: '2026-10-15',
-      end_date: '2026-10-16',
+      end_date: '2026-10-18',
     });
-    const fromFourteenth = await portfolioApi.getPnlSeries({
-      start_date: '2026-10-14',
+    const fromTwelfth = await portfolioApi.getPnlSeries({
+      start_date: '2026-10-12',
       end_date: '2026-10-16',
     });
 
     expect(fromFifteenth.items.map((p) => [p.date, p.range_cumulative_pnl])).toEqual([
       ['2026-10-15', '-8034.1345282660'],
-      ['2026-10-16', null],
+      // 16/10 is processed with a null daily P&L; 17 and 18/10 are not processed.
+      ['2026-10-16', '-8034.1345282660'],
+      ['2026-10-17', '-8034.1345282660'],
+      ['2026-10-18', '-8034.1345282660'],
     ]);
-    expect(fromFourteenth.items.map((p) => [p.date, p.range_cumulative_pnl])).toEqual([
+    expect(fromTwelfth.items.map((p) => [p.date, p.range_cumulative_pnl])).toEqual([
+      ['2026-10-12', '0'],
+      ['2026-10-13', '0'],
       ['2026-10-14', '0.0000000000'],
       ['2026-10-15', '-8034.1345282660'],
-      ['2026-10-16', null],
+      ['2026-10-16', '-8034.1345282660'],
     ]);
+  });
+
+  it('OQ-41 item 2 a date with no status has no processing time, even over an older published row', async () => {
+    setStatus('2026-10-15', 'POSITIONS', null);
+
+    const { items } = await portfolioApi.getPnlSeries({
+      start_date: '2026-10-15',
+      end_date: '2026-10-15',
+    });
+
+    expect(items[0]).toMatchObject({
+      status: 'NOT_PROCESSED',
+      published_at: null,
+      daily_pnl: null,
+    });
+  });
+
+  it.each(['FAILED', 'RUNNING'] as const)(
+    'OQ-41 item 4 a %s day shows its status with no P&L and adds 0, even over an older published row',
+    async (status) => {
+      setStatus('2026-10-15', 'POSITIONS', status);
+
+      const { items } = await portfolioApi.getPnlSeries({
+        start_date: '2026-10-14',
+        end_date: '2026-10-15',
+      });
+
+      expect(items[1]).toEqual({
+        date: '2026-10-15',
+        status,
+        published_at: '2026-10-16T18:40:00-03:00',
+        pnl_status: null,
+        daily_pnl: null,
+        cumulative_pnl: null,
+        range_cumulative_pnl: '0.0000000000',
+      });
+    },
+  );
+});
+
+describe('OQ-35 Portfolio reads dated after today', () => {
+  it('OQ-35 a summary or positions read after today is 422 FUTURE_DATE on date', async () => {
+    const summary = await problemOf(portfolioApi.getSummary('2026-10-19'));
+    const positions = await problemOf(portfolioApi.getPositions('2026-10-19'));
+
+    for (const problem of [summary, positions]) {
+      expect(problem.status).toBe(422);
+      expect(problem.errors?.map((e) => [e.code, e.field])).toEqual([['FUTURE_DATE', 'date']]);
+    }
+  });
+
+  it('OQ-35 a P&L series ending after today is 422 FUTURE_DATE on end_date only', async () => {
+    const problem = await problemOf(
+      portfolioApi.getPnlSeries({ start_date: '2026-10-19', end_date: '2026-10-20' }),
+    );
+
+    expect(problem.status).toBe(422);
+    expect(problem.errors?.map((e) => [e.code, e.field])).toEqual([['FUTURE_DATE', 'end_date']]);
+  });
+
+  it('OQ-35 a P&L series starting after today but ending today is INVALID_RANGE', async () => {
+    const problem = await problemOf(
+      portfolioApi.getPnlSeries({ start_date: '2026-10-19', end_date: '2026-10-18' }),
+    );
+
+    expect(problem.errors?.map((e) => [e.code, e.field])).toEqual([
+      ['INVALID_RANGE', 'start_date'],
+    ]);
+  });
+
+  it('OQ-35 today is read as published; a date not processed reads Não processado', async () => {
+    const summary = await portfolioApi.getSummary('2026-10-18');
+
+    expect(summary.cash.status).toBe('NOT_PROCESSED');
+    expect(summary.positions.status).toBe('NOT_PROCESSED');
   });
 });
 
@@ -216,6 +327,46 @@ describe('mock assets', () => {
       settlement_method: 'CASH',
       settlement_description: 'Liquidação financeira',
     });
+  });
+
+  it('OQ-33 trims and upper-cases a new contract code', async () => {
+    const created = await assetsApi.createInstrument({
+      product_id: IDS.di1,
+      code: '  di1f31 ',
+      maturity_date: '2031-01-02',
+    });
+
+    expect(created.code).toBe('DI1F31');
+    const duplicate = await problemOf(
+      assetsApi.createInstrument({
+        product_id: IDS.di1,
+        code: 'Di1F31',
+        maturity_date: '2031-01-02',
+      }),
+    );
+    expect(duplicate.errors?.[0]).toMatchObject({ code: 'VALIDATION_ERROR', field: 'code' });
+  });
+
+  it('OQ-33 an unknown product_id in the body is 422 on product_id, with the other field errors', async () => {
+    const problem = await problemOf(
+      assetsApi.createInstrument({ product_id: 'missing', code: 'DI1F31', maturity_date: '' }),
+    );
+
+    expect(problem.status).toBe(422);
+    expect(problem.errors?.map((e) => [e.code, e.field])).toEqual([
+      ['VALIDATION_ERROR', 'product_id'],
+      ['VALIDATION_ERROR', 'maturity_date'],
+    ]);
+  });
+
+  it('OQ-33 search is a substring match ignoring case and accents', async () => {
+    const byName = await assetsApi.listProducts({ search: 'taxa media' });
+    const byClass = await assetsApi.listProducts({ search: 'JUROS' });
+    const byCode = await assetsApi.listInstruments({ product_id: IDS.di1, search: 'f28' });
+
+    expect(byName.items.map((p) => p.code)).toEqual(['DI1']);
+    expect(byClass.items.map((p) => p.code)).toEqual(['DI1']);
+    expect(byCode.items.map((i) => i.code)).toEqual(['DI1F28']);
   });
 });
 
@@ -274,6 +425,49 @@ describe('mock reference prices', () => {
     expect((await problemOf(pricesApi.removeReferencePrice(PRICE_IDS.f28_1016))).status).toBe(404);
   });
 
+  it('OQ-42 a price read accepts dates after today; those days come back empty', async () => {
+    const future = await pricesApi.listReferencePrices({
+      asset_id: IDS.di1f28,
+      start_date: '2026-10-19',
+      end_date: '2026-11-30',
+    });
+    const across = await pricesApi.listReferencePrices({
+      asset_id: IDS.di1f28,
+      start_date: '2026-10-16',
+      end_date: '2026-10-25',
+    });
+
+    expect(future.items).toEqual([]);
+    expect(across.items.map((d) => d.reference_date)).toEqual(['2026-10-16']);
+  });
+
+  it('OQ-42 a price read still refuses a start after its end', async () => {
+    const problem = await problemOf(
+      pricesApi.listReferencePrices({
+        asset_id: IDS.di1f28,
+        start_date: '2026-10-25',
+        end_date: '2026-10-20',
+      }),
+    );
+
+    expect(problem.errors?.map((e) => [e.code, e.field])).toEqual([
+      ['INVALID_RANGE', 'start_date'],
+    ]);
+  });
+
+  it('OQ-42 OQ-14 a price write dated after today is still refused', async () => {
+    const problem = await problemOf(
+      pricesApi.setReferencePrice({
+        asset_id: IDS.di1f28,
+        reference_date: '2026-10-19',
+        input_kind: 'PU',
+        pu: '89000.00',
+      }),
+    );
+
+    expect(problem.errors?.[0]).toMatchObject({ code: 'FUTURE_DATE', field: 'reference_date' });
+  });
+
   it('§5 requires the contract when listing reference prices', async () => {
     const problem = await problemOf(
       pricesApi.listReferencePrices({
@@ -286,15 +480,16 @@ describe('mock reference prices', () => {
     expect(problem.errors?.[0]).toMatchObject({ code: 'VALIDATION_ERROR', field: 'asset_id' });
   });
 
-  it('OQ-19 shows each contract latest observation with its date', async () => {
+  it('OQ-33 last_reference is null for every contract for now, prices or not', async () => {
     const { items } = await assetsApi.listInstruments({ product_id: IDS.di1 });
 
-    expect(items.map((i) => [i.code, i.last_reference?.reference_date ?? null])).toEqual([
+    expect(items.map((i) => [i.code, i.last_reference])).toEqual([
       ['DI1F27', null],
-      ['DI1F28', '2026-10-16'],
-      ['DI1F29', '2026-10-15'],
+      ['DI1F28', null],
+      ['DI1F29', null],
       ['DI1F30', null],
     ]);
+    expect((await assetsApi.getInstrument(IDS.di1f28)).last_reference).toBeNull();
   });
 });
 
@@ -461,6 +656,37 @@ describe('mock ledger validation', () => {
       ]),
     );
     expect((await ledgerApi.listEntries(range)).items).toHaveLength(3);
+  });
+
+  it('OQ-32 an empty ids list is 422 VALIDATION_ERROR on ids', async () => {
+    const problem = await problemOf(ledgerApi.deleteEntries({ ids: [] }));
+
+    expect(problem.status).toBe(422);
+    expect(problem.errors?.[0]).toMatchObject({ code: 'VALIDATION_ERROR', field: 'ids' });
+  });
+
+  it('OQ-32 a repeated id counts once: {ids: [X, X]} deletes X and succeeds', async () => {
+    const range = { start_date: '2026-10-01', end_date: '2026-10-18' };
+    const id = '7a000000-0000-4000-8000-000000000003';
+
+    await ledgerApi.deleteEntries({ ids: [id, id] });
+
+    const ids = (await ledgerApi.listEntries(range)).items.map((e) => e.id);
+    expect(ids).not.toContain(id);
+    expect(ids).toHaveLength(4);
+  });
+
+  it('OQ-32 the deletion is permanent: an already-deleted id answers 404 and nothing is deleted', async () => {
+    const range = { start_date: '2026-10-01', end_date: '2026-10-18' };
+    const gone = '7a000000-0000-4000-8000-000000000003';
+    const kept = '7c000000-0000-4000-8000-000000000002';
+    await ledgerApi.deleteEntries({ ids: [gone] });
+
+    const problem = await problemOf(ledgerApi.deleteEntries({ ids: [kept, gone] }));
+
+    expect(problem.status).toBe(404);
+    expect(problem.errors?.[0]?.code).toBe('NOT_FOUND');
+    expect((await ledgerApi.listEntries(range)).items.map((e) => e.id)).toContain(kept);
   });
 
   it('§6.2 a cash entry needs a time and a non-zero amount with at most 2 places', async () => {
@@ -646,6 +872,45 @@ describe('mock processing', () => {
     expect(problem.errors?.[0]).toMatchObject({ code: 'INVALID_RANGE', field: 'start_date' });
   });
 
+  it('OQ-37 a missing price shows once per (asset, needed date), at its earliest affected date', async () => {
+    const base = db.issues[0];
+    if (!base) throw new Error('the fixtures have one issue');
+    // 17/10's P&L needs the same 16/10 DI1F29 price as 16/10's valuation.
+    db.issues.push(
+      { ...base, id: 'dup-1', affected_date: '2026-10-17' },
+      { ...base, id: 'other-date', affected_date: '2026-10-17', required_price_date: '2026-10-17' },
+    );
+
+    const { items } = await processingApi.listIssues();
+
+    expect(items.map((i) => [i.asset_code, i.required_price_date, i.affected_date])).toEqual([
+      ['DI1F29', '2026-10-17', '2026-10-17'],
+      ['DI1F29', '2026-10-16', '2026-10-16'],
+    ]);
+  });
+
+  it('OQ-37 an expired open position shows once per asset, at its earliest affected date', async () => {
+    const expired = (id: string, date: string) => ({
+      id,
+      issue_type: 'EXPIRED_OPEN_POSITION' as const,
+      asset_id: IDS.di1f27,
+      asset_code: 'DI1F27',
+      affected_date: date,
+      required_price_date: null,
+      request_id: 'r',
+    });
+    db.issues.push(
+      expired('e3', '2027-01-07'),
+      expired('e1', '2027-01-05'),
+      expired('e2', '2027-01-06'),
+    );
+
+    const { items } = await processingApi.listIssues();
+
+    const rows = items.filter((i) => i.issue_type === 'EXPIRED_OPEN_POSITION');
+    expect(rows.map((i) => [i.asset_code, i.affected_date])).toEqual([['DI1F27', '2027-01-05']]);
+  });
+
   it('§10.3 lists the missing price as the only Pendência', async () => {
     const { items } = await processingApi.listIssues();
 
@@ -663,8 +928,12 @@ describe('mock publication (a finished job publishes the precomputed results of 
   const FINAL = ['COMPLETED', 'COMPLETED_WITH_ISSUES', 'CANCELLED', 'FAILED'];
 
   /** Queues [start, end] and polls it until it reaches a final status. */
-  async function run(start: string, end: string): Promise<ProcessingRequest> {
-    const job = await processingApi.enqueue({ start_date: start, end_date: end, scope: 'ALL' });
+  async function run(
+    start: string,
+    end: string,
+    scope: ProcessingScope = 'ALL',
+  ): Promise<ProcessingRequest> {
+    const job = await processingApi.enqueue({ start_date: start, end_date: end, scope });
     for (let i = 0; i < 50; i += 1) {
       const current = await processingApi.getRequest(job.id);
       if (FINAL.includes(current.status)) return current;
@@ -882,7 +1151,9 @@ describe('mock publication (a finished job publishes the precomputed results of 
     expect(await missingPrices()).toHaveLength(5);
   });
 
-  it.each<[string, () => Promise<unknown>, string]>([
+  // A trade changes both chains, so an ALL run fails; a cash entry or a price changes one, so
+  // the other chain goes on to the end (OQ-36).
+  it.each<[string, () => Promise<unknown>, string, string, ProcessingChain]>([
     [
       'POST /ledger/entries (TRADE)',
       () =>
@@ -896,16 +1167,22 @@ describe('mock publication (a finished job publishes the precomputed results of 
           execution_pu: '89000.00',
         }),
       '17/10/2026',
+      'FAILED',
+      'POSITIONS',
     ],
     [
       'POST /ledger/entries/deletions (a trade)',
       () => ledgerApi.deleteEntries({ ids: ['7a000000-0000-4000-8000-000000000003'] }),
       '16/10/2026',
+      'FAILED',
+      'POSITIONS',
     ],
     [
       'POST /ledger/entries/deletions (a cash entry)',
       () => ledgerApi.deleteEntries({ ids: ['7c000000-0000-4000-8000-000000000002'] }),
       '16/10/2026',
+      'COMPLETED_WITH_ISSUES',
+      'CASH',
     ],
     [
       'POST /reference-prices',
@@ -917,27 +1194,32 @@ describe('mock publication (a finished job publishes the precomputed results of 
           pu: '80300.00',
         }),
       '16/10/2026',
+      'COMPLETED_WITH_ISSUES',
+      'POSITIONS',
     ],
     [
       'DELETE /reference-prices/:id',
       () => pricesApi.removeReferencePrice(PRICE_IDS.f28_1016),
       '16/10/2026',
+      'COMPLETED_WITH_ISSUES',
+      'POSITIONS',
     ],
   ])(
-    'OQ-23 the mock fails a run at the first date a write through %s changed',
-    async (_path, write, shown) => {
+    'OQ-23 OQ-36 the mock fails a chain at the first date a write through %s changed',
+    async (_path, write, shown, ending, chain) => {
       await write();
 
       const job = await run('2026-10-16', '2026-10-18');
 
-      expect(job.status).toBe('FAILED');
+      expect(job).toMatchObject({ status: ending, failed_chain: chain });
       expect(job.error_message).toContain(`Backend simulado: ${shown} depende`);
-      // Later dates are untouched (OQ-23 item 5).
-      expect((await portfolioApi.getSummary('2026-10-18')).positions.status).toBe('NOT_PROCESSED');
+      // The failed chain's later dates are untouched (OQ-23 item 5, OQ-36 item 1).
+      const after = await portfolioApi.getSummary('2026-10-18');
+      expect(chain === 'CASH' ? after.cash.status : after.positions.status).toBe('NOT_PROCESSED');
     },
   );
 
-  it('OQ-23 a write made while the job is queued fails it at that date (fake backend)', async () => {
+  it('OQ-36 a cash write made while an ALL job is queued fails its cash there; positions go on', async () => {
     const job = await processingApi.enqueue({
       start_date: '2026-10-16',
       end_date: '2026-10-18',
@@ -955,14 +1237,20 @@ describe('mock publication (a finished job publishes the precomputed results of 
       current = await processingApi.getRequest(job.id);
     }
 
-    expect(current.status).toBe('FAILED');
+    expect(current).toMatchObject({
+      status: 'COMPLETED_WITH_ISSUES',
+      progress_date: '2026-10-18',
+      failed_date: '2026-10-17',
+      failed_chain: 'CASH',
+    });
+    expect((await chainStatus('2026-10-18')).cash).toBe('NOT_PROCESSED');
   });
 
   it.each([
     ['2026-10-17', '2026-10-16', '2026-10-18', '17/10/2026', '2026-10-16'],
     ['2026-10-15', '2026-10-16', '2026-10-16', '16/10/2026', null],
   ])(
-    'OQ-23 the mock fails a run at the first date changed since the seed (%s): earlier dates stay',
+    'OQ-23 the mock fails a cash run at the first date changed since the seed (%s): earlier dates stay',
     async (changed, start, end, shown, committed) => {
       await ledgerApi.createEntry({
         type: 'CASH',
@@ -971,7 +1259,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
         cash_amount: '1000.00',
       });
 
-      const job = await run(start, end);
+      const job = await run(start, end, 'CASH');
 
       expect(job).toMatchObject({
         status: 'FAILED',

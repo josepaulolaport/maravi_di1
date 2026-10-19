@@ -1,5 +1,5 @@
 import type { ProcessingRequest, ProcessingScope } from '../contract';
-import { ledgerApi, portfolioApi, processingApi } from '../endpoints';
+import { ledgerApi, portfolioApi, pricesApi, processingApi } from '../endpoints';
 import { IDS } from './fixtures';
 
 // OQ-23, OQ-26 and OQ-31 (docs/open-questions.md): a run processes its dates in calendar order
@@ -38,6 +38,15 @@ async function status(date: string) {
 
 const deposit = (date: string) =>
   ledgerApi.createEntry({ type: 'CASH', date, time: '12:00:00', cash_amount: '1000.00' });
+
+/** A reference price: it changes only the positions chain's inputs from its date. */
+const setPrice = (date: string) =>
+  pricesApi.setReferencePrice({
+    asset_id: IDS.di1f28,
+    reference_date: date,
+    input_kind: 'PU',
+    pu: '89300.00',
+  });
 
 describe('OQ-23 the run (eight statuses, per-date progress)', () => {
   it('OQ-23 a run carries start_date, end_date and progress_date, with no day counters', async () => {
@@ -109,6 +118,9 @@ describe('OQ-23 the run (eight statuses, per-date progress)', () => {
       status: 'FAILED',
       progress_date: '2026-10-14',
       error_code: 'MOCK_INPUTS_CHANGED',
+      // A single-chain run's failure names the run's chain (OQ-40 item 3).
+      failed_date: '2026-10-15',
+      failed_chain: 'CASH',
     });
     expect((await status('2026-10-14')).cash).toBe('PROCESSED');
     expect((await status('2026-10-15')).cash).toBe('FAILED');
@@ -136,14 +148,14 @@ describe('OQ-23 the run (eight statuses, per-date progress)', () => {
 });
 
 describe('OQ-23 the status of a date, per chain', () => {
-  it.each<[ProcessingScope, string]>([
-    ['POSITIONS', 'POSITIONS_PREDECESSOR_MISSING'],
-    ['CASH', 'CASH_PREDECESSOR_MISSING'],
-    // Both chains fail: the positions code (OQ-31 item 7).
-    ['ALL', 'POSITIONS_PREDECESSOR_MISSING'],
+  it.each<[ProcessingScope, string, string]>([
+    ['POSITIONS', 'POSITIONS_PREDECESSOR_MISSING', 'POSITIONS'],
+    ['CASH', 'CASH_PREDECESSOR_MISSING', 'CASH'],
+    // Both chains fail on the same date: the positions code and chain (OQ-36 item 5, OQ-40 item 3).
+    ['ALL', 'POSITIONS_PREDECESSOR_MISSING', 'POSITIONS'],
   ])(
-    'OQ-31 a %s run whose day before is not processed fails on its first date (%s)',
-    async (scope, code) => {
+    'OQ-31 OQ-40 a %s run whose day before is not processed fails on its first date (%s)',
+    async (scope, code, chain) => {
       const job = await finish(await enqueue('2026-10-18', '2026-10-18', scope));
 
       expect(job).toMatchObject({
@@ -151,6 +163,8 @@ describe('OQ-23 the status of a date, per chain', () => {
         progress_date: null,
         error_code: code,
         error_message: 'Dia anterior não processado',
+        failed_date: '2026-10-18',
+        failed_chain: chain,
       });
       const after = await status('2026-10-18');
       expect(after.positions).toBe(scope === 'CASH' ? 'NOT_PROCESSED' : 'FAILED');
@@ -161,13 +175,98 @@ describe('OQ-23 the status of a date, per chain', () => {
     },
   );
 
-  it('OQ-31 in an ALL run only the failing chain reads Erro; the other keeps its status', async () => {
+  it('OQ-36 in an ALL run one chain failing its predecessor reads Erro; the other is written on D', async () => {
     await finish(await enqueue('2026-10-17', '2026-10-17', 'CASH'));
 
     const job = await finish(await enqueue('2026-10-18', '2026-10-18', 'ALL'));
 
-    expect(job.error_code).toBe('POSITIONS_PREDECESSOR_MISSING');
-    expect(await status('2026-10-18')).toEqual({ cash: 'NOT_PROCESSED', positions: 'FAILED' });
+    expect(job).toMatchObject({
+      status: 'COMPLETED_WITH_ISSUES',
+      progress_date: '2026-10-18',
+      error_code: 'POSITIONS_PREDECESSOR_MISSING',
+      error_message: 'Dia anterior não processado',
+      failed_date: '2026-10-18',
+      failed_chain: 'POSITIONS',
+    });
+    expect(await status('2026-10-18')).toEqual({ cash: 'PROCESSED', positions: 'FAILED' });
+    // AUM needs the other chain processed on the date (OQ-38).
+    expect((await portfolioApi.getSummary('2026-10-18')).aum).toBeNull();
+  });
+
+  it('OQ-36 in an ALL run the surviving chain goes on to the end; the failed one is untouched after D', async () => {
+    // The fake cannot recompute positions from 17/10 after a price dated then.
+    await setPrice('2026-10-17');
+
+    const job = await finish(await enqueue('2026-10-16', '2026-10-18', 'ALL'));
+
+    expect(job).toMatchObject({
+      status: 'COMPLETED_WITH_ISSUES',
+      progress_date: '2026-10-18',
+      error_code: 'MOCK_INPUTS_CHANGED',
+      failed_date: '2026-10-17',
+      failed_chain: 'POSITIONS',
+    });
+    expect(await status('2026-10-16')).toEqual({
+      cash: 'PROCESSED',
+      positions: 'PROCESSED_WITH_ISSUES',
+    });
+    expect(await status('2026-10-17')).toEqual({ cash: 'PROCESSED', positions: 'FAILED' });
+    expect(await status('2026-10-18')).toEqual({ cash: 'PROCESSED', positions: 'NOT_PROCESSED' });
+  });
+
+  it('OQ-36 an ALL run ends FAILED only when both chains fail, keeping the first failure', async () => {
+    await setPrice('2026-10-17');
+    await deposit('2026-10-18');
+
+    const job = await finish(await enqueue('2026-10-16', '2026-10-18', 'ALL'));
+
+    expect(job).toMatchObject({
+      status: 'FAILED',
+      progress_date: '2026-10-17',
+      error_code: 'MOCK_INPUTS_CHANGED',
+      failed_date: '2026-10-17',
+      failed_chain: 'POSITIONS',
+    });
+    expect(job.error_message).toContain('17/10/2026');
+    expect(await status('2026-10-18')).toEqual({ cash: 'FAILED', positions: 'NOT_PROCESSED' });
+  });
+
+  it('OQ-36 OQ-40 both chains failing on the same date keep the positions error, even in two steps', async () => {
+    // Positions have 17/10, cash does not; a price on 18/10 makes positions fail there too.
+    await finish(await enqueue('2026-10-17', '2026-10-17', 'POSITIONS'));
+    await setPrice('2026-10-18');
+
+    const job = await finish(await enqueue('2026-10-18', '2026-10-18', 'ALL'));
+
+    expect(job).toMatchObject({
+      status: 'FAILED',
+      error_code: 'MOCK_INPUTS_CHANGED',
+      failed_date: '2026-10-18',
+      failed_chain: 'POSITIONS',
+    });
+    expect(await status('2026-10-18')).toEqual({ cash: 'FAILED', positions: 'FAILED' });
+  });
+
+  it('OQ-36 OQ-40 an ALL run cancelled after one chain failed ends CANCELLED and keeps the failure', async () => {
+    await setPrice('2026-10-16');
+    const job = await enqueue('2026-10-15', '2026-10-18', 'ALL');
+    await polls(job, 4); // 15/10 committed; 16/10 positions Erro, cash committed; 17/10 next
+
+    await processingApi.cancel(job.id);
+
+    expect(await finish(job)).toMatchObject({
+      status: 'CANCELLED',
+      progress_date: '2026-10-17',
+      error_code: 'MOCK_INPUTS_CHANGED',
+      failed_date: '2026-10-16',
+      failed_chain: 'POSITIONS',
+    });
+  });
+
+  it('OQ-40 a run with no failure has failed_date and failed_chain null', async () => {
+    const job = await finish(await enqueue('2026-10-14', '2026-10-15', 'ALL'));
+
+    expect(job).toMatchObject({ status: 'COMPLETED', failed_date: null, failed_chain: null });
   });
 
   it('OQ-31 a failed day before counts as not processed', async () => {
@@ -250,12 +349,75 @@ describe('OQ-23 the status of a date, per chain', () => {
     expect(afterDeposit.predecessor).toEqual({ cash: 'NOT_PROCESSED', positions: 'ZERO_STATE' });
   });
 
+  it.each<ProcessingScope>(['CASH', 'POSITIONS', 'ALL'])(
+    'OQ-39 a %s preview returns both chains',
+    async (scope) => {
+      await finish(await enqueue('2026-10-17', '2026-10-17', 'CASH'));
+
+      const preview = await processingApi.preview({
+        start_date: '2026-10-18',
+        end_date: '2026-10-18',
+        scope,
+      });
+
+      expect(preview.predecessor).toEqual({ cash: 'PROCESSED', positions: 'NOT_PROCESSED' });
+    },
+  );
+
   it('§8.2 AUM has no status of its own: it is the value, null when either side is missing', async () => {
     const complete = await portfolioApi.getSummary('2026-10-15');
     const noPositions = await portfolioApi.getSummary('2026-10-17');
 
     expect(complete.aum).toBe('1491965.8654717340');
     expect(noPositions.aum).toBeNull();
+  });
+
+  it('OQ-38 a chain written while the other is processed keeps AUM = cash + market value', async () => {
+    await finish(await enqueue('2026-10-15', '2026-10-15', 'CASH'));
+
+    expect((await portfolioApi.getSummary('2026-10-15')).aum).toBe('1491965.8654717340');
+  });
+
+  it('OQ-38 OQ-40 a chain written while the other is Erro on that date leaves AUM null', async () => {
+    // The fake cannot recompute 15/10's cash after a deposit dated then: cash reads Erro.
+    await deposit('2026-10-15');
+    await finish(await enqueue('2026-10-15', '2026-10-15', 'CASH'));
+    expect((await portfolioApi.getSummary('2026-10-15')).aum).toBe('1491965.8654717340');
+
+    await finish(await enqueue('2026-10-15', '2026-10-15', 'POSITIONS'));
+
+    const summary = await portfolioApi.getSummary('2026-10-15');
+    expect(summary.cash.status).toBe('FAILED');
+    expect(summary.positions.status).toBe('PROCESSED');
+    expect(summary.cash.balance).not.toBeNull();
+    expect(summary.positions.market_value).not.toBeNull();
+    expect(summary.aum).toBeNull();
+  });
+
+  it('OQ-38 a chain written while the other is not processed leaves AUM null', async () => {
+    await finish(await enqueue('2026-10-17', '2026-10-17', 'CASH'));
+
+    const summary = await portfolioApi.getSummary('2026-10-17');
+    expect(summary.cash.balance).not.toBeNull();
+    expect(summary.aum).toBeNull();
+  });
+
+  it('OQ-40 the zero state needs no earlier status for the chain: a gap after one fails the date', async () => {
+    // Nothing is dated before 14/10, so 01/10 is processed from the zero state.
+    expect((await finish(await enqueue('2026-10-01', '2026-10-01', 'CASH'))).status).toBe(
+      'COMPLETED',
+    );
+
+    const preview = await processingApi.preview({
+      start_date: '2026-10-05',
+      end_date: '2026-10-05',
+      scope: 'ALL',
+    });
+    const job = await finish(await enqueue('2026-10-05', '2026-10-05', 'CASH'));
+
+    // Cash has a status on 01/10, so 04/10 unprocessed is a gap; positions have none.
+    expect(preview.predecessor).toEqual({ cash: 'NOT_PROCESSED', positions: 'ZERO_STATE' });
+    expect(job).toMatchObject({ status: 'FAILED', error_code: 'CASH_PREDECESSOR_MISSING' });
   });
 
   it('OQ-31 a trade on a processed date leaves both chains as they were', async () => {

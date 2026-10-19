@@ -40,20 +40,14 @@ function issueAction(issue: Issue): { label: string; to: string } | null {
   }
 }
 
-/**
- * The date the user must act on (§10.3 "data necessária"): for a missing price, the date
- * whose price is needed, which can precede the affected day (its D−1 price).
- */
-function requiredDate(issue: Issue) {
-  return issue.required_price_date ?? issue.affected_date;
-}
-
 function matchesSearch(issue: Issue, search: string): boolean {
   const needle = search.trim().toLocaleLowerCase('pt-BR');
   if (!needle) return true;
-  return [issue.asset_code ?? '', formatDate(requiredDate(issue))].some((value) =>
-    value.toLocaleLowerCase('pt-BR').includes(needle),
-  );
+  return [
+    issue.asset_code ?? '',
+    formatDate(issue.required_price_date),
+    formatDate(issue.affected_date),
+  ].some((value) => value.toLocaleLowerCase('pt-BR').includes(needle));
 }
 
 interface IssuesTabProps {
@@ -89,6 +83,7 @@ export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
                 <Table.Th>Data</Table.Th>
                 <Table.Th>Ativo</Table.Th>
                 <Table.Th>Pendência</Table.Th>
+                <Table.Th>Afetado desde</Table.Th>
                 <Table.Th>
                   <VisuallyHidden>Ação</VisuallyHidden>
                 </Table.Th>
@@ -97,7 +92,7 @@ export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
             <Table.Tbody>
               {rows.length === 0 ? (
                 <Table.Tr>
-                  <Table.Td colSpan={4}>
+                  <Table.Td colSpan={5}>
                     <Text size="sm" c="dimmed" ta="center" py="md">
                       Nenhuma pendência encontrada.
                     </Text>
@@ -122,7 +117,11 @@ function IssueRow({ issue }: { issue: Issue }) {
   const action = issueAction(issue);
   return (
     <Table.Tr>
-      <Table.Td>{formatDate(requiredDate(issue))}</Table.Td>
+      {/*
+        The date the user must act on (§10.3 "data necessária"): for a missing price, the date
+        whose price is needed, which can precede the affected day (its D−1 price).
+      */}
+      <Table.Td>{formatDate(issue.required_price_date)}</Table.Td>
       <Table.Td fw={500}>{issue.asset_code ?? UNAVAILABLE}</Table.Td>
       <Table.Td>
         <Group gap={6} wrap="nowrap">
@@ -134,6 +133,8 @@ function IssueRow({ issue }: { issue: Issue }) {
           </Text>
         </Group>
       </Table.Td>
+      {/* The row's earliest affected date: rows come deduplicated (OQ-37). */}
+      <Table.Td>{formatDate(issue.affected_date)}</Table.Td>
       <Table.Td ta="right">
         {action && (
           <Button component={Link} to={action.to} size="xs" variant="light">

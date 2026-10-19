@@ -40,9 +40,21 @@ export interface ProcessingRequest {
    * and the date being processed derive from it and the range.
    */
   progress_date: IsoDate | null;
+  /**
+   * The first failure's code and pt-BR message (OQ-36 items 5–6): set on FAILED, and on
+   * COMPLETED_WITH_ISSUES or CANCELLED when one chain of an ALL run failed and the other went
+   * on. A run with only missing prices or expired positions keeps them null.
+   */
   error_code: string | null;
-  /** pt-BR, for FAILED. */
   error_message: string | null;
+  /** The date of the run's first failure; null if it never failed (OQ-40 item 3). */
+  failed_date: IsoDate | null;
+  /**
+   * The chain that failed first (OQ-40 item 3): POSITIONS when both fail on the same date; the
+   * run's chain on a single-chain run; null with a `failed_date` for a failure outside every
+   * chain, and null if the run never failed. Never ALL.
+   */
+  failed_chain: ProcessingChain | null;
   created_at: IsoDateTime;
   updated_at: IsoDateTime;
   dispatched_at: IsoDateTime | null;
@@ -90,6 +102,10 @@ export interface Issue {
   issue_type: IssueType;
   asset_id: string | null;
   asset_code: string | null;
+  /**
+   * The earliest affected date of the deduplicated row (OQ-37): one row per (asset, needed date)
+   * for a missing price, one per asset for an expired open position.
+   */
   affected_date: IsoDate;
   /** For MISSING_REFERENCE_PRICE: the exact date whose price is needed ("Definir preço"). */
   required_price_date: IsoDate | null;
