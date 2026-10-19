@@ -232,6 +232,41 @@ async def test_oq29_a_start_after_the_end_is_an_invalid_range_even_in_the_future
     assert raised.value.code is ErrorCode.INVALID_RANGE
 
 
+async def test_the_first_representable_date_cannot_start_a_range(harness: Harness) -> None:
+    """A range needs the day before its start (the predecessor); 01/01/0001 has none, so it is
+    refused as a 422, never a crash."""
+    for call in (
+        lambda: harness.service.preview_range(ALL, date.min, date.min, uow=FakeUnitOfWork()),
+        lambda: harness.service.enqueue_range(ALL, date.min, date.min, uow=FakeUnitOfWork()),
+    ):
+        with pytest.raises(DomainError) as raised:
+            await call()
+        assert _error(raised) == (
+            ErrorDetail(
+                ErrorCode.INVALID_RANGE,
+                "A data inicial deve ser posterior a 01/01/0001.",
+                "start_date",
+            ),
+        )
+
+
+async def test_oq37_an_earlier_failed_date_alone_is_a_gap_and_the_ledger_is_not_asked(
+    harness: Harness,
+) -> None:
+    """No status on A−1, an earlier FAILED date of the chain: the chain has a status before A,
+    so it is a gap, not the zero state (OQ-37 item 4, OQ-40 item 5)."""
+    harness.date_statuses.rows[date(2026, 10, 3)] = date_status(
+        date(2026, 10, 3), portfolio=ChainStatus.FAILED
+    )
+
+    preview = await harness.service.preview_range(
+        POSITIONS, date(2026, 10, 10), date(2026, 10, 12), uow=FakeUnitOfWork()
+    )
+
+    assert preview.positions is PredecessorState.NOT_PROCESSED
+    assert (ProcessingChain.POSITIONS, date(2026, 10, 9)) not in harness.history.asked
+
+
 # Enqueue
 
 

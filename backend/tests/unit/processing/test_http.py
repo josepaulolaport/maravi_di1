@@ -121,6 +121,7 @@ def test_post_request_answers_201_with_the_queued_run(client: TestClient) -> Non
         ({**BODY, "start_date": "14/10/2026"}, "start_date", "VALIDATION_ERROR"),
         ({**BODY, "start_date": "2026-10-17"}, "start_date", "INVALID_RANGE"),
         ({**BODY, "end_date": "2026-10-20"}, "end_date", "FUTURE_DATE"),
+        ({**BODY, "start_date": "0001-01-01"}, "start_date", "INVALID_RANGE"),
     ],
 )
 def test_post_request_refuses_a_malformed_range(
