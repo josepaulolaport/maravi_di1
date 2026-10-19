@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Make a Maravi DI1 commit the way the project requires — no per-commit approval (review at PR time), one logical change, green, test and code together, Conventional Commits message with why and Refs, generated files separate, fixups squashed before the PR. Use every time you commit.
+description: Make a Maravi DI1 commit the way the project requires — no per-commit approval (review at PR time), one logical change, green, test and code together, Conventional Commits message with why and Refs, generated files separate, fixups squashed only before the first push. Use every time you commit.
 ---
 
 # Commit
@@ -47,7 +47,7 @@ Refs: spec §<n>; interfaces <module>; OQ-<n> if relevant
 
 Use `git commit -F <file>` or a heredoc. **Never use `--no-verify`.**
 
-## 4. Fixing an earlier commit of your own branch (before its PR)
+## 4. Fixing an earlier commit of your own branch (before its first push)
 
 ```bash
 git commit --fixup <sha>                                  # no per-commit approval
@@ -55,4 +55,4 @@ GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash main     # before opening the P
 git rebase main --exec "<the area's fast test command>"   # every commit still green
 ```
 
-Never rewrite commits that are already on `main` or in a PR under review. Never force-push.
+Never rewrite commits that are already pushed, on `main` or in a PR. After the first push, add the fix as a new commit and merge `origin/main` in when you need it. Never force-push.
