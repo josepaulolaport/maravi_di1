@@ -6,9 +6,9 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { useCashSummary } from '../hooks/useLedger';
 
-// OQ-19 item 3: Caixa D0 is the published cash on the range's end date, Caixa D−1 the one on
-// the day before, each read from the portfolio summary and marked when it is stale or was
-// never processed. Nothing is computed from the ledger rows.
+// OQ-19 item 3, amended by OQ-21 (draft): Caixa D0 is the published cash on the range's end
+// date, Caixa D−1 the one on the day before, each read from the cash chain of the portfolio
+// summary with its own freshness, apart from positions. Nothing is computed from the rows.
 
 function CashCard({ label, date }: { label: string; date: IsoDate }) {
   const summary = useCashSummary(date);
@@ -24,12 +24,14 @@ function CashCard({ label, date }: { label: string; date: IsoDate }) {
   } else if (summary.isError) {
     value = <span title="Indisponível">{UNAVAILABLE}</span>;
     marker = <StatusBadge label="Erro ao carregar" color="red" />;
-  } else if (summary.data.publication === 'NOT_PROCESSED') {
+  } else if (summary.data.cash.status === 'NOT_PROCESSED') {
     value = <span title="Indisponível">{UNAVAILABLE}</span>;
     marker = <StatusBadge label="Não processado" color="gray" />;
   } else {
-    value = formatMoney(summary.data.cash_balance);
-    if (summary.data.stale) marker = <StatusBadge label="Desatualizado" color="yellow" />;
+    value = formatMoney(summary.data.cash.balance);
+    if (summary.data.cash.status === 'STALE') {
+      marker = <StatusBadge label="Desatualizado" color="yellow" />;
+    }
   }
 
   return (

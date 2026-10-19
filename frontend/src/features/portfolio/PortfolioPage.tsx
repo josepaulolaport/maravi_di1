@@ -8,7 +8,7 @@ import { ErrorState } from '@/shared/ui/ErrorState';
 import { CumulativePnlCard } from './components/CumulativePnlCard';
 import { KpiGrid } from './components/KpiGrid';
 import { PositionsTable } from './components/PositionsTable';
-import { NotProcessedNotice, PublishedNotices } from './components/StatusNotices';
+import { ChainNotices, NotProcessedNotice } from './components/StatusNotices';
 import {
   useEvaluationDate,
   usePortfolioPositions,
@@ -16,8 +16,9 @@ import {
 } from './hooks/usePortfolio';
 
 /**
- * Carteira (spec §11.4): one evaluation date, published data only. KPIs, positions and the
- * cumulative P&L headline come from the same publication; nothing is recalculated here.
+ * Carteira (spec §11.4): one evaluation date, published data only; nothing is recalculated
+ * here. Cash and positions are published by separate chains (OQ-21 draft), so each KPI and
+ * notice follows its own chain's freshness; AUM joins both.
  */
 export function PortfolioPage() {
   const [date, setDate, today] = useEvaluationDate();
@@ -73,20 +74,28 @@ function PortfolioBody({ date, summary, positions }: BodyProps) {
   }
 
   const data = summary.data;
-  if (data.publication === 'NOT_PROCESSED' || positions.data.publication === 'NOT_PROCESSED') {
+  const rows = positions.data;
+  if (data.cash.status === 'NOT_PROCESSED' && data.positions.status === 'NOT_PROCESSED') {
     return <NotProcessedNotice date={date} />;
   }
 
   return (
     <Stack gap="md">
-      <PublishedNotices
+      <ChainNotices
         date={date}
-        stale={data.stale || positions.data.stale}
-        incomplete={data.valuation_status === 'MISSING' || data.pnl_status === 'MISSING'}
+        cash={data.cash.status}
+        positions={data.positions.status}
+        incomplete={
+          data.positions.valuation_status === 'MISSING' || data.positions.pnl_status === 'MISSING'
+        }
       />
-      <KpiGrid kpis={data} />
-      <CumulativePnlCard date={date} cumulative={data.cumulative_pnl} />
-      <PositionsTable rows={positions.data.items} />
+      <KpiGrid summary={data} />
+      {rows.publication === 'PUBLISHED' && (
+        <>
+          <CumulativePnlCard date={date} cumulative={data.positions.cumulative_pnl} />
+          <PositionsTable rows={rows.items} />
+        </>
+      )}
     </Stack>
   );
 }

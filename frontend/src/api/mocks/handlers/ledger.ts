@@ -36,13 +36,13 @@ function inRange(request: Request) {
   return { start, end, search: params.get('search'), errors: rangeErrors(start, end) };
 }
 
-/** Removes a trade (soft delete in the real backend) and marks accounting dirty. */
+/** Removes a trade (soft delete in the real backend) and marks cash and positions dirty. */
 function deleteTrade(id: string): boolean {
   const index = db.trades.findIndex((t) => t.id === id);
   const trade = db.trades[index];
   if (!trade) return false;
   db.trades.splice(index, 1);
-  markDirty('accounting', trade.trade_date);
+  markDirty('trade', trade.trade_date);
   return true;
 }
 
@@ -51,7 +51,7 @@ function deleteMovement(id: string): boolean {
   const movement = db.cashMovements[index];
   if (!movement) return false;
   db.cashMovements.splice(index, 1);
-  markDirty('accounting', movement.movement_date);
+  markDirty('cash', movement.movement_date);
   return true;
 }
 
@@ -212,7 +212,7 @@ export const ledgerHandlers = [
       created_at: new Date().toISOString(),
     };
     db.trades.push(trade);
-    markDirty('accounting', date);
+    markDirty('trade', date);
     return HttpResponse.json(trade, { status: 201 });
   }),
 
@@ -260,7 +260,7 @@ export const ledgerHandlers = [
       created_at: new Date().toISOString(),
     };
     db.cashMovements.push(movement);
-    markDirty('accounting', movement.movement_date);
+    markDirty('cash', movement.movement_date);
     return HttpResponse.json(movement, { status: 201 });
   }),
 

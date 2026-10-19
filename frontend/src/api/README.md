@@ -33,6 +33,24 @@ Everything below is used by the frontend but not yet named in `docs/interfaces.m
 | P17 | `Issue.asset_code`                                                                                                                                                                                                                                                 | Pendências list without a second request                                                                                         |
 | P18 | `GET /ledger/entries?start_date&end_date&search&order` → trades and cash movements in one list, `kind: TRADE \| CASH_MOVEMENT`, each with a signed `cash_amount`, filtered and ordered by the backend (date desc; within a date trades by time and seq, then cash) | The list is merged and ordered on the server, so it can be paged; the browser neither sorts nor signs amounts (user, 2026-10-18) |
 
+## Draft: OQ-21, cash and positions as separate chains
+
+The user decided (2026-10-18) that cash and positions are two separately processed chains; lane X is recording it as OQ-21. Until `docs/interfaces.md` publishes the names, these fields are a **draft** and are aligned afterwards (if anything differs, the docs win):
+
+- `ProcessingScope = CASH | POSITIONS | ALL`: required on `POST /processing/requests`, on cancel-and-replace and on the preview; echoed on every `ProcessingRequest`.
+- `ProcessingPreview.predecessor = {cash, positions}`, replacing `predecessor_state`.
+- `Issue.chain`: for `STALE_PREDECESSOR`, the chain whose day before is behind; `null` for the other types. A missing price and an expired open position are facts of the positions chain.
+- `PortfolioSummary = {date, cash, positions, aum}`, each with its own `status: FRESH | STALE | NOT_PROCESSED`:
+  - `cash.balance` comes from `portfolio.cash_balances`;
+  - `positions` holds the market value, the valuation status and the P&L;
+  - `aum.value` is `null` when either side is missing, and `aum.status` is the less current of the two.
+- `PortfolioPositions` and `PnlPoint` keep `publication`/`stale`, now for the positions chain only. A proposal: align them with `Freshness`.
+- OQ-22 (user, 2026-10-18): a CASH or ALL job whose day before has no published cash, while entries are dated on or before it, is refused when it starts. It ends `FAILED` with `error_code = CASH_PREDECESSOR_MISSING`, and the preview warns. Positions still run after a missing day (OQ-11). `Issue.chain` is set only on `STALE_PREDECESSOR`.
+- What goes stale after a write:
+  - a trade: cash and positions;
+  - a cash movement: cash only;
+  - a reference price: positions only.
+
 ## Decided gap
 
 - **GAP-I-1** (user, 2026-10-18: "go with your recommendation (date only)"): the Lançamentos design shows a time for cash movements ("17/10/2026 11:15 Aporte"), but `ledger.cash_movements` has only `movement_date`. Decision: no schema change; aportes and retiradas show the date alone. Cash effects are daily, and the accounting does not depend on the intraday order of movements.

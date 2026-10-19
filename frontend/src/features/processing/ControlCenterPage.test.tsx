@@ -23,6 +23,7 @@ const issue = (changes: Partial<Issue>): Issue => ({
   asset_code: 'DI1F29',
   affected_date: '2026-10-16',
   required_price_date: '2026-10-16',
+  chain: null,
   request_id: '7f3c9a02-0000-4000-8000-000000000002',
   ...changes,
 });
@@ -114,7 +115,7 @@ describe('Pendências (§11.1, §10.3)', () => {
     );
   });
 
-  it('OQ-11 links a stale predecessor to Processamentos ending the day before', async () => {
+  it('OQ-11 OQ-21 links a stale predecessor to Processamentos for its chain, ending the day before', async () => {
     serveIssues([
       issue({
         issue_type: 'STALE_PREDECESSOR',
@@ -122,20 +123,25 @@ describe('Pendências (§11.1, §10.3)', () => {
         asset_code: null,
         affected_date: '2026-10-17',
         required_price_date: null,
+        chain: 'CASH',
       }),
     ]);
     const { user, router } = renderApp(PAGE);
 
-    const text = await screen.findByText('Estado anterior desatualizado');
+    const text = await screen.findByText('Estado anterior desatualizado (caixa)');
     const cells = within(text.closest('tr') as HTMLElement);
     expect(cells.getByText('—')).toBeInTheDocument();
     const link = cells.getByRole('link', { name: 'Processar intervalo anterior' });
-    expect(link).toHaveAttribute('href', '/central-de-controle?tab=processamentos&fim=2026-10-16');
+    expect(link).toHaveAttribute(
+      'href',
+      '/central-de-controle?tab=processamentos&fim=2026-10-16&escopo=caixa',
+    );
 
     await user.click(link);
 
-    expect(router.state.location.search).toBe('?tab=processamentos&fim=2026-10-16');
+    expect(router.state.location.search).toBe('?tab=processamentos&fim=2026-10-16&escopo=caixa');
     expect(await screen.findByRole('textbox', { name: 'Data final' })).toHaveValue('16/10/2026');
+    expect(screen.getByRole('radio', { name: 'Caixa' })).toBeChecked();
   });
 
   it('§10.3 shows the date whose price is needed, which may differ from the affected day', async () => {

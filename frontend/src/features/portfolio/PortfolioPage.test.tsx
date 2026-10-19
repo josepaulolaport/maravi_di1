@@ -2,7 +2,8 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
 import type { PortfolioPositions, PortfolioSummary } from '@/api/contract';
-import { positions, summaries } from '@/api/mocks/fixtures';
+import { positions } from '@/api/mocks/fixtures';
+import { summaryOf } from '@/api/mocks/handlers/portfolio';
 import { url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { todayInSaoPaulo } from '@/shared/format';
@@ -23,17 +24,34 @@ function rowOf(assetCode: string) {
   return within(row);
 }
 
-/** Serves 15/10 (complete in the fixtures) with the given changes, to isolate one state. */
+interface SummaryChanges {
+  cash?: Partial<PortfolioSummary['cash']>;
+  positions?: Partial<PortfolioSummary['positions']>;
+  aum?: Partial<PortfolioSummary['aum']>;
+}
+
+/**
+ * Serves 15/10 (complete and current for both chains in the fixtures) with the given changes
+ * to one chain or both, to isolate one state (OQ-21 draft: cash and positions apart).
+ */
 function override15(
-  summaryChanges: Partial<Extract<PortfolioSummary, { publication: 'PUBLISHED' }>>,
-  positionsChanges: Partial<Extract<PortfolioPositions, { publication: 'PUBLISHED' }>> = {},
+  changes: SummaryChanges,
+  positionsChanges:
+    | Partial<Extract<PortfolioPositions, { publication: 'PUBLISHED' }>>
+    | Pick<Extract<PortfolioPositions, { publication: 'NOT_PROCESSED' }>, 'publication'> = {},
 ) {
-  const summary = summaries.find((s) => s.date === '2026-10-15');
   const rows = positions.find((p) => p.date === '2026-10-15');
   server.use(
-    http.get(url('/portfolio/summary'), () =>
-      HttpResponse.json({ ...summary, stale: false, ...summaryChanges }),
-    ),
+    http.get(url('/portfolio/summary'), () => {
+      const summary = summaryOf('2026-10-15');
+      const body: PortfolioSummary = {
+        ...summary,
+        cash: { ...summary.cash, ...changes.cash },
+        positions: { ...summary.positions, ...changes.positions },
+        aum: { ...summary.aum, ...changes.aum },
+      };
+      return HttpResponse.json(body);
+    }),
     http.get(url('/portfolio/positions'), () =>
       HttpResponse.json({ ...rows, stale: false, ...positionsChanges }),
     ),
@@ -55,7 +73,7 @@ describe('Carteira (§11.4)', () => {
     expect(kpi('P&L diário').getByText('-R$ 8.034,13')).toBeInTheDocument();
     expect(kpi('P&L posições').getByText('+R$ 1.220,20')).toBeInTheDocument();
     expect(kpi('P&L operações').getByText('-R$ 9.254,33')).toBeInTheDocument();
-    expect(screen.queryByText('Resultados desatualizados')).not.toBeInTheDocument();
+    expect(screen.queryByText(/desatualizad/)).not.toBeInTheDocument();
     expect(screen.queryByText('Resultados incompletos')).not.toBeInTheDocument();
   });
 
@@ -137,14 +155,75 @@ describe('Carteira (§11.4)', () => {
     );
   });
 
-  it('§10.4 flags a stale day and links to Processamentos for that date', async () => {
+  it('§10.4 OQ-21 a corrected price makes only positions stale; the link asks for Posições', async () => {
     await openCarteira('2026-10-16');
 
-    expect(screen.getByText('Resultados desatualizados')).toBeInTheDocument();
+    expect(screen.getByText('Posições desatualizadas')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Ir para Processamentos' })).toHaveAttribute(
       'href',
-      '/central-de-controle?tab=processamentos&inicio=2026-10-16&fim=2026-10-16',
+      '/central-de-controle?tab=processamentos&inicio=2026-10-16&fim=2026-10-16&escopo=posicoes',
     );
+    expect(kpi('Saldo em caixa').queryByText('Desatualizado')).not.toBeInTheDocument();
+    expect(kpi('P&L operações').getByText('Desatualizado')).toBeInTheDocument();
+    expect(kpi('Patrimônio total').getByText('Desatualizado')).toBeInTheDocument();
+  });
+
+  it('§11.4 OQ-21 stale cash marks Saldo em caixa and AUM, never the P&L', async () => {
+    override15({ cash: { status: 'STALE' }, aum: { status: 'STALE' } });
+    await openCarteira('2026-10-15');
+
+    expect(screen.getByText('Caixa desatualizado')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ir para Processamentos' })).toHaveAttribute(
+      'href',
+      '/central-de-controle?tab=processamentos&inicio=2026-10-15&fim=2026-10-15&escopo=caixa',
+    );
+    expect(kpi('Saldo em caixa').getByText('Desatualizado')).toBeInTheDocument();
+    expect(kpi('Patrimônio total').getByText('Desatualizado')).toBeInTheDocument();
+    for (const label of ['P&L diário', 'P&L posições', 'P&L operações']) {
+      expect(kpi(label).queryByText('Desatualizado')).not.toBeInTheDocument();
+    }
+  });
+
+  it('§11.4 OQ-21 both chains stale: one notice that asks for Tudo', async () => {
+    override15({
+      cash: { status: 'STALE' },
+      positions: { status: 'STALE' },
+      aum: { status: 'STALE' },
+    });
+    await openCarteira('2026-10-15');
+
+    expect(screen.getByText('Caixa e posições desatualizados')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ir para Processamentos' })).toHaveAttribute(
+      'href',
+      '/central-de-controle?tab=processamentos&inicio=2026-10-15&fim=2026-10-15&escopo=tudo',
+    );
+  });
+
+  it('§11.4 OQ-21 cash processed but positions not: cash shows, AUM and positions do not', async () => {
+    override15(
+      {
+        positions: {
+          status: 'NOT_PROCESSED',
+          published_at: null,
+          market_value: null,
+          valuation_status: null,
+          position_pnl: null,
+          trades_pnl: null,
+          daily_pnl: null,
+          cumulative_pnl: null,
+          pnl_status: null,
+        },
+        aum: { status: 'NOT_PROCESSED', value: null },
+      },
+      { publication: 'NOT_PROCESSED' },
+    );
+    await openCarteira('2026-10-15');
+
+    expect(screen.getByText('Posições não processadas')).toBeInTheDocument();
+    expect(kpi('Saldo em caixa').getByText('R$ 199.650,37')).toBeInTheDocument();
+    expect(kpi('Patrimônio total').getByText('—')).toBeInTheDocument();
+    expect(kpi('Patrimônio total').getByText('Não processado')).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
   it('§12 D3 says a date was never processed instead of showing figures', async () => {
@@ -153,7 +232,7 @@ describe('Carteira (§11.4)', () => {
     expect(await screen.findByText('Data não processada')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Solicitar processamento' })).toHaveAttribute(
       'href',
-      '/central-de-controle?tab=processamentos&inicio=2026-10-17&fim=2026-10-17',
+      '/central-de-controle?tab=processamentos&inicio=2026-10-17&fim=2026-10-17&escopo=tudo',
     );
     expect(screen.queryByRole('group', { name: 'Saldo em caixa' })).not.toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
@@ -240,17 +319,24 @@ describe('Carteira (§11.4)', () => {
     expect(router.state.location.search).toBe(`?date=${todayInSaoPaulo()}`);
   });
   it('§10.4 shows only the stale notice for a stale but complete day', async () => {
-    override15({ stale: true }, { stale: true });
+    override15({ positions: { status: 'STALE' }, aum: { status: 'STALE' } }, { stale: true });
     await openCarteira('2026-10-15');
 
-    expect(screen.getByText('Resultados desatualizados')).toBeInTheDocument();
+    expect(screen.getByText('Posições desatualizadas')).toBeInTheDocument();
     expect(screen.queryByText('Resultados incompletos')).not.toBeInTheDocument();
   });
 
   it('§8.3 shows only the incomplete notice, and marks the asset, when P&L is missing', async () => {
     const rows = positions.find((p) => p.date === '2026-10-15')?.items ?? [];
     override15(
-      { position_pnl: null, daily_pnl: null, cumulative_pnl: null, pnl_status: 'MISSING' },
+      {
+        positions: {
+          position_pnl: null,
+          daily_pnl: null,
+          cumulative_pnl: null,
+          pnl_status: 'MISSING',
+        },
+      },
       {
         items: rows.map((row) =>
           row.asset_code === 'DI1F28'
@@ -262,7 +348,7 @@ describe('Carteira (§11.4)', () => {
     await openCarteira('2026-10-15');
 
     expect(screen.getByText('Resultados incompletos')).toBeInTheDocument();
-    expect(screen.queryByText('Resultados desatualizados')).not.toBeInTheDocument();
+    expect(screen.queryByText('Posições desatualizadas')).not.toBeInTheDocument();
     expect(rowOf('DI1F28').getByText('P&L indisponível')).toBeInTheDocument();
     expect(rowOf('DI1F29').queryByText('P&L indisponível')).not.toBeInTheDocument();
   });

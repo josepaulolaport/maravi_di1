@@ -86,6 +86,7 @@ function seedJob(changes: Partial<ProcessingRequest>): ProcessingRequest {
     id: SEEDED_ID,
     requested_start_date: '2026-10-17',
     requested_end_date: '2026-10-18',
+    scope: 'ALL',
     status: 'QUEUED',
     created_at: '2026-10-18T10:00:00-03:00',
     dispatched_at: null,
@@ -216,7 +217,12 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
     expect(await modal.findByText('14/10/2026 a 16/10/2026')).toBeInTheDocument();
     expect(modal.getByText('3')).toBeInTheDocument();
-    expect(modal.getByText('Estado inicial (sem lançamentos anteriores)')).toBeInTheDocument();
+    expect(field(modal, 'Escopo').getByText('Tudo')).toBeInTheDocument();
+    for (const label of ['Estado anterior do caixa', 'Estado anterior das posições']) {
+      expect(
+        field(modal, label).getByText('Estado inicial (sem lançamentos anteriores)'),
+      ).toBeInTheDocument();
+    }
     expect(modal.queryByRole('alert')).not.toBeInTheDocument();
     expect(modal.queryByText(/período efetivo/i)).not.toBeInTheDocument();
   });
@@ -227,7 +233,13 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
     const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
-    expect(await modal.findByText('Válido em 14/10')).toBeInTheDocument();
+    await modal.findByText('15/10/2026 a 16/10/2026');
+    expect(
+      field(modal, 'Estado anterior do caixa').getByText('Válido em 14/10'),
+    ).toBeInTheDocument();
+    expect(
+      field(modal, 'Estado anterior das posições').getByText('Válido em 14/10'),
+    ).toBeInTheDocument();
     expect(modal.getByText('2')).toBeInTheDocument();
     expect(modal.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -238,23 +250,82 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
     const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    // OQ-21: only the positions of 16/10 are stale (a corrected price); its cash is current.
     const warning = await modal.findByRole('alert');
-    expect(warning).toHaveTextContent('O fechamento de 16/10/2026 está desatualizado.');
+    expect(
+      field(modal, 'Estado anterior do caixa').getByText('Válido em 16/10'),
+    ).toBeInTheDocument();
+    expect(warning).toHaveTextContent(
+      'O fechamento das posições de 16/10/2026 está desatualizado.',
+    );
     expect(warning).toHaveTextContent(
       'O processamento será executado, mas os dias do intervalo aparecerão como desatualizados, sem P&L, e uma pendência pedirá o processamento de um intervalo anterior.',
     );
   });
 
-  it('OQ-11 warns that a range after an unprocessed day still runs, but reads as stale', async () => {
+  it('OQ-11 OQ-22 after an unprocessed day: cash will be refused, positions still run but read as stale', async () => {
     const { user } = renderApp(`${PAGE}&inicio=2026-10-18&fim=2026-10-18`);
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
     const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
-    const warning = await modal.findByRole('alert');
-    expect(warning).toHaveTextContent('O dia 17/10/2026 ainda não foi processado.');
-    expect(warning).toHaveTextContent('O processamento será executado');
+    // Neither chain has 17/10: one warning each.
+    const warnings = await modal.findAllByRole('alert');
+    expect(warnings.map((w) => w.textContent)).toEqual([
+      expect.stringContaining(
+        'O caixa de 17/10/2026 não foi processado: este processamento será recusado ao iniciar, sem publicar nenhum dia. Processe antes um intervalo que inclua esse dia.',
+      ),
+      expect.stringContaining(
+        'O dia 17/10/2026 ainda não foi processado para o cálculo das posições.',
+      ),
+    ]);
+    expect(warnings[1]).toHaveTextContent('O processamento será executado');
     expect(modal.getByText('1')).toBeInTheDocument();
+  });
+
+  it('OQ-21 the scope defaults to Tudo and Caixa warns only about the cash chain', async () => {
+    const { user } = renderApp(`${PAGE}&inicio=2026-10-17&fim=2026-10-18`);
+    expect(await screen.findByRole('radio', { name: 'Tudo' })).toBeChecked();
+
+    await user.click(screen.getByRole('radio', { name: 'Caixa' }));
+    await user.click(screen.getByRole('button', { name: 'Solicitar processamento' }));
+
+    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    expect(await modal.findByText('Válido em 16/10')).toBeInTheDocument();
+    expect(field(modal, 'Escopo').getByText('Caixa')).toBeInTheDocument();
+    expect(modal.queryByRole('group', { name: 'Estado anterior das posições' })).toBeNull();
+    expect(modal.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('OQ-21 keeps the scope in the URL (escopo) and prefills it from there', async () => {
+    const { user, router } = renderApp(`${PAGE}&escopo=posicoes`);
+    expect(await screen.findByRole('radio', { name: 'Posições' })).toBeChecked();
+
+    await user.click(screen.getByRole('radio', { name: 'Caixa' }));
+
+    expect(router.state.location.search).toContain('escopo=caixa');
+  });
+
+  it('OQ-21 sends the chosen scope and shows it in the history', async () => {
+    holdWorker();
+    const bodies: unknown[] = [];
+    server.use(
+      http.post(url('/processing/requests'), async ({ request }) => {
+        bodies.push(await request.clone().json());
+        return undefined;
+      }),
+    );
+    const { user } = renderApp(`${PAGE}&inicio=2026-10-17&fim=2026-10-18&escopo=caixa`);
+    await findJobRow('01/10/2026 a 05/10/2026', 'Falhou');
+
+    await user.click(screen.getByRole('button', { name: 'Solicitar processamento' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Confirmar processamento' });
+    await within(dialog).findByText('17/10/2026 a 18/10/2026');
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmar processamento' }));
+
+    const row = await findJobRow('17/10/2026 a 18/10/2026', 'Na fila');
+    expect(row.getByText('Caixa')).toBeInTheDocument();
+    expect(bodies).toEqual([{ start_date: '2026-10-17', end_date: '2026-10-18', scope: 'CASH' }]);
   });
 
   it('§10.1 queues the confirmed range and shows it in the history', async () => {
@@ -387,7 +458,13 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     const headers = history()
       .getAllByRole('columnheader')
       .map((th) => th.textContent);
-    expect(headers.slice(0, 4)).toEqual(['Processamento', 'Período', 'Progresso', 'Status']);
+    expect(headers.slice(0, 5)).toEqual([
+      'Processamento',
+      'Período',
+      'Escopo',
+      'Progresso',
+      'Status',
+    ]);
     expect(jobRow('01/10/2026 a 05/10/2026', 'Falhou').getByText('2 / 5 dias')).toBeVisible();
     expect(jobRow('10/10/2026 a 12/10/2026', 'Cancelado').getByText('1 / 3 dias')).toBeVisible();
     expect(jobRow('14/10/2026 a 15/10/2026', 'Concluído').getByText('2 / 2 dias')).toBeVisible();
@@ -455,15 +532,18 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     ]);
   });
 
-  it('OQ-20 prefills a new request with the full original range of a failed job', async () => {
+  it('OQ-20 OQ-21 prefills a new request with the full original range and scope of a failed job', async () => {
+    const failed = db.requests.find((job) => job.status === 'FAILED');
+    if (failed) failed.scope = 'CASH';
     const { user, router } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '01/10/2026 a 05/10/2026', 'Falhou'));
     await user.click(menu.getByRole('menuitem', { name: 'Solicitar novo processamento' }));
 
     expect(router.state.location.search).toBe(
-      '?tab=processamentos&inicio=2026-10-01&fim=2026-10-05',
+      '?tab=processamentos&inicio=2026-10-01&fim=2026-10-05&escopo=caixa',
     );
+    expect(screen.getByRole('radio', { name: 'Caixa' })).toBeChecked();
     expect(screen.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('01/10/2026');
     expect(screen.getByRole('textbox', { name: 'Data final' })).toHaveValue('05/10/2026');
   });
@@ -650,8 +730,8 @@ describe('Processamentos: cancel (§10.2)', () => {
     );
   });
 
-  it('§10.2 cancels and replaces an active job with a new range', async () => {
-    seedJob({});
+  it('§10.2 OQ-21 cancels and replaces an active job with a new range, starting from its scope', async () => {
+    seedJob({ scope: 'POSITIONS' });
     holdWorker();
     const { user } = renderApp(PAGE);
 
@@ -664,6 +744,7 @@ describe('Processamentos: cancel (§10.2)', () => {
     const dialog = within(dialogElement);
     expect(dialog.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('17/10/2026');
     expect(dialog.getByRole('textbox', { name: 'Data final' })).toHaveValue('18/10/2026');
+    expect(dialog.getByRole('radio', { name: 'Posições' })).toBeChecked();
     await typeRange(user, '16/10/2026', '18/10/2026', dialog);
     await user.click(dialog.getByRole('button', { name: 'Cancelar e criar novo' }));
 
@@ -791,7 +872,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
 
     await user.click(modal.getByRole('button', { name: 'Solicitar novo processamento' }));
     expect(router.state.location.search).toBe(
-      '?tab=processamentos&inicio=2026-10-01&fim=2026-10-05',
+      '?tab=processamentos&inicio=2026-10-01&fim=2026-10-05&escopo=tudo',
     );
   });
 

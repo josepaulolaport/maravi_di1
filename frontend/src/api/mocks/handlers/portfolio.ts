@@ -1,16 +1,65 @@
 import { http, HttpResponse } from 'msw';
 
-import type { ListResponse, PnlPoint, PortfolioPositions, PortfolioSummary } from '../../contract';
-import { db, isStale } from '../db';
+import type {
+  Freshness,
+  ListResponse,
+  PnlPoint,
+  PortfolioPositions,
+  PortfolioSummary,
+  ProcessingChain,
+} from '../../contract';
+import { db, isPublished, isStale } from '../db';
 import { dateErrors, latency, problem, rangeErrors, url } from './support';
 
-// Published results start as the fixtures; a finished job replaces its days with the
-// precomputed results of the scenario (handlers/processing.ts). Stale flags follow the live
-// dirty markers, so edits show as stale.
+// Published results start as the fixtures; a finished job replaces the days of its scope with
+// the precomputed results of the scenario (handlers/processing.ts). Cash and positions are
+// served apart, each with its own freshness (OQ-21 draft); AUM joins them.
 
 function dateParam(request: Request) {
   const date = new URL(request.url).searchParams.get('date');
   return { date, errors: dateErrors(date, 'date') };
+}
+
+function freshness(date: string, chain: ProcessingChain): Freshness {
+  if (!isPublished(date, chain)) return 'NOT_PROCESSED';
+  return isStale(date, chain) ? 'STALE' : 'FRESH';
+}
+
+/** AUM is as current as its least current side, and unavailable when either side is. */
+function aumFreshness(cash: Freshness, positions: Freshness): Freshness {
+  if (cash === 'NOT_PROCESSED' || positions === 'NOT_PROCESSED') return 'NOT_PROCESSED';
+  return cash === 'STALE' || positions === 'STALE' ? 'STALE' : 'FRESH';
+}
+
+export function summaryOf(date: string): PortfolioSummary {
+  const cash = db.published.cash.get(date);
+  const positions = db.published.summaries.get(date);
+  const cashStatus = freshness(date, 'CASH');
+  const positionsStatus = freshness(date, 'POSITIONS');
+  return {
+    date,
+    cash: {
+      status: cashStatus,
+      balance: cash?.balance ?? null,
+      published_at: cash?.published_at ?? null,
+    },
+    positions: {
+      status: positionsStatus,
+      published_at: positions?.published_at ?? null,
+      market_value: positions?.positions_market_value ?? null,
+      valuation_status: positions?.valuation_status ?? null,
+      position_pnl: positions?.position_pnl ?? null,
+      trades_pnl: positions?.trades_pnl ?? null,
+      daily_pnl: positions?.daily_pnl ?? null,
+      cumulative_pnl: positions?.cumulative_pnl ?? null,
+      pnl_status: positions?.pnl_status ?? null,
+    },
+    aum: {
+      status: aumFreshness(cashStatus, positionsStatus),
+      // The scenario's cash + market value, only while both sides are published.
+      value: cash && positions ? positions.aum : null,
+    },
+  };
 }
 
 export const portfolioHandlers = [
@@ -18,11 +67,7 @@ export const portfolioHandlers = [
     await latency();
     const { date, errors } = dateParam(request);
     if (errors.length > 0 || !date) return problem(422, errors);
-    const published = db.published.summaries.get(date);
-    const body: PortfolioSummary = published
-      ? { ...published, stale: isStale(date) }
-      : { date, publication: 'NOT_PROCESSED' };
-    return HttpResponse.json(body);
+    return HttpResponse.json<PortfolioSummary>(summaryOf(date));
   }),
 
   http.get(url('/portfolio/positions'), async ({ request }) => {
@@ -31,7 +76,7 @@ export const portfolioHandlers = [
     if (errors.length > 0 || !date) return problem(422, errors);
     const published = db.published.positions.get(date);
     const body: PortfolioPositions = published
-      ? { ...published, stale: isStale(date) }
+      ? { ...published, stale: isStale(date, 'POSITIONS') }
       : { date, publication: 'NOT_PROCESSED' };
     return HttpResponse.json(body);
   }),
@@ -46,13 +91,10 @@ export const portfolioHandlers = [
     const items = [...db.published.pnl.values()]
       .filter((p) => p.date >= (start as string) && p.date <= (end as string))
       .sort((a, b) => a.date.localeCompare(b.date))
-      .map((p) => ({ ...p, stale: isStale(p.date) }));
+      .map((p) => ({ ...p, stale: isStale(p.date, 'POSITIONS') }));
     return HttpResponse.json<ListResponse<PnlPoint>>({ items });
   }),
 ];
-
-/** Whether the mock has published results for `date`, for the processing preview. */
-export const isPublished = (date: string) => db.published.summaries.has(date);
 
 /** The earliest date with any ledger entry (the day before it is the zero state). */
 export function firstEntryDate(): string | undefined {

@@ -125,7 +125,7 @@ export const priceHandlers = [
       superseded_at: null,
     };
     db.referencePrices.push(created);
-    markDirty('valuation', date);
+    markDirty('price', date);
     return HttpResponse.json(created, { status: 201 });
   }),
 
@@ -134,7 +134,7 @@ export const priceHandlers = [
     const price = db.referencePrices.find((p) => p.id === params.id && p.superseded_at === null);
     if (!price) return notFound('Preço de referência');
     price.superseded_at = new Date().toISOString();
-    markDirty('valuation', price.reference_date);
+    markDirty('price', price.reference_date);
     return new HttpResponse(null, { status: 204 });
   }),
 ];

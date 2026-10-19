@@ -6,7 +6,7 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 import { useState } from 'react';
 
 import type { CashMovementType, IsoDate } from '@/api/contract';
-import { parsePtBrDecimal } from '@/shared/format';
+import { formatDate, parsePtBrDecimal } from '@/shared/format';
 
 import { useCreateCashMovement } from '../hooks/useLedger';
 import { parsePtBrDate, splitErrors } from './formSupport';
@@ -56,13 +56,17 @@ export function CashMovementForm({
 
   const submit = form.onSubmit((values) => {
     const amount = parsePtBrDecimal(values.amount);
-    if (!values.date || amount === null) return;
+    const date = values.date;
+    if (!date || amount === null) return;
     setPageErrors([]);
     createMovement.mutate(
-      { movement_date: values.date, movement_type: type, amount },
+      { movement_date: date, movement_type: type, amount },
       {
         onSuccess: () => {
-          notifications.show({ color: 'teal', message: LABELS[type].done });
+          notifications.show({
+            color: 'teal',
+            message: `${LABELS[type].done} O caixa precisa ser processado a partir de ${formatDate(date)}: use o escopo Caixa.`,
+          });
           onDone();
         },
         onError: (error) => {

@@ -17,7 +17,33 @@ async function problemOf(promise: Promise<unknown>) {
   throw new Error('expected an error');
 }
 
-function published<T extends PortfolioSummary | PortfolioPositions>(
+/**
+ * The summary as one flat record, as these tests were written before OQ-21 split it: cash from
+ * the cash chain, the rest from the positions chain; `stale` when either chain is.
+ */
+function flat(summary: PortfolioSummary) {
+  return {
+    stale: summary.cash.status === 'STALE' || summary.positions.status === 'STALE',
+    published_at: summary.positions.published_at,
+    cash_balance: summary.cash.balance,
+    positions_market_value: summary.positions.market_value,
+    aum: summary.aum.value,
+    position_pnl: summary.positions.position_pnl,
+    trades_pnl: summary.positions.trades_pnl,
+    daily_pnl: summary.positions.daily_pnl,
+    cumulative_pnl: summary.positions.cumulative_pnl,
+    valuation_status: summary.positions.valuation_status,
+    pnl_status: summary.positions.pnl_status,
+  };
+}
+
+/** The freshness of each chain on a date (OQ-21 draft). */
+async function chainStatus(date: string) {
+  const summary = await portfolioApi.getSummary(date);
+  return { cash: summary.cash.status, positions: summary.positions.status };
+}
+
+function published<T extends PortfolioPositions>(
   value: T,
 ): Extract<T, { publication: 'PUBLISHED' }> {
   if (value.publication !== 'PUBLISHED') throw new Error('expected a published date');
@@ -26,7 +52,7 @@ function published<T extends PortfolioSummary | PortfolioPositions>(
 
 describe('mock portfolio', () => {
   it('§8.2 §11.4 returns the published summary of a complete day', async () => {
-    const summary = published(await portfolioApi.getSummary('2026-10-15'));
+    const summary = flat(await portfolioApi.getSummary('2026-10-15'));
 
     expect(summary).toMatchObject({
       stale: false,
@@ -42,7 +68,7 @@ describe('mock portfolio', () => {
   });
 
   it('§8.3 keeps cash but returns null valuation and P&L when a price is missing', async () => {
-    const summary = published(await portfolioApi.getSummary('2026-10-16'));
+    const summary = flat(await portfolioApi.getSummary('2026-10-16'));
 
     expect(summary).toMatchObject({
       cash_balance: '506059.2651460232',
@@ -69,15 +95,15 @@ describe('mock portfolio', () => {
     });
   });
 
-  it('§10.4 flags a date as stale when its price was corrected after publication', async () => {
-    expect(published(await portfolioApi.getSummary('2026-10-16')).stale).toBe(true);
+  it('§10.4 OQ-21 a price corrected after publication makes only the positions stale', async () => {
+    expect(await chainStatus('2026-10-16')).toEqual({ cash: 'FRESH', positions: 'STALE' });
   });
 
   it('§12 D3 reports a date that was never processed instead of inventing figures', async () => {
-    expect(await portfolioApi.getSummary('2026-10-17')).toEqual({
-      date: '2026-10-17',
-      publication: 'NOT_PROCESSED',
-    });
+    const summary = await portfolioApi.getSummary('2026-10-17');
+    expect(summary.cash).toEqual({ status: 'NOT_PROCESSED', balance: null, published_at: null });
+    expect(summary.positions.status).toBe('NOT_PROCESSED');
+    expect(summary.positions.market_value).toBeNull();
   });
 
   it('OQ-16 returns the cumulative series with the gap as null', async () => {
@@ -152,7 +178,7 @@ describe('mock reference prices', () => {
       [2, false],
       [1, false],
     ]);
-    expect(published(await portfolioApi.getSummary('2026-10-16')).stale).toBe(true);
+    expect(await chainStatus('2026-10-16')).toEqual({ cash: 'FRESH', positions: 'STALE' });
   });
 
   it('§5 requires the contract when listing reference prices', async () => {
@@ -279,7 +305,7 @@ describe('mock ledger validation', () => {
 
     await ledgerApi.createTrade({ ...trade, trade_date: '2026-10-15' });
 
-    expect(published(await portfolioApi.getSummary('2026-10-15')).stale).toBe(true);
+    expect(await chainStatus('2026-10-15')).toEqual({ cash: 'STALE', positions: 'STALE' });
     expect((await processingApi.listRequests()).items).toHaveLength(before);
   });
 
@@ -302,7 +328,11 @@ describe('mock processing', () => {
   }
 
   it('§10.2 runs one queued job day by day to completion', async () => {
-    const job = await processingApi.enqueue({ start_date: '2026-10-14', end_date: '2026-10-15' });
+    const job = await processingApi.enqueue({
+      start_date: '2026-10-14',
+      end_date: '2026-10-15',
+      scope: 'ALL',
+    });
     expect(job).toMatchObject({ status: 'QUEUED', total_days: 2, processed_days: 0 });
 
     expect((await poll(job.id)).status).toBe('DISPATCHED');
@@ -312,7 +342,11 @@ describe('mock processing', () => {
   });
 
   it('§10.3 ends with COMPLETED_WITH_ISSUES when the range has a missing price', async () => {
-    const job = await processingApi.enqueue({ start_date: '2026-10-16', end_date: '2026-10-16' });
+    const job = await processingApi.enqueue({
+      start_date: '2026-10-16',
+      end_date: '2026-10-16',
+      scope: 'ALL',
+    });
     for (let i = 0; i < 3; i += 1) await poll(job.id);
 
     expect((await poll(job.id)).status).toBe('COMPLETED_WITH_ISSUES');
@@ -322,10 +356,12 @@ describe('mock processing', () => {
     const queued = await processingApi.enqueue({
       start_date: '2026-10-14',
       end_date: '2026-10-16',
+      scope: 'ALL',
     });
     const second = await processingApi.enqueue({
       start_date: '2026-10-15',
       end_date: '2026-10-16',
+      scope: 'ALL',
     });
     await poll(queued.id); // DISPATCHED
     await poll(queued.id); // RUNNING
@@ -336,10 +372,15 @@ describe('mock processing', () => {
   });
 
   it('§10.2 runs one job at a time: the next stays queued until the active one ends', async () => {
-    const first = await processingApi.enqueue({ start_date: '2026-10-14', end_date: '2026-10-15' });
+    const first = await processingApi.enqueue({
+      start_date: '2026-10-14',
+      end_date: '2026-10-15',
+      scope: 'ALL',
+    });
     const second = await processingApi.enqueue({
       start_date: '2026-10-14',
       end_date: '2026-10-14',
+      scope: 'ALL',
     });
 
     await poll(first.id); // first DISPATCHED
@@ -350,7 +391,11 @@ describe('mock processing', () => {
   });
 
   it('§10.2 marks a job SUPERSEDED when an input changes during the run', async () => {
-    const job = await processingApi.enqueue({ start_date: '2026-10-14', end_date: '2026-10-15' });
+    const job = await processingApi.enqueue({
+      start_date: '2026-10-14',
+      end_date: '2026-10-15',
+      scope: 'ALL',
+    });
     await poll(job.id); // DISPATCHED
     await poll(job.id); // RUNNING
 
@@ -362,11 +407,16 @@ describe('mock processing', () => {
     await poll(job.id);
 
     expect((await poll(job.id)).status).toBe('SUPERSEDED');
-    expect(published(await portfolioApi.getSummary('2026-10-15')).stale).toBe(true);
+    // A deposit changes only the cash chain (OQ-21 draft).
+    expect(await chainStatus('2026-10-15')).toEqual({ cash: 'STALE', positions: 'FRESH' });
   });
 
   it('OQ-11 runs a range whose predecessor is stale and raises STALE_PREDECESSOR', async () => {
-    const job = await processingApi.enqueue({ start_date: '2026-10-17', end_date: '2026-10-17' });
+    const job = await processingApi.enqueue({
+      start_date: '2026-10-17',
+      end_date: '2026-10-17',
+      scope: 'ALL',
+    });
     for (let i = 0; i < 3; i += 1) await poll(job.id);
 
     expect((await poll(job.id)).status).toBe('COMPLETED_WITH_ISSUES');
@@ -389,11 +439,13 @@ describe('mock processing', () => {
     const active = await processingApi.enqueue({
       start_date: '2026-10-14',
       end_date: '2026-10-16',
+      scope: 'ALL',
     });
 
     const result = await processingApi.cancelAndReplace(active.id, {
       start_date: '2026-10-14',
       end_date: '2026-10-18',
+      scope: 'ALL',
     });
 
     expect(result.cancelled.status).toBe('CANCELLED');
@@ -406,14 +458,18 @@ describe('mock processing', () => {
     ['2026-10-17', 'STALE'],
     ['2026-10-18', 'NOT_PROCESSED'],
   ])('OQ-11 previews a range starting %s with predecessor %s', async (start, state) => {
-    const preview = await processingApi.preview({ start_date: start, end_date: '2026-10-18' });
+    const preview = await processingApi.preview({
+      start_date: start,
+      end_date: '2026-10-18',
+      scope: 'ALL',
+    });
 
-    expect(preview.predecessor_state).toBe(state);
+    expect(preview.predecessor.positions).toBe(state);
   });
 
   it('OQ-11 rejects a range that starts after it ends', async () => {
     const problem = await problemOf(
-      processingApi.preview({ start_date: '2026-10-16', end_date: '2026-10-15' }),
+      processingApi.preview({ start_date: '2026-10-16', end_date: '2026-10-15', scope: 'ALL' }),
     );
 
     expect(problem.errors?.[0]).toMatchObject({ code: 'INVALID_RANGE', field: 'start_date' });
@@ -437,7 +493,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
 
   /** Queues [start, end] and polls it until it reaches a final status. */
   async function run(start: string, end: string): Promise<ProcessingRequest> {
-    const job = await processingApi.enqueue({ start_date: start, end_date: end });
+    const job = await processingApi.enqueue({ start_date: start, end_date: end, scope: 'ALL' });
     for (let i = 0; i < 50; i += 1) {
       const current = await processingApi.getRequest(job.id);
       if (FINAL.includes(current.status)) return current;
@@ -456,7 +512,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
   it('§10.4 OQ-12 republishes 16/10 with the corrected price and clears its stale flag', async () => {
     expect((await run('2026-10-16', '2026-10-18')).status).toBe('COMPLETED_WITH_ISSUES');
 
-    const summary = published(await portfolioApi.getSummary('2026-10-16'));
+    const summary = flat(await portfolioApi.getSummary('2026-10-16'));
     expect(summary).toMatchObject({
       stale: false,
       cash_balance: '506059.2651460232',
@@ -503,7 +559,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
     async (date) => {
       await run('2026-10-16', '2026-10-18');
 
-      expect(published(await portfolioApi.getSummary(date))).toMatchObject({
+      expect(flat(await portfolioApi.getSummary(date))).toMatchObject({
         stale: false,
         cash_balance: '506059.2651460232',
         positions_market_value: null,
@@ -555,25 +611,39 @@ describe('mock publication (a finished job publishes the precomputed results of 
     expect((await run('2026-10-17', '2026-10-18')).status).toBe('COMPLETED_WITH_ISSUES');
 
     for (const date of ['2026-10-16', '2026-10-17', '2026-10-18']) {
-      expect(published(await portfolioApi.getSummary(date)).stale).toBe(true);
+      expect((await chainStatus(date)).positions).toBe('STALE');
     }
   });
 
   it('OQ-11 a range after an unprocessed day reads as stale until the gap is processed', async () => {
     await run('2026-10-16', '2026-10-16');
     expect(
-      (await processingApi.preview({ start_date: '2026-10-17', end_date: '2026-10-17' }))
-        .predecessor_state,
-    ).toBe('VALID');
+      (
+        await processingApi.preview({
+          start_date: '2026-10-17',
+          end_date: '2026-10-17',
+          scope: 'ALL',
+        })
+      ).predecessor,
+    ).toEqual({ cash: 'VALID', positions: 'VALID' });
 
-    await run('2026-10-18', '2026-10-18');
-    expect(published(await portfolioApi.getSummary('2026-10-18')).stale).toBe(true);
+    // OQ-22: cash after a day with no published cash is refused; positions still run (OQ-11).
+    const positionsJob = await processingApi.enqueue({
+      start_date: '2026-10-18',
+      end_date: '2026-10-18',
+      scope: 'POSITIONS',
+    });
+    for (let i = 0; i < 10; i += 1) await processingApi.getRequest(positionsJob.id);
+    expect(await chainStatus('2026-10-18')).toEqual({
+      cash: 'NOT_PROCESSED',
+      positions: 'STALE',
+    });
     expect((await processingApi.listIssues()).items).toContainEqual(
       expect.objectContaining({ issue_type: 'STALE_PREDECESSOR', affected_date: '2026-10-18' }),
     );
 
     await run('2026-10-17', '2026-10-18');
-    expect(published(await portfolioApi.getSummary('2026-10-18')).stale).toBe(false);
+    expect(await chainStatus('2026-10-18')).toEqual({ cash: 'FRESH', positions: 'FRESH' });
     expect((await processingApi.listIssues()).items).not.toContainEqual(
       expect.objectContaining({ issue_type: 'STALE_PREDECESSOR' }),
     );
@@ -582,7 +652,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
   it('§7 publishes the days before the first entry as the zero state', async () => {
     expect((await run('2026-10-10', '2026-10-13')).status).toBe('COMPLETED');
 
-    expect(published(await portfolioApi.getSummary('2026-10-12'))).toMatchObject({
+    expect(flat(await portfolioApi.getSummary('2026-10-12'))).toMatchObject({
       stale: false,
       cash_balance: '0',
       positions_market_value: '0',
@@ -605,7 +675,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
     });
 
     expect((await run('2026-10-14', '2026-10-16')).status).toBe('COMPLETED_WITH_ISSUES');
-    const summary = published(await portfolioApi.getSummary('2026-10-16'));
+    const summary = flat(await portfolioApi.getSummary('2026-10-16'));
     expect(summary).toMatchObject({ stale: false, trades_pnl: '-592.3681943852' });
     const rows = published(await portfolioApi.getPositions('2026-10-16')).items;
     expect(rows.find((r) => r.asset_code === 'DI1F28')?.reference_price_id).toBe(
@@ -616,7 +686,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
   it('§10.4 republishes 14/10 and 15/10 with their published figures unchanged', async () => {
     expect((await run('2026-10-14', '2026-10-15')).status).toBe('COMPLETED');
 
-    const summary = published(await portfolioApi.getSummary('2026-10-15'));
+    const summary = flat(await portfolioApi.getSummary('2026-10-15'));
     expect(summary).toMatchObject({
       stale: false,
       cash_balance: '199650.3745326500',
@@ -625,7 +695,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
       cumulative_pnl: '-8034.1345282660',
     });
     expect(summary.published_at).not.toBe('2026-10-16T18:40:00-03:00');
-    expect(published(await portfolioApi.getSummary('2026-10-14')).aum).toBe('1500000.0000000000');
+    expect(flat(await portfolioApi.getSummary('2026-10-14')).aum).toBe('1500000.0000000000');
   });
 
   it('§10.3 does not duplicate Pendências when ranges are processed again', async () => {
@@ -697,11 +767,15 @@ describe('mock publication (a finished job publishes the precomputed results of 
 
     expect(job.status).toBe('FAILED');
     expect(job.error_message).toContain(`a partir de ${shown}`);
-    expect((await portfolioApi.getSummary('2026-10-18')).publication).toBe('NOT_PROCESSED');
+    expect((await portfolioApi.getSummary('2026-10-18')).positions.status).toBe('NOT_PROCESSED');
   });
 
   it('§10.4 a write made while the job is queued fails it rather than superseding it', async () => {
-    const job = await processingApi.enqueue({ start_date: '2026-10-16', end_date: '2026-10-18' });
+    const job = await processingApi.enqueue({
+      start_date: '2026-10-16',
+      end_date: '2026-10-18',
+      scope: 'ALL',
+    });
     await ledgerApi.createCashMovement({
       movement_date: '2026-10-17',
       movement_type: 'DEPOSIT',
@@ -736,10 +810,8 @@ describe('mock publication (a finished job publishes the precomputed results of 
         error_message: `Backend simulado: os resultados a partir de ${shown} dependem de lançamentos ou preços alterados e só podem ser recalculados pelo backend real. Nenhum dia foi publicado.`,
       });
       // All or nothing (§10.4): no day of the range was published.
-      expect(published(await portfolioApi.getSummary('2026-10-16')).trades_pnl).toBe(
-        '-394.7129232316',
-      );
-      expect((await portfolioApi.getSummary('2026-10-18')).publication).toBe('NOT_PROCESSED');
+      expect(flat(await portfolioApi.getSummary('2026-10-16')).trades_pnl).toBe('-394.7129232316');
+      expect((await portfolioApi.getSummary('2026-10-18')).positions.status).toBe('NOT_PROCESSED');
       expect((await processingApi.listIssues()).items).toEqual(issuesBefore);
     },
   );
@@ -747,8 +819,8 @@ describe('mock publication (a finished job publishes the precomputed results of 
 
 describe('mock ids', () => {
   it('§11.1 gives every job a distinct short id (its first 8 characters), as real UUIDs do', async () => {
-    await processingApi.enqueue({ start_date: '2026-10-14', end_date: '2026-10-14' });
-    await processingApi.enqueue({ start_date: '2026-10-15', end_date: '2026-10-15' });
+    await processingApi.enqueue({ start_date: '2026-10-14', end_date: '2026-10-14', scope: 'ALL' });
+    await processingApi.enqueue({ start_date: '2026-10-15', end_date: '2026-10-15', scope: 'ALL' });
 
     const { items } = await processingApi.listRequests();
     const shortIds = items.map((job) => job.id.slice(0, 8));

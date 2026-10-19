@@ -5,9 +5,11 @@ import type { ProcessingRequest } from '@/api/contract';
 import { formatDate } from '@/shared/format';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
+import { SCOPE_LABELS } from '@/shared/processing/scope';
+
 import { formatDateTime, formatDays, formatPeriod, shortId } from '../format';
 import { canCancel, canRequestAgain, jobStatusBadge, publishedNothing } from '../jobStatus';
-import { Field } from './Field';
+import { Field } from '@/shared/ui/Field';
 import type { JobActions } from './HistoryTable';
 
 export const UNPUBLISHED_NOTICE =
@@ -50,6 +52,7 @@ export function JobDetailsModal({
           <Field label="Período solicitado">
             {formatPeriod(job.requested_start_date, job.requested_end_date)}
           </Field>
+          <Field label="Escopo">{SCOPE_LABELS[job.scope]}</Field>
           <SimpleGrid cols={3}>
             <Field label="Criação">{formatDateTime(job.created_at)}</Field>
             <Field label="Início">{formatDateTime(job.started_at)}</Field>

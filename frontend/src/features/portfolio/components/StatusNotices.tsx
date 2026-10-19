@@ -2,13 +2,13 @@ import { Alert, Anchor, Stack, Text } from '@mantine/core';
 import { IconAlertCircle, IconClockExclamation, IconInfoCircle } from '@tabler/icons-react';
 import { Link } from 'react-router';
 
-import type { IsoDate } from '@/api/contract';
+import type { Freshness, IsoDate, ProcessingChain } from '@/api/contract';
 import { controlCenterLinks } from '@/app/paths';
 import { formatDate } from '@/shared/format';
 
-// The three states the screen must tell apart from "valid" (§8.3, §11.4): never processed,
-// stale (inputs changed after publication) and incomplete (a required price is missing).
-// Each offers the contextual path to Processamentos or Pendências.
+// The states the screen must tell apart from "valid" (§8.3, §11.4), per chain since OQ-21
+// (draft): never processed, stale (inputs changed after publication) and incomplete (a
+// required price is missing). Each offers the contextual path to Processamentos or Pendências.
 
 export function NotProcessedNotice({ date }: { date: IsoDate }) {
   return (
@@ -24,7 +24,7 @@ export function NotProcessedNotice({ date }: { date: IsoDate }) {
       </Text>
       <Anchor
         component={Link}
-        to={controlCenterLinks.processing({ start: date, end: date })}
+        to={controlCenterLinks.processing({ start: date, end: date, scope: 'ALL' })}
         size="sm"
       >
         Solicitar processamento
@@ -33,31 +33,78 @@ export function NotProcessedNotice({ date }: { date: IsoDate }) {
   );
 }
 
-interface PublishedNoticesProps {
+type Chain = ProcessingChain;
+
+const BEHIND_TITLE: Record<Chain, { stale: string; unprocessed: string }> = {
+  CASH: { stale: 'Caixa desatualizado', unprocessed: 'Caixa não processado' },
+  POSITIONS: { stale: 'Posições desatualizadas', unprocessed: 'Posições não processadas' },
+};
+
+interface ChainNoticesProps {
   date: IsoDate;
-  stale: boolean;
+  cash: Freshness;
+  positions: Freshness;
   incomplete: boolean;
 }
 
-export function PublishedNotices({ date, stale, incomplete }: PublishedNoticesProps) {
-  if (!stale && !incomplete) return null;
+/**
+ * The states each chain must be told apart in (OQ-21 draft): cash and positions are processed
+ * separately, so one can be current while the other is stale or never processed. Each notice
+ * links to Processamentos prefilled with that chain's scope; when both are stale, with Tudo.
+ */
+export function ChainNotices({ date, cash, positions, incomplete }: ChainNoticesProps) {
+  const statusOf = { CASH: cash, POSITIONS: positions };
+  const chains: Chain[] = ['CASH', 'POSITIONS'];
+  const stale = chains.filter((chain) => statusOf[chain] === 'STALE');
+  const unprocessed = chains.filter((chain) => statusOf[chain] === 'NOT_PROCESSED');
+  const range = { start: date, end: date };
+  if (stale.length === 0 && unprocessed.length === 0 && !incomplete) return null;
   return (
     <Stack gap="xs">
-      {stale && (
+      {unprocessed.map((chain) => (
+        <Alert
+          key={chain}
+          color="gray"
+          variant="light"
+          icon={<IconInfoCircle size={18} />}
+          title={BEHIND_TITLE[chain].unprocessed}
+        >
+          <Text size="sm">
+            {chain === 'CASH'
+              ? `O caixa de ${formatDate(date)} ainda não foi calculado; o patrimônio total fica indisponível.`
+              : `As posições, a avaliação e o P&L de ${formatDate(date)} ainda não foram calculados; o patrimônio total fica indisponível.`}
+          </Text>
+          <Anchor
+            component={Link}
+            to={controlCenterLinks.processing({ ...range, scope: chain })}
+            size="sm"
+          >
+            Solicitar processamento
+          </Anchor>
+        </Alert>
+      ))}
+      {stale.length > 0 && (
         <Alert
           color="yellow"
           variant="light"
           icon={<IconClockExclamation size={18} />}
-          title="Resultados desatualizados"
+          title={
+            stale.length === 2
+              ? 'Caixa e posições desatualizados'
+              : BEHIND_TITLE[stale[0] as Chain].stale
+          }
         >
           <Text size="sm">
             Os dados de origem mudaram depois da publicação desta data, ou o dia anterior não estava
-            atualizado quando ela foi processada. Os valores abaixo são os últimos publicados e
-            podem não refletir os dados atuais.
+            atualizado quando ela foi processada. Os valores marcados são os últimos publicados e
+            podem não refletir os dados atuais; o patrimônio total também fica desatualizado.
           </Text>
           <Anchor
             component={Link}
-            to={controlCenterLinks.processing({ start: date, end: date })}
+            to={controlCenterLinks.processing({
+              ...range,
+              scope: stale.length === 2 ? 'ALL' : (stale[0] as Chain),
+            })}
             size="sm"
           >
             Ir para Processamentos

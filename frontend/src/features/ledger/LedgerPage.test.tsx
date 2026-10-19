@@ -11,6 +11,7 @@ import { http, HttpResponse } from 'msw';
 
 import type { CashMovement } from '@/api/contract';
 import { cashMovements, IDS, instruments, products, trades } from '@/api/mocks/fixtures';
+import { ledgerApi } from '@/api/endpoints';
 import { cashEntry } from '@/api/mocks/handlers/ledger';
 import { fieldError, problem, url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
@@ -330,17 +331,30 @@ describe('Lançamentos (§11.3)', () => {
   });
 
   describe('cash strip (OQ-19 item 3)', () => {
-    it('§11.3 shows Caixa D−1 and Caixa D0 for the range end, with the stale marker', async () => {
+    it('§11.3 OQ-21 shows the published cash of the range end and the day before, with its own freshness', async () => {
       await openLedger();
 
       const before = within(screen.getByRole('group', { name: 'Caixa D−1' }));
       const end = within(screen.getByRole('group', { name: 'Caixa D0' }));
       expect(before.getByText('15/10/2026')).toBeInTheDocument();
       expect(await before.findByText('R$ 199.650,37')).toBeInTheDocument();
-      expect(before.queryByText('Desatualizado')).not.toBeInTheDocument();
       expect(end.getByText('16/10/2026')).toBeInTheDocument();
       expect(await end.findByText('R$ 506.059,27')).toBeInTheDocument();
-      expect(end.getByText('Desatualizado')).toBeInTheDocument();
+      // The 16/10 price correction makes positions stale, never the cash (OQ-21).
+      expect(before.queryByText('Desatualizado')).not.toBeInTheDocument();
+      expect(end.queryByText('Desatualizado')).not.toBeInTheDocument();
+    });
+
+    it('OQ-21 a deposit marks only the cash stale: Caixa D0 shows it', async () => {
+      await ledgerApi.createCashMovement({
+        movement_date: '2026-10-15',
+        movement_type: 'DEPOSIT',
+        amount: '1000.00',
+      });
+      await openLedger();
+
+      const end = within(screen.getByRole('group', { name: 'Caixa D0' }));
+      expect(await end.findByText('Desatualizado')).toBeInTheDocument();
     });
 
     it('§11.3 shows unprocessed dates as unavailable, never as zero', async () => {
@@ -400,7 +414,11 @@ describe('Lançamentos (§11.3)', () => {
       await user.type(modal.getByRole('textbox', { name: 'PU' }), '80.000,00');
       await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await screen.findByText('Compra registrada.')).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          /^Compra registrada\. Caixa e posições precisam ser processados a partir de \d{2}\/\d{2}\/\d{4}: use o escopo Tudo\.$/,
+        ),
+      ).toBeInTheDocument();
       expect(bodies).toEqual([
         {
           asset_id: IDS.di1f29,
@@ -432,7 +450,11 @@ describe('Lançamentos (§11.3)', () => {
       await user.type(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,45');
       await user.click(modal.getByRole('button', { name: 'Registrar venda' }));
 
-      expect(await screen.findByText('Venda registrada.')).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          /^Venda registrada\. Caixa e posições precisam ser processados a partir de \d{2}\/\d{2}\/\d{4}: use o escopo Tudo\.$/,
+        ),
+      ).toBeInTheDocument();
       expect(bodies).toEqual([
         {
           asset_id: IDS.di1f28,
@@ -485,7 +507,11 @@ describe('Lançamentos (§11.3)', () => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
       expect(modal.getByRole('button', { name: 'Registrar compra' })).toBeInTheDocument();
       release();
-      expect(await screen.findByText('Compra registrada.')).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          /^Compra registrada\. Caixa e posições precisam ser processados a partir de \d{2}\/\d{2}\/\d{4}: use o escopo Tudo\.$/,
+        ),
+      ).toBeInTheDocument();
     });
 
     it('§6.1 checks the required fields before sending', async () => {
@@ -605,7 +631,11 @@ describe('Lançamentos (§11.3)', () => {
       await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '2.500,50');
       await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
-      expect(await screen.findByText('Aporte registrado.')).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          /^Aporte registrado\. O caixa precisa ser processado a partir de \d{2}\/\d{2}\/\d{4}: use o escopo Caixa\.$/,
+        ),
+      ).toBeInTheDocument();
       expect(bodies).toEqual([
         { movement_date: '2026-10-15', movement_type: 'DEPOSIT', amount: '2500.50' },
       ]);
@@ -621,7 +651,11 @@ describe('Lançamentos (§11.3)', () => {
       await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '1.000');
       await user.click(modal.getByRole('button', { name: 'Registrar retirada' }));
 
-      expect(await screen.findByText('Retirada registrada.')).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          /^Retirada registrada\. O caixa precisa ser processado a partir de \d{2}\/\d{2}\/\d{4}: use o escopo Caixa\.$/,
+        ),
+      ).toBeInTheDocument();
       expect(bodies).toEqual([
         { movement_date: '2026-10-15', movement_type: 'WITHDRAWAL', amount: '1000' },
       ]);

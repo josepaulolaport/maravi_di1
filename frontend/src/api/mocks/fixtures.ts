@@ -1,11 +1,12 @@
 import type {
   CashMovement,
+  CompletenessStatus,
+  Decimal,
   Instrument,
   InstrumentType,
   Issue,
   PnlPoint,
   PortfolioPositions,
-  PortfolioSummary,
   ProcessingRequest,
   Product,
   ReferencePrice,
@@ -227,19 +228,43 @@ export const referencePrices: ReferencePrice[] = [
 /** First date with an input; the day before it is the valid zero state (OQ-11). */
 export const FIRST_ENTRY_DATE = '2026-10-14';
 
-/** Dirty markers (`processing.calculation_state`): the 16/10 price correction. */
+/**
+ * Dirty markers (`processing.calculation_state`), one set per chain (OQ-21 draft): `cash` for
+ * the cash chain; `accounting` and `valuation` for the positions chain. The seed has only the
+ * 16/10 price correction, which affects positions, never cash.
+ */
 export const initialDirty = {
+  cash: null as string | null,
   accounting: null as string | null,
   valuation: '2026-10-16' as string | null,
 };
 
 const PUBLISHED_AT = '2026-10-16T18:40:00-03:00';
 
-type PublishedSummary = Extract<PortfolioSummary, { publication: 'PUBLISHED' }>;
+/**
+ * One published day of the seed, for both chains (OQ-21 draft): the handlers serve its cash
+ * (`cash_balance`, the cash chain) and the rest (the positions chain) separately. `aum` is
+ * the scenario's cash + market value, served only when both chains are published.
+ */
+export interface SeedSummary {
+  date: string;
+  publication: 'PUBLISHED';
+  published_at: string;
+  cash_balance: Decimal;
+  positions_market_value: Decimal | null;
+  aum: Decimal | null;
+  position_pnl: Decimal | null;
+  trades_pnl: Decimal | null;
+  daily_pnl: Decimal | null;
+  cumulative_pnl: Decimal | null;
+  valuation_status: CompletenessStatus;
+  pnl_status: CompletenessStatus;
+}
+
 type PublishedPositions = Extract<PortfolioPositions, { publication: 'PUBLISHED' }>;
 
-/** Published `portfolio_metrics`; `stale` is set by the handlers from the dirty markers. */
-export const summaries: Omit<PublishedSummary, 'stale'>[] = [
+/** Published days of the seed; freshness is set by the handlers from the dirty markers. */
+export const summaries: SeedSummary[] = [
   {
     date: '2026-10-14',
     publication: 'PUBLISHED',
@@ -484,7 +509,7 @@ function dayWithoutInputs(date: string): RecalculatedDay {
 }
 
 export interface RecalculatedDay {
-  summary: Omit<PublishedSummary, 'stale'>;
+  summary: SeedSummary;
   positions: Omit<PublishedPositions, 'stale'>;
   pnl: Omit<PnlPoint, 'stale'>;
 }
@@ -586,6 +611,7 @@ function job(
     id,
     requested_start_date: start,
     requested_end_date: end,
+    scope: 'ALL',
     status,
     created_at: createdAt,
     dispatched_at: createdAt,
@@ -656,6 +682,7 @@ export const issues: Issue[] = [
     asset_code: 'DI1F29',
     affected_date: '2026-10-16',
     required_price_date: '2026-10-16',
+    chain: null,
     request_id: REQUEST_IDS.withIssues,
   },
 ];

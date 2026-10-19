@@ -7,7 +7,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { formatPeriod, formatProgress, shortId } from '../format';
 import { useCancel } from '../hooks/useProcessing';
 import { jobStatusBadge } from '../jobStatus';
-import { Field } from './Field';
+import { Field } from '@/shared/ui/Field';
 
 interface CancelDialogProps {
   /** The job to cancel; `null` keeps the dialog closed. */

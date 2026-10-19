@@ -2,6 +2,16 @@ import type { IsoDate, IsoDateTime } from './common';
 
 // Processing (spec §10, schema `processing.*`). Central de Controle (§11.1, OQ-20).
 
+/**
+ * DRAFT (OQ-21, user 2026-10-18; names to align with lane X's interfaces.md): cash and
+ * positions are two daily chains processed separately. A request processes the cash chain,
+ * the positions chain (quantities, averages, valuation and P&L) or both.
+ */
+export type ProcessingScope = 'CASH' | 'POSITIONS' | 'ALL';
+
+/** One of the two daily chains (OQ-21 draft). */
+export type ProcessingChain = 'CASH' | 'POSITIONS';
+
 export type JobStatus =
   | 'QUEUED'
   | 'DISPATCHED'
@@ -19,6 +29,8 @@ export interface ProcessingRequest {
   /** The job processes exactly this range (OQ-11). */
   requested_start_date: IsoDate;
   requested_end_date: IsoDate;
+  /** Draft (OQ-21): the chain(s) this job recomputes and publishes. */
+  scope: ProcessingScope;
   status: JobStatus;
   created_at: IsoDateTime;
   dispatched_at: IsoDateTime | null;
@@ -39,6 +51,8 @@ export interface ProcessingRequest {
 export interface ProcessingRangeRequest {
   start_date: IsoDate;
   end_date: IsoDate;
+  /** Draft (OQ-21): required. */
+  scope: ProcessingScope;
 }
 
 /**
@@ -53,8 +67,10 @@ export interface ProcessingPreview {
   start_date: IsoDate;
   end_date: IsoDate;
   total_days: number;
+  scope: ProcessingScope;
   predecessor_date: IsoDate;
-  predecessor_state: PredecessorState;
+  /** Draft (OQ-21): the state of the day before the range, for each chain. */
+  predecessor: { cash: PredecessorState; positions: PredecessorState };
 }
 
 /** `POST /processing/requests/{id}/cancel-and-replace` (§10.2). */
@@ -77,5 +93,7 @@ export interface Issue {
   affected_date: IsoDate;
   /** For MISSING_REFERENCE_PRICE: the exact date whose price is needed ("Definir preço"). */
   required_price_date: IsoDate | null;
+  /** Draft (OQ-21): for STALE_PREDECESSOR, the chain whose day before is stale; else `null`. */
+  chain: ProcessingChain | null;
   request_id: string;
 }

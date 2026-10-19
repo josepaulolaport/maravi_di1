@@ -17,6 +17,8 @@ import { formatQuantity } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
+import { SCOPE_LABELS } from '@/shared/processing/scope';
+
 import { formatPeriod, formatProgress, shortId } from '../format';
 import type { useProcessingRequests } from '../hooks/useProcessing';
 import { canCancel, canRequestAgain, jobStatusBadge } from '../jobStatus';
@@ -35,6 +37,7 @@ function matchesSearch(job: ProcessingRequest, search: string): boolean {
   return [
     shortId(job.id),
     formatPeriod(job.requested_start_date, job.requested_end_date),
+    SCOPE_LABELS[job.scope],
     jobStatusBadge(job.status).label,
   ].some((value) => value.toLocaleLowerCase('pt-BR').includes(needle));
 }
@@ -94,6 +97,7 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
             <Table.Tr>
               <Table.Th>Processamento</Table.Th>
               <Table.Th>Período</Table.Th>
+              <Table.Th>Escopo</Table.Th>
               <Table.Th>Progresso</Table.Th>
               <Table.Th>Status</Table.Th>
               <Table.Th>
@@ -104,7 +108,7 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
           <Table.Tbody>
             {rows.length === 0 ? (
               <Table.Tr>
-                <Table.Td colSpan={5}>
+                <Table.Td colSpan={6}>
                   <Text size="sm" c="dimmed" ta="center" py="md">
                     Nenhum processamento encontrado.
                   </Text>
@@ -130,6 +134,7 @@ function JobRow({ job, actions }: { job: ProcessingRequest; actions: JobActions 
     <Table.Tr>
       <Table.Td ff="monospace">{id}</Table.Td>
       <Table.Td>{formatPeriod(job.requested_start_date, job.requested_end_date)}</Table.Td>
+      <Table.Td>{SCOPE_LABELS[job.scope]}</Table.Td>
       <Table.Td>{formatProgress(job.processed_days, job.total_days)}</Table.Td>
       <Table.Td>
         <StatusBadge label={badge.label} color={badge.color} />

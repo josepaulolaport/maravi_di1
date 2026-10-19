@@ -40,3 +40,17 @@ export function isIsoDate(value: string | null | undefined): value is IsoDate {
   const time = Date.parse(`${value}T00:00:00Z`);
   return !Number.isNaN(time) && new Date(time).toISOString().startsWith(value);
 }
+
+/** The inclusive range [A, B] (OQ-11): 14/10/2026 a 16/10/2026. */
+export function formatPeriod(start: IsoDate, end: IsoDate): string {
+  return `${formatDate(start)} a ${formatDate(end)}`;
+}
+
+/** A typed DD/MM/AAAA date → YYYY-MM-DD; `null` for anything else. */
+export function parsePtBrDate(text: string): IsoDate | null {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text.trim());
+  if (!match) return null;
+  const [, day, month, year] = match;
+  const iso = `${year ?? ''}-${month ?? ''}-${day ?? ''}`;
+  return isIsoDate(iso) ? iso : null;
+}

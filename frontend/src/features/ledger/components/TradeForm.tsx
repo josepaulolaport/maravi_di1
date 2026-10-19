@@ -16,7 +16,7 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
 import type { CreateTradeRequest, InputKind, IsoDate } from '@/api/contract';
-import { parsePtBrDecimal, percentToFraction } from '@/shared/format';
+import { formatDate, parsePtBrDecimal, percentToFraction } from '@/shared/format';
 
 import { useCreateTrade, useInstruments, useProducts } from '../hooks/useLedger';
 import { nowInSaoPaulo, parsePtBrDate, splitErrors, toIsoTime } from './formSupport';
@@ -160,7 +160,10 @@ export function TradeForm({
     setPageErrors([]);
     createTrade.mutate(body, {
       onSuccess: () => {
-        notifications.show({ color: 'teal', message: LABELS[side].done });
+        notifications.show({
+          color: 'teal',
+          message: `${LABELS[side].done} Caixa e posições precisam ser processados a partir de ${formatDate(body.trade_date)}: use o escopo Tudo.`,
+        });
         onDone();
       },
       onError: (error) => {

@@ -1,15 +1,12 @@
-import { Alert, Button, Modal, Group, Skeleton, Stack, Text } from '@mantine/core';
-import { IconAlertTriangle } from '@tabler/icons-react';
+import { Button, Group, Modal, Skeleton, Stack } from '@mantine/core';
 import { useRef } from 'react';
 
-import type { ProcessingPreview, ProcessingRangeRequest } from '@/api/contract';
-import { formatDate } from '@/shared/format';
+import type { ProcessingRangeRequest } from '@/api/contract';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
-import { formatDays, formatPeriod } from '../format';
-import { useEnqueue, usePreview } from '../hooks/useProcessing';
-import { ActionError } from './ActionError';
-import { Field } from './Field';
+import { useEnqueue, usePreview } from '@/shared/processing/hooks';
+import { PreviewSummary } from '@/shared/processing/PreviewSummary';
+import { ActionError } from '@/shared/ui/ActionError';
 
 interface ConfirmProcessingModalProps {
   /** The range to confirm; `null` keeps the modal closed. */
@@ -19,7 +16,10 @@ interface ConfirmProcessingModalProps {
   onQueued: () => void;
 }
 
-/** "Confirmar processamento" (§10.1, OQ-11): exactly [A, B], its days and the state before it. */
+/**
+ * "Confirmar processamento" (§10.1, OQ-11, OQ-21 draft): exactly [A, B], its days, its scope
+ * and the state before it for each chain in scope.
+ */
 export function ConfirmProcessingModal({ range, onClose, onQueued }: ConfirmProcessingModalProps) {
   const preview = usePreview(range);
   const enqueue = useEnqueue();
@@ -84,33 +84,5 @@ export function ConfirmProcessingModal({ range, onClose, onQueued }: ConfirmProc
         </Group>
       </Stack>
     </Modal>
-  );
-}
-
-function PreviewSummary({ preview }: { preview: ProcessingPreview }) {
-  const predecessor = formatDate(preview.predecessor_date);
-  return (
-    <Stack gap="sm">
-      <Field label="Período solicitado">{formatPeriod(preview.start_date, preview.end_date)}</Field>
-      <Field label="Dias a processar">{formatDays(preview.total_days)}</Field>
-      <Field label="Estado anterior">
-        {preview.predecessor_state === 'ZERO_STATE' &&
-          'Estado inicial (sem lançamentos anteriores)'}
-        {preview.predecessor_state === 'VALID' && `Válido em ${predecessor.slice(0, 5)}`}
-        {preview.predecessor_state === 'STALE' && 'Desatualizado'}
-        {preview.predecessor_state === 'NOT_PROCESSED' && 'Não processado'}
-      </Field>
-      {(preview.predecessor_state === 'STALE' || preview.predecessor_state === 'NOT_PROCESSED') && (
-        <Alert role="alert" color="yellow" variant="light" icon={<IconAlertTriangle size={18} />}>
-          <Text size="sm">
-            {preview.predecessor_state === 'STALE'
-              ? `O fechamento de ${predecessor} está desatualizado.`
-              : `O dia ${predecessor} ainda não foi processado.`}{' '}
-            O processamento será executado, mas os dias do intervalo aparecerão como desatualizados,
-            sem P&L, e uma pendência pedirá o processamento de um intervalo anterior.
-          </Text>
-        </Alert>
-      )}
-    </Stack>
   );
 }

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 
-import type { IsoDate, JobStatus, ProcessingRangeRequest } from '@/api/contract';
+import type { JobStatus, ProcessingRangeRequest } from '@/api/contract';
 import { processingApi } from '@/api/endpoints';
 import { invalidateAfterJobFinished, queryRoots } from '@/api/queryRoots';
 
@@ -11,8 +11,6 @@ export const processingKeys = {
   all: queryRoots.processing,
   requests: () => [...processingKeys.all, 'requests'] as const,
   issues: () => [...processingKeys.all, 'issues'] as const,
-  preview: (start: IsoDate, end: IsoDate) =>
-    [...processingKeys.all, 'preview', start, end] as const,
 };
 
 /** How often the history is read while a job is active (§12). */
@@ -57,25 +55,12 @@ export function useProcessingRequests() {
   return query;
 }
 
-/** The exact range [A, B] to process and the state before it (OQ-11). */
-export function usePreview(range: ProcessingRangeRequest | null) {
-  return useQuery({
-    queryKey: processingKeys.preview(range?.start_date ?? '', range?.end_date ?? ''),
-    queryFn: () => processingApi.preview(range as ProcessingRangeRequest),
-    enabled: range !== null,
-  });
-}
-
 function useProcessingMutation<TVariables, TData>(fn: (variables: TVariables) => Promise<TData>) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: fn,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: processingKeys.all }),
   });
-}
-
-export function useEnqueue() {
-  return useProcessingMutation((range: ProcessingRangeRequest) => processingApi.enqueue(range));
 }
 
 export function useCancel() {
