@@ -333,7 +333,7 @@ Duas abas: **Pendências** e **Processamentos**.
 
 ### 11.4 Carteira
 
-- Seleção de **uma data**; consulta a posições e métricas anteriormente publicadas, sem recalcular no GET.
+- Seleção de **uma data**; consulta a posições e métricas anteriormente publicadas, sem recalcular no GET. Uma data posterior a hoje é recusada com 422 `FUTURE_DATE`, inclusive a data final da série de P&L (OQ-35).
 - Indicadores: **Saldo em caixa**, **AUM/Patrimônio**, **P&L diário**, **P&L de posições** e **P&L de operações**.
 - **Gráfico compacto de P&L acumulado** no nível da carteira, somente onde houver histórico completo e válido.
 - O gráfico termina sempre na data selecionada da Carteira (mesma publicação dos indicadores); o usuário escolhe apenas a **data inicial**, anterior a essa data. Padrão: os 30 dias corridos que terminam na data. A data inicial fica na URL (`?pnl_start=`); valor inválido é ignorado (OQ-27).
@@ -427,6 +427,7 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - Sem desatualização (usuário, 19/10/2026, sessões Lead Backend e do integrador; OQ-31): lançamentos e preços apenas gravam o fato, sem invalidação nem `FinancialResultInvalidator`; status das datas por cadeia `PROCESSED` Processado, `PROCESSED_WITH_ISSUES` Processado com pendências, `RUNNING` Processando, `FAILED` Erro, sem status = Não processado; `cash_processed_at` e `portfolio_processed_at` em `processing.date_status`, expostos em todas as leituras e exibidos como "Processado em dd/mm/aaaa hh:mm"; regra do predecessor por dia (D−1 não processado deixa D com Erro, `CASH_PREDECESSOR_MISSING` ou `POSITIONS_PREDECESSOR_MISSING`, e o pedido termina `FAILED`; em Tudo, só a cadeia que falhou fica com Erro e a outra volta ao status anterior, com `POSITIONS_PREDECESSOR_MISSING` se as duas falharem, item 7); série de P&L só com a cadeia de posições e `range_cumulative_pnl` somado pelo backend a partir da data inicial, desenhado no gráfico da Carteira (item 8); pendências só de preço ausente e contrato vencido com posição aberta, sem `processing.issues.chain`.
 - Exclusão definitiva de lançamentos (usuário, 19/10/2026, sessões de Lançamentos e do integrador; OQ-32): `DELETE` real em `ledger.entries`, confirmada, sem motivo, tudo ou nada; id inexistente ou já excluído → 404 `NOT_FOUND` e nada é excluído; sem trilha de auditoria nem `deleted_at`/`deletion_batch_id`; regras de "lançamento ativo" passam a valer para todo lançamento. Substitui a exclusão lógica de OQ-24 item 4; não é desvio do enunciado, que não exige exclusão lógica (§15).
 - Regras HTTP de Ativos (usuário, 19/10/2026, sessões de Ativos e do integrador; OQ-33): códigos sem espaços nas pontas e em maiúsculas; id inexistente no corpo da requisição → 422 `VALIDATION_ERROR` no campo, 404 `NOT_FOUND` só para o recurso do caminho (exceção: os ids da exclusão de lançamentos, OQ-32); busca por substring sem diferenciar maiúsculas nem acentos; `last_reference` sempre nulo por ora ("—").
+- Leituras da Carteira após hoje (usuário, 19/10/2026, sessão do integrador; OQ-35): resumo, posições e série de P&L com data (ou data final) posterior a hoje são recusados com 422 `FUTURE_DATE`.
 
 ### Aberto — requer decisão específica antes de codificar o comportamento
 
