@@ -68,7 +68,9 @@ class DateStatusReader(Protocol):
 
 class ProcessingStatus(StrEnum):
     """The eight run statuses (spec §10.3; schema ``requests_status_check``); there is no
-    SUPERSEDED since OQ-23."""
+    SUPERSEDED since OQ-23. DISPATCHED and CANCELLING are never set since OQ-46: a request goes
+    QUEUED → RUNNING when the worker takes it, and a cancel of a RUNNING run only records
+    ``cancel_requested_at``; the values stay for rows written before."""
 
     QUEUED = "QUEUED"
     DISPATCHED = "DISPATCHED"
@@ -86,8 +88,8 @@ class ProcessingRequest:
     per transaction (OQ-11, OQ-21, OQ-23; schema ``processing.requests``). ``progress_date`` is
     the last date it committed; the error belongs to the run, the failed date shows FAILED in
     ``date_status``. A date whose day before is neither processed nor the chain's zero state
-    fails with ``CASH_PREDECESSOR_MISSING`` or ``POSITIONS_PREDECESSOR_MISSING`` (OQ-31). Claim
-    token and lease stay inside Processing."""
+    fails with ``CASH_PREDECESSOR_MISSING`` or ``POSITIONS_PREDECESSOR_MISSING`` (OQ-31). The run
+    has no lease and no claim token: one worker runs it (OQ-45)."""
 
     id: UUID
     scope: ProcessingScope
@@ -96,6 +98,7 @@ class ProcessingRequest:
     status: ProcessingStatus
     created_at: datetime
     dispatched_at: datetime | None
+    """Unused since OQ-46 (there is no dispatch); ``None`` for every new run."""
     started_at: datetime | None
     finished_at: datetime | None
     cancel_requested_at: datetime | None
@@ -111,7 +114,7 @@ class ProcessingRequest:
     error raised by a chain's writer call, AUM recompute included, belongs to that chain.
     ``None`` with a ``failed_date`` when the failure belonged to no chain (outside every chain's
     savepoint, e.g. a lock timeout), which fails the date for every chain still alive and the
-    run; a lost lease is not a failure at D (the worker is fenced and the run recovers).
+    run; a worker crash is not a failure at D (the run recovers when the worker starts, OQ-45).
     Both are kept when the run ends ``CANCELLED``. "Solicitar novo processamento" on
     ``COMPLETED_WITH_ISSUES`` or ``CANCELLED`` also offers this chain's scope from
     ``failed_date`` to ``end_date`` (OQ-40)."""

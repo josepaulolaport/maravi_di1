@@ -295,6 +295,7 @@ async def test_10_1_enqueue_records_a_queued_run_of_exactly_the_range_and_commit
     )
     assert request.created_at == request.updated_at == harness.clock.current
     assert uow.commits == 1
+    assert harness.doorbell.rung == [uow]  # in the same transaction (OQ-46)
 
 
 async def test_10_2_overlapping_and_repeated_requests_are_all_queued(harness: Harness) -> None:
@@ -317,6 +318,7 @@ async def test_enqueue_refuses_a_start_after_the_end_and_stores_nothing(
     assert raised.value.code is ErrorCode.INVALID_RANGE
     assert harness.requests.rows == {}
     assert uow.commits == 0
+    assert harness.doorbell.rung == []
 
 
 # Cancel
@@ -336,18 +338,35 @@ async def test_10_2_a_queued_run_is_cancelled_at_once(harness: Harness) -> None:
     assert uow.commits == 1
 
 
-@pytest.mark.parametrize("status", [ProcessingStatus.RUNNING, ProcessingStatus.DISPATCHED])
-async def test_10_2_a_started_run_is_flagged_for_the_worker(
-    harness: Harness, status: ProcessingStatus
+async def test_10_2_a_running_run_is_flagged_for_the_worker_and_stays_running(
+    harness: Harness,
 ) -> None:
     run = await harness.enqueue()
-    harness.set_status(run.id, status)
+    harness.set_status(run.id, ProcessingStatus.RUNNING)
 
     flagged = await harness.service.request_cancel(run.id, uow=FakeUnitOfWork())
 
-    assert flagged.status is ProcessingStatus.CANCELLING
+    assert flagged.status is ProcessingStatus.RUNNING  # no CANCELLING (OQ-46)
     assert flagged.cancel_requested_at == flagged.updated_at
+    assert flagged.cancel_requested_at is not None
     assert flagged.finished_at is None
+
+
+async def test_a_second_cancel_of_a_running_run_is_already_requested(harness: Harness) -> None:
+    run = await harness.enqueue()
+    harness.set_status(run.id, ProcessingStatus.RUNNING)
+    await harness.service.request_cancel(run.id, uow=FakeUnitOfWork())
+    uow = FakeUnitOfWork()
+
+    with pytest.raises(DomainError) as raised:
+        await harness.service.request_cancel(run.id, uow=uow)
+
+    assert _error(raised) == (
+        ErrorDetail(
+            ErrorCode.JOB_NOT_CANCELLABLE, "O cancelamento deste processamento já foi solicitado."
+        ),
+    )
+    assert uow.commits == 0
 
 
 @pytest.mark.parametrize(
@@ -367,6 +386,10 @@ async def test_10_2_a_started_run_is_flagged_for_the_worker(
         ),
         (ProcessingStatus.FAILED, "Este processamento já foi encerrado e não pode ser cancelado."),
         (ProcessingStatus.CANCELLING, "O cancelamento deste processamento já foi solicitado."),
+        (
+            ProcessingStatus.DISPATCHED,  # no longer written (OQ-46): not cancellable
+            "Este processamento já foi encerrado e não pode ser cancelado.",
+        ),
     ],
 )
 async def test_a_finished_or_cancelling_run_is_not_cancellable(
@@ -536,3 +559,42 @@ def test_oq31_the_predecessor_has_no_stale_state() -> None:
         "NOT_PROCESSED",
         "ZERO_STATE",
     }
+
+
+@pytest.mark.parametrize(
+    "ended",
+    [
+        ProcessingStatus.CANCELLED,  # a queued run cancelled, then cancelled again
+        ProcessingStatus.COMPLETED,  # a cancel that arrived during the last date (OQ-23)
+        ProcessingStatus.FAILED,
+    ],
+)
+async def test_an_ended_run_with_a_cancel_on_record_answers_ended_not_requested(
+    harness: Harness, ended: ProcessingStatus
+) -> None:
+    run = await harness.enqueue()
+    harness.set_status(run.id, ProcessingStatus.RUNNING)
+    await harness.service.request_cancel(run.id, uow=FakeUnitOfWork())  # cancel on record
+    harness.set_status(run.id, ended)
+
+    with pytest.raises(DomainError) as raised:
+        await harness.service.request_cancel(run.id, uow=FakeUnitOfWork())
+
+    assert _error(raised) == (
+        ErrorDetail(
+            ErrorCode.JOB_NOT_CANCELLABLE,
+            "Este processamento já foi encerrado e não pode ser cancelado.",
+        ),
+    )
+
+
+async def test_a_queued_run_cancelled_twice_answers_ended(harness: Harness) -> None:
+    queued = await harness.enqueue()
+    await harness.service.request_cancel(queued.id, uow=FakeUnitOfWork())
+
+    with pytest.raises(DomainError) as raised:
+        await harness.service.request_cancel(queued.id, uow=FakeUnitOfWork())
+
+    assert _error(raised)[0].message == (
+        "Este processamento já foi encerrado e não pode ser cancelado."
+    )

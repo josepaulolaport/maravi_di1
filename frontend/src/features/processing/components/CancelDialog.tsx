@@ -6,7 +6,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { formatPeriod, formatProgress, shortId } from '../format';
 import { useCancel } from '../hooks/useProcessing';
-import { jobStatusBadge, progressOf } from '../jobStatus';
+import { runBadge, progressOf } from '../jobStatus';
 import { Field } from '@/shared/ui/Field';
 
 interface CancelDialogProps {
@@ -17,7 +17,8 @@ interface CancelDialogProps {
 
 /**
  * "Cancelar processamento?" (§10.2): a queued job is cancelled at once, a running one
- * cooperatively. A job that already finished answers 409 JOB_NOT_CANCELLABLE, shown here.
+ * cooperatively. A job that already finished, or whose cancel was already asked (OQ-46), answers
+ * 409 JOB_NOT_CANCELLABLE; its message is shown here.
  */
 export function CancelDialog({ job, onClose }: CancelDialogProps) {
   const cancel = useCancel();
@@ -45,7 +46,7 @@ export function CancelDialog({ job, onClose }: CancelDialogProps) {
             {formatProgress(progressOf(job).done, progressOf(job).total)}
           </Field>
           <Field label="Status atual">
-            <StatusBadge {...jobStatusBadge(job.status)} />
+            <StatusBadge {...runBadge(job)} />
           </Field>
           <Text size="sm">
             O processamento será interrompido ao fim da data em andamento. As datas já processadas

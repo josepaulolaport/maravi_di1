@@ -12,6 +12,11 @@ export type ProcessingScope = 'CASH' | 'POSITIONS' | 'ALL';
 /** One of the two daily chains (OQ-21). */
 export type ProcessingChain = 'CASH' | 'POSITIONS';
 
+/**
+ * Since OQ-46 there is no dispatcher: a run goes QUEUED → RUNNING, and the API never sends
+ * DISPATCHED or CANCELLING (both stay in the enum, unused). A running run whose cancel was
+ * asked stays RUNNING with `cancel_requested_at` set.
+ */
 export type JobStatus =
   | 'QUEUED'
   | 'DISPATCHED'
@@ -43,7 +48,10 @@ export interface ProcessingRequest {
   /**
    * The first failure's code and pt-BR message (OQ-36 items 5–6): set on FAILED, and on
    * COMPLETED_WITH_ISSUES or CANCELLED when one chain of an ALL run failed and the other went
-   * on. A run with only missing prices or expired positions keeps them null.
+   * on. A run with only missing prices or expired positions keeps them null. Codes:
+   * CASH_PREDECESSOR_MISSING and POSITIONS_PREDECESSOR_MISSING ("Dia anterior não processado",
+   * OQ-31), and PROCESSING_ERROR ("Erro técnico ao processar a data.", OQ-44) for a technical
+   * failure of a chain or of no chain. RECOVERY_EXHAUSTED is retired (OQ-45).
    */
   error_code: string | null;
   error_message: string | null;

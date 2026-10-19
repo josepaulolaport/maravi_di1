@@ -6,12 +6,9 @@ Platform owns these types; Processing supplies the implementations and the compo
 - The processing worker (``di1.workers.main``) builds its consumers once at startup with a
   `ConsumerFactory`: each `ConsumerRegistration` names the queue, the inbox key and the
   handler. The queue, the message type and the payload belong to the module.
-- The dispatcher (``di1.workers.dispatcher``) builds a `DispatchTick` once with a
-  `DispatchTickFactory` and calls it in a loop: one tick selects the oldest queued job, sets
-  it DISPATCHED and writes the outbox command in one transaction (interfaces.md "Transaction
-  boundaries" 3). It returns what it dispatched (``ProcessingDispatcher.dispatch_next``: the
-  request id), or `None` when nothing was queued; after a dispatch the loop ticks again at
-  once.
+- At startup, before it consumes, the worker awaits a `StartupHook` once: Processing's
+  recovery of a run left RUNNING (OQ-45), then the drain of the queued requests (OQ-46).
+  There is no dispatcher process: the worker drains again on each doorbell command.
 """
 
 from __future__ import annotations
@@ -44,7 +41,7 @@ class ConsumerRegistration:
 
 type ConsumerFactory = Callable[[WorkerResources], Sequence[ConsumerRegistration]]
 
-type DispatchTick = Callable[[], Awaitable[object | None]]
-"""One dispatch attempt: what it dispatched, or `None` when there was nothing to dispatch."""
-
-type DispatchTickFactory = Callable[[WorkerResources], DispatchTick]
+type StartupHook = Callable[[WorkerResources], Awaitable[None]]
+"""Work the worker awaits once at startup, before it consumes: Processing's recovery (a run
+left RUNNING resumes after its ``progress_date``, OQ-45), then the drain of the queued requests
+(OQ-46). There is one worker, so nothing else runs meanwhile."""

@@ -1,8 +1,8 @@
 """The outbox row is part of the business write's transaction.
 
-interfaces.md "Transaction boundaries" 3 (the dispatch saves its outbox command in the same
-transaction); backend/CLAUDE.md "Messaging" (publish only through ``platform.outbox_messages``
-and the relay); CLAUDE.md §2 (JSON carries decimal strings).
+OQ-46 (Processing's doorbell is saved in the same transaction as the fact it signals);
+backend/CLAUDE.md "Messaging" (publish only through ``platform.outbox_messages`` and the
+relay); CLAUDE.md §2 (JSON carries decimal strings).
 """
 
 from __future__ import annotations

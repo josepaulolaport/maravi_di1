@@ -3,7 +3,6 @@ import { http, HttpResponse } from 'msw';
 import type {
   FieldError,
   Issue,
-  JobStatus,
   Page,
   PredecessorState,
   ProcessingChain,
@@ -35,8 +34,6 @@ import {
   url,
 } from './support';
 
-const ACTIVE: JobStatus[] = ['DISPATCHED', 'RUNNING', 'CANCELLING'];
-const CANCELLABLE: JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING'];
 const SCOPES: readonly ProcessingScope[] = ['CASH', 'POSITIONS', 'ALL'];
 /** A date written with this makes the run end COMPLETED_WITH_ISSUES (OQ-23 item 8, OQ-31). */
 const WITH_ISSUES: readonly ChainStatus[] = ['PROCESSED_WITH_ISSUES'];
@@ -47,6 +44,13 @@ export function chainsOf(scope: ProcessingScope): ProcessingChain[] {
 }
 
 const now = () => new Date().toISOString();
+
+/**
+ * Oldest first by (created_at, id), comparing instants: the seed carries "-03:00" offsets and
+ * new runs UTC "Z", so the strings do not sort in time order.
+ */
+const byCreation = (a: ProcessingRequest, b: ProcessingRequest) =>
+  Date.parse(a.created_at) - Date.parse(b.created_at) || a.id.localeCompare(b.id);
 
 const isProcessed = (status: PredecessorState) =>
   status === 'PROCESSED' || status === 'PROCESSED_WITH_ISSUES';
@@ -236,8 +240,8 @@ function finish(job: ProcessingRequest, fields: Partial<ProcessingRequest>): voi
 
 /**
  * Advances the fake worker one step per read of the job list or a job, so the UI can show
- * every status (one active run at a time, §10.2): QUEUED → DISPATCHED → RUNNING, then one date
- * per step, each published as it commits (OQ-23). A cancel is checked between dates: the date
+ * every status (one active run at a time, §10.2): QUEUED → RUNNING (no dispatcher, OQ-46), then
+ * one date per step, each published as it commits (OQ-23). A cancel is checked between dates: the date
  * being processed commits, later dates are untouched, and the run ends CANCELLED, or as it
  * would have when that date was its last (OQ-26 item 9). A failure at a date sets it FAILED for
  * the failing chain and keeps every earlier date published (OQ-23 item 5). On an ALL run the
@@ -249,18 +253,8 @@ function finish(job: ProcessingRequest, fields: Partial<ProcessingRequest>): voi
  * there; only the real backend can recalculate it.
  */
 function tick(): void {
-  const active = db.requests.find((r) => ACTIVE.includes(r.status));
-  if (active?.status === 'DISPATCHED') {
-    if (!startDate(active, active.start_date)) return;
-    Object.assign(active, { status: 'RUNNING', started_at: now(), updated_at: now() });
-    return;
-  }
-  if (active?.status === 'CANCELLING' && active.started_at === null) {
-    // Cancelled while dispatched (GAP-G-2): it ends without running a date.
-    finish(active, { status: 'CANCELLED' });
-    return;
-  }
-  if (active?.status === 'RUNNING' || active?.status === 'CANCELLING') {
+  const active = db.requests.find((r) => r.status === 'RUNNING');
+  if (active) {
     const date = nextDate(active);
     if (!commitDate(active, date)) return;
     if (date >= active.end_date) {
@@ -271,18 +265,22 @@ function tick(): void {
       finish(active, { status: issues ? 'COMPLETED_WITH_ISSUES' : 'COMPLETED' });
       return;
     }
-    if (active.status === 'CANCELLING') {
+    if (active.cancel_requested_at !== null) {
       finish(active, { status: 'CANCELLED' });
       return;
     }
     startDate(active, addDays(date, 1));
     return;
   }
+  // No dispatcher (OQ-46): the one worker takes the oldest queued run, by (created_at, id),
+  // straight to RUNNING and starts its first date.
   const next = db.requests
     .filter((r) => r.status === 'QUEUED')
-    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
+    .sort((a, b) => byCreation(a, b))
     .at(0);
-  if (next) Object.assign(next, { status: 'DISPATCHED', dispatched_at: now(), updated_at: now() });
+  if (!next) return;
+  Object.assign(next, { status: 'RUNNING', started_at: now(), updated_at: now() });
+  startDate(next, next.start_date);
 }
 
 function enqueue(start: string, end: string, scope: ProcessingScope): ProcessingRequest {
@@ -309,25 +307,20 @@ function enqueue(start: string, end: string, scope: ProcessingScope): Processing
   return request;
 }
 
-/** Cancels a run: a queued one at once, a started one cooperatively, between dates (§10.2). */
+/**
+ * Cancels a run (§10.2, OQ-46): a queued one at once; a running one cooperatively, between
+ * dates. A running run stays RUNNING with `cancel_requested_at` set: there is no CANCELLING.
+ */
 function cancel(request: ProcessingRequest): ProcessingRequest {
   Object.assign(request, { cancel_requested_at: now(), updated_at: now() });
   if (request.status === 'QUEUED') {
     Object.assign(request, { status: 'CANCELLED', finished_at: now() });
-  } else {
-    // DISPATCHED (GAP-G-2) or RUNNING: cooperative, it ends at the next safe point.
-    request.status = 'CANCELLING';
   }
   return request;
 }
 
-const notCancellable = () =>
-  problem(409, [
-    fieldError(
-      'JOB_NOT_CANCELLABLE',
-      'Este processamento já foi encerrado e não pode ser cancelado.',
-    ),
-  ]);
+const notCancellable = (message: string) =>
+  problem(409, [fieldError('JOB_NOT_CANCELLABLE', message)]);
 
 /** A request's range and scope (OQ-21: the scope is required). */
 function requestErrors(start: unknown, end: unknown, scope: unknown): FieldError[] {
@@ -360,9 +353,7 @@ export const processingHandlers = [
   http.get(url('/processing/requests'), async ({ request }) => {
     await latency();
     tick();
-    const items = [...db.requests].sort(
-      (a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id),
-    );
+    const items = [...db.requests].sort((a, b) => byCreation(b, a));
     const page = paginate(items, request);
     return page instanceof Response ? page : HttpResponse.json<Page<ProcessingRequest>>(page);
   }),
@@ -411,7 +402,12 @@ export const processingHandlers = [
     await latency();
     const request = db.requests.find((r) => r.id === params.id);
     if (!request) return notFound('Processamento');
-    if (!CANCELLABLE.includes(request.status)) return notCancellable();
+    if (request.status !== 'QUEUED' && request.status !== 'RUNNING') {
+      return notCancellable('Este processamento já foi encerrado e não pode ser cancelado.');
+    }
+    if (request.cancel_requested_at !== null) {
+      return notCancellable('O cancelamento deste processamento já foi solicitado.');
+    }
     return HttpResponse.json(cancel(request));
   }),
 

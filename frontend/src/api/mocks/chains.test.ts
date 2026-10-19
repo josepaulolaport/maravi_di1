@@ -214,8 +214,7 @@ describe('OQ-21 a job publishes only its scope', () => {
         end_date: '2026-10-15',
         scope: 'CASH',
       });
-      await processingApi.getRequest(job.id); // DISPATCHED
-      await processingApi.getRequest(job.id); // RUNNING
+      await processingApi.getRequest(job.id); // RUNNING (OQ-46: no dispatch step)
       await write();
 
       let current = job;
@@ -246,8 +245,7 @@ describe('OQ-21 a job publishes only its scope', () => {
       end_date: '2026-10-15',
       scope: 'POSITIONS',
     });
-    await processingApi.getRequest(job.id); // DISPATCHED
-    await processingApi.getRequest(job.id); // RUNNING
+    await processingApi.getRequest(job.id); // RUNNING (OQ-46: no dispatch step)
     await deposit('2026-10-18');
 
     let current = job;
