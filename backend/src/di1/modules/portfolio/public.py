@@ -232,7 +232,9 @@ class PnLPointView:
     request. A date adds its ``daily_pnl`` only when its positions status is ``PROCESSED`` or
     ``PROCESSED_WITH_ISSUES`` and ``daily_pnl`` is not ``None``; otherwise (not processed,
     ``FAILED``, ``RUNNING``, a missing price) it adds 0 (OQ-41). A ``FAILED`` or ``RUNNING``
-    point shows its status with ``daily_pnl`` ``None``, even if older published rows exist."""
+    point shows its status with ``daily_pnl``, ``cumulative_pnl`` and ``pnl_status`` ``None`` and
+    ``published_at`` the stored processing time (integrator reading), even if older published
+    rows exist."""
 
     date: date
     daily_pnl: Decimal | None
