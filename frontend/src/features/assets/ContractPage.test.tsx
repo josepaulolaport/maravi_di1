@@ -77,7 +77,7 @@ describe('Ativos: contrato (§11.2)', () => {
 
     const table = within(screen.getByRole('table', { name: 'Calendário de preços de referência' }));
     const headers = table.getAllByRole('columnheader').map((th) => th.textContent);
-    expect(headers).toEqual(['Data', 'PU', 'Taxa a.a.', 'Fonte', '']);
+    expect(headers).toEqual(['Data', 'PU', 'Taxa a.a.', 'Fonte', 'Ações']);
     const dates = table.getAllByRole('row').slice(1);
     expect(dates).toHaveLength(30);
     expect(within(dates[0] as HTMLElement).getByText('18/10/2026')).toBeInTheDocument();

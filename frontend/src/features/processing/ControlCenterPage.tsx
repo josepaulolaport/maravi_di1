@@ -1,6 +1,6 @@
-import { Badge, Stack, Tabs, Title } from '@mantine/core';
+import { Badge, Stack, Tabs, Title, VisuallyHidden } from '@mantine/core';
 
-import { formatQuantity } from '@/shared/format';
+import { countLabel, formatQuantity } from '@/shared/format';
 
 import { IssuesTab } from './components/IssuesTab';
 import { ProcessingTab } from './components/ProcessingTab';
@@ -35,13 +35,19 @@ export function ControlCenterPage() {
             value="pendencias"
             rightSection={
               issues.data && (
-                <Badge size="sm" variant="light" circle>
+                // Read once, in words, by the hidden text below; the badge is for the eye.
+                <Badge size="sm" variant="light" circle aria-hidden>
                   {formatQuantity(issues.data.items.length)}
                 </Badge>
               )
             }
           >
             Pendências
+            {issues.data && (
+              <VisuallyHidden>
+                {`, ${countLabel(issues.data.items.length, 'pendência', 'pendências')}`}
+              </VisuallyHidden>
+            )}
           </Tabs.Tab>
           <Tabs.Tab value="processamentos">Processamentos</Tabs.Tab>
         </Tabs.List>

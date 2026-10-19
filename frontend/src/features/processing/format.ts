@@ -1,6 +1,6 @@
 import { formatDays } from '@/shared/format';
 
-export { formatDays, formatPeriod, parsePtBrDate as parseDateInput } from '@/shared/format';
+export { formatDays, formatPeriod } from '@/shared/format';
 
 // Formatting used only by Central de Controle. Dates and counts, never money.
 

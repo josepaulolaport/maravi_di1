@@ -9,7 +9,6 @@ import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
 // Catalogue and instrument data (spec §3, §11.2). Keys live under the assets API area.
 const assetKeys = {
   all: queryRoots.assets,
-  instrumentTypes: () => [...assetKeys.all, 'instrument-types'] as const,
   products: (instrumentType: string, search: string) =>
     [...assetKeys.all, 'products', { instrumentType, search }] as const,
   product: (productId: string) => [...assetKeys.all, 'product', productId] as const,
@@ -18,17 +17,11 @@ const assetKeys = {
   instrument: (instrumentId: string) => [...assetKeys.all, 'instrument', instrumentId] as const,
 };
 
-export function useInstrumentTypes() {
-  return useQuery({
-    queryKey: assetKeys.instrumentTypes(),
-    queryFn: () => assetsApi.listInstrumentTypes(),
-  });
-}
-
 export function useProducts(instrumentType: string | undefined, search: string) {
   return useQuery({
     queryKey: assetKeys.products(instrumentType ?? '', search),
-    queryFn: () => assetsApi.listProducts({ instrument_type: instrumentType ?? '', search }),
+    queryFn: ({ signal }) =>
+      assetsApi.listProducts({ instrument_type: instrumentType ?? '', search }, signal),
     enabled: instrumentType !== undefined,
     // While a new search of the same type loads, its previous rows stay on screen; another
     // type shows its own loading state, never the previous type's products.
@@ -40,14 +33,14 @@ export function useProducts(instrumentType: string | undefined, search: string) 
 export function useProduct(productId: string) {
   return useQuery({
     queryKey: assetKeys.product(productId),
-    queryFn: () => assetsApi.getProduct(productId),
+    queryFn: ({ signal }) => assetsApi.getProduct(productId, signal),
   });
 }
 
 export function useInstruments(productId: string, search: string) {
   return useQuery({
     queryKey: assetKeys.instruments(productId, search),
-    queryFn: () => assetsApi.listInstruments({ product_id: productId, search }),
+    queryFn: ({ signal }) => assetsApi.listInstruments({ product_id: productId, search }, signal),
     placeholderData: keepPreviousData,
   });
 }
@@ -55,7 +48,7 @@ export function useInstruments(productId: string, search: string) {
 export function useInstrument(instrumentId: string) {
   return useQuery({
     queryKey: assetKeys.instrument(instrumentId),
-    queryFn: () => assetsApi.getInstrument(instrumentId),
+    queryFn: ({ signal }) => assetsApi.getInstrument(instrumentId, signal),
   });
 }
 

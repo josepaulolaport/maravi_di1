@@ -15,7 +15,7 @@ const processingRequestKeys = {
 export function usePreview(range: ProcessingRangeRequest | null) {
   return useQuery({
     queryKey: range ? processingRequestKeys.preview(range) : [...queryRoots.processing, 'preview'],
-    queryFn: () => processingApi.preview(range as ProcessingRangeRequest),
+    queryFn: ({ signal }) => processingApi.preview(range as ProcessingRangeRequest, signal),
     enabled: range !== null,
   });
 }

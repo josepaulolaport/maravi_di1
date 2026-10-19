@@ -21,16 +21,14 @@ export function ScopeField({ value, onChange, disabled = false, error }: ScopeFi
   const labelId = useId();
   const errorId = useId();
   return (
-    <Stack
-      gap={6}
-      role="radiogroup"
-      aria-labelledby={labelId}
-      {...(error ? { 'aria-describedby': errorId, 'aria-invalid': true } : {})}
-    >
+    <Stack gap={6}>
       <Text size="sm" fw={500} id={labelId}>
         Escopo
       </Text>
+      {/* SegmentedControl is itself the radio group: it carries the name and the error. */}
       <SegmentedControl
+        aria-labelledby={labelId}
+        {...(error ? { 'aria-describedby': errorId, 'aria-invalid': true } : {})}
         data={SCOPE_OPTIONS}
         value={value}
         onChange={(next) => {

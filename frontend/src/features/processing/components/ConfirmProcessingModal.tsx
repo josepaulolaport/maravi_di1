@@ -1,6 +1,7 @@
-import { Button, Group, Modal, Skeleton, Stack } from '@mantine/core';
+import { Button, Group, Modal, Stack } from '@mantine/core';
 import { useRef } from 'react';
 
+import { Loading } from '@/shared/ui/Loading';
 import type { ProcessingRangeRequest } from '@/api/contract';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
@@ -65,7 +66,7 @@ export function ConfirmProcessingModal({ range, onClose, onQueued }: ConfirmProc
         {preview.isError ? (
           <ErrorState error={preview.error} onRetry={() => void preview.refetch()} />
         ) : preview.isPending || preview.isFetching ? (
-          <Skeleton h={160} aria-busy="true" aria-label="Carregando pré-visualização" />
+          <Loading label="Carregando pré-visualização" h={160} />
         ) : (
           <PreviewSummary preview={preview.data} />
         )}

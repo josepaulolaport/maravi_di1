@@ -2,28 +2,23 @@ import {
   useInfiniteQuery,
   useIsMutating,
   useMutation,
-  useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 
 import type { CreateLedgerEntryRequest, IsoDate, LedgerOrder } from '@/api/contract';
-import { assetsApi, ledgerApi, portfolioApi } from '@/api/endpoints';
+import { ledgerApi } from '@/api/endpoints';
 import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
 import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
 
 import type { LedgerEntry } from '../entries';
 
-// A key's root is the API area it reads (`@/api/queryRoots`): the cash strip reads the
-// portfolio summary under the same key Carteira uses, so a finished job refreshes both.
+// A key's root is the API area it reads (`@/api/queryRoots`). The cash strip's summary and the
+// form's catalogue come from `@/shared/queries`, shared with Carteira and Ativos.
 const ledgerKeys = {
   all: queryRoots.ledger,
   entries: (start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) =>
     [...queryRoots.ledger, 'entries', start, end, search, order] as const,
-  summary: (date: IsoDate) => [...queryRoots.portfolio, 'summary', date] as const,
-  instruments: () => [...queryRoots.assets, 'instruments', 'all'] as const,
-  products: () => [...queryRoots.assets, 'products', 'all'] as const,
-  instrumentTypes: () => [...queryRoots.assets, 'instrument-types'] as const,
   /** Mutation key of the new-entry saves, so the page knows a save is running. */
   create: () => [...queryRoots.ledger, 'create'] as const,
 };
@@ -95,15 +90,18 @@ const LEDGER_PAGE_SIZE = 50;
 export function useEntries(start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) {
   return useInfiniteQuery({
     queryKey: ledgerKeys.entries(start, end, search, order),
-    queryFn: ({ pageParam }) =>
-      ledgerApi.listEntries({
-        start_date: start,
-        end_date: end,
-        ...(search ? { search } : {}),
-        order,
-        limit: LEDGER_PAGE_SIZE,
-        ...(pageParam ? { cursor: pageParam } : {}),
-      }),
+    queryFn: ({ pageParam, signal }) =>
+      ledgerApi.listEntries(
+        {
+          start_date: start,
+          end_date: end,
+          ...(search ? { search } : {}),
+          order,
+          limit: LEDGER_PAGE_SIZE,
+          ...(pageParam ? { cursor: pageParam } : {}),
+        },
+        signal,
+      ),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next_cursor,
     select: (data) => ({ items: data.pages.flatMap((page) => page.items) }),
@@ -115,35 +113,6 @@ export function useEntries(start: IsoDate, end: IsoDate, search: string, order: 
         key !== undefined && key[2] === start && key[3] === end && key[4] === search;
       return sameFilter ? previous : undefined;
     },
-  });
-}
-
-export function useCashSummary(date: IsoDate) {
-  return useQuery({
-    queryKey: ledgerKeys.summary(date),
-    queryFn: () => portfolioApi.getSummary(date),
-  });
-}
-
-export function useInstruments() {
-  return useQuery({
-    queryKey: ledgerKeys.instruments(),
-    queryFn: () => assetsApi.listInstruments(),
-  });
-}
-
-/** Products carry the asset class of their contracts (the trade form's class filter). */
-export function useProducts() {
-  return useQuery({
-    queryKey: ledgerKeys.products(),
-    queryFn: () => assetsApi.listProducts(),
-  });
-}
-
-export function useInstrumentTypes() {
-  return useQuery({
-    queryKey: ledgerKeys.instrumentTypes(),
-    queryFn: () => assetsApi.listInstrumentTypes(),
   });
 }
 

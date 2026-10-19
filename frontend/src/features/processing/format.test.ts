@@ -1,4 +1,4 @@
-import { formatPeriod, formatProgress, parseDateInput, shortId } from './format';
+import { formatPeriod, formatProgress, shortId } from './format';
 
 describe('Central de Controle formatting (§11.1)', () => {
   it('§11.1 shows the inclusive period with both dates', () => {
@@ -13,13 +13,5 @@ describe('Central de Controle formatting (§11.1)', () => {
 
   it('§11.1 shortens a request id to its first eight characters', () => {
     expect(shortId('7f000000-0000-4000-8000-000000000001')).toBe('7f000000');
-  });
-
-  it('§11.1 reads a typed DD/MM/AAAA date as an ISO date, and nothing else', () => {
-    expect(parseDateInput('17/10/2026')).toBe('2026-10-17');
-    expect(parseDateInput(' 01/02/2026 ')).toBe('2026-02-01');
-    expect(parseDateInput('31/02/2026')).toBeNull();
-    expect(parseDateInput('2026-10-17')).toBeNull();
-    expect(parseDateInput('17/10')).toBeNull();
   });
 });

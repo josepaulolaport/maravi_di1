@@ -15,8 +15,11 @@ const priceKeys = {
 export function useReferencePriceDays(assetId: string, start: IsoDate, end: IsoDate) {
   return useQuery({
     queryKey: priceKeys.days(assetId, start, end),
-    queryFn: () =>
-      pricesApi.listReferencePrices({ asset_id: assetId, start_date: start, end_date: end }),
+    queryFn: ({ signal }) =>
+      pricesApi.listReferencePrices(
+        { asset_id: assetId, start_date: start, end_date: end },
+        signal,
+      ),
   });
 }
 

@@ -1,7 +1,7 @@
 import type { FieldError } from '@/api/contract';
 import { ApiError } from '@/api/http';
 
-import { problemMessages } from './problemMessages';
+import { problemMessages, sameFields, splitProblem } from './problemMessages';
 
 const problem = (errors: FieldError[]) =>
   new ApiError({
@@ -48,5 +48,54 @@ describe('problemMessages (OQ-15)', () => {
       'De end_date.',
       'Sem campo.',
     ]);
+  });
+});
+
+describe('splitProblem (forms, OQ-15)', () => {
+  const error = (errors: { field: string | null; message: string }[]) =>
+    problem(errors.map((e) => ({ code: 'VALIDATION_ERROR', ...e })));
+
+  it('§12 keeps field errors on the fields the form shows, mapped to its own names', () => {
+    const result = splitProblem(error([{ field: 'date', message: 'Informe a data.' }]), {
+      date: 'entryDate',
+    });
+
+    expect(result).toEqual({ fields: { entryDate: 'Informe a data.' }, page: [] });
+  });
+
+  it('§12 keeps every message of a field, not only the first', () => {
+    const result = splitProblem(
+      error([
+        { field: 'pu', message: 'Informe um número válido.' },
+        { field: 'pu', message: 'Use no máximo 10 casas decimais.' },
+        { field: 'source', message: 'Fonte inválida.' },
+        { field: 'source', message: 'Fonte desconhecida.' },
+      ]),
+      sameFields(['pu']),
+    );
+
+    expect(result.fields).toEqual({
+      pu: 'Informe um número válido. Use no máximo 10 casas decimais.',
+    });
+    expect(result.page).toEqual(['Fonte inválida.', 'Fonte desconhecida.']);
+  });
+
+  it("§12 shows on the page, in the API's order, what no input displays, so none is lost", () => {
+    const result = splitProblem(
+      error([
+        { field: 'source', message: 'Fonte inválida.' },
+        { field: null, message: 'Erro geral.' },
+      ]),
+      sameFields(['pu']),
+    );
+
+    expect(result.page).toEqual(['Fonte inválida.', 'Erro geral.']);
+  });
+
+  it('§12 shows a generic message for an error that is not a problem+json, and nothing for none', () => {
+    expect(splitProblem(new Error('x'), {}).page).toEqual([
+      'Ocorreu um erro inesperado. Tente novamente.',
+    ]);
+    expect(splitProblem(null, {})).toEqual({ fields: {}, page: [] });
   });
 });

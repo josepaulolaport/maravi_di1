@@ -1,7 +1,7 @@
-import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
-import { IconAlertTriangle } from '@tabler/icons-react';
+import { Button, Group, Modal, Stack, Text } from '@mantine/core';
 import { type ReactNode, useEffect, useRef } from 'react';
 
+import { MessageAlert } from './MessageAlert';
 import { problemMessages } from './problemMessages';
 
 interface ConfirmModalProps {
@@ -63,17 +63,7 @@ export function ConfirmModal({
         <Text component="div" size="sm">
           {children}
         </Text>
-        {problemMessages(error).length > 0 && (
-          <Alert role="alert" color="red" variant="light" icon={<IconAlertTriangle size={18} />}>
-            <Stack gap={4}>
-              {problemMessages(error).map((message) => (
-                <Text key={message} size="sm">
-                  {message}
-                </Text>
-              ))}
-            </Stack>
-          </Alert>
-        )}
+        <MessageAlert messages={problemMessages(error)} />
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={onClose} disabled={loading}>
             Voltar

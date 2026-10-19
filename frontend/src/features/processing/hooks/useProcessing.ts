@@ -20,7 +20,10 @@ const POLL_INTERVAL_MS = 2_000;
 const JOBS_PAGE_SIZE = 20;
 
 export function useIssues() {
-  return useQuery({ queryKey: processingKeys.issues(), queryFn: processingApi.listIssues });
+  return useQuery({
+    queryKey: processingKeys.issues(),
+    queryFn: ({ signal }) => processingApi.listIssues(signal),
+  });
 }
 
 /**
@@ -33,11 +36,11 @@ export function useProcessingRequests() {
   const queryClient = useQueryClient();
   const query = useInfiniteQuery({
     queryKey: processingKeys.requests(),
-    queryFn: ({ pageParam }) =>
-      processingApi.listRequests({
-        limit: JOBS_PAGE_SIZE,
-        ...(pageParam ? { cursor: pageParam } : {}),
-      }),
+    queryFn: ({ pageParam, signal }) =>
+      processingApi.listRequests(
+        { limit: JOBS_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) },
+        signal,
+      ),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next_cursor,
     select: (data) => ({ items: data.pages.flatMap((page) => page.items) }),

@@ -1,14 +1,15 @@
-import { Alert, Button, Modal, Group, Stack, Text, TextInput } from '@mantine/core';
+import { Button, Modal, Group, Stack, TextInput } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
-import { IconAlertTriangle, IconCalendar } from '@tabler/icons-react';
+import { IconCalendar } from '@tabler/icons-react';
 import { useState } from 'react';
 
+import { parsePtBrDate } from '@/shared/format';
+import { MessageAlert } from '@/shared/ui/MessageAlert';
 import type { Product } from '@/api/contract';
 
 import { useCreateInstrument } from '../hooks/useAssets';
-import { parsePtBrDate } from './dateInput';
-import { formErrors } from './formErrors';
+import { sameFields, splitProblem } from '@/shared/ui/problemMessages';
 
 const SHOWN_FIELDS = ['code', 'maturity_date'] as const;
 
@@ -48,7 +49,10 @@ export function NewContractModal({ product, opened, onClose }: NewContractModalP
     );
   };
 
-  const { fields: fieldErrors, page: pageErrors } = formErrors(create.error, SHOWN_FIELDS);
+  const { fields: fieldErrors, page: pageErrors } = splitProblem(
+    create.error,
+    sameFields(SHOWN_FIELDS),
+  );
 
   return (
     <Modal
@@ -89,15 +93,7 @@ export function NewContractModal({ product, opened, onClose }: NewContractModalP
             leftSection={<IconCalendar size={16} stroke={1.5} />}
             error={fieldErrors.maturity_date}
           />
-          {pageErrors.length > 0 && (
-            <Alert role="alert" color="red" variant="light" icon={<IconAlertTriangle size={18} />}>
-              {pageErrors.map((message) => (
-                <Text key={message} size="sm">
-                  {message}
-                </Text>
-              ))}
-            </Alert>
-          )}
+          <MessageAlert messages={pageErrors} />
           <Group justify="flex-end" gap="sm">
             <Button variant="default" onClick={close} disabled={create.isPending}>
               Cancelar

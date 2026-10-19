@@ -11,15 +11,15 @@ import {
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
-import { IconAlertTriangle, IconCalendar, IconInfoCircle } from '@tabler/icons-react';
+import { IconCalendar, IconInfoCircle } from '@tabler/icons-react';
 import { useId, useState } from 'react';
 
+import { MessageAlert } from '@/shared/ui/MessageAlert';
 import type { InputKind, Instrument, IsoDate } from '@/api/contract';
-import { parsePtBrDecimal, percentToFraction } from '@/shared/format';
+import { parsePtBrDate, parsePtBrDecimal, percentToFraction } from '@/shared/format';
 
 import { useSetReferencePrice } from '../hooks/usePrices';
-import { parsePtBrDate } from './dateInput';
-import { formErrors } from './formErrors';
+import { sameFields, splitProblem } from '@/shared/ui/problemMessages';
 
 interface PriceModalProps {
   instrument: Instrument;
@@ -110,7 +110,7 @@ function PriceForm({ instrument, initialDate, save, onDone }: PriceFormProps) {
     );
   };
 
-  const { fields, page: pageErrors } = formErrors(save.error, SHOWN_FIELDS);
+  const { fields, page: pageErrors } = splitProblem(save.error, sameFields(SHOWN_FIELDS));
   // The value input owns the pu, rate and input_kind errors: every one of them is shown.
   const valueMessages = [fields.pu, fields.rate, fields.input_kind].filter(
     (message): message is string => message !== undefined,
@@ -172,15 +172,7 @@ function PriceForm({ instrument, initialDate, save, onDone }: PriceFormProps) {
             O registro não inicia um recálculo. Solicite um processamento para atualizar a carteira.
           </Text>
         </Alert>
-        {pageErrors.length > 0 && (
-          <Alert role="alert" color="red" variant="light" icon={<IconAlertTriangle size={18} />}>
-            {pageErrors.map((message) => (
-              <Text key={message} size="sm">
-                {message}
-              </Text>
-            ))}
-          </Alert>
-        )}
+        <MessageAlert messages={pageErrors} />
         <Group justify="flex-end" gap="sm">
           <Button
             variant="default"

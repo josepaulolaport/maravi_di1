@@ -1,21 +1,12 @@
-import {
-  Button,
-  Group,
-  Paper,
-  Skeleton,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-  VisuallyHidden,
-} from '@mantine/core';
+import { Button, Group, Paper, Stack, Table, Text, TextInput, VisuallyHidden } from '@mantine/core';
 import { IconAlertTriangle, IconCalendarX, IconHistory, IconSearch } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
+import { Loading } from '@/shared/ui/Loading';
 import type { Issue, IssueType } from '@/api/contract';
 import { assetLinks, controlCenterLinks, ledgerLinks } from '@/app/paths';
-import { addDays, formatDate, formatQuantity, UNAVAILABLE } from '@/shared/format';
+import { UNAVAILABLE, addDays, countLabel, formatDate } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
 import type { useIssues } from '../hooks/useProcessing';
@@ -77,9 +68,6 @@ function matchesSearch(issue: Issue, search: string): boolean {
   );
 }
 
-const countLabel = (n: number) =>
-  n === 1 ? '1 pendência encontrada' : `${formatQuantity(n)} pendências encontradas`;
-
 interface IssuesTabProps {
   issues: ReturnType<typeof useIssues>;
   search: string;
@@ -92,7 +80,7 @@ export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
     return <ErrorState error={issues.error} onRetry={() => void issues.refetch()} />;
   }
   if (issues.isPending) {
-    return <Skeleton h={220} aria-busy="true" aria-label="Carregando pendências" />;
+    return <Loading label="Carregando pendências" h={220} />;
   }
   const rows = issues.data.items.filter((issue) => matchesSearch(issue, search));
 
@@ -110,7 +98,7 @@ export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
           maw={360}
         />
         <Table.ScrollContainer minWidth={640}>
-          <Table verticalSpacing="sm">
+          <Table verticalSpacing="sm" aria-label="Pendências">
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Data</Table.Th>
@@ -137,7 +125,7 @@ export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
           </Table>
         </Table.ScrollContainer>
         <Text size="sm" c="dimmed">
-          {countLabel(rows.length)}
+          {countLabel(rows.length, 'pendência encontrada', 'pendências encontradas')}
         </Text>
       </Stack>
     </Paper>

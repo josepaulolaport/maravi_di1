@@ -14,12 +14,13 @@ import { useState } from 'react';
 
 import type { PositionRow } from '@/api/contract';
 import {
+  UNAVAILABLE,
+  countLabel,
   formatDate,
   formatMoney,
   formatPu,
   formatQuantity,
   formatRate,
-  UNAVAILABLE,
 } from '@/shared/format';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
 
@@ -157,7 +158,7 @@ export function PositionsTable({ rows }: { rows: PositionRow[] }) {
         />
       </Group>
       <Table.ScrollContainer minWidth={980}>
-        <Table highlightOnHover verticalSpacing="sm">
+        <Table highlightOnHover verticalSpacing="sm" aria-label="Posições">
           <Table.Thead bg="gray.0">
             <Table.Tr>
               {columns.map((column) => {
@@ -212,7 +213,7 @@ export function PositionsTable({ rows }: { rows: PositionRow[] }) {
         </Text>
       )}
       <VisuallyHidden role="status">
-        {visible.length} {visible.length === 1 ? 'posição exibida' : 'posições exibidas'}
+        {countLabel(visible.length, 'posição exibida', 'posições exibidas')}
       </VisuallyHidden>
     </Paper>
   );

@@ -213,6 +213,28 @@ describe('Carteira (§11.4)', () => {
     },
   );
 
+  it('OQ-23 a date being processed is read again until it is done, without a reload', async () => {
+    let reads = 0;
+    server.use(
+      http.get(url('/portfolio/summary'), () => {
+        reads += 1;
+        const summary = summaryOf('2026-10-15');
+        const running = { ...summary.positions, status: 'RUNNING' as const };
+        return HttpResponse.json<PortfolioSummary>(
+          reads === 1 ? { ...summary, positions: running } : summary,
+        );
+      }),
+    );
+    await openCarteira('2026-10-15');
+    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Processando']);
+
+    // Polled every 2 s while a chain is RUNNING (§12), then no more.
+    await waitFor(() => {
+      expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Atualizado']);
+    });
+    expect(reads).toBe(2);
+  });
+
   it('§11.4 OQ-21 both chains stale: both badges say so, no card', async () => {
     override15({
       cash: { status: 'STALE' },

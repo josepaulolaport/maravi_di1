@@ -1,11 +1,13 @@
-import { Paper, Skeleton, Stack, Tabs, Text, TextInput, Title } from '@mantine/core';
+import { Paper, Stack, Tabs, Text, TextInput, Title } from '@mantine/core';
 import { IconSearch } from '@tabler/icons-react';
 import { useSearchParams } from 'react-router';
 
+import { useInstrumentTypes } from '@/shared/queries';
+import { Loading } from '@/shared/ui/Loading';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
 import { ProductsTable } from './components/ProductsTable';
-import { useInstrumentTypes, useProducts, useSearchParam } from './hooks/useAssets';
+import { useProducts, useSearchParam } from './hooks/useAssets';
 
 /**
  * Ativos catalogue (spec §11.2, design 2:2): instrument types as tabs, then the products of the
@@ -41,7 +43,7 @@ export function AssetsPage() {
       {types.isError ? (
         <ErrorState error={types.error} onRetry={() => void types.refetch()} />
       ) : types.isPending ? (
-        <Skeleton h={240} role="status" aria-label="Carregando catálogo" />
+        <Loading label="Carregando catálogo" h={240} />
       ) : items.length === 0 ? (
         <Text size="sm" c="dimmed">
           Nenhum tipo de instrumento cadastrado.
@@ -72,7 +74,7 @@ export function AssetsPage() {
                   {products.isError ? (
                     <ErrorState error={products.error} onRetry={() => void products.refetch()} />
                   ) : products.isPending ? (
-                    <Skeleton h={120} m="md" role="status" aria-label="Carregando produtos" />
+                    <Loading label="Carregando produtos" h={120} m="md" />
                   ) : (
                     <ProductsTable products={products.data.items} />
                   )}

@@ -2,7 +2,6 @@ import {
   ActionIcon,
   Menu,
   Paper,
-  Skeleton,
   Stack,
   Table,
   Text,
@@ -12,8 +11,9 @@ import {
 } from '@mantine/core';
 import { IconDots, IconSearch } from '@tabler/icons-react';
 
+import { Loading } from '@/shared/ui/Loading';
 import type { ProcessingRequest } from '@/api/contract';
-import { formatQuantity } from '@/shared/format';
+import { countLabel } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { LoadMore } from '@/shared/ui/LoadMore';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
@@ -44,10 +44,10 @@ function matchesSearch(job: ProcessingRequest, search: string): boolean {
 }
 
 /** "encontrados" once every page is read; "exibidos" while the backend has more (P21). */
-const countLabel = (n: number, more: boolean) => {
-  if (more) return `${formatQuantity(n)} processamentos exibidos`;
-  return n === 1 ? '1 processamento encontrado' : `${formatQuantity(n)} processamentos encontrados`;
-};
+const jobsLabel = (n: number, more: boolean) =>
+  more
+    ? countLabel(n, 'processamento exibido', 'processamentos exibidos')
+    : countLabel(n, 'processamento encontrado', 'processamentos encontrados');
 
 interface HistoryTableProps extends JobActions {
   requests: ReturnType<typeof useProcessingRequests>;
@@ -90,14 +90,14 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
     return <ErrorState error={requests.error} onRetry={() => void requests.refetch()} />;
   }
   if (requests.isPending) {
-    return <Skeleton h={220} aria-busy="true" aria-label="Carregando processamentos" />;
+    return <Loading label="Carregando processamentos" h={220} />;
   }
   // The search filters the pages read so far; "Carregar mais" reads older jobs.
   const rows = requests.data.items.filter((job) => matchesSearch(job, search));
   return (
     <>
       <Table.ScrollContainer minWidth={640}>
-        <Table verticalSpacing="sm">
+        <Table verticalSpacing="sm" aria-label="Processamentos">
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Processamento</Table.Th>
@@ -133,7 +133,7 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
         }}
       />
       <Text size="sm" c="dimmed">
-        {countLabel(rows.length, requests.hasNextPage)}
+        {jobsLabel(rows.length, requests.hasNextPage)}
       </Text>
     </>
   );

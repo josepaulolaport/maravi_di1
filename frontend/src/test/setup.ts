@@ -1,10 +1,14 @@
 import '@testing-library/jest-dom/vitest';
 
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 
 import { resetDb } from '@/api/mocks/db';
 import { MOCK_TODAY } from '@/api/mocks/fixtures';
 import { server } from '@/api/mocks/server';
+
+// The first test of a file also loads its lazy route, which can pass the default 1 s under a
+// busy machine; 3 s keeps `findBy*`/`waitFor` honest without masking real hangs.
+configure({ asyncUtilTimeout: 3_000 });
 
 // jsdom lacks these browser APIs; Mantine needs them (Mantine testing guide).
 Object.defineProperty(window, 'matchMedia', {

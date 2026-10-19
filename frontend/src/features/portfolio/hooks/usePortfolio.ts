@@ -9,7 +9,6 @@ import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
 
 const portfolioKeys = {
   all: queryRoots.portfolio,
-  summary: (date: IsoDate) => [...portfolioKeys.all, 'summary', date] as const,
   positions: (date: IsoDate) => [...portfolioKeys.all, 'positions', date] as const,
   pnl: (start: IsoDate, end: IsoDate) => [...portfolioKeys.all, 'pnl', start, end] as const,
 };
@@ -17,17 +16,10 @@ const portfolioKeys = {
 /** Default days of history in the cumulative P&L chart, ending on the selected date. */
 const CHART_DAYS = 30;
 
-export function usePortfolioSummary(date: IsoDate) {
-  return useQuery({
-    queryKey: portfolioKeys.summary(date),
-    queryFn: () => portfolioApi.getSummary(date),
-  });
-}
-
 export function usePortfolioPositions(date: IsoDate) {
   return useQuery({
     queryKey: portfolioKeys.positions(date),
-    queryFn: () => portfolioApi.getPositions(date),
+    queryFn: ({ signal }) => portfolioApi.getPositions(date, signal),
   });
 }
 
@@ -35,7 +27,8 @@ export function usePortfolioPositions(date: IsoDate) {
 export function useCumulativePnl(start: IsoDate, date: IsoDate) {
   return useQuery({
     queryKey: portfolioKeys.pnl(start, date),
-    queryFn: () => portfolioApi.getPnlSeries({ start_date: start, end_date: date }),
+    queryFn: ({ signal }) =>
+      portfolioApi.getPnlSeries({ start_date: start, end_date: date }, signal),
   });
 }
 

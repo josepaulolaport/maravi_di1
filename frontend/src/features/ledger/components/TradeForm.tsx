@@ -1,5 +1,4 @@
 import {
-  Alert,
   Button,
   Group,
   NumberInput,
@@ -12,14 +11,17 @@ import {
 import { DateInput, TimeInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconAlertTriangle } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
+import { useAllInstruments, useAllProducts } from '@/shared/queries';
+import { MessageAlert } from '@/shared/ui/MessageAlert';
 import type { CreateTradeEntryRequest, InputKind, IsoDate } from '@/api/contract';
-import { formatDate, parsePtBrDecimal, percentToFraction } from '@/shared/format';
+import { formatDate, parsePtBrDate, parsePtBrDecimal, percentToFraction } from '@/shared/format';
 
-import { useCreateEntry, useInstruments, useProducts } from '../hooks/useLedger';
-import { nowInSaoPaulo, parsePtBrDate, splitErrors, toIsoTime } from './formSupport';
+import { useCreateEntry } from '../hooks/useLedger';
+import { splitProblem } from '@/shared/ui/problemMessages';
+
+import { nowInSaoPaulo, toIsoTime } from './formSupport';
 
 export type TradeSide = 'BUY' | 'SELL';
 
@@ -69,8 +71,8 @@ function typedPrice(values: TradeValues): string | null {
  * asset class. The class names come from the products, so only classes with a product show.
  */
 function useContractOptions(assetClassId: string | null) {
-  const instruments = useInstruments();
-  const products = useProducts();
+  const instruments = useAllInstruments();
+  const products = useAllProducts();
   const classOf = useMemo(
     () => new Map((products.data?.items ?? []).map((p) => [p.id, String(p.asset_class.id)])),
     [products.data],
@@ -168,7 +170,7 @@ export function TradeForm({
         onDone();
       },
       onError: (error) => {
-        const { fields, page } = splitErrors(error, FIELD_MAP);
+        const { fields, page } = splitProblem(error, FIELD_MAP);
         form.setErrors(fields);
         setPageErrors(page);
       },
@@ -178,17 +180,7 @@ export function TradeForm({
   return (
     <form onSubmit={submit} noValidate>
       <Stack gap="md">
-        {pageErrors.length > 0 && (
-          <Alert role="alert" color="red" variant="light" icon={<IconAlertTriangle size={18} />}>
-            <Stack gap={4}>
-              {pageErrors.map((message, index) => (
-                <Text key={`${String(index)}-${message}`} size="sm">
-                  {message}
-                </Text>
-              ))}
-            </Stack>
-          </Alert>
-        )}
+        <MessageAlert messages={pageErrors} />
         <Group grow align="flex-start">
           <Select
             label="Classe de ativo"

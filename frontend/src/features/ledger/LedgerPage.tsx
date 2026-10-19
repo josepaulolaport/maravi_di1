@@ -1,16 +1,18 @@
-import { Button, Group, List, Paper, Skeleton, Stack, Text, TextInput } from '@mantine/core';
+import { Button, Group, List, Paper, Stack, Text, TextInput } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { IconCalendar, IconPlayerPlay, IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 
+import { useInstrumentTypes } from '@/shared/queries';
+import { Loading } from '@/shared/ui/Loading';
 import type { IsoDate } from '@/api/contract';
 import {
   type ProcessingDraft,
   ProcessingRequestModal,
 } from '@/shared/processing/ProcessingRequestModal';
-import { formatQuantity } from '@/shared/format';
+import { countLabel } from '@/shared/format';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { LoadMore } from '@/shared/ui/LoadMore';
@@ -22,7 +24,6 @@ import { type LedgerEntry, type SortDirection, toRow } from './entries';
 import {
   useDeleteEntries,
   useEntries,
-  useInstrumentTypes,
   useIsSavingEntry,
   useLedgerFilters,
 } from './hooks/useLedger';
@@ -35,10 +36,10 @@ const SEARCH_DEBOUNCE_MS = 300;
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
 /** "encontrados" once every page is read; "exibidos" while the backend has more (P21). */
-const countLabel = (n: number, more: boolean) => {
-  if (more) return `${formatQuantity(n)} lançamentos exibidos`;
-  return n === 1 ? '1 lançamento encontrado' : `${formatQuantity(n)} lançamentos encontrados`;
-};
+const entriesLabel = (n: number, more: boolean) =>
+  more
+    ? countLabel(n, 'lançamento exibido', 'lançamentos exibidos')
+    : countLabel(n, 'lançamento encontrado', 'lançamentos encontrados');
 
 /**
  * Lançamentos (spec §11.3): trades and cash movements in an inclusive range, with a search;
@@ -162,9 +163,7 @@ export function LedgerPage() {
           }}
         />
       ) : list.isPending ? (
-        <div role="status" aria-label="Carregando lançamentos">
-          <Skeleton h={320} />
-        </div>
+        <Loading label="Carregando lançamentos" h={320} />
       ) : (
         <Paper>
           <EntriesTable
@@ -194,7 +193,7 @@ export function LedgerPage() {
             }}
           />
           <Text size="sm" c="dimmed" p="md" role="status">
-            {countLabel(entries.length, list.hasNextPage)}
+            {entriesLabel(entries.length, list.hasNextPage)}
           </Text>
         </Paper>
       )}

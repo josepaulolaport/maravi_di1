@@ -1,15 +1,16 @@
-import { Button, Paper, Skeleton, Stack, Text, TextInput, Title } from '@mantine/core';
+import { Button, Paper, Stack, Text, TextInput, Title } from '@mantine/core';
 import { IconPlus, IconSearch } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useParams } from 'react-router';
 
+import { Loading } from '@/shared/ui/Loading';
 import type { Product } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { ContractsTable } from './components/ContractsTable';
-import { countLabel } from './components/countLabel';
+import { countLabel } from '@/shared/format';
 import { NewContractModal } from './components/NewContractModal';
 import { PageHeader } from './components/PageHeader';
 import { useInstruments, useProduct, useSearchParam } from './hooks/useAssets';
@@ -26,7 +27,7 @@ export function ProductPage() {
     return <ErrorState error={product.error} onRetry={() => void product.refetch()} />;
   }
   if (product.isPending) {
-    return <Skeleton h={320} role="status" aria-label="Carregando produto" />;
+    return <Loading label="Carregando produto" h={320} />;
   }
   return <ProductBody key={product.data.id} product={product.data} />;
 }
@@ -72,7 +73,7 @@ function ProductBody({ product }: { product: Product }) {
           {instruments.isError ? (
             <ErrorState error={instruments.error} onRetry={() => void instruments.refetch()} />
           ) : instruments.isPending ? (
-            <Skeleton h={160} m="md" role="status" aria-label="Carregando contratos" />
+            <Loading label="Carregando contratos" h={160} m="md" />
           ) : (
             <ContractsTable instruments={instruments.data.items} />
           )}

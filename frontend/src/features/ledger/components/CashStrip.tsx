@@ -1,12 +1,12 @@
-import { Button, Group, Paper, SimpleGrid, Skeleton, Stack, Text } from '@mantine/core';
+import { Button, Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconPlayerPlay } from '@tabler/icons-react';
 
+import { Loading } from '@/shared/ui/Loading';
 import type { IsoDate } from '@/api/contract';
 import { addDays, formatDate, formatMoney, UNAVAILABLE } from '@/shared/format';
 import { DATE_STATUS, isBehind } from '@/shared/ui/dateStatus';
+import { useSummary } from '@/shared/queries';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
-
-import { useCashSummary } from '../hooks/useLedger';
 
 // OQ-19 item 3, amended by OQ-21: Caixa D0 is the published cash on the range's end
 // date, Caixa D−1 the one on the day before, each read from the cash chain of the portfolio
@@ -14,21 +14,17 @@ import { useCashSummary } from '../hooks/useLedger';
 
 /** A day's cash is behind when it is stale, failed or was never processed (OQ-23). */
 function useCashBehind(date: IsoDate): boolean {
-  const status = useCashSummary(date).data?.cash.status;
+  const status = useSummary(date).data?.cash.status;
   return status !== undefined && isBehind(status);
 }
 
 function CashCard({ label, date }: { label: string; date: IsoDate }) {
-  const summary = useCashSummary(date);
+  const summary = useSummary(date);
 
   let value: React.ReactNode;
   let marker: React.ReactNode = null;
   if (summary.isPending) {
-    value = (
-      <div role="status" aria-label={`Carregando ${label}`}>
-        <Skeleton h={24} w={140} />
-      </div>
-    );
+    value = <Loading label={`Carregando ${label}`} h={24} w={140} />;
   } else if (summary.isError) {
     value = <span title="Indisponível">{UNAVAILABLE}</span>;
     marker = <StatusBadge label="Erro ao carregar" color="red" />;

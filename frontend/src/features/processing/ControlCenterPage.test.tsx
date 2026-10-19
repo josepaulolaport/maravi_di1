@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
 import type { Issue } from '@/api/contract';
@@ -40,6 +40,10 @@ describe('Central de Controle (§11.1)', () => {
 
     const tab = await screen.findByRole('tab', { name: /Pendências/ });
     expect(tab).toHaveAttribute('aria-selected', 'true');
+    // The count is read once, in words; the badge is hidden from screen readers.
+    await waitFor(() => {
+      expect(tab).toHaveAccessibleName('Pendências, 1 pendência');
+    });
     expect(await within(tab).findByText('1')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Processamentos' })).toHaveAttribute(
       'aria-selected',
