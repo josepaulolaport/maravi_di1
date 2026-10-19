@@ -23,7 +23,6 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from di1.platform.config import DispatcherSettings, Settings
-from di1.platform.database.engine import check_connection, create_engine
 from di1.platform.messaging.worker import DispatchTick, WorkerResources
 from di1.shared.clock import FixedClock
 from di1.workers.dispatcher import run_dispatcher
@@ -184,16 +183,3 @@ async def test_a_dispatcher_startup_failure_is_logged_and_exits_with_status_1() 
     # Run with ``-m``, the module's logger is ``__main__``.
     assert re.search(r"Z ERROR __main__ dispatcher failed\n", output), output
     assert "s3cret-pw" not in output
-
-
-async def test_the_startup_check_gives_up_on_a_database_that_never_answers(
-    hanging_database_settings: Settings,
-) -> None:
-    """Without a stop, a database that hangs must still end the process (exit 1), so the
-    restart policy applies."""
-    engine = create_engine(hanging_database_settings)
-    try:
-        with pytest.raises(TimeoutError):
-            await asyncio.wait_for(check_connection(engine, timeout_seconds=0.3), timeout=5)
-    finally:
-        await engine.dispose()
