@@ -1,8 +1,9 @@
 """Cash and positions as two separately processable chains (OQ-21, OQ-22).
 
 Upgrade and downgrade run the reviewed SQL in ``migrations/sql/0002_cash_chain*.sql``.
-`tests/integration/test_cash_chain_migration.py` checks that 0001 + 0002 produce exactly the
-database `docs/schema.sql` produces, and how existing rows are carried over.
+`tests/integration/test_migrations_match_schema.py` checks that 0001 + 0002 produce exactly the
+database `docs/schema.sql` produces; `test_cash_chain_migration.py` how existing rows are
+carried over.
 
 Revision ID: 0002
 Revises: 0001

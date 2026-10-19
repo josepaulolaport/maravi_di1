@@ -43,7 +43,7 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
-              - 'docs/schema.sql' # tests/integration/test_cash_chain_migration.py compares the migrations with it
+              - 'docs/schema.sql' # tests/integration/test_migrations_match_schema.py compares the migrations with it
               - 'scripts/**'
               - 'Makefile'
               - '.github/workflows/**'

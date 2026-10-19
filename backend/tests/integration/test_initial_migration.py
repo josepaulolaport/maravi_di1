@@ -1,7 +1,7 @@
 """Upgrade to head creates the schema of `docs/schema.sql`; downgrade to base removes it (plan §3).
 
 - 0001 + 0002 build exactly what `docs/schema.sql` builds (checked column by column in
-  `test_cash_chain_migration.py`).
+  `test_migrations_match_schema.py`).
 - Upgrade to head on a fresh PostgreSQL 16 database creates the six schemas and 21 tables, with
   the singleton `processing.calculation_state` row. Downgrade to base removes them, and a second
   upgrade works again.

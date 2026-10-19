@@ -23,7 +23,7 @@ description: Create or verify the Alembic migration(s) for the Maravi DI1 Postgr
 3. **Write the revision as reviewed SQL** in `migrations/sql/NNNN_<name>.sql` (and `NNNN_<name>_downgrade.sql`), run from `migrations/versions/NNNN_<name>.py` exactly like 0001. No `BEGIN;`/`COMMIT;`: Alembic owns the transaction.
 4. **Carry existing rows over** explicitly in the SQL, and say how in its comments; refuse to run while a processing job is active if staged rows are touched.
 5. **Downgrade** restores the previous revision exactly and refuses to lose rows unless `-x allow_data_loss=true` is given.
-6. **Extend the equivalence test** (`tests/integration/test_cash_chain_migration.py`): the revisions must build exactly the columns, constraints and indexes that `docs/schema.sql` builds, and a downgrade must give back the previous catalog.
+6. **Extend the equivalence test** (`tests/integration/test_migrations_match_schema.py`): the revisions must build exactly the columns, constraints and indexes that `docs/schema.sql` builds, and a downgrade must give back the previous catalog.
 
 ## Verify, every time
 

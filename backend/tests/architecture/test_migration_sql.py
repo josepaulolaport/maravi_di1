@@ -2,7 +2,7 @@
 
 `migrations/sql/0001_initial.sql` is the initial schema as reviewed and applied: a released
 revision never changes, so its content is pinned here. Since 0002, `docs/schema.sql` is the
-result of all revisions, not the text of one; `tests/integration/test_cash_chain_migration.py`
+result of all revisions, not the text of one; `tests/integration/test_migrations_match_schema.py`
 checks on PostgreSQL that 0001 + 0002 build exactly what `docs/schema.sql` builds. No database
 is needed here, so this runs in the pre-commit hook.
 """
