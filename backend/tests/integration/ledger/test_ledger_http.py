@@ -9,6 +9,7 @@ OQ-26 item 1 (keyset pages ``{items, next_cursor}``).
 
 from __future__ import annotations
 
+import base64
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -212,6 +213,26 @@ def test_pages_follow_the_cursor(client: TestClient) -> None:
     seqs = [[i["seq"] for i in page["items"]] for page in (first, second, third)]
     assert seqs == [[5, 4], [3, 2], [1]]
     assert third["next_cursor"] is None
+
+
+def test_an_empty_cursor_is_the_first_page(client: TestClient) -> None:
+    record_fixtures(client)
+
+    response = client.get("/ledger/entries", params={**RANGE, "limit": 2, "cursor": ""})
+
+    assert response.status_code == 200, response.text
+    assert [item["seq"] for item in response.json()["items"]] == [5, 4]
+
+
+def test_a_crafted_cursor_is_refused_before_it_reaches_the_database(client: TestClient) -> None:
+    record_fixtures(client)
+    aware_time = base64.urlsafe_b64encode(b"2026-10-16|10:00:00+03:00|4").decode().rstrip("=")
+    huge_seq = base64.urlsafe_b64encode(b"2026-10-16|10:00:00|99999999999999999999").decode()
+
+    for cursor in (aware_time, huge_seq.rstrip("=")):
+        response = client.get("/ledger/entries", params={**RANGE, "cursor": cursor})
+
+        assert_problem(response, 422, ("VALIDATION_ERROR", "cursor"))
 
 
 def test_range_and_search_filter_on_the_server(client: TestClient) -> None:

@@ -3,7 +3,8 @@ OQ-24, OQ-26 item 1).
 
 - Order: ``(entry_date, entry_time, seq)`` across both types; ``desc`` (the default) newest first,
   ``asc`` the exact reverse. ``seq`` is unique, so the key is unique and a page boundary is exact.
-- The cursor is opaque to the client: the key of the last entry of the previous page.
+- The cursor is opaque to the client: the key of the last entry of the previous page. An empty
+  cursor is the first page; a cursor the API did not write is refused.
 - Search (frozen frontend contract, mock ``handlers/ledger.ts``): case- and accent-insensitive,
   by substring; a trade matches its contract code, a cash entry the label of its sign, "Aporte"
   (positive) or "Retirada" (negative).
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, time
@@ -22,6 +24,14 @@ from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
+
+_CURSOR_KEY = re.compile(
+    r"(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})\|(?P<time>[0-9]{2}:[0-9]{2}:[0-9]{2})\|(?P<seq>[1-9][0-9]{0,18})"
+)
+"""``YYYY-MM-DD|HH:MM:SS|seq``: what `EntryCursor.encode` writes."""
+
+_BIGINT_MAX = 2**63 - 1
+"""``seq BIGINT``."""
 
 DEPOSIT_LABEL = "Aporte"
 WITHDRAWAL_LABEL = "Retirada"
@@ -41,16 +51,29 @@ class EntryCursor:
     seq: int
 
     def encode(self) -> str:
-        raw = f"{self.entry_date.isoformat()}|{self.entry_time.isoformat()}|{self.seq}"
+        moment = self.entry_time.isoformat(timespec="seconds")
+        raw = f"{self.entry_date.isoformat()}|{moment}|{self.seq}"
         return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
 
     @classmethod
     def decode(cls, token: str) -> EntryCursor:
-        """Raises `DomainError` (``VALIDATION_ERROR`` on ``cursor``) for a malformed token."""
+        """The cursor ``encode`` wrote, and only that: the key must be a valid ``DATE``, a naive
+        whole-second ``TIME`` and a ``seq`` in ``BIGINT``'s positive range, spelled exactly as
+        ``encode`` spells it. Anything else, crafted or corrupted, raises `DomainError`
+        (``VALIDATION_ERROR`` on ``cursor``) before it reaches a query."""
         try:
-            raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode()
-            day, moment, seq = raw.split("|")
-            return cls(date.fromisoformat(day), time.fromisoformat(moment), int(seq))
+            raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode("ascii")
+            key = _CURSOR_KEY.fullmatch(raw)
+            if key is None:
+                raise ValueError("not a cursor key")
+            cursor = cls(
+                date.fromisoformat(key["date"]),
+                time.fromisoformat(key["time"]),
+                int(key["seq"]),
+            )
+            if cursor.seq > _BIGINT_MAX or cursor.encode() != token:
+                raise ValueError("not a cursor this API wrote")
+            return cursor
         except (ValueError, binascii.Error, UnicodeDecodeError) as exc:
             raise DomainError(
                 ErrorDetail(ErrorCode.VALIDATION_ERROR, "Cursor inválido.", "cursor")
@@ -129,7 +152,8 @@ def validate_page_request(
         search=EntrySearch.parse(search),
         order=order,
         limit=page_size,
-        after=EntryCursor.decode(cursor) if cursor is not None else None,
+        # An empty ``?cursor=`` is no cursor: the first page.
+        after=EntryCursor.decode(cursor) if cursor else None,
     )
 
 

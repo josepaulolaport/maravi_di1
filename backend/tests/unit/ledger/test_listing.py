@@ -9,6 +9,7 @@ matches its contract code, a cash entry the label of its sign, "Aporte" or "Reti
 
 from __future__ import annotations
 
+import base64
 from datetime import date, time
 
 import pytest
@@ -41,6 +42,63 @@ def test_a_malformed_cursor_is_a_validation_error_on_cursor(token: str) -> None:
     assert error.value.code is ErrorCode.VALIDATION_ERROR
     assert error.value.errors[0].field == "cursor"
     assert error.value.errors[0].message == "Cursor inválido."
+
+
+def _token(raw: str) -> str:
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "2026-10-16|10:00:00+03:00|4",  # an aware time: PostgreSQL would compare timetz to time
+        "2026-10-16|10:00:00.5|4",  # fractions: entry times are whole seconds
+        "2026-10-16|10:00|4",  # not the HH:MM:SS the encoder writes
+        "2026-10-16|10:00:00|99999999999999999999",  # beyond BIGINT
+        "2026-10-16|10:00:00|9223372036854775808",  # 2^63, one past BIGINT
+        "2026-10-16|10:00:00|0",  # seq starts at 1
+        "2026-10-16|10:00:00|-4",
+        "2026-10-16|10:00:00|+4",
+        "2026-10-16|10:00:00| 4",
+        "2026-10-16|10:00:00|04",
+        "20261016|10:00:00|4",
+        "2026-10-16|10:00:00|4|extra",
+    ],
+)
+def test_a_crafted_cursor_is_a_validation_error_not_a_server_error(raw: str) -> None:
+    with pytest.raises(DomainError) as error:
+        EntryCursor.decode(_token(raw))
+
+    assert error.value.code is ErrorCode.VALIDATION_ERROR
+    assert error.value.errors[0].field == "cursor"
+
+
+def test_only_the_encoders_own_spelling_is_accepted() -> None:
+    token = EntryCursor(date(2026, 10, 16), time(15, 0), 4).encode()
+
+    with pytest.raises(DomainError):
+        EntryCursor.decode(token + "==")  # padding the encoder never writes
+    with pytest.raises(DomainError):
+        EntryCursor.decode(token[:5] + "!" + token[5:])  # a character base64 would skip
+
+
+def test_the_largest_seq_round_trips() -> None:
+    cursor = EntryCursor(date(2026, 10, 16), time(23, 59, 59), 2**63 - 1)
+
+    assert EntryCursor.decode(cursor.encode()) == cursor
+
+
+def test_an_empty_cursor_is_the_first_page() -> None:
+    request = validate_page_request(
+        start_date=date(2026, 10, 1),
+        end_date=date(2026, 10, 18),
+        search=None,
+        order=ListOrder.DESC,
+        limit=None,
+        cursor="",
+    )
+
+    assert request.after is None
 
 
 def test_the_page_request_defaults() -> None:
