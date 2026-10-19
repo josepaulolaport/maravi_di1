@@ -22,6 +22,6 @@ Only the **user** decides. Record a decision only when you have the user's words
    - grep for old wording that is now wrong;
    - check every relative link.
 5. **Hand it over:**
-   - show the user the diff, and commit only after approval (skill `commit`, type `docs`, scope `docs`);
+   - commit (skill `commit`, type `docs`, scope `docs`); the recorded words must be the user's;
    - open a PR, which a human merges;
    - tell the affected lanes what changed.

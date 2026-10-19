@@ -10,7 +10,8 @@ Run each step and record its real result. Never write "passes" for something you
 ## 1. Scope and ownership
 
 ```bash
-git fetch origin && git rebase origin/main
+git fetch origin
+git rebase origin/main        # only while no commit is pushed; after the first push: git merge origin/main
 git diff --name-only origin/main...HEAD
 ```
 
@@ -19,7 +20,7 @@ git diff --name-only origin/main...HEAD
   - `migrations/`;
   - `pyproject.toml`, `uv.lock`;
   - `compose.yaml`, CI.
-- **No commit is pending the user's approval.** Every commit on the branch was approved.
+- **Every commit on the branch is green** and one logical change; review happens on this PR (CLAUDE.md §4).
 
 ## 2. Checks for the touched areas
 
@@ -34,6 +35,7 @@ git diff --name-only origin/main...HEAD
 - **History:**
 
   ```bash
+  # Only for commits not pushed yet; after the first push, fixes are new commits (no force-push).
   GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash origin/main
   git log --format='%h %s' origin/main..HEAD
   git rebase origin/main --exec "<fast test command>"
@@ -71,4 +73,4 @@ Not verified / known limits:
 - …
 ```
 
-A human reviews and merges it on GitHub. Never run `gh pr merge` or `git merge`. Give the user the PR URL.
+A human reviews and merges it on GitHub. Never `git merge` into `main` and never `gh pr merge`; bringing `origin/main` into your own branch is allowed (CLAUDE.md §4). Give the user the PR URL.

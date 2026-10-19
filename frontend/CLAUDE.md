@@ -111,7 +111,7 @@ frontend/src/
 
 ## Working rules for the frontend lane
 
-- **Commits are batched.** The user approves every commit, and so does another session at the same time. Make one commit per screen or feature: the scaffold, the API draft, then Carteira, Lançamentos, Ativos and Central de Controle. Each commit is still green and one logical change. Show the user the staged diff before committing.
+- **Commits are batched.** Commits need no per-commit approval (CLAUDE.md §4); review happens at PR time. Make one commit per screen or feature: the scaffold, the API draft, then Carteira, Lançamentos, Ativos and Central de Controle. Each commit is still green and one logical change.
 - **You own `frontend/**` only.** Changes elsewhere go to the integrator, in your report and the PR description:
   - Docker Compose and CI;
   - the docs and `CLAUDE.md`;

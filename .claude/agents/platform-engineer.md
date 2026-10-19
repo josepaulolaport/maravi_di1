@@ -47,4 +47,4 @@ You change root configuration and `compose.yaml` only together with the integrat
   - acknowledgement only after durability;
   - a broker reconnect;
   - recovery at worker start (OQ-45).
-- **Commits:** prepare the change, get the user's approval, then commit. Push and open a GitHub PR with `pr-ready`. Never merge.
+- **Commits:** commit freely, each green (CLAUDE.md §4); review happens at PR time. Push and open a GitHub PR with `pr-ready`. Never merge.
