@@ -35,13 +35,14 @@ cp frontend/.env.example frontend/.env.local   # optional: API_PROXY_TARGET for 
 
 - `docker compose` reads the root `.env` by itself and interpolates the `DI1_*` variables
   (credentials, host ports, `DI1_DEMO`); its services set their own `DATABASE_URL`/`RABBITMQ_URL`.
-- `uv run` in `backend/` (API, `alembic`, workers) reads `DATABASE_URL`, `RABBITMQ_URL`,
+- `uv run` with the working directory `backend/` (API, `alembic`, workers) reads `DATABASE_URL`, `RABBITMQ_URL`,
   `LOG_LEVEL` and the other settings from the root `.env`, then `backend/.env`
   (`di1.platform.config`); `DI1_*` lines are ignored there. Compose does not publish PostgreSQL to
   the host, so `DATABASE_URL` points at a server of your own.
 - `npm run dev` reads `API_PROXY_TARGET` from `frontend/.env` or `frontend/.env.local`.
-- Backend tests never read a `.env` (`backend/tests/conftest.py`); `make test` and `make e2e` set what
-  they need.
+- Backend tests never read a `.env` (`backend/tests/conftest.py`; the worker processes they start
+  run outside the checkout). `make e2e` runs Compose, so it uses the root `.env`'s credentials,
+  with its own ports and `DI1_DEMO=0`.
 
 ## Run the application
 

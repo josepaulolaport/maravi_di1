@@ -17,8 +17,8 @@ frontend/playwright-report/
 
 # Environment and local settings (the committed templates are .env.example)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 .claude/settings.local.json
 CLAUDE.local.md
 
