@@ -27,6 +27,18 @@ x-backend: &backend
   build: ./backend
   image: di1-backend:local
 
+# The worker processes' health check (di1.workers.healthcheck): healthy while the heartbeat file
+# the process touches (HEARTBEAT_FILE) is younger than HEARTBEAT_MAX_AGE_SECONDS. It opens no
+# connection. Docker does not restart an unhealthy container; a process that cannot go on exits
+# instead (status 1) and its restart policy brings it back.
+x-heartbeat-check: &heartbeat-check
+  test: ["CMD", "python", "-m", "di1.workers.healthcheck"]
+  interval: 10s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+  start_interval: 1s
+
 services:
   postgres:
     image: postgres:16
@@ -137,11 +149,16 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Publishes the outbox to RabbitMQ and, once an hour, deletes the inbox records older than
+  # INBOX_RETENTION_DAYS (default 7). Its heartbeat is touched after each poll (every second when
+  # idle), so a fresh file means the loop is progressing.
   outbox-relay:
     <<: *backend
     command: ["python", "-m", "di1.workers.outbox_relay"]
     environment:
       <<: [*database-env, *broker-env]
+      HEARTBEAT_FILE: /tmp/di1-outbox-relay.heartbeat
+    healthcheck: *heartbeat-check
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -151,13 +168,18 @@ services:
 
   # Exactly one processing worker (OQ-45), and no dispatcher (OQ-46): at startup it recovers an
   # interrupted run and drains the queued requests, then it drains again on each doorbell message,
-  # so it must never be scaled. It stops on SIGTERM within the default grace period and exits 1
-  # on a startup failure; without a health check `up --wait` waits for it to be running.
+  # so it must never be scaled. It stops on SIGTERM within the default grace period. It exits 1 on
+  # a startup failure, and when a run cannot record its end (the run would stay RUNNING and hold
+  # the queue): the restart's recovery then finishes the run. Its heartbeat is touched every 5 s
+  # by a task of its event loop, the startup recovery included, so a fresh file means the
+  # process is responsive.
   worker:
     <<: *backend
     command: ["python", "-m", "di1.workers.main"]
     environment:
       <<: [*database-env, *broker-env]
+      HEARTBEAT_FILE: /tmp/di1-worker.heartbeat
+    healthcheck: *heartbeat-check
     depends_on:
       migrate:
         condition: service_completed_successfully

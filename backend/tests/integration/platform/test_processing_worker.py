@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from di1.platform.config import BrokerSettings, Settings
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.platform.messaging.connection import connect
-from di1.platform.messaging.consumer import AfterAck
+from di1.platform.messaging.consumer import AfterAck, AfterAckFailedError
 from di1.platform.messaging.envelope import Envelope
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import QueueSpec, Topology, declare_queue
@@ -39,6 +39,7 @@ from di1.platform.messaging.worker import (
     ConsumerRegistration,
     WorkerResources,
 )
+from di1.platform.observability.heartbeat import Heartbeat
 from di1.shared.clock import FixedClock
 from di1.workers import main as worker
 from di1.workers.main import run_worker
@@ -62,6 +63,7 @@ class _Run:
 
     hold_before_ack: bool = False
     hold_after_ack: bool = False
+    fail_after_ack: bool = False
     claimed: list[Envelope] = field(default_factory=list)
     ran: list[Envelope] = field(default_factory=list)
     entered: asyncio.Event = field(default_factory=asyncio.Event)
@@ -77,6 +79,8 @@ class _Run:
         async def run() -> None:
             if self.hold_after_ack and not self.ran:
                 await self._hold()
+            if self.fail_after_ack:
+                raise RuntimeError("the end of the run was not recorded")
             self.ran.append(envelope)
 
         return run
@@ -156,6 +160,45 @@ async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
     assert resources.clock is clock
 
 
+async def test_the_worker_beats_its_heartbeat_from_its_start_until_it_stops(
+    settings: Settings,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    tmp_path: Path,
+) -> None:
+    """The heartbeat shows the event loop is responsive (compose.yaml's health check), also
+    during the startup step: recovery may run a long range before the worker consumes."""
+    path = tmp_path / "worker.heartbeat"
+    release = asyncio.Event()
+
+    async def recover(resources: WorkerResources) -> None:
+        await release.wait()
+
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings,
+            consumers=lambda resources: [],
+            stop=stop,
+            topology=topology,
+            on_startup=recover,
+            heartbeat=Heartbeat(path),
+            heartbeat_interval_seconds=0.05,
+        )
+    )
+    await eventually(path.exists)
+    os.utime(path, (1000.0, 1000.0))
+    await eventually(lambda: path.stat().st_mtime > 1000.0)  # still beating, mid-startup
+
+    release.set()
+    stop.set()
+    await asyncio.wait_for(running, timeout=10)
+    os.utime(path, (1000.0, 1000.0))
+    await asyncio.sleep(0.2)
+    assert path.stat().st_mtime == 1000.0  # stopped with the worker
+
+
 async def _is_consumed(broker: AbstractRobustConnection, name: str) -> bool:
     """Whether the worker consumes the queue. A queue that merely exists is not enough: the
     worker declares it, then binds it to its message types, then consumes it, and a publish
@@ -204,6 +247,41 @@ async def test_a_stop_during_the_run_after_the_ack_cancels_it_and_the_message_st
     await asyncio.wait_for(running, timeout=10)
     assert handler.cancelled.is_set()
     assert handler.ran == []
+    assert await effects(engine) == [envelope.message_id]
+    assert await _ready_messages(broker, spec.name) == 0
+
+
+async def test_a_failure_after_the_ack_ends_the_worker_with_an_error(
+    settings: Settings,
+    engine: AsyncEngine,
+    broker: AbstractRobustConnection,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    publisher: MessagePublisher,
+) -> None:
+    """Work after the ack that fails left state only a restart repairs: a run that could not
+    record its end stays RUNNING, and no later run starts while it does. The worker stops with
+    an error (the process exits 1 and Docker restarts it) instead of idling with a stuck queue;
+    its startup recovery then resumes the run (OQ-45). The message stays acknowledged."""
+    spec = queue_spec(topology, "test.command")
+    handler = _Run(fail_after_ack=True)
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings,
+            consumers=_consumers(spec, handler),
+            stop=asyncio.Event(),
+            topology=topology,
+        )
+    )
+    envelope = make_envelope()
+    await eventually(lambda: _is_consumed(broker, spec.name))
+
+    await publisher.publish(envelope)
+
+    with pytest.raises(AfterAckFailedError) as raised:
+        await asyncio.wait_for(running, timeout=15)
+    assert isinstance(raised.value.__cause__, RuntimeError)
     assert await effects(engine) == [envelope.message_id]
     assert await _ready_messages(broker, spec.name) == 0
 

@@ -35,7 +35,7 @@
 | processing | `date_status` | `date` | the current status of the portfolio and cash chains on each date and when each was last processed (OQ-23, OQ-31) |
 | processing | `issues` | `id` | job issues: `MISSING_REFERENCE_PRICE`, `EXPIRED_OPEN_POSITION` (OQ-31) |
 | platform | `outbox_messages` | `id` | committed commands awaiting broker publication |
-| platform | `inbox_messages` | `(consumer_name, message_id)` | handler delivery deduplication; will get a retention cleanup of old rows (OQ-47 item 2; not yet implemented) |
+| platform | `inbox_messages` | `(consumer_name, message_id)` | handler delivery deduplication; rows processed more than `INBOX_RETENTION_DAYS` ago (default 7) are deleted hourly by the outbox relay (OQ-47 item 2) |
 
 ## Important database integrity decisions
 

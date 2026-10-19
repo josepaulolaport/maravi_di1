@@ -3,14 +3,16 @@
 The channel uses publisher confirms (interfaces.md "Transaction boundaries" 3), and every
 message is mandatory and persistent: a message no queue accepts, a negative confirm, a timeout
 or a lost channel all raise `PublishFailedError`, so the outbox relay keeps the row and retries
-instead of losing the command.
+instead of losing the command. A failure that is not this message's (a timeout, a closed
+channel or connection) is a `BrokerUnavailableError`: every later message would fail the same
+way, so the relay stops its batch.
 """
 
 from __future__ import annotations
 
 import aio_pika
 from aio_pika.abc import AbstractExchange, AbstractRobustChannel, AbstractRobustConnection
-from aio_pika.exceptions import AMQPError, ChannelInvalidStateError
+from aio_pika.exceptions import AMQPError, ChannelInvalidStateError, DeliveryError
 
 from di1.platform.config import BrokerSettings
 from di1.platform.messaging.envelope import CONTENT_TYPE, Envelope
@@ -19,6 +21,10 @@ from di1.platform.messaging.topology import Topology, declare_exchanges
 
 class PublishFailedError(Exception):
     """The broker did not confirm the message; it may or may not have been delivered."""
+
+
+class BrokerUnavailableError(PublishFailedError):
+    """The broker could not be reached or did not answer, whatever the message."""
 
 
 class MessagePublisher:
@@ -55,8 +61,10 @@ class MessagePublisher:
             await self._exchange.publish(
                 message, routing_key=envelope.message_type, mandatory=True, timeout=self._timeout
             )
-        except (TimeoutError, AMQPError, ChannelInvalidStateError, ConnectionError) as error:
+        except DeliveryError as error:  # a negative confirm or a return: this message only
             raise PublishFailedError(_describe(error)) from error
+        except (TimeoutError, AMQPError, ChannelInvalidStateError, ConnectionError) as error:
+            raise BrokerUnavailableError(_describe(error)) from error
 
     async def close(self) -> None:
         await self._channel.close()

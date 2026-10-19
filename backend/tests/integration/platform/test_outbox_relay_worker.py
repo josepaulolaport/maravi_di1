@@ -31,9 +31,11 @@ from di1.platform.messaging.envelope import Envelope
 from di1.platform.messaging.outbox import add_outbox_message
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import Topology
+from di1.platform.observability.heartbeat import Heartbeat
 from di1.workers import outbox_relay
 from di1.workers.outbox_relay import run_outbox_relay
 from tests.integration.platform.conftest import queue_spec
+from tests.integration.platform.support import eventually
 
 BACKEND = Path(__file__).resolve().parents[3]
 
@@ -60,6 +62,34 @@ async def test_the_relay_declares_the_queues_and_publishes_until_stopped(
     await asyncio.wait_for(running, timeout=10)
 
     assert Envelope.from_json(message) == written
+
+
+async def test_the_relay_beats_its_heartbeat_once_it_relays(
+    settings: Settings,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    tmp_path: Path,
+) -> None:
+    """The heartbeat follows the poll loop (compose.yaml's health check): a stale file left by
+    a previous process is removed at start, and the loop writes it again on its first turn."""
+    path = tmp_path / "relay.heartbeat"
+    path.touch()
+    os.utime(path, (1000.0, 1000.0))
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_outbox_relay(
+            settings,
+            broker_settings,
+            queues=[],
+            stop=stop,
+            topology=topology,
+            heartbeat=Heartbeat(path),
+        )
+    )
+
+    await eventually(lambda: path.exists() and path.stat().st_mtime > 1000.0)
+    stop.set()
+    await asyncio.wait_for(running, timeout=10)
 
 
 async def _first_message(
