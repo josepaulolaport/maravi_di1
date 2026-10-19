@@ -31,13 +31,13 @@ You review one lane branch in a fresh context. You never edit files.
 3. **No automatic processing:** look for any hidden recalculation or enqueue triggered by a write.
 4. **Atomicity:**
    - each fact and its invalidation are saved in one UoW;
-   - publication of `positions`, `position_metrics` and `portfolio_metrics` happens in one transaction;
-   - the revision and claim-token checks run before publication.
+   - each date's published rows (`positions`, `position_metrics`, `portfolio_metrics`, `cash_balances`), its AUM, its `date_status` and `progress_date` are written in that date's one transaction (OQ-23);
+   - the claim-token check and the D−1/D `date_status` row locks happen in that transaction.
 5. **Concurrency:**
    - one active job;
    - overlapping queued jobs;
    - cooperative cancellation;
-   - `SUPERSEDED`;
+   - writes during a run, failure at a date and cancellation, which leave later dates untouched (OQ-23);
    - duplicate delivery, crash recovery and lease fencing.
 6. **Interface hygiene:**
    - cross-module access only through `public.py`;
