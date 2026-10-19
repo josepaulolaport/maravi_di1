@@ -1,4 +1,4 @@
-import type { Decimal, IsoDate, ReferencePriceDay } from '@/api/contract';
+import type { Decimal, Instrument, IsoDate, ReferencePriceDay } from '@/api/contract';
 import { addDays, formatDate, isIsoDate } from '@/shared/format';
 
 /** Calendar days shown on the contract page, ending on min(today, maturity) (§11.2). */
@@ -97,4 +97,13 @@ export function toPriceChart(
     });
   }
   return points;
+}
+
+/**
+ * The last date a price may have (OQ-14, OQ-1): today, or the contract's maturity once it has
+ * passed.
+ */
+export function lastDay(instrument: Instrument | null, today: IsoDate): IsoDate {
+  const maturity = instrument?.maturity_date ?? null;
+  return maturity !== null && maturity < today ? maturity : today;
 }

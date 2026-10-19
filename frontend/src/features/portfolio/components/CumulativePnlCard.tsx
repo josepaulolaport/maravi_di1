@@ -1,10 +1,10 @@
 import { LineChart } from '@mantine/charts';
-import { Divider, Group, Paper, Stack, Text } from '@mantine/core';
+import { Divider, Group, Paper, Skeleton, Stack, Text } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { IconCalendar } from '@tabler/icons-react';
 
 import { Loading } from '@/shared/ui/Loading';
-import type { Decimal, IsoDate } from '@/api/contract';
+import type { IsoDate } from '@/api/contract';
 import { addDays, formatDate, formatSignedMoney } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
@@ -14,8 +14,6 @@ import { type ChartPoint, hasIncompleteDay, incompleteReason, toChartData } from
 
 interface CumulativePnlCardProps {
   date: IsoDate;
-  /** The cumulative P&L of the selected date, from the same publication as the KPIs. */
-  cumulative: Decimal | null;
   /** The chart's first day, before `date` (`useChartStart`). */
   start: IsoDate;
   onStartChange: (start: IsoDate) => void;
@@ -51,17 +49,15 @@ export function ChartTooltip({ active, payload }: TooltipContentProps) {
 
 /**
  * Compact portfolio-level cumulative P&L (§11.4): one point per calendar day of the period
- * (OQ-41). The user picks where the chart starts; it always ends on the selected date, so the
- * line ends at the headline figure of the same publication.
+ * (OQ-41). The user picks where the chart starts; it always ends on the selected date. The
+ * headline is the chart's range total on that date, "Desde" its start (OQ-48 item 3): the
+ * backend's `range_cumulative_pnl`, where an incomplete day adds 0. The stored since-inception
+ * `cumulative_pnl` stays unavailable from the first gap (§8.3) and is not shown here.
  */
-export function CumulativePnlCard({
-  date,
-  cumulative,
-  start,
-  onStartChange,
-}: CumulativePnlCardProps) {
+export function CumulativePnlCard({ date, start, onStartChange }: CumulativePnlCardProps) {
   const series = useCumulativePnl(start, date);
   const points = series.data ? toChartData(series.data.items) : [];
+  const total = points.find((point) => point.date === date)?.cumulativeText ?? null;
 
   return (
     <Paper p="lg" aria-label="P&L acumulado" role="region">
@@ -70,7 +66,15 @@ export function CumulativePnlCard({
           <Text size="sm" c="dimmed">
             P&L acumulado
           </Text>
-          <SignedMoney value={cumulative} size="xl" fw={500} />
+          {/* While the series is read the total is not known yet: loading, never "—". */}
+          {series.isPending ? (
+            <Skeleton h={31} w={160} aria-busy="true" aria-label="Carregando total do período" />
+          ) : (
+            <SignedMoney value={total} size="xl" fw={500} />
+          )}
+          <Text size="sm" c="dimmed">
+            Desde {formatDate(start)}
+          </Text>
         </Stack>
         <Stack gap={4} align="flex-end">
           <DatePickerInput

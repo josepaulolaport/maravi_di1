@@ -84,12 +84,7 @@ function PortfolioBody({ date, chartStart, summary, positions }: BodyProps) {
       <KpiGrid summary={data} />
       {rows.status !== 'NOT_PROCESSED' && (
         <>
-          <CumulativePnlCard
-            date={date}
-            cumulative={data.positions.cumulative_pnl}
-            start={chartStart[0]}
-            onStartChange={chartStart[1]}
-          />
+          <CumulativePnlCard date={date} start={chartStart[0]} onStartChange={chartStart[1]} />
           <PositionsTable rows={rows.items} />
         </>
       )}

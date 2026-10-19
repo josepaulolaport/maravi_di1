@@ -12,8 +12,14 @@ const priceKeys = {
     [...priceKeys.all, 'reference-prices', assetId, start, end] as const,
 };
 
-export function useReferencePriceDays(assetId: string, start: IsoDate, end: IsoDate) {
+export function useReferencePriceDays(
+  assetId: string,
+  start: IsoDate,
+  end: IsoDate,
+  enabled = true,
+) {
   return useQuery({
+    enabled,
     queryKey: priceKeys.days(assetId, start, end),
     queryFn: () =>
       pricesApi.listReferencePrices({ asset_id: assetId, start_date: start, end_date: end }),
