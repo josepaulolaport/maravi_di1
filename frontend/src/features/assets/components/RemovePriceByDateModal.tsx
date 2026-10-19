@@ -18,7 +18,7 @@ interface RemovePriceByDateModalProps {
 }
 
 /**
- * "Remover preço" from the product page's contract list (user, 2026-10-19): the user picks a
+ * "Remover preço" from the product page's contract list (OQ-48 item 1): the user picks a
  * date, then chooses which of that date's prices to remove, as on the contract page (§5). There
  * is no calendar here to pick the date from, so the date comes first.
  */

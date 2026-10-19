@@ -50,7 +50,7 @@ export function ChartTooltip({ active, payload }: TooltipContentProps) {
 /**
  * Compact portfolio-level cumulative P&L (§11.4): one point per calendar day of the period
  * (OQ-41). The user picks where the chart starts; it always ends on the selected date. The
- * headline is the chart's range total on that date, "Desde" its start (user, 2026-10-19): the
+ * headline is the chart's range total on that date, "Desde" its start (OQ-48 item 3): the
  * backend's `range_cumulative_pnl`, where an incomplete day adds 0. The stored since-inception
  * `cumulative_pnl` stays unavailable from the first gap (§8.3) and is not shown here.
  */

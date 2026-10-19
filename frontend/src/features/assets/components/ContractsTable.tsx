@@ -12,9 +12,9 @@ import { formatDate, formatPu, formatRate, UNAVAILABLE } from '@/shared/format';
  */
 interface ContractsTableProps {
   instruments: Instrument[];
-  /** "Registrar preço" from a row's menu (user, 2026-10-19). */
+  /** "Registrar preço" from a row's menu (OQ-48 item 1). */
   onRegisterPrice: (instrument: Instrument) => void;
-  /** "Remover preço" from a row's menu (user, 2026-10-19). */
+  /** "Remover preço" from a row's menu (OQ-48 item 1). */
   onRemovePrice: (instrument: Instrument) => void;
 }
 

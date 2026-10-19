@@ -17,7 +17,7 @@ interface PriceModalProps {
   /** The contract the price is for; `null` with `contracts` lets the user pick it. */
   instrument: Instrument | null;
   /**
-   * The contracts to pick from (the product page, user 2026-10-19): the form then shows a
+   * The contracts to pick from (the product page, OQ-48 item 1): the form then shows a
    * "Contrato" select, prefilled with `instrument` when given. Without it the contract is fixed.
    */
   contracts?: Instrument[];

@@ -240,7 +240,7 @@ async function rowMenu(user: ReturnType<typeof renderApp>['user'], code: string,
 const priceDialog = async () =>
   within(await screen.findByRole('dialog', { name: 'Registrar preço de referência' }));
 
-describe('Ativos: preços na lista de contratos (§11.2, §5; user, 2026-10-19)', () => {
+describe('Ativos: preços na lista de contratos (§11.2, §5, OQ-48 item 1)', () => {
   beforeEach(() => {
     notifications.clean();
     vi.useFakeTimers({ toFake: ['Date'] });

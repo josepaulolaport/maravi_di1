@@ -22,7 +22,7 @@ import { useInstruments, useProduct, useSearchParam } from './hooks/useAssets';
 /**
  * A product (spec §11.2, design 2:165): its contracts, each with its latest reference
  * observation next to its own date (OQ-19 item 5). No specification card (user, 2026-10-18).
- * A price is registered or removed from the list too (user, 2026-10-19): "Registrar preço" above
+ * A price is registered or removed from the list too (OQ-48 item 1): "Registrar preço" above
  * it, and each row's menu.
  */
 export function ProductPage() {

@@ -131,7 +131,7 @@ describe('Carteira (§11.4)', () => {
     expectNoCard();
   });
 
-  it("§11.4 OQ-41 the card's headline is the chart's range total on the date, since its start (user, 2026-10-19)", async () => {
+  it("§11.4 OQ-41 OQ-48 the card's headline is the chart's range total on the date, since its start", async () => {
     // 16/10 has a missing price: its stored cumulative P&L is null, but the range total is not.
     await openCarteira('2026-10-16');
 
@@ -141,7 +141,7 @@ describe('Carteira (§11.4)', () => {
     expect(card.getByText('Até 16/10/2026')).toBeInTheDocument();
   });
 
-  it('§11.4 the headline shows loading, not "—", while the series is read', async () => {
+  it('§11.4 OQ-48 the headline shows loading, not "—", while the series is read', async () => {
     // The series never answers in this test.
     server.use(http.get(url('/portfolio/pnl'), () => new Promise<Response>(() => undefined)));
     await openCarteira('2026-10-16');
@@ -152,7 +152,7 @@ describe('Carteira (§11.4)', () => {
     expect(headline).not.toHaveTextContent('—');
   });
 
-  it('§11.4 the headline reads "—" when the series has no point for the date', async () => {
+  it('§11.4 OQ-48 the headline reads "—" when the series has no point for the date', async () => {
     server.use(http.get(url('/portfolio/pnl'), () => HttpResponse.json({ items: [] })));
     await openCarteira('2026-10-16');
 
@@ -548,7 +548,7 @@ describe('Carteira (§11.4)', () => {
     );
   });
 
-  it('§11.4 OQ-16 picking a chart start reloads the chart, and its headline total, up to the date', async () => {
+  it('§11.4 OQ-16 OQ-48 picking a chart start reloads the chart, and its headline total, up to the date', async () => {
     // The range total on 16/10 depends on where the sum starts.
     server.use(
       http.get(url('/portfolio/pnl'), ({ request }) => {
