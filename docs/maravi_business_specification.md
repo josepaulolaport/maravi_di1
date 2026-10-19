@@ -122,6 +122,7 @@ Uma compra/venda inclui contrato, direção, quantidade, data/hora efetiva e PU 
 - Calcula-se **todos os dias corridos** na faixa efetiva do processamento, inclusive fins de semana e feriados.
 - Há **duas cadeias diárias independentes** (OQ-21): a de **caixa** (§7.3) e a de **posições** (§7.2, com avaliação e P&L, §8). Ambas leem os mesmos fatos do Ledger e nunca a saída uma da outra; só se encontram no AUM (§8.2).
 - O cálculo do dia de cada cadeia usa o estado anterior válido **da própria cadeia** e aplica sequencialmente os fatos daquele dia.
+- A posição de abertura de D é a de fechamento de D−1, levada adiante quando o usuário processa D; não há processo automático à meia-noite (OQ-22). O usuário processa D0 quando quiser (§10.1).
 - Os resultados de dias anteriores só podem ser reutilizados como pontos de partida quando o estado da cadeia está válido diante das revisões atuais.
 
 ### 7.2 Posição e custo médio
@@ -206,6 +207,7 @@ aum[D]                     = cash_balance[D] + positions_market_value[D]
 - O valor de mercado de uma posição zero é zero mesmo sem referência; **isso não implica** que o P&L dos trades do dia seja calculável.
 - Alguns ativos podem ter P&L disponível enquanto outros não. O P&L agregado da carteira **não é completo** se faltar resultado de qualquer ativo esperado.
 - **Ativo esperado em D** (OQ-10): `Q[a,D-1] != 0` ou existe operação do ativo em D. Exatamente esses ativos têm linhas em `positions` e `position_metrics` para D, inclusive com quantidade 0 após zeragem ou round trip no dia.
+- **Dia sem ativo esperado** (OQ-22), por exemplo depois de zerar tudo ou após o vencimento: o dia é processado mesmo assim. `portfolio_metrics` recebe a linha do dia com valor de mercado 0, AUM = caixa (`null` se o caixa faltar), P&L de posições, de operações e diário exatamente 0, ambos os estados completos, e P&L acumulado igual ao do dia anterior (`null` se a cadeia já estiver interrompida).
 - O P&L acumulado permanece indisponível a partir do primeiro dia com lacuna não resolvida na cadeia histórica, até a correção e o reprocessamento necessário.
 - Uma data sem preços no calendário da tela de Ativos não gera automaticamente pendência; a pendência surge quando um cálculo requer efetivamente a observação ausente.
 - Ausência de dado de mercado **não é falha técnica** da fila ou da calculadora.
@@ -234,8 +236,10 @@ aum[D]                     = cash_balance[D] + positions_market_value[D]
 
 O usuário acessa **Central de Controle → Processamentos**, escolhe intervalo inclusivo de datas e o **escopo** — **Caixa**, **Posições** ou **Tudo** (OQ-21) — e confirma o processamento. Caixa processa só a cadeia de caixa; Posições, a de posições com avaliação e P&L; Tudo, as duas, publicadas juntas. **O processamento cobre exatamente o intervalo solicitado [A, B]**; não há expansão automática (OQ-11).
 
-- Cada escopo verifica o estado de A−1 da sua própria cadeia. Se ele estiver desatualizado ou ausente, o job ainda executa e publica [A, B]: esses dias aparecem como desatualizados (na cadeia de posições, o P&L fica `null`; na de caixa, o saldo é publicado marcado como desatualizado) e uma pendência pede o processamento de um intervalo anterior. Sem lançamentos antes de A, o estado de A−1 é o estado zero, válido.
-- A pré-visualização avisa quando o estado de A−1 está desatualizado.
+- Cada escopo verifica o estado de A−1 da sua própria cadeia. Sem lançamentos antes de A, o estado de A−1 é o estado zero, válido.
+- **Posições** (OQ-11): se o estado de A−1 estiver desatualizado ou ausente, o job ainda executa e publica [A, B]; esses dias aparecem como desatualizados, o P&L fica `null` e uma pendência pede o processamento de um intervalo anterior.
+- **Caixa** (OQ-22): se o caixa de A−1 está **desatualizado**, o job executa a partir dele e publica [A, B] marcado como desatualizado, com a mesma pendência. Se o caixa de A−1 **não foi publicado** e há lançamento datado até A−1, o job de Caixa ou Tudo é recusado ao iniciar: não publica nada e termina `FAILED` com o código `CASH_PREDECESSOR_MISSING` e a mensagem "Caixa do dia anterior não processado: processe primeiro um intervalo anterior." Enfileirar é sempre permitido.
+- A pré-visualização avisa quando o estado de A−1 da cadeia do escopo está desatualizado ou ausente.
 
 ### 10.2 Fila, simultaneidade e cancelamento
 
@@ -246,7 +250,7 @@ O usuário acessa **Central de Controle → Processamentos**, escolhe intervalo 
 - O usuário pode registrar nova operação ou corrigir preço, enfileirar um novo intervalo e cancelar o job anterior. A UI oferece **Cancelar e criar novo processamento**, que faz os dois pedidos de forma coordenada (OQ-20).
 - A fila durável e os estados de jobs pertencem ao **PostgreSQL**. RabbitMQ transporta comandos de execução; não é a fonte de verdade sobre a ordem dos jobs.
 - O worker processa cronologicamente as datas com chamadas diretas aos módulos (Portfolio, Prices, PnL); não se publica uma mensagem para cada ativo ou dia.
-- Um job calcula com versões dos inputs capturadas ao iniciar e verifica as versões antes de publicar: Caixa verifica operações e movimentações; Posições, operações e preços; Tudo, as três (OQ-21). Um aporte não torna obsoleto um job de Posições; uma nova operação torna obsoletos os dois. Se mudanças posteriores tornarem o resultado obsoleto, não pode sobrescrever dados atuais (**SUPERSEDED**).
+- Um job calcula com versões dos inputs capturadas ao iniciar e verifica as versões antes de publicar: Caixa verifica operações e movimentações; Posições, operações e preços; Tudo, as três (OQ-21). Um aporte não torna obsoleto um job de Posições; uma nova operação torna obsoleto qualquer job (Caixa, Posições ou Tudo). Se mudanças posteriores tornarem o resultado obsoleto, não pode sobrescrever dados atuais (**SUPERSEDED**).
 - Reentrega de mensagens, reinicialização de worker e retomada de lease não podem gerar duas publicações concorrentes.
 
 ### 10.3 Status e pendências
@@ -260,12 +264,12 @@ Estados principais planejados:
 - `CANCELLED`: cancelado sem publicar cálculo incompleto.
 - `COMPLETED`: resultados exigidos completos.
 - `COMPLETED_WITH_ISSUES`: cálculo contábil persistível, mas alguma métrica de mercado/P&L está incompleta por dependência ausente.
-- `FAILED`: falha técnica inesperada.
+- `FAILED`: falha técnica inesperada, ou caixa de A−1 não publicado (`CASH_PREDECESSOR_MISSING`, §10.1, OQ-22).
 - `SUPERSEDED`: fonte de dados mudou; publicação obsoleta foi bloqueada.
 
 Rótulos na interface (OQ-20): `QUEUED` **Na fila**, `DISPATCHED` **Enviado**, `RUNNING` **Processando**, `CANCELLING` **Cancelando**, `CANCELLED` **Cancelado**, `COMPLETED` **Concluído**, `COMPLETED_WITH_ISSUES` **Concluído com pendências**, `FAILED` **Falhou**, `SUPERSEDED` **Obsoleto**. Não existe status "Bloqueado": preço ausente nunca interrompe um job.
 
-A lista de **Pendências** exibe problemas acionáveis: ativo, data necessária, motivo e ação. Deduplicar problemas repetidos para a mesma obrigação. Tipos atuais: **preço de referência faltante** (ação: definir preço), **contrato vencido com posição aberta** (§7.4) e **estado anterior desatualizado** (§10.1; ação: processar intervalo anterior).
+A lista de **Pendências** exibe problemas acionáveis: ativo, data necessária, motivo e ação. Deduplicar problemas repetidos para a mesma obrigação. Tipos atuais: **preço de referência faltante** (ação: definir preço), **contrato vencido com posição aberta** (§7.4) e **estado anterior desatualizado** (§10.1; ação: processar intervalo anterior), que indica a cadeia afetada, Caixa ou Posições (OQ-22).
 
 ### 10.4 Publicação e invalidação
 
@@ -347,6 +351,9 @@ Devem existir testes de unidade para calculadoras e testes de integração para 
 10. Dois pedidos com intervalos sobrepostos, cancelamento na fila, cancelamento em execução, reposição e proteção de publicação atômica.
 11. Mudança de fonte durante job; marcação `SUPERSEDED`, idempotência/reentrega RabbitMQ, recuperação de worker.
 12. Resposta consolidada da Carteira coerente por data e versão; mocks em conformidade com APIs.
+13. Cadeias separadas (OQ-21): um aporte durante um job de Posições não o torna obsoleto; uma operação torna obsoleto qualquer job; `aum = caixa + valor de mercado` após publicar só Caixa, só Posições e Tudo.
+14. Predecessor (OQ-22): Caixa com A−1 não publicado e lançamentos anteriores termina `FAILED` (`CASH_PREDECESSOR_MISSING`) sem publicar; com A−1 desatualizado publica marcado; um job Tudo registra as duas pendências de predecessor, uma por cadeia.
+15. Dia sem ativo esperado (OQ-22): posição zerada em D e D+1 sem ativos publica P&L 0, AUM = caixa e P&L acumulado levado adiante.
 
 ## 14. Decisões fechadas e itens ainda abertos
 
@@ -382,6 +389,7 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - `GET /portfolio/pnl` alimenta o gráfico de P&L acumulado (OQ-16).
 - Lane H é dona de `platform/**` (OQ-17).
 - Caixa e posições são duas cadeias processáveis separadamente (escopos Caixa, Posições e Tudo), com marcadores e revisões próprios; caixa publicado em `cash_balances`; AUM recalculado por quem publica (OQ-21).
+- Caixa de A−1 não publicado recusa o job ao iniciar; caixa desatualizado publica marcado; posições seguem OQ-11; pendência de predecessor indica a cadeia; dia sem ativo esperado é processado com P&L 0 e acumulado levado adiante; sem processo automático à meia-noite (OQ-22).
 - Arquitetura (usuário, 18/10/2026): `infrastructure/` contém persistência e outros adaptadores de saída; consumidores e handlers RabbitMQ de um módulo ficam em `presentation/messaging/`, a infraestrutura RabbitMQ compartilhada em `platform/messaging/`, e a lógica de processamento em `application/`. O domínio é determinístico e sem I/O nem efeitos colaterais (sem arquivo, rede, banco, mensageria, ambiente ou relógio do sistema); utilitários puros da biblioteca padrão (`datetime`, `Decimal`, `Enum`, `dataclasses`) são permitidos. O domínio não faz logging (que pertence às camadas de aplicação, infraestrutura e apresentação) e comunica falhas por exceções e resultados explícitos; não gera aleatoriedade internamente: um cálculo que precise dela (ex.: Monte Carlo) recebe uma semente explícita ou um gerador injetado.
 
 - Desvios e interpretações do enunciado registrados em §15 (OQ-18).

@@ -42,7 +42,7 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 - Two independent chains (OQ-21), both pure and reading the same Ledger facts:
   - positions: `PortfolioAccounting.calculate_day(previous_state, trades, date) -> AccountingDay` (quantities, average PU/rate; no cash);
   - cash: a cash calculator `calculate_day(previous_cash, trades, deposits, withdrawals, date)` giving `cash_balance`, `trades_cash_flow`, `deposits`, `withdrawals` for the day. It reads no positions and no prices.
-- `PortfolioReader.get_previous_valid_accounting_state(before_date) -> AccountingState`
+- `PortfolioReader.get_previous_valid_accounting_state(before_date) -> AccountingState` and, for the cash chain, `get_previous_cash(before_date)` → the published `cash_balances` row of `before_date − 1` with its stale flag, or none (OQ-22).
 - `PortfolioReader.get_positions(date) -> list[Position]`
 - `PortfolioQueryService.get_position_table(date) -> PositionTableView`
 - `PortfolioQueryService.get_summary(date) -> PortfolioSummaryView`
@@ -65,7 +65,8 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 - `ProcessingService.list_requests()`, `get_request(id)`, `get_issues(...)`
 - `ProcessingDispatcher.dispatch_next() -> Optional[request_id]`: transactionally claim singleton `calculation_state` row, set job DISPATCHED, record outbox command.
 - `PortfolioRangeProcessor.run(request_id, claim_token)`: claim/lease (60 s, renewed per day, OQ-5), capture the latest input revisions of its scope, process exactly the requested dates (each chain checks its own start−1; if stale or missing, still run, publish flagged stale — positions with `pnl_status = MISSING` — and a `STALE_PREDECESSOR` issue: OQ-11, OQ-21), loop one calendar day at a time, calculate the scope's chains (cash; or Portfolio accounting, Prices, PnL; or both), stage results/progress; check cancellation between dates and before publication; publish only with matching input revisions and active fencing token; then finish job. No nested RabbitMQ message per asset or per day.
-- Issue types: `MISSING_REFERENCE_PRICE`, `EXPIRED_OPEN_POSITION`, `STALE_PREDECESSOR`.
+- Issue types: `MISSING_REFERENCE_PRICE`, `EXPIRED_OPEN_POSITION`, `STALE_PREDECESSOR`; a `STALE_PREDECESSOR` names its chain (`CASH` or `POSITIONS`, OQ-22).
+- Predecessor rule (OQ-22): a CASH or ALL job whose start−1 has no published cash while an active trade or cash movement is dated on or before start−1 publishes nothing and ends `FAILED` with `error_code = CASH_PREDECESSOR_MISSING`; stale cash at start−1 publishes flagged stale. Checked when the job starts; enqueueing is never refused for it.
 - Cancellation of queued work is immediate. Running cancellation sets a request marker; worker stops safely and discards staged data. Overlapping requests allowed in PostgreSQL, one active global job.
 
 ## Transaction boundaries and behavior

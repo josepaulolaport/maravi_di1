@@ -88,7 +88,9 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 - **Processing ranges** (OQ-11, OQ-12, OQ-21):
   - A job has a scope: CASH, POSITIONS or ALL. Each scope checks its own A−1, fences its own input revisions and advances only its own markers; ALL publishes both chains at once.
   - A job processes exactly [A, B], with no expansion.
-  - If A−1 is stale or missing, the job still publishes; those days read as stale, with `null` P&L and a `STALE_PREDECESSOR` issue.
+  - If A−1 is stale or missing, the job still publishes; those days read as stale, with `null` P&L and a `STALE_PREDECESSOR` issue that names its chain.
+  - Exception for cash (OQ-22): if A−1 has no published cash and something is dated on or before A−1, a CASH or ALL job publishes nothing and ends `FAILED` (`CASH_PREDECESSOR_MISSING`). Stale cash at A−1 publishes flagged stale.
+  - A day with no expected asset is still processed: P&L 0, AUM = cash, cumulative P&L carried forward (OQ-22).
   - After a publish, a dirty marker within [A, B] advances to B+1.
 - **All user-facing text is Brazilian Portuguese**, with Brazilian formats. Code and identifiers are English.
 
