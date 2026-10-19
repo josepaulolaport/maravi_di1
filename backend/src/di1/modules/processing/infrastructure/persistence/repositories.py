@@ -50,9 +50,8 @@ def _to_request(row: Row[Any]) -> ProcessingRequest:
         error_code=row.error_code,
         error_message=row.error_message,
         updated_at=row.updated_at,
-        # The columns arrive with migration 0006 (PR #58, OQ-40); only the Wave 4 worker sets them.
-        failed_date=None,
-        failed_chain=None,
+        failed_date=row.failed_date,
+        failed_chain=None if row.failed_chain is None else ProcessingScope(row.failed_chain),
     )
 
 
@@ -113,6 +112,8 @@ class SqlRequestRepository:
             "started_at": request.started_at,
             "finished_at": request.finished_at,
             "cancel_requested_at": request.cancel_requested_at,
+            "failed_date": request.failed_date,
+            "failed_chain": None if request.failed_chain is None else request.failed_chain.value,
         }
 
 

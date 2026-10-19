@@ -35,6 +35,8 @@ class RequestModel(Base):
     claim_token: Mapped[uuid.UUID | None]
     lease_expires_at: Mapped[datetime | None]
     attempt_count: Mapped[int] = mapped_column(default=0)
+    failed_date: Mapped[date | None] = mapped_column(Date)
+    failed_chain: Mapped[str | None] = mapped_column(String(16))
 
 
 class DateStatusModel(Base):
