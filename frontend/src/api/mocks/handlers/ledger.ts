@@ -167,7 +167,7 @@ export const ledgerHandlers = [
 
   // All or nothing: if any id is unknown nothing is deleted (§6.1 "operação atômica"). A trade
   // marks cash and positions dirty; a cash entry only cash.
-  http.delete(url('/ledger/entries'), async ({ request }) => {
+  http.post(url('/ledger/entries/deletions'), async ({ request }) => {
     await latency();
     const body = await readJson(request);
     const ids = Array.isArray(body.ids) ? (body.ids as string[]) : [];

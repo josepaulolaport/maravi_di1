@@ -153,7 +153,7 @@ export const useCreateEntry = () =>
 /** A new entry's save is running: the modal must stay open until its result is shown. */
 export const useIsSavingEntry = () => useIsMutating({ mutationKey: ledgerKeys.create() }) > 0;
 
-/** One or several entries, of either type, all or nothing (§6.1): `DELETE /ledger/entries`. */
+/** One or several entries, of either type, all or nothing (§6.1): `POST /ledger/entries/deletions`. */
 export const useDeleteEntries = () =>
   useLedgerWrite((entries: LedgerEntry[]) =>
     ledgerApi.deleteEntries({ ids: entries.map((e) => e.id) }),

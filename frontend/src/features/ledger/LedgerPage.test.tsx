@@ -50,7 +50,7 @@ function cellTexts(row: HTMLElement) {
 }
 
 /** Records the JSON body of every request to `path`, then lets the mock answer it. */
-function captureBodies(method: 'post' | 'delete', path: string) {
+function captureBodies(method: 'post', path: string) {
   const bodies: unknown[] = [];
   server.use(
     http[method](url(path), async ({ request }) => {
@@ -966,7 +966,7 @@ describe('Lançamentos (§11.3)', () => {
     const withdrawal = 'Retirada 16/10/2026 17:30 -R$\u00a050.000,00';
 
     it('§6.1 deletes one trade after confirmation, by its id; there is no edit action', async () => {
-      const bodies = captureBodies('delete', '/ledger/entries');
+      const bodies = captureBodies('post', '/ledger/entries/deletions');
       const { user } = await openLedger();
 
       await user.click(rowNamed(sale).getByRole('button', { name: `Ações de ${sale}` }));
@@ -1002,7 +1002,7 @@ describe('Lançamentos (§11.3)', () => {
 
     it('§6.1 a failed single delete keeps the entry and shows why', async () => {
       server.use(
-        http.delete(url('/ledger/entries'), () =>
+        http.post(url('/ledger/entries/deletions'), () =>
           problem(404, [fieldError('NOT_FOUND', 'Lançamento não encontrado.')]),
         ),
       );
@@ -1076,7 +1076,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.1 deletes the selected entries, of both types, in one atomic request', async () => {
-      const bodies = captureBodies('delete', '/ledger/entries');
+      const bodies = captureBodies('post', '/ledger/entries/deletions');
       const { user } = await openLedger();
 
       expect(
@@ -1110,7 +1110,7 @@ describe('Lançamentos (§11.3)', () => {
 
     it('§6.1 a failed multiple delete removes nothing and shows the error', async () => {
       server.use(
-        http.delete(url('/ledger/entries'), () =>
+        http.post(url('/ledger/entries/deletions'), () =>
           problem(404, [fieldError('NOT_FOUND', 'Lançamento não encontrado.')]),
         ),
       );

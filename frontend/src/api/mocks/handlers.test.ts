@@ -826,12 +826,12 @@ describe('mock publication (a finished job publishes the precomputed results of 
       '17/10/2026',
     ],
     [
-      'DELETE /ledger/entries (a trade)',
+      'POST /ledger/entries/deletions (a trade)',
       () => ledgerApi.deleteEntries({ ids: ['7a000000-0000-4000-8000-000000000003'] }),
       '16/10/2026',
     ],
     [
-      'DELETE /ledger/entries (a cash entry)',
+      'POST /ledger/entries/deletions (a cash entry)',
       () => ledgerApi.deleteEntries({ ids: ['7c000000-0000-4000-8000-000000000002'] }),
       '16/10/2026',
     ],

@@ -76,7 +76,8 @@ export interface CreateCashEntryRequest {
 export type CreateLedgerEntryRequest = CreateTradeEntryRequest | CreateCashEntryRequest;
 
 /**
- * `DELETE /ledger/entries` with this body: soft-deletes the entries, whatever their type, in
+ * `POST /ledger/entries/deletions` (lane X, 2026-10-18; a POST, since a DELETE body is not
+ * reliably carried by proxies): soft-deletes the entries, whatever their type, in
  * one transaction; an unknown id deletes nothing (§6.1 "operação atômica"). 204.
  */
 export interface DeleteLedgerEntriesRequest {

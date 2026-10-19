@@ -48,7 +48,8 @@ export const ledgerApi = {
     http.get<ListResponse<LedgerEntry>>('/ledger/entries', { query }),
   createEntry: (body: CreateLedgerEntryRequest) => http.post<LedgerEntry>('/ledger/entries', body),
   /** All or nothing (§6.1); one entry is a list of one. */
-  deleteEntries: (body: DeleteLedgerEntriesRequest) => http.delete('/ledger/entries', { body }),
+  deleteEntries: (body: DeleteLedgerEntriesRequest) =>
+    http.post<undefined>('/ledger/entries/deletions', body),
 };
 
 export const pricesApi = {

@@ -287,7 +287,7 @@ function SearchBox({ value, onChange }: { value: string; onChange: (value: strin
 }
 
 function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClose: () => void }) {
-  // One request for one entry or many, of either type (`DELETE /ledger/entries`).
+  // One request for one entry or many, of either type (`POST /ledger/entries/deletions`).
   const mutation = useDeleteEntries();
   // The last target stays on screen while the dialog closes, so its text does not flicker.
   const [shown, setShown] = useState(target);
