@@ -41,8 +41,8 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 - **Reference prices:**
   - **Exact date only. No carry-forward**, weekends included.
   - When both sources exist, MANUAL wins over B3.
-  - There is one current revision per (asset, date, source); corrections append a new revision.
-  - The price used must be traceable to its revision.
+  - There is one row per (asset, date, source) and no revisions (OQ-25): a correction updates it in place, a removal deletes it.
+  - The price used is traceable through the published row: `position_metrics` stores the `reference_pu` used and its `reference_source`.
 - **Accounting:**
   - Starting state: zero cash, zero positions, zero P&L.
   - **Every calendar day** is processed.
@@ -68,30 +68,32 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - The cumulative P&L stays unavailable from the first gap onward.
   - A missing price is not a technical failure: the job ends `COMPLETED_WITH_ISSUES`.
 - **No automatic processing.**
-  - A write saves the fact and marks the dependent results stale **in the same transaction**. Nothing else. A trade makes cash and positions stale; a deposit or withdrawal only cash; a reference price only valuation (OQ-21).
+  - A write saves the fact and marks the dependent results stale **in the same transaction**. Nothing else. A write dated W sets the affected chain to `STALE` in `processing.date_status` on every date ≥ W that already has a status (OQ-23): a trade, cash and positions; a deposit or withdrawal, only cash; a reference price, only positions (OQ-21).
   - Processing runs only when the user requests a date range.
 - **Jobs:**
   - PostgreSQL holds the queue and the job statuses; RabbitMQ only carries dispatch commands.
   - Many jobs may be queued, and only one runs at a time.
   - Cancellation is cooperative.
-  - Results are staged per request, then published atomically, after a check of the input revisions and the claim token. A job whose inputs changed is marked `SUPERSEDED`.
-- **History is immutable.** Trades and cash movements are never edited: they are soft-deleted with an audit trail.
+  - No staging (OQ-23): each date is published in its own transaction, which locks the `date_status` rows of D−1 and D and checks the claim token. A write during a run waits on those locks, then marks what it affects stale; the run never stops for it.
+  - `processing.date_status(date, portfolio, cash)` is the only source of freshness: no row or NULL = not processed, `FRESH`, `FRESH_WITH_ISSUES`, `STALE`, `RUNNING`, `FAILED`. There are no dirty markers and no revision counters.
+  - Eight run statuses; there is no `SUPERSEDED`. A failure at D sets D `FAILED` and ends the run `FAILED`; a cancel commits the current date and ends `CANCELLED`. Later dates are never touched. Recovery resumes after `requests.progress_date`.
+- **History is immutable.** Trades and cash movements are one ledger entry (`ledger.entries`, OQ-24) and are never edited: they are soft-deleted, without a reason, and a multi-delete shares one `deletion_batch_id`, all or nothing.
 - **Dates and validation** (OQ-7, OQ-13, OQ-14):
   - Any calendar date, weekends and holidays included.
   - Nothing dated after today (America/Sao_Paulo, through an injected clock); maturities are exempt.
-  - `trade_time` is required. Same-date order: `(trade_date, trade_time, seq)`.
+  - `entry_time` is required for trades and cash movements alike. Same-date order across both: `(entry_date, entry_time, seq)` (OQ-24).
   - Value bounds are only the schema's CHECKs.
 - **Maturity** (OQ-1):
   - No automatic settlement. The user closes with a normal trade, at any PU, up to the maturity date inclusive. On the maturity date the PU is typed and the rate is stored as 0.
   - The maturity-day reference price is entered by the user.
   - After maturity the reference PU is 0 by definition, and trades and prices dated after it are rejected. An open position then raises the Pendência "contrato vencido com posição aberta".
-- **Processing ranges** (OQ-11, OQ-12, OQ-21):
-  - A job has a scope: CASH, POSITIONS or ALL. Each scope checks its own A−1, fences its own input revisions and advances only its own markers; ALL publishes both chains at once.
+- **Processing ranges** (OQ-11, OQ-21, OQ-23):
+  - A job has a scope: CASH, POSITIONS or ALL. Each scope reads and sets only its own chain's status; ALL writes both chains of a date, and its AUM, in one transaction.
   - A job processes exactly [A, B], with no expansion.
-  - If A−1 is stale or missing, the job still publishes; those days read as stale, with `null` P&L and a `STALE_PREDECESSOR` issue that names its chain.
+  - D is `FRESH` (or `FRESH_WITH_ISSUES`) only when D−1 is `FRESH` or `FRESH_WITH_ISSUES`, or is the chain's zero state (positions: no trade before D; cash: no entry of either type before D, OQ-26); otherwise the job still publishes D as `STALE`, with `null` P&L and a `STALE_PREDECESSOR` issue that names its chain.
   - Exception for cash (OQ-22): if A−1 has no published cash and something is dated on or before A−1, a CASH or ALL job publishes nothing and ends `FAILED` (`CASH_PREDECESSOR_MISSING`). Stale cash at A−1 publishes flagged stale.
   - A day with no expected asset is still processed: P&L 0, AUM = cash, cumulative P&L carried forward (OQ-22).
-  - After a publish, a dirty marker within [A, B] advances to B+1.
+  - There are no dirty markers: each published date sets its own status in `date_status` (OQ-23).
 - **All user-facing text is Brazilian Portuguese**, with Brazilian formats. Code and identifiers are English.
 
 ## 3. Architecture

@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.processing.public import (
+    ChainStatus,
     FinancialResultInvalidator,
     ProcessingRequest,
     ProcessingScope,
@@ -24,7 +25,7 @@ from tests.fakes.processing import (
 )
 
 
-def test_processing_status_has_the_nine_schema_statuses() -> None:
+def test_processing_status_has_the_eight_schema_statuses() -> None:
     assert {status.value for status in ProcessingStatus} == {
         "QUEUED",
         "DISPATCHED",
@@ -34,7 +35,6 @@ def test_processing_status_has_the_nine_schema_statuses() -> None:
         "COMPLETED_WITH_ISSUES",
         "CANCELLED",
         "FAILED",
-        "SUPERSEDED",
     }
 
 
@@ -54,11 +54,10 @@ def test_a_request_is_frozen_and_covers_exactly_its_range() -> None:
         started_at=None,
         finished_at=None,
         cancel_requested_at=None,
-        processed_days=0,
-        total_days=16,
         progress_date=None,
         error_code=None,
         error_message=None,
+        updated_at=datetime(2026, 10, 16, 18, 0, tzinfo=SAO_PAULO),
     )
 
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -89,3 +88,13 @@ async def test_the_fake_invalidator_records_calls_with_their_unit_of_work() -> N
         CashMovementsChanged(date(2026, 10, 3), uow),
         PricesChanged(asset_id, date(2026, 10, 2), uow),
     ]
+
+
+def test_chain_status_matches_the_schema_check() -> None:
+    assert {status.value for status in ChainStatus} == {
+        "FRESH",
+        "FRESH_WITH_ISSUES",
+        "STALE",
+        "RUNNING",
+        "FAILED",
+    }

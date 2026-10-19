@@ -97,3 +97,15 @@ def test_downgrade_to_0001_gives_back_the_initial_schema(database_url: str) -> N
     initial = _catalog_of_sql(INITIAL_SQL.read_text())
     for part in ("columns", "constraints", "indexes"):
         assert downgraded[part] == initial[part], part
+
+
+def test_downgrade_to_0002_gives_back_its_schema(database_url: str) -> None:
+    command.upgrade(_alembic(database_url), "head")
+    command.downgrade(_alembic(database_url), "0002")
+
+    downgraded = catalog(database_url)
+    with database() as reference_url:
+        command.upgrade(_alembic(reference_url), "0002")
+        at_0002 = catalog(reference_url)
+    for part in ("columns", "constraints", "indexes"):
+        assert downgraded[part] == at_0002[part], part

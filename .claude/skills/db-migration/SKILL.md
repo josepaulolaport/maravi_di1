@@ -21,7 +21,7 @@ description: Create or verify the Alembic migration(s) for the Maravi DI1 Postgr
 1. **Update `docs/schema.sql` first**, so it stays the complete schema: the result of every revision, not the text of one.
 2. **Never edit a released revision.** `tests/architecture/test_migration_sql.py` pins `0001_initial.sql` by hash.
 3. **Write the revision as reviewed SQL** in `migrations/sql/NNNN_<name>.sql` (and `NNNN_<name>_downgrade.sql`), run from `migrations/versions/NNNN_<name>.py` exactly like 0001. No `BEGIN;`/`COMMIT;`: Alembic owns the transaction.
-4. **Carry existing rows over** explicitly in the SQL, and say how in its comments; refuse to run while a processing job is active if staged rows are touched.
+4. **Carry existing rows over** explicitly in the SQL, and say how in its comments; refuse to run while a processing job is active if it touches the tables a job writes (`processing.requests`, `processing.date_status`, the published `portfolio` tables).
 5. **Downgrade** restores the previous revision exactly and refuses to lose rows unless `-x allow_data_loss=true` is given.
 6. **Extend the equivalence test** (`tests/integration/test_migrations_match_schema.py`): the revisions must build exactly the columns, constraints and indexes that `docs/schema.sql` builds, and a downgrade must give back the previous catalog.
 
