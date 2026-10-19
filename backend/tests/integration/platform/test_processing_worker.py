@@ -53,8 +53,6 @@ from tests.integration.platform.support import (
     make_envelope,
 )
 
-BACKEND = Path(__file__).resolve().parents[3]
-
 
 @dataclass
 class _Run:
@@ -573,7 +571,7 @@ async def test_a_connection_made_as_the_worker_is_cancelled_is_closed(
 
 
 async def test_the_worker_process_stops_cleanly_on_sigterm(
-    settings: Settings, broker_settings: BrokerSettings
+    settings: Settings, broker_settings: BrokerSettings, tmp_path: Path
 ) -> None:
     """The process runs the composition's startup step and its one consumer
     (``processing.run_request``), then stops on SIGTERM."""
@@ -586,7 +584,7 @@ async def test_the_worker_process_stops_cleanly_on_sigterm(
         sys.executable,
         "-m",
         "di1.workers.main",
-        cwd=BACKEND,
+        cwd=tmp_path,
         env=environment,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -617,7 +615,7 @@ async def test_the_worker_process_stops_cleanly_on_sigterm(
 
 
 async def test_a_worker_startup_failure_is_logged_and_exits_with_status_1(
-    settings: Settings,
+    settings: Settings, tmp_path: Path
 ) -> None:
     environment = os.environ | {
         "DATABASE_URL": settings.database_url.get_secret_value(),
@@ -628,7 +626,7 @@ async def test_a_worker_startup_failure_is_logged_and_exits_with_status_1(
         sys.executable,
         "-m",
         "di1.workers.main",
-        cwd=BACKEND,
+        cwd=tmp_path,
         env=environment,
         stderr=asyncio.subprocess.PIPE,
     )

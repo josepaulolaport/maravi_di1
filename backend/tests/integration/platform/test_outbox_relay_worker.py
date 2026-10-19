@@ -37,8 +37,6 @@ from di1.workers.outbox_relay import run_outbox_relay
 from tests.integration.platform.conftest import queue_spec
 from tests.integration.platform.support import eventually
 
-BACKEND = Path(__file__).resolve().parents[3]
-
 
 async def test_the_relay_declares_the_queues_and_publishes_until_stopped(
     settings: Settings,
@@ -161,7 +159,7 @@ async def test_a_stop_while_connecting_to_the_broker_ends_the_relay(
 
 
 async def test_the_relay_process_stops_cleanly_on_sigterm(
-    settings: Settings, broker_settings: BrokerSettings
+    settings: Settings, broker_settings: BrokerSettings, tmp_path: Path
 ) -> None:
     """The process runs its real topology (``di1.commands``, ``di1.dead-letter``): the one
     exception to test-owned broker names. It declares the composition's one queue,
@@ -176,7 +174,7 @@ async def test_the_relay_process_stops_cleanly_on_sigterm(
         sys.executable,
         "-m",
         "di1.workers.outbox_relay",
-        cwd=BACKEND,
+        cwd=tmp_path,
         env=environment,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -205,7 +203,9 @@ async def test_the_relay_process_stops_cleanly_on_sigterm(
     assert settings.database_url.get_secret_value() not in output
 
 
-async def test_a_startup_failure_is_logged_and_exits_with_status_1(settings: Settings) -> None:
+async def test_a_startup_failure_is_logged_and_exits_with_status_1(
+    settings: Settings, tmp_path: Path
+) -> None:
     environment = os.environ | {
         "DATABASE_URL": settings.database_url.get_secret_value(),
         "RABBITMQ_URL": "amqp://guest:s3cret-pw@127.0.0.1:1/",
@@ -215,7 +215,7 @@ async def test_a_startup_failure_is_logged_and_exits_with_status_1(settings: Set
         sys.executable,
         "-m",
         "di1.workers.outbox_relay",
-        cwd=BACKEND,
+        cwd=tmp_path,
         env=environment,
         stderr=asyncio.subprocess.PIPE,
     )
