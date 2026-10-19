@@ -97,6 +97,10 @@ class RunStore(Protocol):
         """The oldest QUEUED run by ``(created_at, id)``, row-locked (OQ-5 item 4, OQ-46)."""
         ...
 
+    async def has_queued(self, *, uow: UnitOfWork) -> bool:
+        """Whether any run is QUEUED (a plain read)."""
+        ...
+
     async def lock_active_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
         """The runs RUNNING (or DISPATCHED/CANCELLING, from before OQ-46), oldest first,
         row-locked: the run the worker is processing, or at its start the one it was (OQ-45)."""

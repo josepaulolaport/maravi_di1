@@ -165,21 +165,21 @@ class PortfolioRangeProcessor:
             await self.run(request_id)
 
     async def take_next(self) -> UUID | None:
-        """Locks the oldest QUEUED request and sets it RUNNING, in one transaction; ``None`` when
-        none is queued, or while a run is still RUNNING (one stopped by an error it could not
-        record waits for the worker's next start, so two runs never overlap)."""
+        """Locks the oldest QUEUED request and sets it RUNNING, in one transaction. ``None`` only
+        when none is queued (a cancel and a take on the same row: whichever commits first wins),
+        or while a run is still RUNNING: one stopped by an error it could not record waits for
+        the worker's next start, so two runs never overlap."""
         async with self._uow_factory() as uow:
             if await self._store.lock_active_runs(uow=uow):
                 await uow.commit()
                 return None
-            queued = await self._store.lock_oldest_queued(uow=uow)
-            if queued is None:
-                # A cancel committed on the oldest row while we waited on its lock: PostgreSQL
-                # re-checks that row and returns none, though others may still be queued.
-                queued = await self._store.lock_oldest_queued(uow=uow)
-            if queued is None:
-                await uow.commit()
-                return None
+            while (queued := await self._store.lock_oldest_queued(uow=uow)) is None:
+                # No row can also mean a cancel committed on the oldest row while we waited on
+                # its lock: PostgreSQL re-checks that row and returns none, not the next one.
+                # Select again until a row is locked or none is queued at all.
+                if not await self._store.has_queued(uow=uow):
+                    await uow.commit()
+                    return None
             now = self._clock.now()
             await self._store.save_run(
                 replace(queued, status=ProcessingStatus.RUNNING, started_at=now, updated_at=now),

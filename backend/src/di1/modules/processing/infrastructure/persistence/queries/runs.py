@@ -17,6 +17,8 @@ LOCK_OLDEST_QUEUED = text(
     " ORDER BY created_at, id LIMIT 1 FOR UPDATE"
 )
 
+EXISTS_QUEUED = text("SELECT EXISTS (SELECT 1 FROM processing.requests WHERE status = 'QUEUED')")
+
 LOCK_ACTIVE_RUNS = text(
     f"SELECT {RUN_COLUMNS} FROM processing.requests"
     " WHERE status IN ('DISPATCHED', 'RUNNING', 'CANCELLING') ORDER BY created_at, id FOR UPDATE"

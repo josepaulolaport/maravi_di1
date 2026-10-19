@@ -11,6 +11,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.ledger.public import EntryType
@@ -841,3 +842,32 @@ async def test_a_crash_mid_run_resumes_at_restart_then_drains_the_queue(worker: 
     assert order == [D1, D2, D2, D3]  # D2 again (resumed after progress_date), then the queue
     assert (await worker.run_row(first))["status"] == "COMPLETED"
     assert (await worker.run_row(second))["status"] == "COMPLETED"
+
+
+async def test_a_cancel_committing_on_the_oldest_row_during_a_take_still_takes_the_next(
+    worker: Worker,
+) -> None:
+    """A cancel that commits on the oldest QUEUED row while the take waits on its lock: the take
+    must still take the next request (OQ-46). PostgreSQL re-checks the locked row; whether the
+    same SELECT then returns the next row or none depends on the plan, so the take also selects
+    again until it locks a row or none is queued."""
+    oldest = await worker.enqueue("CASH", D1, D1)
+    second = await worker.enqueue("CASH", D2, D2)
+
+    async with worker.engine.connect() as connection:
+        transaction = await connection.begin()
+        await connection.execute(  # as ProcessingService.request_cancel does first
+            text("SELECT id FROM processing.requests WHERE id = :id FOR UPDATE"),
+            {"id": oldest},
+        )
+        take = asyncio.create_task(worker.take_next())
+        await worker.wait_for_a_lock_waiter()
+        await connection.execute(
+            text("UPDATE processing.requests SET status = 'CANCELLED' WHERE id = :id"),
+            {"id": oldest},
+        )
+        await transaction.commit()
+
+    async with asyncio.timeout(5):
+        assert await take == second
+    assert (await worker.run_row(second))["status"] == "RUNNING"

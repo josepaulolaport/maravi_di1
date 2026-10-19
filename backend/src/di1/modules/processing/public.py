@@ -68,7 +68,9 @@ class DateStatusReader(Protocol):
 
 class ProcessingStatus(StrEnum):
     """The eight run statuses (spec §10.3; schema ``requests_status_check``); there is no
-    SUPERSEDED since OQ-23."""
+    SUPERSEDED since OQ-23. DISPATCHED and CANCELLING are never set since OQ-46: a request goes
+    QUEUED → RUNNING when the worker takes it, and a cancel of a RUNNING run only records
+    ``cancel_requested_at``; the values stay for rows written before."""
 
     QUEUED = "QUEUED"
     DISPATCHED = "DISPATCHED"
@@ -96,6 +98,7 @@ class ProcessingRequest:
     status: ProcessingStatus
     created_at: datetime
     dispatched_at: datetime | None
+    """Unused since OQ-46 (there is no dispatch); ``None`` for every new run."""
     started_at: datetime | None
     finished_at: datetime | None
     cancel_requested_at: datetime | None

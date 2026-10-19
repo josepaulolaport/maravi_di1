@@ -74,6 +74,9 @@ class SqlRunStore:
     def __init__(self, clock: Clock) -> None:
         self._clock = clock
 
+    async def has_queued(self, *, uow: UnitOfWork) -> bool:
+        return bool(await uow.session.scalar(sql.EXISTS_QUEUED))
+
     async def lock_active_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
         return [_to_run(row) for row in await uow.session.execute(sql.LOCK_ACTIVE_RUNS)]
 
