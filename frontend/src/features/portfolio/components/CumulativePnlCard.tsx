@@ -1,12 +1,14 @@
 import { LineChart } from '@mantine/charts';
 import { Divider, Group, Paper, Skeleton, Stack, Text } from '@mantine/core';
+import { DatePickerInput } from '@mantine/dates';
+import { IconCalendar } from '@tabler/icons-react';
 
 import type { Decimal, IsoDate } from '@/api/contract';
-import { formatDate, formatSignedMoney } from '@/shared/format';
+import { addDays, formatDate, formatSignedMoney } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
 
-import { useCumulativePnl } from '../hooks/usePortfolio';
+import { useChartStart, useCumulativePnl } from '../hooks/usePortfolio';
 import { type ChartPoint, hasHistory, toChartData } from './chartData';
 
 interface CumulativePnlCardProps {
@@ -34,10 +36,15 @@ function ChartTooltip({ active, payload }: TooltipContentProps) {
   );
 }
 
-/** Compact portfolio-level cumulative P&L, drawn only where the history is complete (§11.4). */
+/**
+ * Compact portfolio-level cumulative P&L, drawn only where the history is complete (§11.4).
+ * The user picks where the chart starts; it always ends on the selected date, so the line
+ * ends at the headline figure of the same publication.
+ */
 export function CumulativePnlCard({ date, cumulative }: CumulativePnlCardProps) {
-  const series = useCumulativePnl(date);
-  const points = series.data ? toChartData(series.data.items, series.start, date) : [];
+  const [start, setStart] = useChartStart(date);
+  const series = useCumulativePnl(start, date);
+  const points = series.data ? toChartData(series.data.items, start, date) : [];
 
   return (
     <Paper p="lg" aria-label="P&L acumulado" role="region">
@@ -48,9 +55,23 @@ export function CumulativePnlCard({ date, cumulative }: CumulativePnlCardProps) 
           </Text>
           <SignedMoney value={cumulative} size="xl" fw={500} />
         </Stack>
-        <Text size="sm" c="dimmed">
-          Até {formatDate(date)}
-        </Text>
+        <Stack gap={4} align="flex-end">
+          <DatePickerInput
+            label="Início do gráfico"
+            size="xs"
+            value={start}
+            onChange={(value) => {
+              if (value) setStart(value);
+            }}
+            maxDate={addDays(date, -1)}
+            valueFormat="DD/MM/YYYY"
+            leftSection={<IconCalendar size={14} stroke={1.5} />}
+            w={160}
+          />
+          <Text size="sm" c="dimmed">
+            Até {formatDate(date)}
+          </Text>
+        </Stack>
       </Group>
       <Divider my="md" />
       {series.isPending && <Skeleton h={180} />}
@@ -78,7 +99,7 @@ export function CumulativePnlCard({ date, cumulative }: CumulativePnlCardProps) 
           />
         ) : (
           <Text size="sm" c="dimmed">
-            Sem histórico completo para exibir nos últimos 30 dias.
+            Sem histórico completo para exibir no período selecionado.
           </Text>
         ))}
       <Text size="xs" c="dimmed" mt="xs">

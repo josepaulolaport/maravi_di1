@@ -40,6 +40,19 @@ function override15(
   );
 }
 
+/** Records the range of every cumulative P&L request, then lets the mock answer it. */
+function recordPnlRanges() {
+  const ranges: [string | null, string | null][] = [];
+  server.use(
+    http.get(url('/portfolio/pnl'), ({ request }) => {
+      const params = new URL(request.url).searchParams;
+      ranges.push([params.get('start_date'), params.get('end_date')]);
+      return undefined;
+    }),
+  );
+  return ranges;
+}
+
 async function openCarteira(date: string) {
   const result = renderApp(`/carteira?date=${date}`);
   await screen.findByRole('group', { name: 'Saldo em caixa' });
@@ -215,6 +228,65 @@ describe('Carteira (§11.4)', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Valor de mercado' }));
     expect(assetOrder()).toEqual(['DI1F28', 'DI1F29']);
+  });
+
+  it('§11.4 OQ-16 starts the cumulative P&L chart 30 days back and ends it on the date', async () => {
+    const ranges = recordPnlRanges();
+    await openCarteira('2026-10-16');
+
+    await waitFor(() => {
+      expect(ranges.at(-1)).toEqual(['2026-09-17', '2026-10-16']);
+    });
+    expect(screen.getByRole('button', { name: /Início do gráfico/ })).toHaveTextContent(
+      '17/09/2026',
+    );
+  });
+
+  it('§11.4 OQ-16 picking a chart start reloads the chart up to the date and keeps it in the URL', async () => {
+    const ranges = recordPnlRanges();
+    const { user, router } = renderApp('/carteira?date=2026-10-16&pnl_start=2026-10-10');
+    await waitFor(() => {
+      expect(ranges.at(-1)).toEqual(['2026-10-10', '2026-10-16']);
+    });
+
+    await user.click(await screen.findByRole('button', { name: /Início do gráfico/ }));
+    await user.click(await screen.findByRole('button', { name: '14 outubro 2026' }));
+
+    expect(new URLSearchParams(router.state.location.search).get('pnl_start')).toBe('2026-10-14');
+    await waitFor(() => {
+      expect(ranges.at(-1)).toEqual(['2026-10-14', '2026-10-16']);
+    });
+    // The headline stays the date's own published figure.
+    const card = within(screen.getByRole('region', { name: 'P&L acumulado' }));
+    expect(card.getByText('Até 16/10/2026')).toBeInTheDocument();
+  });
+
+  it('§11.4 OQ-16 offers chart starts only before the date', async () => {
+    const { user } = renderApp('/carteira?date=2026-10-16&pnl_start=2026-10-10');
+
+    await user.click(await screen.findByRole('button', { name: /Início do gráfico/ }));
+
+    expect(await screen.findByRole('button', { name: '15 outubro 2026' })).toBeEnabled();
+    // A disabled day is out of the accessibility tree's buttons; find it by its label.
+    expect(screen.getByLabelText('16 outubro 2026')).toBeDisabled();
+  });
+
+  it('§11.4 OQ-16 ignores a linked chart start on or after the date', async () => {
+    const ranges = recordPnlRanges();
+    renderApp('/carteira?date=2026-10-16&pnl_start=2026-10-16');
+
+    await waitFor(() => {
+      expect(ranges.at(-1)).toEqual(['2026-09-17', '2026-10-16']);
+    });
+  });
+
+  it('§11.4 says when the chosen period has no complete history', async () => {
+    server.use(http.get(url('/portfolio/pnl'), () => HttpResponse.json({ items: [] })));
+    await openCarteira('2026-10-15');
+
+    expect(
+      await screen.findByText('Sem histórico completo para exibir no período selecionado.'),
+    ).toBeInTheDocument();
   });
 
   it('§11.4 picking a date in the calendar loads that date and puts it in the URL', async () => {

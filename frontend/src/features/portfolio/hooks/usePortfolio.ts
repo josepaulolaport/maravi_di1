@@ -14,7 +14,7 @@ export const portfolioKeys = {
   pnl: (start: IsoDate, end: IsoDate) => [...portfolioKeys.all, 'pnl', start, end] as const,
 };
 
-/** Days of history in the cumulative P&L chart, ending on the selected date. */
+/** Default days of history in the cumulative P&L chart, ending on the selected date. */
 export const CHART_DAYS = 30;
 
 export function usePortfolioSummary(date: IsoDate) {
@@ -31,13 +31,34 @@ export function usePortfolioPositions(date: IsoDate) {
   });
 }
 
-export function useCumulativePnl(date: IsoDate) {
-  const start = addDays(date, -(CHART_DAYS - 1));
-  const query = useQuery({
+/** The cumulative P&L series for [start, date]: the chart always ends on the selected date. */
+export function useCumulativePnl(start: IsoDate, date: IsoDate) {
+  return useQuery({
     queryKey: portfolioKeys.pnl(start, date),
     queryFn: () => portfolioApi.getPnlSeries({ start_date: start, end_date: date }),
   });
-  return { ...query, start };
+}
+
+/**
+ * The cumulative P&L chart's first day, in the URL (`?pnl_start=YYYY-MM-DD`). It must be
+ * before the selected date; otherwise (or when absent) the chart shows the CHART_DAYS days
+ * ending on the date.
+ */
+export function useChartStart(date: IsoDate): [IsoDate, (start: IsoDate) => void] {
+  const [params, setParams] = useSearchParams();
+  const requested = params.get('pnl_start');
+  const start =
+    isIsoDate(requested) && requested < date ? requested : addDays(date, -(CHART_DAYS - 1));
+  const setStart = (next: IsoDate) => {
+    setParams(
+      (current) => {
+        current.set('pnl_start', next);
+        return current;
+      },
+      { replace: true },
+    );
+  };
+  return [start, setStart];
 }
 
 /**
