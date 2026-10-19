@@ -23,6 +23,26 @@ uses that server instead. Database tests are required (`REQUIRE_DATABASE_TESTS=1
 Split targets: `make {install,lint,test}-{backend,frontend}`, and `make lint-commits` checks the
 messages of `origin/main..HEAD`.
 
+## Configuration (`.env`)
+
+Every setting has a local default, so nothing is required. To change one, copy the template and
+edit it; `.env` files are git-ignored, and the process environment always wins over them.
+
+```bash
+cp .env.example .env                       # Compose variables (DI1_*) and backend settings
+cp frontend/.env.example frontend/.env.local   # optional: API_PROXY_TARGET for npm run dev
+```
+
+- `docker compose` reads the root `.env` by itself and interpolates the `DI1_*` variables
+  (credentials, host ports, `DI1_DEMO`); its services set their own `DATABASE_URL`/`RABBITMQ_URL`.
+- `uv run` in `backend/` (API, `alembic`, workers) reads `DATABASE_URL`, `RABBITMQ_URL`,
+  `LOG_LEVEL` and the other settings from the root `.env`, then `backend/.env`
+  (`di1.platform.config`); `DI1_*` lines are ignored there. Compose does not publish PostgreSQL to
+  the host, so `DATABASE_URL` points at a server of your own.
+- `npm run dev` reads `API_PROXY_TARGET` from `frontend/.env` or `frontend/.env.local`.
+- Backend tests never read a `.env` (`backend/tests/conftest.py`); `make test` and `make e2e` set what
+  they need.
+
 ## Run the application
 
 ```bash
@@ -51,7 +71,8 @@ cd frontend && npm run dev   # UI on http://localhost:5173 against the API
 ```
 
 The dev server proxies `/api` and `/health` to the API; when the API runs on another port
-(`DI1_API_PORT`), add `API_PROXY_TARGET=http://127.0.0.1:<port>` to the `npm run dev` command.
+(`DI1_API_PORT`), set `API_PROXY_TARGET=http://127.0.0.1:<port>` in `frontend/.env.local` or on
+the `npm run dev` command.
 MSW is used only in the frontend's component tests, as static fixtures.
 
 ### Processing: why RabbitMQ
