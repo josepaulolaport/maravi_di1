@@ -1,8 +1,8 @@
-import { cashEntries, tradeEntries } from '@/api/mocks/fixtures';
+import { cashEntries, tradeEntries } from '@/test/msw/fixtures';
 
 import { toRow } from './entries';
 
-// Fixture entries (src/api/mocks/fixtures.ts): trades 14/10 compra, 15/10 compra, 16/10 venda;
+// Fixture entries (src/test/msw/fixtures.ts): trades 14/10 compra, 15/10 compra, 16/10 venda;
 // aporte 14/10, retirada 16/10. The order of the rows is the backend's (GET /ledger/entries);
 // the screen only maps each row for the table.
 

@@ -2,12 +2,12 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
 import type { Issue } from '@/api/contract';
-import { IDS } from '@/api/mocks/fixtures';
-import { url } from '@/api/mocks/handlers/support';
-import { server } from '@/api/mocks/server';
+import { IDS } from '@/test/msw/fixtures';
+import { url } from '@/test/msw/handlers';
+import { server } from '@/test/msw/server';
 import { renderApp } from '@/test/render';
 
-// Expected values come from the fixture scenario (src/api/mocks/fixtures.ts): one
+// Expected values come from the fixture scenario (src/test/msw/fixtures.ts): one
 // MISSING_REFERENCE_PRICE issue for DI1F29 on 16/10/2026, and five finished jobs.
 
 const PAGE = '/central-de-controle';

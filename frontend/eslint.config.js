@@ -67,7 +67,7 @@ const importBoundaries = {
 };
 
 export default tseslint.config(
-  { ignores: ['dist', 'public/mockServiceWorker.js'] },
+  { ignores: ['dist'] },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.strictTypeChecked],

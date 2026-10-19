@@ -1,13 +1,29 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import { delay, http, HttpResponse } from 'msw';
 
-import { IDS, instrumentTypes } from '@/api/mocks/fixtures';
-import { problem, url } from '@/api/mocks/handlers/support';
-import { server } from '@/api/mocks/server';
+import { IDS, instrumentTypes, products } from '@/test/msw/fixtures';
+import { problem, url } from '@/test/msw/handlers';
+import { server } from '@/test/msw/server';
 import { renderApp } from '@/test/render';
 
-// Expected values come from the fixture scenario (src/api/mocks/fixtures.ts): one instrument
-// type (Futuros), one product (DI1) with four contracts.
+// Expected values come from the fixtures (src/test/msw/fixtures.ts): one instrument type
+// (Futuros), one product (DI1) with four contracts.
+
+/**
+ * The search is the backend's (OQ-33): this answers DI1 to no search or "juros" (its class) and
+ * nothing to any other, and records each search the screen sent.
+ */
+function serveSearch() {
+  const searches: (string | null)[] = [];
+  server.use(
+    http.get(url('/products'), ({ request }) => {
+      const search = new URL(request.url).searchParams.get('search');
+      searches.push(search);
+      return HttpResponse.json({ items: !search || search === 'juros' ? products : [] });
+    }),
+  );
+  return searches;
+}
 
 async function openCatalogue(route = '/ativos') {
   const result = renderApp(route);
@@ -47,6 +63,7 @@ describe('Ativos: catálogo (§11.2)', () => {
   });
 
   it('§11.2 searches by code, product or class, and keeps the search in the URL', async () => {
+    const searches = serveSearch();
     const { user, router } = await openCatalogue();
 
     const search = screen.getByRole('textbox', { name: 'Buscar produtos' });
@@ -62,13 +79,17 @@ describe('Ativos: catálogo (§11.2)', () => {
     await user.type(search, 'xyz');
     expect(await screen.findByText('0 produtos encontrados')).toBeInTheDocument();
     expect(screen.queryByRole('row', { name: /DI1/ })).not.toBeInTheDocument();
+    expect(searches).toContain('juros');
+    expect(searches.at(-1)).toBe('xyz');
   });
 
   it('§11.2 reads the search from the URL', async () => {
+    const searches = serveSearch();
     await openCatalogue('/ativos?busca=xyz');
 
     expect(screen.getByRole('textbox', { name: 'Buscar produtos' })).toHaveValue('xyz');
     expect(await screen.findByText('0 produtos encontrados')).toBeInTheDocument();
+    expect(searches).toEqual(['xyz']);
   });
 
   it('§11.2 opens the product page from its row', async () => {
@@ -102,6 +123,7 @@ describe('Ativos: catálogo (§11.2)', () => {
   });
 
   it('§11.2 the search box follows the URL on navigation (back, links)', async () => {
+    serveSearch();
     const { router } = await openCatalogue('/ativos?busca=juros');
     const search = screen.getByRole('textbox', { name: 'Buscar produtos' });
 

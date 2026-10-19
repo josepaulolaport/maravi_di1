@@ -5,10 +5,8 @@ The shapes in `contract/` are the adopted HTTP contract (OQ-26 item 8), frozen a
 - `contract/`: response and request types. snake_case names follow `docs/schema.sql`; decimals are strings; `null` means unavailable.
 - `http.ts`: the only HTTP client. JSON in and out; RFC 9457 problem+json errors become `ApiError` (OQ-15).
 - `endpoints.ts`: one typed function per endpoint. Feature hooks call these.
-- `mocks/`: the MSW fake backend: a stateful in-memory store (`db.ts`) seeded from one coherent scenario (`fixtures.ts`), with the documented validations, one status per date and chain (`processing.date_status`, OQ-23), and a run that advances one step per poll: dispatch, then one date per poll. Its "today" is the app's clock (São Paulo); the tests pin that clock to `MOCK_TODAY`.
-  - A run publishes each date as it commits it: the scenario's precomputed results, that chain's Pendências for the date replaced (OQ-26), and the date's status. The fake does not calculate: a date on or after a write since the seed fails, so the run ends **Falhou** with a "Backend simulado" message there, and the dates before it stay published.
 
-At Wave 5 the hand-written types are replaced by types generated from the backend's OpenAPI (`npm run gen:api`).
+The component tests answer these endpoints with static MSW fixtures typed with `contract/` (`src/test/msw/`); there is no mock backend and no mock mode in development.
 
 ## Contract proposals for the integrator
 
@@ -54,7 +52,7 @@ Recorded by lane X (OQ-21, OQ-22; OQ-23 to OQ-26 in PR #43). The user ruled that
 
 ## OQ-32 to OQ-42
 
-Recorded by lane X in PR #54 (OQ-32 to OQ-40), #59 (OQ-41) and #68 (OQ-42); the mock follows them.
+Recorded by lane X in PR #54 (OQ-32 to OQ-40), #59 (OQ-41) and #68 (OQ-42).
 
 - OQ-32: a ledger deletion is permanent. An unknown or already-deleted id is 404 and deletes nothing; a repeated id counts once; an empty `ids` is 422 on `ids`.
 - OQ-33: a contract code is trimmed and upper-cased; an unknown id in a body is 422 on that field (404 only for a path id); `search` ignores case and accents; `Instrument.last_reference` is always `null` for now, shown as "—".
@@ -62,14 +60,14 @@ Recorded by lane X in PR #54 (OQ-32 to OQ-40), #59 (OQ-41) and #68 (OQ-42); the 
 - OQ-37: `GET /processing/issues` is deduplicated on read: a missing price once per (asset, `required_price_date`), an expired open position once per asset, each with its earliest `affected_date`. The Pendências table shows the needed price date ("—" for an expired position) and, under "Afetado desde", the row's earliest affected date.
 - OQ-39: `GET /processing/preview` returns `predecessor.cash` and `predecessor.positions` for every scope; the screen shows and warns only for the scope's chains.
 - OQ-38, OQ-40 items 2 and 5: a chain written on a date stores that date's AUM as cash + market value only when the other chain is `PROCESSED` or `PROCESSED_WITH_ISSUES` there, whichever run wrote it; otherwise `null`. A chain is in its zero state on D only when no date before D has any status for it and no entry of its type is dated on or before D−1, so a gap after an earlier status fails D.
-- OQ-36, OQ-40 items 3 and 6: on an ALL run, a chain that fails on D (its predecessor, or the fake's changed inputs) reads Erro there and stops; the other chain is still written on D and goes on to the end. The run ends `COMPLETED_WITH_ISSUES` with the first failure's `error_code` and `error_message`, `CANCELLED` keeping them when cancelled, and `FAILED` only when both chains fail. `ProcessingRequest` gains `failed_date` and `failed_chain` (`CASH` or `POSITIONS`, positions when both fail at once, the run's chain on a single-chain run, `null` for a failure outside every chain or a run that never failed).
+- OQ-36, OQ-40 items 3 and 6: on an ALL run, a chain that fails on D (its predecessor, or a technical error) reads Erro there and stops; the other chain is still written on D and goes on to the end. The run ends `COMPLETED_WITH_ISSUES` with the first failure's `error_code` and `error_message`, `CANCELLED` keeping them when cancelled, and `FAILED` only when both chains fail. `ProcessingRequest` gains `failed_date` and `failed_chain` (`CASH` or `POSITIONS`, positions when both fail at once, the run's chain on a single-chain run, `null` for a failure outside every chain or a run that never failed).
 - OQ-41: `GET /portfolio/pnl` returns one point per calendar date. `range_cumulative_pnl` is never `null`: a day adds its `daily_pnl` only when its positions status is `PROCESSED` or `PROCESSED_WITH_ISSUES` and `daily_pnl` is not null, and 0 otherwise. A `NOT_PROCESSED`, `FAILED` or `RUNNING` day has `daily_pnl`, `cumulative_pnl` and `pnl_status` null, even over an older published row. The chart draws every point; its tooltip says why a day adds nothing, and the card notes when any day is incomplete.
 - OQ-42: `GET /reference-prices` accepts any range, dates after today included; those days come back empty. Writes still refuse dates after today (OQ-14). The contract page's calendar still ends on min(today, maturity) (§11.2): it never asks for days that cannot have a price.
 
 ## OQ-44 to OQ-46
 
 - OQ-44: a technical failure on a date, of a chain or of no chain, sets `error_code` `PROCESSING_ERROR`, "Erro técnico ao processar a data."; the job details show it like the run's other errors. OQ-45 retires `RECOVERY_EXHAUSTED`.
-- OQ-46: there is no dispatcher. A run goes `QUEUED` → `RUNNING`; `DISPATCHED`, `CANCELLING` and `dispatched_at` are never used. Cancelling a queued run ends it `CANCELLED` at once; a running run stays `RUNNING` with `cancel_requested_at` set until the current date commits, and the screens show it as Cancelando (item 11). A second cancel is 409 `JOB_NOT_CANCELLABLE`, "O cancelamento deste processamento já foi solicitado." The mock orders runs by `(created_at, id)` as instants, since the seed's `-03:00` and new runs' UTC "Z" strings do not sort in time order.
+- OQ-46: there is no dispatcher. A run goes `QUEUED` → `RUNNING`; `DISPATCHED`, `CANCELLING` and `dispatched_at` are never used. Cancelling a queued run ends it `CANCELLED` at once; a running run stays `RUNNING` with `cancel_requested_at` set until the current date commits, and the screens show it as Cancelando (item 11). A second cancel is 409 `JOB_NOT_CANCELLABLE`, "O cancelamento deste processamento já foi solicitado." Creation times are compared as instants, since `-03:00` and UTC "Z" strings do not sort in time order.
 
 ## Decided gap
 

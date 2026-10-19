@@ -3,10 +3,9 @@ import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
 import type { PortfolioPositions, PortfolioSummary } from '@/api/contract';
-import { positions } from '@/api/mocks/fixtures';
-import { summaryOf } from '@/api/mocks/handlers/portfolio';
-import { url } from '@/api/mocks/handlers/support';
-import { server } from '@/api/mocks/server';
+import { pnlSeries, positions, summaries, unprocessedSummary } from '@/test/msw/fixtures';
+import { url } from '@/test/msw/handlers';
+import { server } from '@/test/msw/server';
 import { todayInSaoPaulo } from '@/shared/format';
 import { renderApp, renderUi } from '@/test/render';
 
@@ -16,7 +15,7 @@ import { toChartData } from './components/chartData';
 const INCOMPLETE_NOTE =
   'Há dias incompletos no período (não processados, com erro, em processamento ou sem P&L diário): eles somam zero ao acumulado.';
 
-// Expected figures are the fixture scenario's published values (src/api/mocks/fixtures.ts),
+// Expected figures are the fixtures' published values (src/test/msw/fixtures.ts),
 // formatted in pt-BR. Intl puts a no-break space after "R$"; Testing Library's default
 // normalizer turns it into a plain space, so expectations use a plain space.
 
@@ -66,12 +65,15 @@ interface SummaryChanges {
   aum?: PortfolioSummary['aum'];
 }
 
+/** The fixtures' answer for a date. */
+const summaryOf = (date: string): PortfolioSummary => summaries[date] ?? unprocessedSummary(date);
+const POSITIONS_15 = positions['2026-10-15'] as PortfolioPositions;
+
 /**
  * Serves 15/10 (complete and current for both chains in the fixtures) with the given changes
  * to one chain or both, to isolate one state (OQ-21: cash and positions apart).
  */
 function override15(changes: SummaryChanges, positionsChanges: Partial<PortfolioPositions> = {}) {
-  const rows = positions.find((p) => p.date === '2026-10-15');
   server.use(
     http.get(url('/portfolio/summary'), () => {
       const summary = summaryOf('2026-10-15');
@@ -84,12 +86,12 @@ function override15(changes: SummaryChanges, positionsChanges: Partial<Portfolio
       return HttpResponse.json(body);
     }),
     http.get(url('/portfolio/positions'), () =>
-      HttpResponse.json({ ...rows, status: 'PROCESSED', ...positionsChanges }),
+      HttpResponse.json({ ...POSITIONS_15, ...positionsChanges }),
     ),
   );
 }
 
-/** Records the range of every cumulative P&L request, then lets the mock answer it. */
+/** Records the range of every cumulative P&L request, then lets the next handler answer it. */
 function recordPnlRanges() {
   const ranges: [string | null, string | null][] = [];
   server.use(
@@ -280,7 +282,6 @@ describe('Carteira (§11.4)', () => {
   it('OQ-23 when a date finishes processing, its positions are read again too', async () => {
     let summaryReads = 0;
     let positionsReads = 0;
-    const rows = positions.find((p) => p.date === '2026-10-15');
     server.use(
       http.get(url('/portfolio/summary'), () => {
         summaryReads += 1;
@@ -300,7 +301,7 @@ describe('Carteira (§11.4)', () => {
                 date: '2026-10-15',
                 status: 'PROCESSED',
                 published_at: null,
-                items: rows?.items ?? [],
+                items: POSITIONS_15.items,
               };
         return HttpResponse.json(body);
       }),
@@ -609,7 +610,7 @@ describe('Carteira (§11.4)', () => {
   });
 
   it('OQ-41 item 5 notes that incomplete days add zero when the period has any', async () => {
-    // The default 30 days before 15/10 are mostly not processed.
+    // The fixture series starts with an unprocessed day.
     await openCarteira('2026-10-15');
 
     const card = within(screen.getByRole('region', { name: 'P&L acumulado' }));
@@ -619,6 +620,13 @@ describe('Carteira (§11.4)', () => {
 
   it('OQ-41 item 5 shows no note when every day of the period is complete', async () => {
     // 14/10 to 15/10: both processed with a daily P&L.
+    server.use(
+      http.get(url('/portfolio/pnl'), () =>
+        HttpResponse.json({
+          items: pnlSeries.filter((p) => p.date === '2026-10-14' || p.date === '2026-10-15'),
+        }),
+      ),
+    );
     const ranges = recordPnlRanges();
     renderApp('/carteira?date=2026-10-15&pnl_start=2026-10-14');
     const card = within(await screen.findByRole('region', { name: 'P&L acumulado' }));
@@ -684,7 +692,7 @@ describe('Carteira (§11.4)', () => {
   });
 
   it('§8.3 P&L missing: no card, the asset is marked', async () => {
-    const rows = positions.find((p) => p.date === '2026-10-15')?.items ?? [];
+    const rows = POSITIONS_15.items;
     override15(
       {
         positions: {

@@ -1,13 +1,13 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
-import type { LastReference } from '@/api/contract';
-import { IDS, instruments } from '@/api/mocks/fixtures';
-import { url } from '@/api/mocks/handlers/support';
-import { server } from '@/api/mocks/server';
+import type { Instrument, LastReference } from '@/api/contract';
+import { IDS, instruments, products } from '@/test/msw/fixtures';
+import { fieldError, problem, url } from '@/test/msw/handlers';
+import { server } from '@/test/msw/server';
 import { renderApp } from '@/test/render';
 
-// Expected values come from the fixture scenario (src/api/mocks/fixtures.ts). The API returns
+// Expected values come from the fixtures (src/test/msw/fixtures.ts). The API returns
 // `last_reference: null` for every contract for now (OQ-33 item 4); the test that shows an
 // observation answers it itself.
 
@@ -107,6 +107,17 @@ describe('Ativos: produto (§11.2)', () => {
   });
 
   it('§11.2 searches contracts by code and links each to its page', async () => {
+    // The search is the backend's (OQ-33): "f29" answers DI1F29 only.
+    const searches: (string | null)[] = [];
+    server.use(
+      http.get(url('/instruments'), ({ request }) => {
+        const search = new URL(request.url).searchParams.get('search');
+        searches.push(search);
+        return HttpResponse.json({
+          items: search === 'f29' ? instruments.filter((i) => i.code === 'DI1F29') : instruments,
+        });
+      }),
+    );
     const { user, router } = await openProduct();
 
     const search = screen.getByRole('textbox', { name: 'Buscar contratos' });
@@ -117,12 +128,51 @@ describe('Ativos: produto (§11.2)', () => {
     });
     expect(screen.getByText('DI1F29', { selector: 'td *' })).toBeInTheDocument();
     expect(router.state.location.search).toContain('busca=f29');
+    expect(searches.at(-1)).toBe('f29');
 
     await user.click(screen.getByRole('link', { name: 'Abrir contrato DI1F29' }));
     expect(router.state.location.pathname).toBe(`/ativos/contratos/${IDS.di1f29}`);
   });
 
   it('§3 creates a contract and shows the API field errors on their fields', async () => {
+    // The API's answers, in turn: the missing fields, a duplicate code, then the new contract,
+    // which the list and the product's count include from then on.
+    const created: Instrument = {
+      id: '9a000004-0000-4000-8000-000000000004',
+      code: 'DI1F31',
+      product_id: IDS.di1,
+      product_code: 'DI1',
+      maturity_date: '2031-01-02',
+      last_reference: null,
+      created_at: '2026-10-18T12:00:00-03:00',
+    };
+    const answers = [
+      () =>
+        problem(422, [
+          fieldError('VALIDATION_ERROR', 'Informe o código do contrato.', 'code'),
+          fieldError('VALIDATION_ERROR', 'Informe o vencimento.', 'maturity_date'),
+        ]),
+      () =>
+        problem(422, [
+          fieldError('VALIDATION_ERROR', 'Já existe um contrato com este código.', 'code'),
+        ]),
+      () => {
+        listed.push(created);
+        return HttpResponse.json(created, { status: 201 });
+      },
+    ];
+    const listed = [...instruments];
+    const bodies: unknown[] = [];
+    server.use(
+      http.get(url('/instruments'), () => HttpResponse.json({ items: listed })),
+      http.get(url('/products/:id'), () =>
+        HttpResponse.json({ ...products[0], instrument_count: listed.length }),
+      ),
+      http.post(url('/instruments'), async ({ request }) => {
+        bodies.push(await request.json());
+        return (answers[bodies.length - 1] as () => Response)();
+      }),
+    );
     const { user } = await openProduct();
 
     await user.click(screen.getByRole('button', { name: 'Novo contrato' }));
@@ -147,6 +197,11 @@ describe('Ativos: produto (§11.2)', () => {
     expect(await screen.findByText('5 contratos cadastrados')).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Novo contrato' })).not.toBeInTheDocument();
+    });
+    expect(bodies.at(-1)).toEqual({
+      product_id: IDS.di1,
+      code: 'DI1F31',
+      maturity_date: '2031-01-02',
     });
   });
 

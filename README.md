@@ -37,22 +37,22 @@ hand. A fresh stack can therefore create a DI1 contract at once (Ativos → DI1 
 trade it.
 
 Then open http://localhost:8080: the `web` service serves the built UI (nginx) and forwards `/api/`
-and `/health` to the API, so the UI runs on the real backend (no MSW mocks in the build). The API
+and `/health` to the API, so the UI runs on the real backend. The API
 also answers directly on http://127.0.0.1:8000 (`/health`, `/api/...`), and the RabbitMQ
 management UI on http://127.0.0.1:15672 (user `di1`, password `di1`). Ports are set with
 `DI1_WEB_PORT`, `DI1_API_PORT` and `DI1_RABBITMQ_MANAGEMENT_PORT`.
 `docker compose down -v` removes the stack and its data.
 
-For frontend development, run the Vite dev server against the same stack:
+For frontend development, run the Vite dev server against the same stack (it needs the backend;
+there is no mock mode):
 
 ```bash
-cd frontend && VITE_API_MOCKS=false npm run dev   # UI on http://localhost:5173 against the API
+cd frontend && npm run dev   # UI on http://localhost:5173 against the API
 ```
 
 The dev server proxies `/api` and `/health` to the API; when the API runs on another port
 (`DI1_API_PORT`), add `API_PROXY_TARGET=http://127.0.0.1:<port>` to the `npm run dev` command.
-Without `VITE_API_MOCKS=false` the dev UI runs against its built-in MSW mocks, with no backend at
-all.
+MSW is used only in the frontend's component tests, as static fixtures.
 
 ### Processing: why RabbitMQ
 
@@ -172,9 +172,6 @@ rather than refactor before delivery (OQ-47); none changes a business result.
   makes the backend suite slow.
 - **Sleep-based race tests (M15):** some concurrency tests rely on `sleep` for ordering instead of
   explicit synchronisation, so they are slower and could flake on a loaded machine.
-- **The MSW mock reimplements backend rules (H6):** the dev mocks in `frontend/src/api/mocks/`
-  recompute pricing, the cash and positions chains, the predecessor rule and date statuses; they
-  can drift from the backend, which is the authority (the production build has no mocks).
 - **Unused schema columns and statuses (H5):** `DISPATCHED`, `CANCELLING`, `claim_token`,
   `lease_expires_at`, `attempt_count`, `dispatched_at` and `calculation_state` stay in the schema,
   unused, with no migration to drop them (OQ-45, OQ-46, OQ-47; [docs/schema.md](docs/schema.md)).

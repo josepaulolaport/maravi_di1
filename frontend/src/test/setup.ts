@@ -2,9 +2,8 @@ import '@testing-library/jest-dom/vitest';
 
 import { cleanup, configure } from '@testing-library/react';
 
-import { resetDb } from '@/api/mocks/db';
-import { MOCK_TODAY } from '@/api/mocks/fixtures';
-import { server } from '@/api/mocks/server';
+import { TEST_TODAY } from './msw/fixtures';
+import { server } from './msw/server';
 
 // The first test of a file also loads its lazy route, which can pass the default 1 s under a
 // busy machine; 3 s keeps `findBy*`/`waitFor` honest without masking real hangs.
@@ -41,12 +40,10 @@ beforeAll(() => {
   server.listen({ onUnhandledFrame: 'error' });
 });
 
-// Tests run on the fixture scenario's day, whatever the real date: the app and the fake
-// backend both read "today" from this clock (only Date is faked; timers stay real).
+// Tests run on the fixtures' day, whatever the real date (only Date is faked; timers stay real).
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date(`${MOCK_TODAY}T12:00:00-03:00`));
-  resetDb();
+  vi.setSystemTime(new Date(`${TEST_TODAY}T12:00:00-03:00`));
 });
 afterEach(() => {
   vi.useRealTimers();

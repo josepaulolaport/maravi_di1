@@ -28,25 +28,25 @@ The toolchain is locked (user, 2026-10-18). Do not add other libraries without t
 | UI components | Mantine: `@mantine/core`, `hooks`, `form` (forms and validation), `dates` (with `dayjs`), `notifications`, `charts` (the cumulative P&L chart) |
 | Icons | `@tabler/icons-react` |
 | Server state | TanStack Query |
-| API mocks | MSW, in the browser during development and in the tests |
+| API mocks | MSW, in the tests only: static fixtures (`src/test/msw/`) |
 | Tests | Vitest, Testing Library (`react`, `user-event`), jsdom |
 | Lint and format | ESLint (flat config, typescript-eslint, react-hooks) and Prettier |
 | Runtime | Node 24 LTS with npm. `package-lock.json` is committed; `npm ci` installs it |
 
 Each package is the current stable major published before 2026-10-04, the same cut-off as the backend, pinned to an exact version. One exception: **TypeScript is 6.0.x**, not 7, because typescript-eslint 8.71 supports only `typescript <6.1.0`. Supporting packages of the locked tools are allowed: `@eslint/js`, `globals`, `eslint-config-prettier`, `@testing-library/dom` and `@testing-library/jest-dom`, and `recharts` (peer of `@mantine/charts`).
 
-**API types.** `frontend/src/api/contract/` holds the hand-written request and response types: the adopted HTTP contract (OQ-26 item 8, frozen at 57b4df0), which the backend now serves and its contract tests check (`backend/tests/architecture/test_contract_*.py`); the real-API QA (`docs/qa/real-api-qa-2026-10-19.md`) found no mismatch. The MSW fixtures in `mocks/` follow the same types. A new or changed field is a contract change: propose it in the PR and the integrator applies it to the backend. Types generated from OpenAPI (`openapi-typescript`, `npm run gen:api`) were planned for Wave 5 but not adopted; there is no such script.
+**API types.** `frontend/src/api/contract/` holds the hand-written request and response types: the adopted HTTP contract (OQ-26 item 8, frozen at 57b4df0), which the backend now serves and its contract tests check (`backend/tests/architecture/test_contract_*.py`); the real-API QA (`docs/qa/real-api-qa-2026-10-19.md`) found no mismatch. The test fixtures in `src/test/msw/` follow the same types. A new or changed field is a contract change: propose it in the PR and the integrator applies it to the backend. Types generated from OpenAPI (`openapi-typescript`, `npm run gen:api`) were planned for Wave 5 but not adopted; there is no such script.
 
 ```text
 frontend/src/
   app/          # composition only: providers, theme, routes, paths
-  api/          # typed HTTP client, the adopted contract types (`contract/`), MSW handlers and fixtures (mocks/)
+  api/          # typed HTTP client and the adopted contract types (`contract/`)
   features/<f>/ # one folder per screen: assets, ledger, prices, portfolio, processing
     <F>Page.tsx #   the route component (lazy-loaded)
     components/ #   components used only by this feature
     hooks/      #   TanStack Query hooks (queries, mutations) and the feature's query keys
   shared/       # cross-feature code: layout/, ui/ (common components), format/ (pt-BR formatting)
-  test/         # Vitest setup and render helpers
+  test/         # Vitest setup, render helpers, MSW fixtures and handlers (msw/)
 ```
 
 ## Architecture
@@ -58,7 +58,7 @@ frontend/src/
 - **Mantine first.** Use Mantine components and props before writing CSS. When CSS is needed, use a CSS module beside the component and Mantine CSS variables (`var(--mantine-color-navy-9)`, `var(--app-…)`). Colours and tokens live only in `app/theme.ts`; no hex value elsewhere.
 - **Every screen is lazy-loaded** (`app/routes.tsx`), and vendor code is split into cached chunks (`vite.config.ts`). A route error boundary (`RouteErrorPage`) keeps the app usable when a screen throws.
 - **Accessibility:** every control has a pt-BR accessible name; tests query by role and name, as a user would. Colour is never the only signal.
-- **Tests** render through `test/render.tsx` (`renderApp(route)`), which uses the real providers and routes, with MSW answering every request (an unmocked request fails the test).
+- **Tests** render through `test/render.tsx` (`renderApp(route)`), which uses the real providers and routes, with MSW answering every request (an unmocked request fails the test). The default answers are static fixtures; a test that needs another answer serves it with `server.use(...)`.
 
 ## Screens (spec §11)
 
@@ -101,7 +101,7 @@ frontend/src/
 - **Job statuses** are shown in Portuguese (spec §10.3, OQ-20): QUEUED Na fila, DISPATCHED Enviado, RUNNING Processando, CANCELLING Cancelando, CANCELLED Cancelado, COMPLETED Concluído, COMPLETED_WITH_ISSUES Concluído com pendências, FAILED Falhou. There is no "Bloqueado" and, since OQ-23, no Obsoleto (SUPERSEDED). Since OQ-46 the backend never sets DISPATCHED or CANCELLING, so Enviado is never shown, and Cancelando is shown for a RUNNING run with `cancel_requested_at` set (a display rule; the API status stays RUNNING); the labels stay in the map; the frontend derives Cancelando (#95).
 - **Polling:** status is polled only while a job is queued or running.
 - **All visible text is pt-BR**, with Brazilian number and date formats. Identifiers are English.
-- **Mocks:** MSW handlers follow the API contracts in `docs/interfaces.md`. When a contract is wrong, raise it to the integrator; do not freeze a wrong API to keep the mocks (spec §12).
+- **Mocks:** MSW exists only in the tests, as static fixtures typed with `src/api/contract` (one answer per endpoint, looked up by path id or date) plus per-test `server.use(...)` overrides. It never re-implements a backend rule (search, ordering, pricing, statuses, processing): a test that needs the answer after a write or a poll scripts it. Behaviour across the API is covered by the backend suites, the §13 HTTP scenarios and `make e2e`. When a contract is wrong, raise it to the integrator (spec §12).
 - **Errors** are RFC 9457 problem+json (`docs/interfaces.md` "Errors", OQ-15). Show each `errors[].message` (pt-BR) on its `field` when one is given, and on the page otherwise.
 
 ## Tests
@@ -119,7 +119,7 @@ frontend/src/
   - a spec gap.
 
   Never edit those paths, even "just one line".
-- **Worktree setup.** Run `npm ci` once in your worktree before the first commit. The pre-commit hook runs eslint, tsc and vitest on staged frontend files as soon as `frontend/package.json` exists, and fails without `node_modules`. Development runs `npm run dev` against MSW by default, with no backend; `VITE_API_MOCKS=false` runs it against the real API (README "Run the application"). Compose serves the built UI as the `web` service (#99).
+- **Worktree setup.** Run `npm ci` once in your worktree before the first commit. The pre-commit hook runs eslint, tsc and vitest on staged frontend files as soon as `frontend/package.json` exists, and fails without `node_modules`. `npm run dev` always talks to the real API through the dev server's `/api` proxy, so it needs the backend running (README "Run the application"). Compose serves the built UI as the `web` service (#99).
 
 ## Commands (from `frontend/`)
 
@@ -127,8 +127,7 @@ The scaffold creates these scripts:
 
 ```bash
 npm ci                 # once per worktree
-npm run dev            # Vite dev server, API mocked by MSW
-VITE_API_MOCKS=false npm run dev   # against the real API (proxy; API_PROXY_TARGET for another port)
+npm run dev            # Vite dev server against the real API (proxy; API_PROXY_TARGET for another port)
 npm test               # Vitest
 npm run lint && npm run typecheck
 ```
