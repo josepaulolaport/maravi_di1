@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router';
 
 import type { IsoDate } from '@/api/contract';
@@ -57,15 +57,18 @@ export function useChartStart(date: IsoDate): [IsoDate, (start: IsoDate) => void
       );
     }
   }, [requested, valid, setParams]);
-  const setStart = (next: IsoDate) => {
-    setParams(
-      (current) => {
-        current.set('pnl_start', next);
-        return current;
-      },
-      { replace: true },
-    );
-  };
+  const setStart = useCallback(
+    (next: IsoDate) => {
+      setParams(
+        (current) => {
+          current.set('pnl_start', next);
+          return current;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
   return [start, setStart];
 }
 
@@ -92,15 +95,18 @@ export function useEvaluationDate(): [IsoDate, (date: IsoDate) => void, IsoDate]
       );
     }
   }, [requested, date, setParams]);
-  const setDate = (next: IsoDate) => {
-    setParams(
-      (current) => {
-        current.set('date', next);
-        return current;
-      },
-      { replace: true },
-    );
-  };
+  const setDate = useCallback(
+    (next: IsoDate) => {
+      setParams(
+        (current) => {
+          current.set('date', next);
+          return current;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
   return [date, setDate, today];
 }
 
@@ -117,25 +123,31 @@ export function usePositionsView() {
   const sort: Sort = SORT_KEYS.includes(key as SortKey)
     ? { key: key as SortKey, direction: raw.startsWith('-') ? 'desc' : 'asc' }
     : DEFAULT_SORT;
-  const update = (name: string, value: string) => {
-    setParams(
-      (current) => {
-        if (value) current.set(name, value);
-        else current.delete(name);
-        return current;
-      },
-      { replace: true },
-    );
-  };
-  return {
-    search,
-    setSearch: (value: string) => {
+  const update = useCallback(
+    (name: string, value: string) => {
+      setParams(
+        (current) => {
+          if (value) current.set(name, value);
+          else current.delete(name);
+          return current;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+  const setSearch = useCallback(
+    (value: string) => {
       update('busca', value);
     },
-    sort,
-    setSort: (next: Sort) => {
+    [update],
+  );
+  const setSort = useCallback(
+    (next: Sort) => {
       const isDefault = next.key === DEFAULT_SORT.key && next.direction === DEFAULT_SORT.direction;
       update('ordem', isDefault ? '' : `${next.direction === 'desc' ? '-' : ''}${next.key}`);
     },
-  };
+    [update],
+  );
+  return { search, setSearch, sort, setSort };
 }

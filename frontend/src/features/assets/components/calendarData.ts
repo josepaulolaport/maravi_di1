@@ -1,5 +1,5 @@
 import type { Decimal, Instrument, IsoDate, ReferencePriceDay } from '@/api/contract';
-import { addDays, formatDate, isIsoDate } from '@/shared/format';
+import { addDays, formatDate, isIsoDate, plotCoordinate } from '@/shared/format';
 
 /** Calendar days shown on the contract page, ending on min(today, maturity) (§11.2). */
 export const CALENDAR_DAYS = 30;
@@ -90,9 +90,7 @@ export function toPriceChart(
     points.push({
       date,
       label: formatDate(date).slice(0, 5),
-      // A chart needs numbers: converting for the pixel position only is formatting, not
-      // calculation; the exact value stays in `text`.
-      value: text === null ? null : Number(text),
+      value: text === null ? null : plotCoordinate(text),
       text,
     });
   }

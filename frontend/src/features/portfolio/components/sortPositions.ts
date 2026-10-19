@@ -24,29 +24,55 @@ export interface Sort {
   direction: 'asc' | 'desc';
 }
 
-const DECIMAL_KEYS = new Set<SortKey>([
-  'average_entry_pu',
-  'average_entry_rate',
-  'reference_pu',
-  'reference_rate',
-  'financial_total',
-  'position_pnl',
-  'trades_pnl',
-]);
+type Compared = { kind: 'value'; value: number } | { kind: 'missing'; side: 'left' | 'right' };
+
+/** Nulls are missing. Both missing compare equal, so the asset code breaks the tie. */
+function compareNullable(
+  left: string | null,
+  right: string | null,
+  compare: (left: string, right: string) => number,
+): Compared {
+  if (left === null && right === null) return { kind: 'value', value: 0 };
+  if (left === null) return { kind: 'missing', side: 'left' };
+  if (right === null) return { kind: 'missing', side: 'right' };
+  return { kind: 'value', value: compare(left, right) };
+}
+
+/** One column, typed. A missing decimal or maturity is not a number and not text. */
+function compareColumn(key: SortKey, a: PositionRow, b: PositionRow): Compared {
+  switch (key) {
+    case 'quantity':
+      return { kind: 'value', value: a.quantity - b.quantity };
+    case 'asset_code':
+      return { kind: 'value', value: a.asset_code.localeCompare(b.asset_code, 'pt-BR') };
+    case 'maturity_date':
+      return compareNullable(a.maturity_date, b.maturity_date, (left, right) =>
+        left.localeCompare(right, 'pt-BR'),
+      );
+    case 'average_entry_pu':
+      return compareNullable(a.average_entry_pu, b.average_entry_pu, compareDecimal);
+    case 'average_entry_rate':
+      return compareNullable(a.average_entry_rate, b.average_entry_rate, compareDecimal);
+    case 'reference_pu':
+      return compareNullable(a.reference_pu, b.reference_pu, compareDecimal);
+    case 'reference_rate':
+      return compareNullable(a.reference_rate, b.reference_rate, compareDecimal);
+    case 'financial_total':
+      return compareNullable(a.financial_total, b.financial_total, compareDecimal);
+    case 'position_pnl':
+      return compareNullable(a.position_pnl, b.position_pnl, compareDecimal);
+    case 'trades_pnl':
+      return compareNullable(a.trades_pnl, b.trades_pnl, compareDecimal);
+  }
+}
 
 /** Sorts rows by a column. Decimals compare exactly; unavailable (`null`) values go last. */
 export function sortPositions(rows: PositionRow[], sort: Sort): PositionRow[] {
   const factor = sort.direction === 'asc' ? 1 : -1;
   return [...rows].sort((a, b) => {
-    const left = a[sort.key];
-    const right = b[sort.key];
-    if (left === null && right === null) return a.asset_code.localeCompare(b.asset_code);
-    if (left === null) return 1;
-    if (right === null) return -1;
-    let result: number;
-    if (sort.key === 'quantity') result = (left as number) - (right as number);
-    else if (DECIMAL_KEYS.has(sort.key)) result = compareDecimal(left as string, right as string);
-    else result = (left as string).localeCompare(right as string, 'pt-BR');
-    return result * factor || a.asset_code.localeCompare(b.asset_code);
+    const compared = compareColumn(sort.key, a, b);
+    // Missing stays last in either direction: it is not a value to reverse.
+    if (compared.kind === 'missing') return compared.side === 'left' ? 1 : -1;
+    return compared.value * factor || a.asset_code.localeCompare(b.asset_code);
   });
 }

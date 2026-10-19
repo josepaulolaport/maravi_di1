@@ -1,7 +1,7 @@
 import { type MantineSpacing, TextInput } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { IconSearch } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /** How long typing must pause before the search reaches the URL (and the request or filter). */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -11,7 +11,7 @@ interface SearchInputProps {
   value: string;
   /** Writes the search to the URL; called once the typing has settled. */
   onChange: (value: string) => void;
-  /** pt-BR accessible name, e.g. "Buscar contratos". */
+  /** Visible label, which is also the accessible name, e.g. "Buscar contratos". */
   label: string;
   placeholder: string;
   w?: number;
@@ -38,12 +38,20 @@ export function SearchInput({ value, onChange, label, placeholder, w, maw, m }: 
     }
   }
   const [debounced] = useDebouncedValue(text, SEARCH_DEBOUNCE_MS);
+  // The parent passes a new function whenever it renders. The search effect must not follow
+  // that, or a settled search would write the URL again on every render.
+  const onChangeRef = useRef(onChange);
   useEffect(() => {
-    if (typing && debounced === text && debounced.trim() !== value) onChange(debounced.trim());
-  }, [typing, debounced, text, value, onChange]);
+    onChangeRef.current = onChange;
+  }, [onChange]);
+  useEffect(() => {
+    if (typing && debounced === text && debounced.trim() !== value) {
+      onChangeRef.current(debounced.trim());
+    }
+  }, [typing, debounced, text, value]);
   return (
     <TextInput
-      aria-label={label}
+      label={label}
       placeholder={placeholder}
       leftSection={<IconSearch size={16} stroke={1.5} />}
       value={text}

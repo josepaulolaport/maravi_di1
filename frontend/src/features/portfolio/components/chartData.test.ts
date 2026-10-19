@@ -2,15 +2,12 @@ import type { PnlPoint } from '@/api/contract';
 
 import { hasIncompleteDay, incompleteReason, toChartData } from './chartData';
 
-/** A processed point whose range sum is `range`; its daily and since-inception figures differ. */
+/** A processed point whose range sum is `range`. */
 const point = (date: string, range: string, extra: Partial<PnlPoint> = {}): PnlPoint => ({
   date,
   daily_pnl: '10.00',
-  cumulative_pnl: '999999.99',
   range_cumulative_pnl: range,
-  pnl_status: 'COMPLETE',
   status: 'PROCESSED',
-  published_at: '2026-10-16T18:40:00-03:00',
   ...extra,
 });
 
@@ -18,11 +15,8 @@ const point = (date: string, range: string, extra: Partial<PnlPoint> = {}): PnlP
 const unprocessed = (date: string, range: string): PnlPoint => ({
   date,
   daily_pnl: null,
-  cumulative_pnl: null,
   range_cumulative_pnl: range,
-  pnl_status: null,
   status: 'NOT_PROCESSED',
-  published_at: null,
 });
 
 describe('toChartData (§11.4, OQ-16, OQ-31, OQ-41)', () => {
@@ -42,7 +36,6 @@ describe('toChartData (§11.4, OQ-16, OQ-31, OQ-41)', () => {
       point('2026-10-16', '-8034.1345282660', {
         status: 'PROCESSED_WITH_ISSUES',
         daily_pnl: null,
-        pnl_status: 'MISSING',
       }),
       unprocessed('2026-10-17', '-8034.1345282660'),
     ];
@@ -61,9 +54,9 @@ describe('toChartData (§11.4, OQ-16, OQ-31, OQ-41)', () => {
   it('OQ-41 item 5 gives the reason a day adds nothing: its status, or no daily P&L', () => {
     const points = toChartData([
       unprocessed('2026-10-13', '0'),
-      point('2026-10-14', '0', { status: 'FAILED', daily_pnl: null, pnl_status: null }),
-      point('2026-10-15', '0', { status: 'RUNNING', daily_pnl: null, pnl_status: null }),
-      point('2026-10-16', '0', { daily_pnl: null, pnl_status: 'MISSING' }),
+      point('2026-10-14', '0', { status: 'FAILED', daily_pnl: null }),
+      point('2026-10-15', '0', { status: 'RUNNING', daily_pnl: null }),
+      point('2026-10-16', '0', { daily_pnl: null }),
       point('2026-10-17', '10.00', { status: 'PROCESSED_WITH_ISSUES' }),
     ]);
 

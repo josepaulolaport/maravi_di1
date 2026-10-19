@@ -4,6 +4,7 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query';
+import { useCallback } from 'react';
 import { useSearchParams } from 'react-router';
 
 import type { CreateLedgerEntryRequest, IsoDate, LedgerOrder } from '@/api/contract';
@@ -59,36 +60,42 @@ export function useLedgerFilters(): LedgerFilters {
   const search = params.get('busca') ?? '';
   const order: LedgerOrder = params.get('ordem') === 'asc' ? 'asc' : 'desc';
 
-  const update = (changes: Record<string, string>, replace: boolean) => {
-    setParams(
-      (current) => {
-        for (const [key, value] of Object.entries(changes)) {
-          if (value) current.set(key, value);
-          else current.delete(key);
-        }
-        return current;
-      },
-      { replace },
-    );
-  };
-
-  return {
-    start,
-    end,
-    search,
-    today,
-    setRange: (nextStart, nextEnd) => {
+  const update = useCallback(
+    (changes: Record<string, string>, replace: boolean) => {
+      setParams(
+        (current) => {
+          for (const [key, value] of Object.entries(changes)) {
+            if (value) current.set(key, value);
+            else current.delete(key);
+          }
+          return current;
+        },
+        { replace },
+      );
+    },
+    [setParams],
+  );
+  const setRange = useCallback(
+    (nextStart: IsoDate, nextEnd: IsoDate) => {
       update({ inicio: nextStart, fim: nextEnd }, false);
     },
-    setSearch: (next) => {
+    [update],
+  );
+  const setSearch = useCallback(
+    (next: string) => {
       // Typing is debounced into the URL; each pause is not a history entry.
       update({ busca: next.trim() }, true);
     },
-    order,
-    setOrder: (next) => {
+    [update],
+  );
+  const setOrder = useCallback(
+    (next: LedgerOrder) => {
       update({ ordem: next === 'asc' ? 'asc' : '' }, true);
     },
-  };
+    [update],
+  );
+
+  return { start, end, search, today, setRange, setSearch, order, setOrder };
 }
 
 /** Entries per page of the list (P21); "Carregar mais" reads the next one. */

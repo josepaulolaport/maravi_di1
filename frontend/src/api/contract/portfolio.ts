@@ -107,15 +107,14 @@ export interface PortfolioPositions {
 }
 
 /**
- * One calendar day of `GET /portfolio/pnl?start_date&end_date` (OQ-16, OQ-41), positions chain:
- * the series has a point for every date of the range. Only a PROCESSED or PROCESSED_WITH_ISSUES
- * day carries its P&L; any other day has `daily_pnl`, `cumulative_pnl` and `pnl_status` null.
+ * One calendar day of `GET /portfolio/pnl?start_date&end_date` (OQ-16, OQ-41, OQ-49), positions
+ * chain: the series has a point for every date of the range. Only a PROCESSED or
+ * PROCESSED_WITH_ISSUES day carries its daily P&L; any other day has `daily_pnl` null.
+ * The since-inception cumulative and the processing time stay on the summary.
  */
 export interface PnlPoint {
   date: IsoDate;
   daily_pnl: Decimal | null;
-  /** Since inception, as stored (the KPI): null from the first gap. */
-  cumulative_pnl: Decimal | null;
   /**
    * Σ daily P&L from the requested `start_date` to this date, the start's own included, summed
    * by the backend on each request (OQ-31 item 8): what the Carteira chart draws. Never null: a
@@ -123,9 +122,6 @@ export interface PnlPoint {
    * (OQ-41 items 1 and 4).
    */
   range_cumulative_pnl: Decimal;
-  pnl_status: CompletenessStatus | null;
   /** The date's positions status: NOT_PROCESSED on a day never processed (OQ-41 item 2). */
   status: DateStatus;
-  /** When the positions chain was last processed for the date (OQ-31). */
-  published_at: IsoDateTime | null;
 }

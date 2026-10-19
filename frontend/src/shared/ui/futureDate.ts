@@ -8,7 +8,7 @@ import { formatDate, isIsoDate } from '@/shared/format';
 export const FUTURE_DATE_MESSAGE = 'A data não pode ser posterior a hoje.';
 
 /** A valid calendar date after today (São Paulo); dates are ISO strings, so they compare as text. */
-export function isFutureDate(value: string | null | undefined, today: IsoDate): value is IsoDate {
+function isFutureDate(value: string | null | undefined, today: IsoDate): value is IsoDate {
   return isIsoDate(value) && value > today;
 }
 

@@ -1,5 +1,5 @@
 import type { DateStatus, Decimal, IsoDate, PnlPoint } from '@/api/contract';
-import { formatDate } from '@/shared/format';
+import { formatDate, plotCoordinate } from '@/shared/format';
 import { DATE_STATUS } from '@/shared/ui/dateStatus';
 
 export interface ChartPoint {
@@ -25,9 +25,7 @@ export function toChartData(items: PnlPoint[]): ChartPoint[] {
   return items.map((item) => ({
     date: item.date,
     label: formatDate(item.date).slice(0, 5),
-    // A chart needs numbers. Converting for the pixel position only is formatting, not
-    // calculation; the exact value stays in the string.
-    cumulative: Number(item.range_cumulative_pnl),
+    cumulative: plotCoordinate(item.range_cumulative_pnl),
     cumulativeText: item.range_cumulative_pnl,
     status: item.status,
     daily: item.daily_pnl,

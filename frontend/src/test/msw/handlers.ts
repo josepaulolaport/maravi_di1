@@ -134,10 +134,6 @@ export const handlers = [
   http.get(url('/processing/requests'), () =>
     HttpResponse.json({ items: fixtures.processingRequests, next_cursor: null }),
   ),
-  http.get(url('/processing/requests/:id'), ({ params }) => {
-    const found = fixtures.processingRequests.find((r) => r.id === params.id);
-    return found ? HttpResponse.json(found) : notFound('Processamento');
-  }),
   http.get(url('/processing/preview'), () => HttpResponse.json(fixtures.preview)),
   // The new run, queued.
   http.post(url('/processing/requests'), async ({ request }) => {

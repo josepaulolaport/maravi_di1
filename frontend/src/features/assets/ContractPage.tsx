@@ -8,10 +8,10 @@ import type { Instrument, IsoDate, ReferencePriceDay } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
 import { formatDate, isIsoDate, todayInSaoPaulo } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { PageHeader } from './components/PageHeader';
-import { PeriodPicker } from './components/PeriodPicker';
 import { PriceCalendar } from './components/PriceCalendar';
 import { calendarRows, calendarWindow, resolveRange } from './components/calendarData';
 import { PriceModal } from './components/PriceModal';

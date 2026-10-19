@@ -86,6 +86,14 @@ export default tseslint.config(
         { object: 'Math', property: 'round', message: 'The backend rounds; the UI only formats.' },
       ],
       '@typescript-eslint/restrict-template-expressions': ['error', { allowNumber: true }],
+      // Money and rates stay decimal strings. The only Number() call is plotCoordinate.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.name='Number']",
+          message: 'Decimals stay strings. A chart axis uses plotCoordinate.',
+        },
+      ],
     },
   },
   // Dependencies point inward (frontend/CLAUDE.md "Architecture").

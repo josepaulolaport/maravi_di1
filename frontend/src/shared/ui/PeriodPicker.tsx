@@ -7,18 +7,32 @@ import type { IsoDate } from '@/api/contract';
 interface PeriodPickerProps {
   start: IsoDate;
   end: IsoDate;
-  /** The last selectable day: min(today, maturity). */
+  /** The last selectable day: today, or min(today, maturity) on a contract. */
   maxDate: IsoDate;
   onChange: (range: { start: IsoDate; end: IsoDate }) => void;
+  /**
+   * One click can close a one-day range. Lançamentos needs that; the contract calendar
+   * keeps the two-click range.
+   */
+  allowSingleDateInRange?: boolean;
+  /** Fixed width. Without it the field only has a minimum, so it can grow in a row. */
+  w?: number;
 }
 
 /**
- * "Período" (§11.2): an inclusive date range. The picker keeps the half-picked range (first
- * click) as a draft; the period changes only once both ends are picked.
+ * "Período": an inclusive date range. The picker keeps the half-picked range (first click)
+ * as a draft; the period changes only once both ends are picked. A period set from outside
+ * (the URL, a save) replaces the draft.
  */
-export function PeriodPicker({ start, end, maxDate, onChange }: PeriodPickerProps) {
+export function PeriodPicker({
+  start,
+  end,
+  maxDate,
+  onChange,
+  allowSingleDateInRange = false,
+  w,
+}: PeriodPickerProps) {
   const [draft, setDraft] = useState<DatesRangeValue<string>>([start, end]);
-  // The period may change elsewhere (the URL, a save outside it): the draft follows it.
   const [synced, setSynced] = useState(`${start}|${end}`);
   if (synced !== `${start}|${end}`) {
     setSynced(`${start}|${end}`);
@@ -35,10 +49,12 @@ export function PeriodPicker({ start, end, maxDate, onChange }: PeriodPickerProp
         const [from, to] = value;
         if (from && to) onChange({ start: from, end: to });
       }}
+      {...(allowSingleDateInRange ? { allowSingleDateInRange: true } : {})}
       maxDate={maxDate}
       valueFormat="DD/MM/YYYY"
       leftSection={<IconCalendar size={16} stroke={1.5} />}
       miw={260}
+      {...(w !== undefined ? { w } : {})}
     />
   );
 }
