@@ -366,6 +366,17 @@ describe('Carteira (§11.4)', () => {
     expect(movement.getByText('Retiradas').nextSibling).toHaveTextContent('R$ 50.000,00');
   });
 
+  it('§11.4 never breaks a KPI figure, so a minus sign cannot wrap alone (QA 2026-10-19 #2)', async () => {
+    await openCarteira('2026-10-16');
+
+    const figures = KPIS.flatMap((label) => kpi(label).queryAllByText(/R\$/));
+    // At least Saldo em caixa and its three movement lines.
+    expect(figures.length).toBeGreaterThanOrEqual(4);
+    for (const figure of figures) {
+      expect(figure).toHaveStyle({ whiteSpace: 'nowrap' });
+    }
+  });
+
   it('§11.4 a badge with issues leads to Pendências', async () => {
     override15({ positions: { status: 'PROCESSED_WITH_ISSUES' } });
     await openCarteira('2026-10-15');
