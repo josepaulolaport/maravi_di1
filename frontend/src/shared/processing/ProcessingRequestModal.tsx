@@ -1,7 +1,8 @@
-import { Button, Group, Modal, Skeleton, Stack, Text } from '@mantine/core';
+import { Button, Group, Modal, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useRef, useState } from 'react';
 
+import { Loading } from '@/shared/ui/Loading';
 import type { IsoDate, ProcessingScope } from '@/api/contract';
 import { ApiError } from '@/api/http';
 import { ActionError } from '@/shared/ui/ActionError';
@@ -29,7 +30,7 @@ interface ProcessingRequestModalProps {
 }
 
 /**
- * "Solicitar processamento" in place (§10.1, OQ-21 draft): the range and scope, prefilled and
+ * "Solicitar processamento" in place (§10.1, OQ-21): the range and scope, prefilled and
  * editable, previewed as they change, then queued. The job is followed in Processamentos.
  */
 export function ProcessingRequestModal({ draft, onClose, today }: ProcessingRequestModalProps) {
@@ -131,7 +132,7 @@ function RequestForm({ draft, enqueue, onClose, today }: RequestFormProps) {
       ) : preview.isError ? (
         <ErrorState error={preview.error} onRetry={() => void preview.refetch()} />
       ) : preview.isPending || preview.isFetching ? (
-        <Skeleton h={160} aria-busy="true" aria-label="Carregando pré-visualização" />
+        <Loading label="Carregando pré-visualização" h={160} />
       ) : (
         <PreviewSummary preview={preview.data} />
       )}

@@ -20,6 +20,8 @@ import {
   UNAVAILABLE,
 } from '@/shared/format';
 
+import table from '@/shared/ui/table.module.css';
+
 import { ENTRY_TYPE_LABELS, type LedgerEntry, type SortDirection } from '../entries';
 
 /**
@@ -83,7 +85,7 @@ export function EntriesTable({
               />
             </Table.Th>
             <Table.Th
-              style={{ whiteSpace: 'nowrap' }}
+              className={table.nowrap}
               aria-sort={sort === 'asc' ? 'ascending' : 'descending'}
             >
               <UnstyledButton onClick={onToggleSort} fz="sm" fw={400} c="dimmed">
@@ -103,7 +105,7 @@ export function EntriesTable({
               </Table.Th>
             ))}
             {['Qtd.', 'PU', 'Taxa', 'Valor financeiro'].map((label) => (
-              <Table.Th key={label} ta="right" fw={400} c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+              <Table.Th key={label} ta="right" fw={400} c="dimmed" className={table.nowrap}>
                 {label}
               </Table.Th>
             ))}
@@ -130,7 +132,7 @@ export function EntriesTable({
                     }}
                   />
                 </Table.Td>
-                <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                <Table.Td className={table.nowrap}>
                   {`${formatDate(entry.date)} ${formatTime(entry.time)}`}
                 </Table.Td>
                 <Table.Td>
@@ -153,7 +155,7 @@ export function EntriesTable({
                 </Table.Td>
                 <Table.Td ta="right">{trade ? formatPu(trade.pu) : dash}</Table.Td>
                 <Table.Td ta="right">{trade ? formatRate(trade.rate) : dash}</Table.Td>
-                <Table.Td ta="right" style={{ whiteSpace: 'nowrap' }}>
+                <Table.Td ta="right" className={table.nowrap}>
                   {formatSignedMoney(entry.signedAmount)}
                 </Table.Td>
                 <Table.Td>

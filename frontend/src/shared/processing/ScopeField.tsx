@@ -14,23 +14,21 @@ interface ScopeFieldProps {
 }
 
 /**
- * "Escopo" of a processing request (OQ-21 draft): Caixa, Posições or Tudo. The options form one
+ * "Escopo" of a processing request (OQ-21): Caixa, Posições or Tudo. The options form one
  * radio group named "Escopo", described by the API's error when there is one.
  */
 export function ScopeField({ value, onChange, disabled = false, error }: ScopeFieldProps) {
   const labelId = useId();
   const errorId = useId();
   return (
-    <Stack
-      gap={6}
-      role="radiogroup"
-      aria-labelledby={labelId}
-      {...(error ? { 'aria-describedby': errorId, 'aria-invalid': true } : {})}
-    >
+    <Stack gap={6}>
       <Text size="sm" fw={500} id={labelId}>
         Escopo
       </Text>
+      {/* SegmentedControl is itself the radio group: it carries the name and the error. */}
       <SegmentedControl
+        aria-labelledby={labelId}
+        {...(error ? { 'aria-describedby': errorId, 'aria-invalid': true } : {})}
         data={SCOPE_OPTIONS}
         value={value}
         onChange={(next) => {

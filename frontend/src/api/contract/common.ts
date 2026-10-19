@@ -1,4 +1,4 @@
-// Draft API contract (lane I). Field names follow docs/schema.sql; anything the docs do not
+// The API contract (lane I's shapes, adopted as the HTTP contract, OQ-26 item 8). Field names follow docs/schema.sql; anything the docs do not
 // name is a contract proposal for the integrator, listed in the PR. At Wave 5 these
 // hand-written types are replaced by types generated from the backend's OpenAPI.
 

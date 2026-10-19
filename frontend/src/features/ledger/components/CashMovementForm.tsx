@@ -1,15 +1,17 @@
-import { Alert, Button, Group, Stack, Text, TextInput } from '@mantine/core';
+import { Button, Group, Stack, TextInput } from '@mantine/core';
 import { DateInput, TimeInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconAlertTriangle } from '@tabler/icons-react';
 import { useState } from 'react';
 
+import { MessageAlert } from '@/shared/ui/MessageAlert';
 import type { IsoDate } from '@/api/contract';
-import { formatDate, parsePtBrDecimal } from '@/shared/format';
+import { formatDate, parsePtBrDate, parsePtBrDecimal } from '@/shared/format';
 
 import { useCreateEntry } from '../hooks/useLedger';
-import { nowInSaoPaulo, parsePtBrDate, splitErrors, toIsoTime } from './formSupport';
+import { splitProblem } from '@/shared/ui/problemMessages';
+
+import { nowInSaoPaulo, toIsoTime } from './formSupport';
 
 export type CashSide = 'DEPOSIT' | 'WITHDRAWAL';
 
@@ -86,7 +88,7 @@ export function CashMovementForm({
           onDone();
         },
         onError: (error) => {
-          const { fields, page } = splitErrors(error, FIELD_MAP);
+          const { fields, page } = splitProblem(error, FIELD_MAP);
           form.setErrors(fields);
           setPageErrors(page);
         },
@@ -97,17 +99,7 @@ export function CashMovementForm({
   return (
     <form onSubmit={submit} noValidate>
       <Stack gap="md">
-        {pageErrors.length > 0 && (
-          <Alert role="alert" color="red" variant="light" icon={<IconAlertTriangle size={18} />}>
-            <Stack gap={4}>
-              {pageErrors.map((message, index) => (
-                <Text key={`${String(index)}-${message}`} size="sm">
-                  {message}
-                </Text>
-              ))}
-            </Stack>
-          </Alert>
-        )}
+        <MessageAlert messages={pageErrors} />
         <Group grow align="flex-start">
           <DateInput
             label="Data"

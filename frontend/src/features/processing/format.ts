@@ -1,10 +1,10 @@
 import { formatDays } from '@/shared/format';
 
-export { formatDays, formatPeriod, parsePtBrDate as parseDateInput } from '@/shared/format';
+export { formatDays, formatPeriod } from '@/shared/format';
 
 // Formatting used only by Central de Controle. Dates and counts, never money.
 
-/** Days staged so far: "2 / 5 dias". */
+/** Days committed of the range: "2 / 5 dias" (OQ-23). */
 export function formatProgress(done: number, total: number): string {
   return `${formatDays(done)} / ${formatDays(total)} ${total === 1 ? 'dia' : 'dias'}`;
 }
