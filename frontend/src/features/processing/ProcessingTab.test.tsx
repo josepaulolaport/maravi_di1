@@ -1230,6 +1230,34 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     expect(modal.queryByRole('button', { name: /Solicitar novo/ })).not.toBeInTheDocument();
   });
 
+  it('OQ-47 a run that failed writing its end shows no error date and asks the whole range again', async () => {
+    // Every date committed, then recording the run's end failed (interfaces "Failure and recovery").
+    serveWith(
+      job({
+        status: 'FAILED',
+        start_date: '2026-10-16',
+        progress_date: '2026-10-18',
+        error_code: 'PROCESSING_ERROR',
+        error_message: 'Erro técnico ao processar a data.',
+        started_at: '2026-10-18T10:00:02-03:00',
+        finished_at: '2026-10-18T10:00:09-03:00',
+      }),
+    );
+    const { user, router } = renderApp(PAGE);
+
+    const menu = within(await openMenu(user, '16/10/2026 a 18/10/2026', 'Falhou'));
+    await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    expect(modal.getByRole('alert')).toHaveTextContent('Erro técnico ao processar a data.');
+    expect(modal.queryByRole('group', { name: 'Data com erro' })).not.toBeInTheDocument();
+    expect(modal.queryByText('19/10/2026')).not.toBeInTheDocument();
+
+    await user.click(modal.getByRole('button', { name: 'Solicitar novo processamento' }));
+    expect(router.state.location.search).toBe(
+      '?tab=processamentos&inicio=2026-10-16&fim=2026-10-18&escopo=tudo',
+    );
+  });
+
   it('§11.1 still shows an error box for a failed job without a message', async () => {
     serveWith(
       job({
