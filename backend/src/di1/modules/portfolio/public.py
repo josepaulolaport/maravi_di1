@@ -20,6 +20,7 @@ from uuid import UUID
 
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
 from di1.modules.portfolio.domain.cash import CashBalance, CashCalculator, CashDay
+from di1.modules.portfolio.domain.maturity import is_past_maturity, reference_pu_on
 from di1.modules.portfolio.domain.positions import (
     OpenPosition,
     PositionDay,
@@ -65,6 +66,8 @@ __all__ = [
     "Trade",
     "ValuationCalculator",
     "ValuationStatus",
+    "is_past_maturity",
+    "reference_pu_on",
 ]
 
 

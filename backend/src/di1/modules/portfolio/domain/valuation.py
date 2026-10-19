@@ -22,6 +22,7 @@ from enum import Enum, StrEnum
 from uuid import UUID
 
 from di1.modules.portfolio.domain.errors import AccountingError
+from di1.modules.portfolio.domain.maturity import is_past_maturity, reference_pu_on
 from di1.shared.decimals import financial_context
 
 ZERO = Decimal("0")
@@ -121,13 +122,10 @@ class ValuationCalculator:
 
 
 def _value(asset: AssetValuationInput, on: date) -> AssetValuation:
-    reference_pu, source = asset.reference_pu, asset.reference_source
-    if on > asset.maturity_date:
-        if reference_pu is not None:
-            raise AccountingError(
-                f"no reference price is accepted after maturity for {asset.asset_id}"
-            )
-        reference_pu = ZERO
+    if is_past_maturity(on, asset.maturity_date) and asset.reference_pu is not None:
+        raise AccountingError(f"no reference price is accepted after maturity for {asset.asset_id}")
+    reference_pu = reference_pu_on(on, asset.maturity_date, asset.reference_pu)
+    source = asset.reference_source
     if asset.quantity == 0:
         return AssetValuation(
             asset.asset_id, reference_pu, source, ZERO, ValuationStatus.NOT_REQUIRED
