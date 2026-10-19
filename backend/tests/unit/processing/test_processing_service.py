@@ -383,14 +383,9 @@ async def test_a_second_cancel_of_a_running_run_is_already_requested(harness: Ha
             "Este processamento já foi encerrado e não pode ser cancelado.",
         ),
         (ProcessingStatus.FAILED, "Este processamento já foi encerrado e não pode ser cancelado."),
-        (ProcessingStatus.CANCELLING, "O cancelamento deste processamento já foi solicitado."),
-        (
-            ProcessingStatus.DISPATCHED,  # no longer written (OQ-46): not cancellable
-            "Este processamento já foi encerrado e não pode ser cancelado.",
-        ),
     ],
 )
-async def test_a_finished_or_cancelling_run_is_not_cancellable(
+async def test_a_finished_run_is_not_cancellable(
     harness: Harness, status: ProcessingStatus, message: str
 ) -> None:
     run = await harness.enqueue()

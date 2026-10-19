@@ -127,11 +127,8 @@ def _not_found() -> DomainError:
 
 def _not_cancellable(request: ProcessingRequest) -> DomainError:
     """An ended run answers "encerrado", whatever cancel it has on record; "já foi solicitado"
-    only for a run still going whose cancel is pending (OQ-46: RUNNING with
-    ``cancel_requested_at``, or CANCELLING from before)."""
-    pending = request.status is ProcessingStatus.CANCELLING or (
-        request.status is ProcessingStatus.RUNNING and request.cancel_requested_at is not None
-    )
+    only for a RUNNING run whose cancel is pending (OQ-46)."""
+    pending = request.status is ProcessingStatus.RUNNING and request.cancel_requested_at is not None
     message = (
         "O cancelamento deste processamento já foi solicitado."
         if pending

@@ -77,8 +77,8 @@ class SqlRunStore:
     async def has_queued(self, *, uow: UnitOfWork) -> bool:
         return bool(await uow.session.scalar(sql.EXISTS_QUEUED))
 
-    async def lock_active_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
-        return [_to_run(row) for row in await uow.session.execute(sql.LOCK_ACTIVE_RUNS)]
+    async def lock_running_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
+        return [_to_run(row) for row in await uow.session.execute(sql.LOCK_RUNNING_RUNS)]
 
     async def lock_oldest_queued(self, *, uow: UnitOfWork) -> ProcessingRequest | None:
         row = (await uow.session.execute(sql.LOCK_OLDEST_QUEUED)).one_or_none()

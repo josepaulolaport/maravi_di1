@@ -31,10 +31,10 @@ with status 1 and restarts (`di1.platform.messaging.consumer.AfterAckRunner`), a
 its start finishes the run.
 
 **Recovery at worker start** (`recover_at_startup`, before the worker consumes): the run left
-RUNNING (or DISPATCHED/CANCELLING, from before OQ-46) was interrupted. Its dates left RUNNING
-are restored from ``*_previous`` (a row left empty is deleted); a run being cancelled (a cancel
-request recorded, or CANCELLING) then ends CANCELLED before any date, any other is run to its end,
-after ``progress_date`` (from ``start_date`` when NULL). Then the queue is drained.
+RUNNING was interrupted. Its dates left RUNNING are restored from ``*_previous`` (a row left
+empty is deleted); a run with a cancel request then ends CANCELLED before any date, any other is
+run to its end, after ``progress_date`` (from ``start_date`` when NULL). Then the queue is
+drained. DISPATCHED and CANCELLING are never written (OQ-46), so no row holds them.
 """
 
 from __future__ import annotations
@@ -185,7 +185,7 @@ class PortfolioRangeProcessor:
         or while a run is still RUNNING: one stopped by an error it could not record waits for
         the worker's next start, so two runs never overlap."""
         async with self._uow_factory() as uow:
-            if await self._store.lock_active_runs(uow=uow):
+            if await self._store.lock_running_runs(uow=uow):
                 await uow.commit()
                 return None
             while (queued := await self._store.lock_oldest_queued(uow=uow)) is None:
@@ -208,34 +208,22 @@ class PortfolioRangeProcessor:
     # --- recovery at worker start (OQ-45) -------------------------------------------------
 
     async def recover_at_startup(self) -> None:
-        """Called once when the worker starts, before it consumes: the run left RUNNING (or
-        DISPATCHED/CANCELLING, from before OQ-46) was interrupted. Its dates left RUNNING are
-        restored; a run being cancelled (a cancel request recorded, or CANCELLING) ends CANCELLED
-        before any date; any other is run to its end here, after ``progress_date``. Then the
-        queue is drained, so a request whose doorbell was lost runs too. Idempotent: a second
-        call finds nothing to recover or run."""
+        """Called once when the worker starts, before it consumes: the run left RUNNING was
+        interrupted. Its dates left RUNNING are restored; a run with a cancel request ends
+        CANCELLED before any date; any other is run to its end here, after ``progress_date``.
+        Then the queue is drained, so a request whose doorbell was lost runs too. Idempotent: a
+        second call finds nothing to recover or run."""
         async with self._uow_factory() as uow:
-            interrupted = await self._store.lock_active_runs(uow=uow)
+            interrupted = await self._store.lock_running_runs(uow=uow)
             now = self._clock.now()
             to_resume: list[UUID] = []
             for request in interrupted:
-                if (
-                    request.status is ProcessingStatus.CANCELLING
-                    or request.cancel_requested_at is not None
-                ):
+                if request.cancel_requested_at is not None:
                     await end_run(self._store, request, ProcessingStatus.CANCELLED, now, uow=uow)
                     logger.info("processing request %s cancelled at worker start", request.id)
                     continue
                 await restore_running_dates(self._store, request, uow=uow)
-                await self._store.save_run(
-                    replace(
-                        request,
-                        status=ProcessingStatus.RUNNING,
-                        started_at=request.started_at or now,
-                        updated_at=now,
-                    ),
-                    uow=uow,
-                )
+                await self._store.save_run(replace(request, updated_at=now), uow=uow)
                 to_resume.append(request.id)
             await uow.commit()
         for request_id in to_resume:

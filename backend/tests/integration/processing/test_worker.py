@@ -565,11 +565,7 @@ async def test_a_cancel_after_a_crash_restores_the_running_date(worker: Worker) 
     worker.writer.hook = crash
     with pytest.raises(asyncio.CancelledError):
         await worker.ring()
-    await worker.execute(
-        "UPDATE processing.requests SET status = 'CANCELLING', cancel_requested_at = now()"
-        " WHERE id = :id",
-        id=request_id,
-    )
+    await request_cancel(worker, request_id)  # RUNNING keeps its status (OQ-46)
     worker.writer.hook = None
 
     await worker.restart()
@@ -589,11 +585,7 @@ async def test_a_crash_on_a_new_date_deletes_its_row_when_the_run_ends(worker: W
     with pytest.raises(asyncio.CancelledError):
         await worker.ring()
     assert await worker.statuses() == {D1: (None, "RUNNING")}
-    await worker.execute(
-        "UPDATE processing.requests SET status = 'CANCELLING', cancel_requested_at = now()"
-        " WHERE id = :id",
-        id=request_id,
-    )
+    await request_cancel(worker, request_id)  # RUNNING keeps its status (OQ-46)
 
     await worker.restart()
 
@@ -779,20 +771,6 @@ async def test_case_26_an_earlier_failed_status_alone_fails_without_asking_the_l
         october_5,
         "CASH",
     )
-
-
-async def test_a_dispatched_run_left_from_before_oq46_is_run_at_the_worker_start(
-    worker: Worker,
-) -> None:
-    request_id = await worker.enqueue("CASH", D1, D1)
-    await worker.execute(
-        "UPDATE processing.requests SET status = 'DISPATCHED' WHERE id = :id", id=request_id
-    )
-
-    await worker.restart()
-
-    assert (await worker.run_row(request_id))["status"] == "COMPLETED"
-    assert await worker.statuses() == {D1: (None, "PROCESSED")}
 
 
 # --- recovery at the worker start (OQ-45, OQ-46) ---------------------------------------

@@ -32,6 +32,8 @@ class RequestModel(Base):
     started_at: Mapped[datetime | None]
     finished_at: Mapped[datetime | None]
     cancel_requested_at: Mapped[datetime | None]
+    # Unused since OQ-45/OQ-46 (no lease, no claim token, no recovery cap); kept, with
+    # dispatched_at, to mirror docs/schema.sql: the user kept the schema as it is.
     claim_token: Mapped[uuid.UUID | None]
     lease_expires_at: Mapped[datetime | None]
     attempt_count: Mapped[int] = mapped_column(default=0)
