@@ -19,26 +19,12 @@ from di1.modules.asset.dependencies import asset_reader
 from di1.modules.ledger.dependencies import ledger_reader
 from di1.modules.portfolio.dependencies import portfolio_reader, results_writer
 from di1.modules.prices.dependencies import price_reader
-from di1.modules.processing.application.services.run_chains import DayReaders
-from di1.modules.processing.application.services.run_processor import PortfolioRangeProcessor
-from di1.modules.processing.infrastructure.persistence.repositories import (
-    SqlDateStatusRepository,
-)
-from di1.modules.processing.infrastructure.persistence.run_store import SqlRunStore
-from di1.platform.database.unit_of_work import UnitOfWork, unit_of_work_factory
+from di1.modules.processing.dependencies import make_range_processor
+from di1.platform.database.unit_of_work import unit_of_work_factory
 from tests.integration.processing.support import seed_instrument
 from tests.integration.processing.worker_support import MutableClock
 
 D1, D2, D3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
-
-
-def readers_for(uow: UnitOfWork) -> DayReaders:
-    return DayReaders(
-        ledger=ledger_reader(uow.session),
-        prices=price_reader(uow.session),
-        assets=asset_reader(uow.session),
-        portfolio=portfolio_reader(uow.session),
-    )
 
 
 class RealWorker:
@@ -46,15 +32,15 @@ class RealWorker:
         self.engine = engine
         self.clock = MutableClock()
         uow_factory = unit_of_work_factory(factory)
-        store = SqlRunStore(self.clock)
         self.uow_factory = uow_factory
-        self.processor = PortfolioRangeProcessor(
+        self.processor = make_range_processor(  # the worker's wiring (OQ-46)
             uow_factory=uow_factory,
-            store=store,
-            date_statuses=SqlDateStatusRepository(),
-            readers_for=readers_for,
-            writer=results_writer(),
             clock=self.clock,
+            ledger_reader=ledger_reader,
+            price_reader=price_reader,
+            asset_reader=asset_reader,
+            portfolio_reader=portfolio_reader,
+            writer=results_writer(),
         )
 
     async def sql(self, statement: str, **params: Any) -> None:
