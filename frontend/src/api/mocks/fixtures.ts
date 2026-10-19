@@ -25,7 +25,7 @@ import type {
 //   16/10  Venda 4 DI1F28 a 9,95% a.a.; retirada 50.000,00
 //          A job started at 17:20 is SUPERSEDED: the withdrawal was recorded at 17:30, mid-run.
 //          No DI1F29 price  → Pendência, P&L incomplete (null), job COMPLETED_WITH_ISSUES.
-//          DI1F28 price corrected after publication (revision 2) → 16/10 is stale.
+//          DI1F28 price corrected after publication (overwritten) → 16/10 is stale.
 //   17/10, 18/10  not processed (weekend; no prices).
 
 export const MOCK_TODAY = '2026-10-18';
@@ -168,8 +168,6 @@ function price(
   source: ReferencePrice['source'],
   pu: string,
   rate: string,
-  revision = 1,
-  supersededAt: string | null = null,
   createdAt = `${date}T18:00:00-03:00`,
 ): ReferencePrice {
   return {
@@ -180,21 +178,18 @@ function price(
     input_kind: 'RATE',
     pu,
     rate,
-    revision,
     created_at: createdAt,
-    superseded_at: supersededAt,
   };
 }
 
 export const PRICE_IDS = {
   f28_1014: '7e000000-0000-4000-8000-000000000006',
   f28_1015: '7e000000-0000-4000-8000-000000000007',
-  f28_1016_r1: '7e000000-0000-4000-8000-000000000008',
-  f28_1016_r2: '7e000000-0000-4000-8000-000000000009',
+  f28_1016: '7e000000-0000-4000-8000-000000000008',
   f29_1015: '7e000000-0000-4000-8000-000000000011',
 } as const;
 
-/** All revisions, current and superseded. Gaps between dates are real: no carry-forward. */
+/** One price per (asset, date, source). Gaps between dates are real: no carry-forward. */
 export const referencePrices: ReferencePrice[] = [
   price(1, IDS.di1f28, '2026-09-24', 'B3', '88215.0712246655', '0.1032'),
   price(2, IDS.di1f28, '2026-09-30', 'MANUAL', '88509.2489449811', '0.1017'),
@@ -203,25 +198,14 @@ export const referencePrices: ReferencePrice[] = [
   price(5, IDS.di1f28, '2026-10-09', 'MANUAL', '88910.3037976557', '0.0998'),
   price(6, IDS.di1f28, '2026-10-14', 'MANUAL', '89006.4625467350', '0.10'),
   price(7, IDS.di1f28, '2026-10-15', 'B3', '89128.4824345118', '0.0990'),
+  // Corrected on 17/10 from 89.200,9008841512 (9,85%), after 16/10 was published: overwritten.
   price(
     8,
     IDS.di1f28,
     '2026-10-16',
     'MANUAL',
-    '89200.9008841512',
-    '0.0985',
-    1,
-    '2026-10-17T10:00:00-03:00',
-  ),
-  price(
-    9,
-    IDS.di1f28,
-    '2026-10-16',
-    'MANUAL',
     '89250.3147019396',
     '0.0980',
-    2,
-    null,
     '2026-10-17T10:00:00-03:00',
   ),
   price(
@@ -231,8 +215,6 @@ export const referencePrices: ReferencePrice[] = [
     'B3',
     '89240.4279488087',
     '0.0981',
-    1,
-    null,
     '2026-10-16T19:00:00-03:00',
   ),
   price(11, IDS.di1f29, '2026-10-15', 'MANUAL', '80206.1333187932', '0.1045'),
@@ -416,14 +398,14 @@ export const positions: PublishedPositions[] = [
     published_at: PUBLISHED_AT,
     items: [
       {
-        // Published with revision 1 of the 16/10 price; revision 2 came later → stale.
+        // Published with the 16/10 price before its correction (89.200,90) → stale.
         asset_id: IDS.di1f28,
         asset_code: 'DI1F28',
         maturity_date: '2028-01-03',
         quantity: 6,
         average_entry_pu: '89006.4625467350',
         average_entry_rate: '0.10',
-        reference_price_id: PRICE_IDS.f28_1016_r1,
+        reference_price_id: PRICE_IDS.f28_1016,
         reference_source: 'MANUAL',
         reference_pu: '89200.9008841512',
         reference_rate: '0.0985',
@@ -476,7 +458,7 @@ export const pnlSeries: Omit<PnlPoint, 'status'>[] = [
 
 // What a job publishes when it processes a day of this scenario with its inputs unchanged.
 // The fake backend does not calculate: these were computed offline with the same formulas
-// and precision as the published fixtures above (re-checked: the 16/10 revision-1 figures
+// and precision as the published fixtures above (re-checked: the 16/10 pre-correction figures
 // reproduce exactly). 14/10 and 15/10 republish as they are; days before FIRST_ENTRY_DATE
 // are the zero state (§7).
 
@@ -551,7 +533,7 @@ export interface RecalculatedDay {
 
 /** Republished results that differ from the published fixtures (`published_at` is replaced). */
 export const recalculatedDays: Record<string, RecalculatedDay> = {
-  // DI1F28 now uses revision 2 of its 16/10 price; DI1F29 still has none, so incomplete.
+  // DI1F28 now uses its corrected 16/10 price; DI1F29 still has none, so incomplete.
   '2026-10-16': {
     summary: {
       date: '2026-10-16',
@@ -581,7 +563,7 @@ export const recalculatedDays: Record<string, RecalculatedDay> = {
           maturity_date: '2028-01-03',
           quantity: 6,
           ...DI1F28_AVERAGES,
-          reference_price_id: PRICE_IDS.f28_1016_r2,
+          reference_price_id: PRICE_IDS.f28_1016,
           reference_source: 'MANUAL',
           reference_pu: '89250.3147019396',
           reference_rate: '0.0980',

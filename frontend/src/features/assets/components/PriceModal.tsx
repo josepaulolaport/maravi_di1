@@ -34,7 +34,7 @@ interface PriceModalProps {
 /**
  * "Registrar preço de referência" (§11.2, §5): a MANUAL observation for one date, typed as PU
  * **or** rate. There is no computed field and no preview: the backend computes the other value
- * on save (OQ-19 item 7). A correction is the same call and appends a new revision.
+ * on save (OQ-19 item 7). A correction is the same call and overwrites the MANUAL price.
  */
 export function PriceModal({ instrument, date, session, onClose }: PriceModalProps) {
   const save = useSetReferencePrice();

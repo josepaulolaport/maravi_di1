@@ -9,7 +9,7 @@ import { renderApp } from '@/test/render';
 // Expected values come from the fixture scenario (src/api/mocks/fixtures.ts), with today fixed
 // at MOCK_TODAY (18/10/2026, São Paulo). DI1F28 matures on 03/01/2028, so its calendar is
 // 19/09–18/10. Its current observations in that window: 24/09 B3, 30/09 MANUAL, 05/10 MANUAL,
-// 08/10 B3, 09/10 MANUAL, 14/10 MANUAL, 15/10 B3, 16/10 MANUAL revision 2 (89250.3147019396,
+// 08/10 B3, 09/10 MANUAL, 14/10 MANUAL, 15/10 B3, 16/10 MANUAL, corrected (89250.3147019396,
 // 0.0980) and B3 (89240.4279488087, 0.0981). Nothing on 17/10 or 18/10.
 
 beforeEach(() => {
@@ -116,25 +116,17 @@ describe('Ativos: contrato (§11.2)', () => {
     ).toBeInTheDocument();
   });
 
-  it('§5 "Ver revisões" lists every revision of both sources, newest first', async () => {
+  it('§5 the row menu offers Corrigir and Remover; there is no "Ver revisões"', async () => {
     const { user } = await openContract();
 
-    await rowAction(user, '16/10/2026', 'Ver revisões');
+    await user.click(dayRow('16/10/2026').getByRole('button', { name: 'Ações de 16/10/2026' }));
 
-    const modal = within(await screen.findByRole('dialog', { name: 'Revisões de 16/10/2026' }));
-    const rows = (await modal.findAllByRole('row')).slice(1).map((row) =>
-      within(row)
-        .getAllByRole('cell')
-        .map((cell) => cell.textContent),
-    );
-    expect(rows).toEqual([
-      ['Manual', '2', '89.250,31', '9,80%', '17/10/2026 10:00', 'Atual'],
-      ['B3', '1', '89.240,43', '9,81%', '16/10/2026 19:00', 'Atual'],
-      ['Manual', '1', '89.200,90', '9,85%', '16/10/2026 18:00', '17/10/2026 10:00'],
-    ]);
+    expect(await screen.findByRole('menuitem', { name: 'Corrigir' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Remover' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Ver revisões' })).not.toBeInTheDocument();
   });
 
-  it('§5 a correction appends a new revision (revision 3) and is shown at once', async () => {
+  it('§5 a correction overwrites the price and is shown at once', async () => {
     const { user } = await openContract();
 
     await rowAction(user, '16/10/2026', 'Corrigir');
@@ -156,15 +148,7 @@ describe('Ativos: contrato (§11.2)', () => {
         screen.queryByRole('dialog', { name: 'Registrar preço de referência' }),
       ).not.toBeInTheDocument();
     });
-    await rowAction(user, '16/10/2026', 'Ver revisões');
-    const modal = within(await screen.findByRole('dialog', { name: 'Revisões de 16/10/2026' }));
-    const first = (await modal.findAllByRole('row'))[1] as HTMLElement;
-    const firstCells = within(first)
-      .getAllByRole('cell')
-      .map((cell) => cell.textContent);
-    expect(firstCells.slice(0, 2)).toEqual(['Manual', '3']);
-    expect(firstCells[3]).toBe('9,75%');
-    expect(firstCells[5]).toBe('Atual');
+    expect(cells('16/10/2026')[3]).toBe('Manual');
   });
 
   it('§5 Remover lists each current observation of the date; removing MANUAL lets B3 prevail', async () => {
@@ -527,20 +511,6 @@ describe('Ativos: contrato, estados (§12)', () => {
     const rows = table.getAllByRole('row').slice(1);
     expect(within(rows[0] as HTMLElement).getByText('01/10/2026')).toBeInTheDocument();
     expect(within(rows[29] as HTMLElement).getByText('02/09/2026')).toBeInTheDocument();
-  });
-
-  it('§12 shows the revisions error in the modal', async () => {
-    server.use(
-      http.get(url('/reference-prices/revisions'), () =>
-        problem(500, [{ code: 'VALIDATION_ERROR', message: 'Serviço indisponível.', field: null }]),
-      ),
-    );
-    const { user } = await openContract();
-
-    await rowAction(user, '16/10/2026', 'Ver revisões');
-
-    const modal = within(await screen.findByRole('dialog', { name: 'Revisões de 16/10/2026' }));
-    expect(await modal.findByText('Serviço indisponível.')).toBeInTheDocument();
   });
 
   it('§12 shows "não encontrado" for an unknown contract', async () => {

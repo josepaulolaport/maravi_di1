@@ -54,8 +54,6 @@ export const ledgerApi = {
 export const pricesApi = {
   listReferencePrices: (query: DateRange & { asset_id: string }) =>
     http.get<ListResponse<ReferencePriceDay>>('/reference-prices', { query }),
-  listRevisions: (query: { asset_id: string; reference_date: IsoDate }) =>
-    http.get<ListResponse<ReferencePrice>>('/reference-prices/revisions', { query }),
   setReferencePrice: (body: SetReferencePriceRequest) =>
     http.post<ReferencePrice>('/reference-prices', body),
   removeReferencePrice: (priceId: string) => http.delete(`/reference-prices/${id(priceId)}`),

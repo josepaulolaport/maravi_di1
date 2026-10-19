@@ -7,7 +7,7 @@ import { server } from '@/api/mocks/server';
 import { renderApp } from '@/test/render';
 
 // Expected values come from the fixture scenario (src/api/mocks/fixtures.ts). Each contract's
-// latest observation: DI1F27 none; DI1F28 16/10 MANUAL revision 2 (PU 89250.3147019396, rate
+// latest observation: DI1F27 none; DI1F28 16/10 MANUAL, corrected (PU 89250.3147019396, rate
 // 0.0980, preferred over B3); DI1F29 15/10 MANUAL (PU 80206.1333187932, rate 0.1045); DI1F30
 // none.
 

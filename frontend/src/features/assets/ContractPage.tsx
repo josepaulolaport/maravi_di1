@@ -16,7 +16,6 @@ import { calendarRows, calendarWindow, resolveRange } from './components/calenda
 import { PriceModal } from './components/PriceModal';
 import { PriceHistoryCard } from './components/PriceHistoryCard';
 import { RemovePriceModal } from './components/RemovePriceModal';
-import { RevisionsModal } from './components/RevisionsModal';
 import { useInstrument, useProduct } from './hooks/useAssets';
 import { useReferencePriceDays } from './hooks/usePrices';
 
@@ -97,7 +96,6 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
     );
   };
 
-  const [revisionsDate, setRevisionsDate] = useState<IsoDate | null>(null);
   // Only the date is UI state; its observations are read from the query, so the modal always
   // lists what is current (also after a partial failure).
   const [removingDate, setRemovingDate] = useState<IsoDate | null>(null);
@@ -147,7 +145,6 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
             onRemove={(day: ReferencePriceDay) => {
               setRemovingDate(day.reference_date);
             }}
-            onRevisions={setRevisionsDate}
           />
         </>
       )}
@@ -156,13 +153,6 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
         date={modalDate}
         session={modal.session}
         onClose={closeModal}
-      />
-      <RevisionsModal
-        assetId={instrument.id}
-        date={revisionsDate}
-        onClose={() => {
-          setRevisionsDate(null);
-        }}
       />
       <RemovePriceModal
         day={removing}

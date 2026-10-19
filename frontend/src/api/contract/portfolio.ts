@@ -72,7 +72,7 @@ export interface PositionRow {
   quantity: number;
   average_entry_pu: Decimal | null;
   average_entry_rate: Decimal | null;
-  /** The observation used, traceable to its revision (§5). Null when missing or after maturity. */
+  /** The price used (§5). Null when missing or after maturity. */
   reference_price_id: string | null;
   /** Proposal: source and rate of that observation, read through `reference_price_id`. */
   reference_source: PriceSource | null;

@@ -176,43 +176,44 @@ describe('mock reference prices', () => {
     });
 
     expect(items.map((d) => d.reference_date)).toEqual(['2026-10-16', '2026-10-15', '2026-10-14']);
-    expect(items[0]?.preferred).toMatchObject({ source: 'MANUAL', revision: 2, rate: '0.0980' });
-    expect(items[0]?.current.map((p) => p.source).sort()).toEqual(['B3', 'MANUAL']);
+    expect(items[0]?.preferred).toMatchObject({ source: 'MANUAL', rate: '0.0980' });
+    expect(items[0]?.sources.map((p) => p.source).sort()).toEqual(['B3', 'MANUAL']);
   });
 
-  it('§5 keeps every revision for "Ver revisões"', async () => {
-    const { items } = await pricesApi.listRevisions({
-      asset_id: IDS.di1f28,
-      reference_date: '2026-10-16',
-    });
-
-    expect(items.map((p) => [p.source, p.revision, p.superseded_at === null])).toEqual([
-      ['MANUAL', 2, true],
-      ['B3', 1, true],
-      ['MANUAL', 1, false],
-    ]);
-  });
-
-  it('§5 a correction appends a revision, supersedes the previous one and marks the date stale', async () => {
-    const created = await pricesApi.setReferencePrice({
+  it('§5 a correction overwrites the MANUAL price in place (no revisions) and marks the date stale', async () => {
+    const corrected = await pricesApi.setReferencePrice({
       asset_id: IDS.di1f28,
       reference_date: '2026-10-16',
       input_kind: 'PU',
       pu: '89260.00',
     });
-    const { items } = await pricesApi.listRevisions({
-      asset_id: IDS.di1f28,
-      reference_date: '2026-10-16',
-    });
-    const manual = items.filter((p) => p.source === 'MANUAL');
+    const [day] = (
+      await pricesApi.listReferencePrices({
+        asset_id: IDS.di1f28,
+        start_date: '2026-10-16',
+        end_date: '2026-10-16',
+      })
+    ).items;
 
-    expect(created).toMatchObject({ source: 'MANUAL', revision: 3, pu: '89260.00' });
-    expect(manual.map((p) => [p.revision, p.superseded_at === null])).toEqual([
-      [3, true],
-      [2, false],
-      [1, false],
-    ]);
+    expect(corrected).toMatchObject({ id: PRICE_IDS.f28_1016, source: 'MANUAL', pu: '89260.00' });
+    expect(corrected).not.toHaveProperty('revision');
+    expect(day?.sources.filter((p) => p.source === 'MANUAL')).toEqual([corrected]);
     expect(await chainStatus('2026-10-16')).toEqual({ cash: 'FRESH', positions: 'STALE' });
+  });
+
+  it('§5 removing a price deletes it; the other source then prevails', async () => {
+    await pricesApi.removeReferencePrice(PRICE_IDS.f28_1016);
+    const [day] = (
+      await pricesApi.listReferencePrices({
+        asset_id: IDS.di1f28,
+        start_date: '2026-10-16',
+        end_date: '2026-10-16',
+      })
+    ).items;
+
+    expect(day?.sources.map((p) => p.source)).toEqual(['B3']);
+    expect(day?.preferred.source).toBe('B3');
+    expect((await problemOf(pricesApi.removeReferencePrice(PRICE_IDS.f28_1016))).status).toBe(404);
   });
 
   it('§5 requires the contract when listing reference prices', async () => {
@@ -624,7 +625,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
       quantity: 6,
       average_entry_pu: '89006.4625467350',
       average_entry_rate: '0.10',
-      reference_price_id: PRICE_IDS.f28_1016_r2,
+      reference_price_id: PRICE_IDS.f28_1016,
       reference_source: 'MANUAL',
       reference_pu: '89250.3147019396',
       reference_rate: '0.0980',
@@ -772,7 +773,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
     expect(summary).toMatchObject({ stale: false, trades_pnl: '-592.3681943852' });
     const rows = published(await portfolioApi.getPositions('2026-10-16')).items;
     expect(rows.find((r) => r.asset_code === 'DI1F28')?.reference_price_id).toBe(
-      PRICE_IDS.f28_1016_r2,
+      PRICE_IDS.f28_1016,
     );
   });
 
@@ -847,7 +848,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
     ],
     [
       'DELETE /reference-prices/:id',
-      () => pricesApi.removeReferencePrice(PRICE_IDS.f28_1016_r2),
+      () => pricesApi.removeReferencePrice(PRICE_IDS.f28_1016),
       '16/10/2026',
     ],
   ])('§10.4 the mock fails a job after a write through %s', async (_path, write, shown) => {

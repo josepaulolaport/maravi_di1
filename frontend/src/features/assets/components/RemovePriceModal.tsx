@@ -19,9 +19,9 @@ const observationLabel = (price: ReferencePrice) =>
   `${SOURCE_LABELS[price.source]}: PU ${formatPu(price.pu)}, taxa ${formatRate(price.rate)}`;
 
 /**
- * "Remover" (§5): the user selects which current observations of the date to remove, of any
- * source (user decision, 2026-10-18). The preferred one starts selected. Removal is logical:
- * every revision stays in "Ver revisões".
+ * "Remover" (§5): the user selects which prices of the date to remove, of any source (user
+ * decision, 2026-10-18). The preferred one starts selected. A removed price is deleted; there
+ * are no revisions to keep it (user, 2026-10-18).
  */
 export function RemovePriceModal({ day, onClose }: RemovePriceModalProps) {
   return day ? <RemoveForm key={day.reference_date} day={day} onClose={onClose} /> : null;
@@ -31,10 +31,10 @@ function RemoveForm({ day, onClose }: { day: ReferencePriceDay; onClose: () => v
   const [chosen, setChosen] = useState<string[]>([day.preferred.id]);
   const [empty, setEmpty] = useState(false);
   const remove = useRemoveReferencePrices();
-  // Only ids still current count: after a partial failure the removed ones drop out, and a
+  // Only ids still listed count: after a partial failure the removed ones drop out, and a
   // retry sends only what is left.
-  const current = chosen.filter((id) => day.current.some((price) => price.id === id));
-  const selected = current.length > 0 ? current : [day.preferred.id];
+  const listed = chosen.filter((id) => day.sources.some((price) => price.id === id));
+  const selected = listed.length > 0 ? listed : [day.preferred.id];
 
   // At least one observation stays selected: ConfirmModal's double-click guard reopens only
   // when an attempt finishes, so an empty "Remover" must never reach `onConfirm`.
@@ -63,7 +63,7 @@ function RemoveForm({ day, onClose }: { day: ReferencePriceDay; onClose: () => v
       error={remove.error}
     >
       <Stack gap="sm">
-        <Text size="sm">Observações atuais de {formatDate(day.reference_date)}:</Text>
+        <Text size="sm">Preços de {formatDate(day.reference_date)}:</Text>
         <Checkbox.Group
           value={selected}
           onChange={(value) => {
@@ -73,14 +73,11 @@ function RemoveForm({ day, onClose }: { day: ReferencePriceDay; onClose: () => v
           error={empty ? 'Selecione ao menos uma observação.' : undefined}
         >
           <Stack gap="xs">
-            {day.current.map((price) => (
+            {day.sources.map((price) => (
               <Checkbox key={price.id} value={price.id} label={observationLabel(price)} />
             ))}
           </Stack>
         </Checkbox.Group>
-        <Text size="xs" c="dimmed">
-          As revisões removidas continuam em “Ver revisões”.
-        </Text>
       </Stack>
     </ConfirmModal>
   );

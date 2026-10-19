@@ -1,5 +1,5 @@
 import { ActionIcon, Group, Menu, Paper, Table, Text, Title } from '@mantine/core';
-import { IconDots, IconHistory, IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconDots, IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
 
 import type { IsoDate, PriceSource, ReferencePriceDay } from '@/api/contract';
 import { formatDate, formatPu, formatRate, UNAVAILABLE } from '@/shared/format';
@@ -14,7 +14,6 @@ interface PriceCalendarProps {
   onRegister: (date: IsoDate) => void;
   onCorrect: (date: IsoDate) => void;
   onRemove: (day: ReferencePriceDay) => void;
-  onRevisions: (date: IsoDate) => void;
 }
 
 /**
@@ -22,13 +21,7 @@ interface PriceCalendarProps {
  * first. A day shows its preferred observation (MANUAL over B3, §5) and its source; a day
  * without one shows "—" and is never filled from another day.
  */
-export function PriceCalendar({
-  rows,
-  onRegister,
-  onCorrect,
-  onRemove,
-  onRevisions,
-}: PriceCalendarProps) {
+export function PriceCalendar({ rows, onRegister, onCorrect, onRemove }: PriceCalendarProps) {
   const observed = rows.filter((row) => row.day !== null).length;
   return (
     <Paper>
@@ -105,14 +98,6 @@ export function PriceCalendar({
                             }}
                           >
                             Remover
-                          </Menu.Item>
-                          <Menu.Item
-                            leftSection={<IconHistory size={14} />}
-                            onClick={() => {
-                              onRevisions(date);
-                            }}
-                          >
-                            Ver revisões
                           </Menu.Item>
                         </Menu.Dropdown>
                       </Menu>
