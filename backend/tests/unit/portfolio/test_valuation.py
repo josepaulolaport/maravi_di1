@@ -24,6 +24,7 @@ from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28
 VALUATION = ValuationCalculator()
 FAR_MATURITY = date(2028, 1, 1)
 ZERO = Decimal("0")
+PRICE_ID = UUID("00000000-0000-0000-0000-0000000000aa")
 
 
 def _asset(
@@ -38,6 +39,7 @@ def _asset(
         quantity=quantity,
         maturity_date=maturity,
         reference_pu=None if reference_pu is None else Decimal(reference_pu),
+        reference_price_id=None if reference_pu is None else PRICE_ID,
     )
 
 
@@ -196,7 +198,7 @@ def test_a_deposit_moves_aum_but_not_the_market_value() -> None:
 
 def test_the_reference_price_used_is_traceable_to_its_observation() -> None:
     # CLAUDE.md §2 / OQ-9: the price used is traceable to its revision (position_metrics row).
-    price_id = UUID("00000000-0000-0000-0000-0000000000aa")
+    price_id = PRICE_ID
     priced = AssetValuationInput(
         asset_id=DI1F27,
         quantity=1,
@@ -221,4 +223,15 @@ def test_a_price_id_without_a_price_is_rejected() -> None:
             maturity_date=FAR_MATURITY,
             reference_pu=None,
             reference_price_id=UUID("00000000-0000-0000-0000-0000000000aa"),
+        )
+
+
+def test_a_reference_pu_without_its_observation_id_is_rejected() -> None:
+    # The price used must be traceable to its revision (OQ-9): an observed PU always has an id.
+    with pytest.raises(AccountingError):
+        AssetValuationInput(
+            asset_id=DI1F27,
+            quantity=1,
+            maturity_date=FAR_MATURITY,
+            reference_pu=Decimal("95000"),
         )

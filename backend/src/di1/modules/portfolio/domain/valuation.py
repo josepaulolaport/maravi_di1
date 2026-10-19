@@ -39,7 +39,9 @@ class ValuationStatus(Enum):
 class AssetValuationInput:
     """One expected asset on the valuation date: its closing quantity, its maturity and the
     exact-date reference PU, ``None`` when there is no observation. ``reference_price_id`` is the
-    observation (revision) the PU came from, so the price used stays traceable (OQ-9)."""
+    observation (revision) the PU came from, so the price used stays traceable (OQ-9): a PU and
+    its id are given together or not at all. The 0 PU after maturity is not an observation and
+    is set by the calculator, not passed in."""
 
     asset_id: UUID
     quantity: int
@@ -48,8 +50,8 @@ class AssetValuationInput:
     reference_price_id: UUID | None = None
 
     def __post_init__(self) -> None:
-        if self.reference_price_id is not None and self.reference_pu is None:
-            raise AccountingError("a reference price id needs its reference PU")
+        if (self.reference_price_id is None) != (self.reference_pu is None):
+            raise AccountingError("a reference PU and its observation id go together")
 
 
 @dataclass(frozen=True)
