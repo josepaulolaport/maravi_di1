@@ -102,10 +102,11 @@ make demo   # after docker compose up, on an empty ledger: two weeks of history 
 dates from today − 14 to today (São Paulo):
 
 - contracts DI1F27, DI1F28 and DI1F29 (maturities 04/01/2027, 03/01/2028, 02/01/2029);
-- an opening deposit of 1.000.000, a second deposit, a withdrawal, and the challenge example's
-  deposit of 200.000 with a buy of 1 DI1F28 at 10%;
-- trades typed as a rate and as a PU, a partial sale, a sale that crosses zero into a short, and two
-  trades on one day ordered by time;
+- an opening deposit of 1.000.000, a second deposit, a withdrawal and, as in the challenge example,
+  a deposit of 200.000 with a buy of 1 DI1F28 at 10% (DI1F28 does not mature in 365 days, so the
+  challenge's figures are those of `make e2e`, not these);
+- trades typed as a rate and as a PU, a partial sale, a sale that crosses zero into a short, and a
+  buy and a sale of DI1F29 on one day, applied in time order;
 - MANUAL reference prices typed as a rate for every calendar day, weekends included, with **one
   deliberate gap**: DI1F29 on today − 5.
 

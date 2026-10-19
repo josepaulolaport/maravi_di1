@@ -7,8 +7,10 @@ processing and writes no positions or P&L: the user processes today − 14 .. to
 Controle and checks the figures.
 
 The trades exercise the accounting rules (spec §7): buys typed as a rate and as a PU, a partial
-sale (the average PU stays), a sale that crosses zero into a short, two trades on one day ordered
-by entry_time, and the challenge example (a 200.000 deposit and a buy of 1 DI1F28 at 10%). Prices
+sale (the average PU stays), a sale that crosses zero into a short, two trades of one contract on
+one day ordered by entry_time (a buy, then a sale), and, as in the challenge example, a 200.000
+deposit and a buy of 1 DI1F28 at 10% (the contract does not mature in 365 days, so the challenge's
+figures do not appear; `make e2e` reproduces them). Prices
 are typed as a rate for every calendar day, weekends included, from each contract's first trade,
 with one deliberate gap (DI1F29 on today − 5), so processing shows a Pendência and ends
 COMPLETED_WITH_ISSUES.
@@ -16,7 +18,8 @@ COMPLETED_WITH_ISSUES.
 A PU-typed trade sends a round PU near the market. The script derives it from the DC/365 formula
 only to pick a plausible typed value; the API stores the typed PU and computes the rate itself.
 
-Refuses to run when the ledger already has an entry. Standard library only.
+Refuses to run when the ledger already has an entry, or when a DI1F2x contract exists with another
+maturity. Standard library only.
 
     python3 scripts/seed_demo.py --api http://127.0.0.1:8000
 """
@@ -117,7 +120,14 @@ def demo(api: str) -> None:
     by_code = {c.code: c for c in CONTRACTS}
     say(f"Demo data from {start} to {today} (São Paulo)")
     for contract in CONTRACTS:
-        if contract.code not in ids:
+        if contract.code in ids:
+            found = next(i for i in listed if i["code"] == contract.code)
+            if found["maturity_date"] != contract.maturity.isoformat():
+                raise DemoError(
+                    f"{contract.code} exists with maturity {found['maturity_date']}, not"
+                    f" {contract.maturity}; run it on a fresh stack (down -v, up)"
+                )
+        else:
             created = call(
                 api,
                 "POST",
@@ -175,12 +185,13 @@ def demo(api: str) -> None:
     trade(14, "10:00", "DI1F27", 4, "buy, typed as a rate", rate="0.1450")
     trade(14, "11:00", "DI1F29", 3, "buy, typed as a PU", pu_near="0.1350")
     trade(12, "10:30", "DI1F27", 2, "buy more, typed as a PU (new average)", pu_near="0.1460")
-    cash(10, "09:00", "200000", "challenge example: deposit")
-    trade(10, "10:00", "DI1F28", 1, "challenge example: buy 1 at 10%", rate="0.10")
+    cash(10, "09:00", "200000", "deposit, as in the challenge example")
+    trade(10, "10:00", "DI1F28", 1, "buy 1 at 10%, as in the challenge example", rate="0.10")
     trade(8, "10:15", "DI1F27", -3, "partial sale (average kept)", rate="0.1445")
-    trade(8, "14:30", "DI1F29", 2, "second trade of the day, later time", rate="0.1352")
+    trade(8, "11:00", "DI1F29", 2, "buy: 3 → 5, new average", rate="0.1352")
+    trade(8, "14:30", "DI1F29", -1, "same contract, same day, later time: 5 → 4", rate="0.1355")
     cash(6, "09:00", "300000", "second deposit")
-    trade(4, "11:00", "DI1F29", -8, "sale crossing zero: 5 → −3 (short)", pu_near="0.1348")
+    trade(4, "11:00", "DI1F29", -7, "sale crossing zero: 4 → −3 (short)", pu_near="0.1348")
     cash(2, "16:00", "-150000", "withdrawal")
 
     first_trade = {"DI1F27": 14, "DI1F28": 10, "DI1F29": 14}
@@ -216,7 +227,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         demo(args.api.rstrip("/"))
-    except (DemoError, urllib.error.URLError) as error:
+    except (DemoError, urllib.error.URLError, TimeoutError, ValueError) as error:
         say(f"DEMO DATA NOT CREATED: {error}", error=True)
         return 1
     say("DEMO DATA CREATED")
