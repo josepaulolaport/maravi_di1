@@ -7,7 +7,7 @@ import { assetsApi } from '@/api/endpoints';
 import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
 
 // Catalogue and instrument data (spec §3, §11.2). Keys live under the assets API area.
-export const assetKeys = {
+const assetKeys = {
   all: queryRoots.assets,
   instrumentTypes: () => [...assetKeys.all, 'instrument-types'] as const,
   products: (instrumentType: string, search: string) =>

@@ -14,7 +14,7 @@ interface ScopeFieldProps {
 }
 
 /**
- * "Escopo" of a processing request (OQ-21 draft): Caixa, Posições or Tudo. The options form one
+ * "Escopo" of a processing request (OQ-21): Caixa, Posições or Tudo. The options form one
  * radio group named "Escopo", described by the API's error when there is one.
  */
 export function ScopeField({ value, onChange, disabled = false, error }: ScopeFieldProps) {

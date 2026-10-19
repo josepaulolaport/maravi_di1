@@ -37,7 +37,7 @@ function flat(summary: PortfolioSummary) {
   };
 }
 
-/** The freshness of each chain on a date (OQ-21 draft). */
+/** The freshness of each chain on a date (OQ-21). */
 async function chainStatus(date: string) {
   const summary = await portfolioApi.getSummary(date);
   return { cash: summary.cash.status, positions: summary.positions.status };
@@ -629,7 +629,7 @@ describe('mock processing', () => {
 });
 
 describe('mock publication (a finished job publishes the precomputed results of its days)', () => {
-  const FINAL = ['COMPLETED', 'COMPLETED_WITH_ISSUES', 'CANCELLED', 'FAILED', 'SUPERSEDED'];
+  const FINAL = ['COMPLETED', 'COMPLETED_WITH_ISSUES', 'CANCELLED', 'FAILED'];
 
   /** Queues [start, end] and polls it until it reaches a final status. */
   async function run(start: string, end: string): Promise<ProcessingRequest> {
@@ -649,7 +649,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
       .sort();
   }
 
-  it('§10.4 OQ-12 republishes 16/10 with the corrected price and clears its stale flag', async () => {
+  it('§10.4 OQ-12 republishes 16/10 with the corrected price and makes it current again', async () => {
     expect((await run('2026-10-16', '2026-10-18')).status).toBe('COMPLETED_WITH_ISSUES');
 
     const summary = flat(await portfolioApi.getSummary('2026-10-16'));

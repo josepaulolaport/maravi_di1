@@ -39,7 +39,7 @@ const isBehind = (state: PredecessorState) =>
   state !== 'ZERO_STATE' && state !== 'FRESH' && state !== 'FRESH_WITH_ISSUES';
 
 /**
- * What "Confirmar processamento" shows (§10.1, OQ-11, OQ-21 draft): exactly [A, B], its days,
+ * What "Confirmar processamento" shows (§10.1, OQ-11, OQ-21): exactly [A, B], its days,
  * the scope, and the state before it for each chain in scope, warning when one is behind.
  */
 export function PreviewSummary({ preview }: { preview: ProcessingPreview }) {

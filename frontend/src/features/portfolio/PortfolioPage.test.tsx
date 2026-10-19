@@ -52,7 +52,7 @@ interface SummaryChanges {
 
 /**
  * Serves 15/10 (complete and current for both chains in the fixtures) with the given changes
- * to one chain or both, to isolate one state (OQ-21 draft: cash and positions apart).
+ * to one chain or both, to isolate one state (OQ-21: cash and positions apart).
  */
 function override15(changes: SummaryChanges, positionsChanges: Partial<PortfolioPositions> = {}) {
   const rows = positions.find((p) => p.date === '2026-10-15');

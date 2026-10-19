@@ -1,13 +1,6 @@
 import { http, HttpResponse } from 'msw';
 
-import type {
-  Freshness,
-  ListResponse,
-  PnlPoint,
-  PortfolioPositions,
-  PortfolioSummary,
-  ProcessingChain,
-} from '../../contract';
+import type { ListResponse, PnlPoint, PortfolioPositions, PortfolioSummary } from '../../contract';
 import { db, statusOf } from '../db';
 import { dateErrors, latency, problem, rangeErrors, url } from './support';
 
@@ -20,13 +13,11 @@ function dateParam(request: Request) {
   return { date, errors: dateErrors(date, 'date') };
 }
 
-const freshness = (date: string, chain: ProcessingChain): Freshness => statusOf(date, chain);
-
 export function summaryOf(date: string): PortfolioSummary {
   const cash = db.published.cash.get(date);
   const positions = db.published.summaries.get(date);
-  const cashStatus = freshness(date, 'CASH');
-  const positionsStatus = freshness(date, 'POSITIONS');
+  const cashStatus = statusOf(date, 'CASH');
+  const positionsStatus = statusOf(date, 'POSITIONS');
   return {
     date,
     cash: {
@@ -68,7 +59,7 @@ export const portfolioHandlers = [
     const published = db.published.positions.get(date);
     const body: PortfolioPositions = {
       date,
-      status: freshness(date, 'POSITIONS'),
+      status: statusOf(date, 'POSITIONS'),
       published_at: published?.published_at ?? null,
       items: published?.items ?? [],
     };
@@ -85,7 +76,7 @@ export const portfolioHandlers = [
     const items = [...db.published.pnl.values()]
       .filter((p) => p.date >= (start as string) && p.date <= (end as string))
       .sort((a, b) => a.date.localeCompare(b.date))
-      .map((p) => ({ ...p, status: freshness(p.date, 'POSITIONS') }));
+      .map((p) => ({ ...p, status: statusOf(p.date, 'POSITIONS') }));
     return HttpResponse.json<ListResponse<PnlPoint>>({ items });
   }),
 ];

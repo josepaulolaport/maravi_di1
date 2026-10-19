@@ -287,7 +287,7 @@ const notCancellable = () =>
     ),
   ]);
 
-/** A request's range and scope (OQ-21 draft: the scope is required). */
+/** A request's range and scope (OQ-21: the scope is required). */
 function requestErrors(start: unknown, end: unknown, scope: unknown): FieldError[] {
   const errors = rangeErrors(start, end);
   if (!SCOPES.includes(scope as ProcessingScope)) {

@@ -16,7 +16,7 @@ import type { LedgerEntry } from '../entries';
 
 // A key's root is the API area it reads (`@/api/queryRoots`): the cash strip reads the
 // portfolio summary under the same key Carteira uses, so a finished job refreshes both.
-export const ledgerKeys = {
+const ledgerKeys = {
   all: queryRoots.ledger,
   entries: (start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) =>
     [...queryRoots.ledger, 'entries', start, end, search, order] as const,
@@ -29,9 +29,9 @@ export const ledgerKeys = {
 };
 
 /** Days in the default range, ending today (São Paulo). */
-export const DEFAULT_RANGE_DAYS = 30;
+const DEFAULT_RANGE_DAYS = 30;
 
-export interface LedgerFilters {
+interface LedgerFilters {
   start: IsoDate;
   end: IsoDate;
   search: string;
@@ -86,7 +86,7 @@ export function useLedgerFilters(): LedgerFilters {
 }
 
 /** Entries per page of the list (P21); "Carregar mais" reads the next one. */
-export const LEDGER_PAGE_SIZE = 50;
+const LEDGER_PAGE_SIZE = 50;
 
 /**
  * The list, filtered and ordered by the backend (P18), read page by page (P21); `data.items`

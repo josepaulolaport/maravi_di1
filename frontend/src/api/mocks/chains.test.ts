@@ -319,7 +319,7 @@ describe('OQ-21 scope on requests, preview and Pendências', () => {
 
       expect(job).toMatchObject({ status: 'FAILED', error_code: 'CASH_PREDECESSOR_MISSING' });
       expect(job.error_message).toContain('17/10/2026');
-      // All or nothing: no day published, no Pendência raised.
+      // Refused at start: no date run, no Pendência raised.
       const summary = await portfolioApi.getSummary('2026-10-18');
       expect(summary.cash.status).toBe('NOT_PROCESSED');
       expect(summary.positions.status).toBe('NOT_PROCESSED');

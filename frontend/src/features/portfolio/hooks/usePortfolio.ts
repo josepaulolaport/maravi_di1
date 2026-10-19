@@ -7,7 +7,7 @@ import { portfolioApi } from '@/api/endpoints';
 import { queryRoots } from '@/api/queryRoots';
 import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
 
-export const portfolioKeys = {
+const portfolioKeys = {
   all: queryRoots.portfolio,
   summary: (date: IsoDate) => [...portfolioKeys.all, 'summary', date] as const,
   positions: (date: IsoDate) => [...portfolioKeys.all, 'positions', date] as const,
@@ -15,7 +15,7 @@ export const portfolioKeys = {
 };
 
 /** Default days of history in the cumulative P&L chart, ending on the selected date. */
-export const CHART_DAYS = 30;
+const CHART_DAYS = 30;
 
 export function usePortfolioSummary(date: IsoDate) {
   return useQuery({

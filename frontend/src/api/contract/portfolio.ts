@@ -21,7 +21,7 @@ export type AssetValuationStatus = CompletenessStatus | 'NOT_REQUIRED';
 export type Freshness =
   'FRESH' | 'FRESH_WITH_ISSUES' | 'STALE' | 'RUNNING' | 'FAILED' | 'NOT_PROCESSED';
 
-/** The cash chain of a date (OQ-21 draft): `portfolio.cash_balances`. */
+/** The cash chain of a date (OQ-21): `portfolio.cash_balances`. */
 export interface CashSummary {
   status: Freshness;
   /** `null` when not processed. */
@@ -39,7 +39,7 @@ export interface CashSummary {
   published_at: IsoDateTime | null;
 }
 
-/** The positions chain of a date (OQ-21 draft): valuation and P&L, `portfolio_metrics`. */
+/** The positions chain of a date (OQ-21): valuation and P&L, `portfolio_metrics`. */
 export interface PositionsSummary {
   status: Freshness;
   published_at: IsoDateTime | null;
@@ -54,7 +54,7 @@ export interface PositionsSummary {
   pnl_status: CompletenessStatus | null;
 }
 
-/** `GET /portfolio/summary?date=` (OQ-21 draft shape). */
+/** `GET /portfolio/summary?date=` (OQ-21). */
 export interface PortfolioSummary {
   date: IsoDate;
   cash: CashSummary;
@@ -95,7 +95,7 @@ export interface PositionRow {
 
 /**
  * `GET /portfolio/positions?date=` — rows and totals come from the same publication, with the
- * positions chain's freshness (OQ-21 draft). Not processed: no rows, no publication time.
+ * positions chain's freshness (OQ-21). Not processed: no rows, no publication time.
  */
 export interface PortfolioPositions {
   date: IsoDate;

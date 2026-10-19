@@ -7,17 +7,17 @@ import { invalidateAfterJobFinished, queryRoots } from '@/api/queryRoots';
 
 import { isActive, isFinal } from '../jobStatus';
 
-export const processingKeys = {
+const processingKeys = {
   all: queryRoots.processing,
   requests: () => [...processingKeys.all, 'requests'] as const,
   issues: () => [...processingKeys.all, 'issues'] as const,
 };
 
 /** How often the history is read while a job is active (§12). */
-export const POLL_INTERVAL_MS = 2_000;
+const POLL_INTERVAL_MS = 2_000;
 
 /** Jobs per page of the history (P21); "Carregar mais" reads the next one. */
-export const JOBS_PAGE_SIZE = 20;
+const JOBS_PAGE_SIZE = 20;
 
 export function useIssues() {
   return useQuery({ queryKey: processingKeys.issues(), queryFn: processingApi.listIssues });

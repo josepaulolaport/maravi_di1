@@ -4,13 +4,12 @@ import type { Freshness } from './portfolio';
 // Processing (spec §10, schema `processing.*`). Central de Controle (§11.1, OQ-20).
 
 /**
- * DRAFT (OQ-21, user 2026-10-18; names to align with lane X's interfaces.md): cash and
- * positions are two daily chains processed separately. A request processes the cash chain,
+ * Cash and positions are two daily chains processed separately (OQ-21). A request processes the cash chain,
  * the positions chain (quantities, averages, valuation and P&L) or both.
  */
 export type ProcessingScope = 'CASH' | 'POSITIONS' | 'ALL';
 
-/** One of the two daily chains (OQ-21 draft). */
+/** One of the two daily chains (OQ-21). */
 export type ProcessingChain = 'CASH' | 'POSITIONS';
 
 export type JobStatus =
@@ -56,7 +55,7 @@ export interface ProcessingRequest {
 export interface ProcessingRangeRequest {
   start_date: IsoDate;
   end_date: IsoDate;
-  /** Draft (OQ-21): required. */
+  /** Required (OQ-21). */
   scope: ProcessingScope;
 }
 
@@ -76,7 +75,7 @@ export interface ProcessingPreview {
   total_days: number;
   scope: ProcessingScope;
   predecessor_date: IsoDate;
-  /** Draft (OQ-21): the state of the day before the range, for each chain. */
+  /** The day before the range, for each chain of the scope (OQ-11, OQ-26). */
   predecessor: { cash: PredecessorState; positions: PredecessorState };
 }
 
@@ -100,7 +99,7 @@ export interface Issue {
   affected_date: IsoDate;
   /** For MISSING_REFERENCE_PRICE: the exact date whose price is needed ("Definir preço"). */
   required_price_date: IsoDate | null;
-  /** Draft (OQ-21): for STALE_PREDECESSOR, the chain whose day before is stale; else `null`. */
+  /** For STALE_PREDECESSOR, the chain whose day before is not current; else `null` (OQ-22). */
   chain: ProcessingChain | null;
   request_id: string;
 }

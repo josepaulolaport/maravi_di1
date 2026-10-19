@@ -2,7 +2,7 @@ import { Anchor, Breadcrumbs, Group, Stack, Text, Title } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
-export interface Crumb {
+interface Crumb {
   label: string;
   /** Omitted for the current page, the last crumb. */
   to?: string;

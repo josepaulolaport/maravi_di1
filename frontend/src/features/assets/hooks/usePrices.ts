@@ -6,7 +6,7 @@ import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
 
 // Reference prices (spec §5) read and written from the contract page. Keys live under the
 // prices API area, so any price write elsewhere (Pendências "Definir preço") refreshes them.
-export const priceKeys = {
+const priceKeys = {
   all: queryRoots.prices,
   days: (assetId: string, start: IsoDate, end: IsoDate) =>
     [...priceKeys.all, 'reference-prices', assetId, start, end] as const,

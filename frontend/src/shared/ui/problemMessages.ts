@@ -1,8 +1,7 @@
 import { ApiError } from '@/api/http';
 
 /**
- * The pt-BR messages of a failed request (RFC 9457 problem+json, OQ-15), for a dialog or a
- * drawer. A form that shows a field's message on its own input (the first one, as
+ * The pt-BR messages of a failed request (RFC 9457 problem+json, OQ-15), for a modal. A form that shows a field's message on its own input (the first one, as
  * `ApiError.fieldErrors()` keeps) names that field in `shownOnFields`; that message is left
  * out here, and any further message for the field stays, so none is lost.
  */

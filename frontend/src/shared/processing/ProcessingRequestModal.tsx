@@ -29,7 +29,7 @@ interface ProcessingRequestModalProps {
 }
 
 /**
- * "Solicitar processamento" in place (§10.1, OQ-21 draft): the range and scope, prefilled and
+ * "Solicitar processamento" in place (§10.1, OQ-21): the range and scope, prefilled and
  * editable, previewed as they change, then queued. The job is followed in Processamentos.
  */
 export function ProcessingRequestModal({ draft, onClose, today }: ProcessingRequestModalProps) {

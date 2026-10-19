@@ -23,7 +23,7 @@ export function nowInSaoPaulo(now: Date = new Date()): string {
 /** `HH:MM` from the time input → the API's `HH:MM:SS`. */
 export const toIsoTime = (value: string): IsoTime => (value.length === 5 ? `${value}:00` : value);
 
-export interface SplitErrors {
+interface SplitErrors {
   /** Messages keyed by form field. */
   fields: Record<string, string>;
   /** Messages shown above the form: no field, or a field the form does not have. */

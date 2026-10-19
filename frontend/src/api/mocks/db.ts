@@ -13,11 +13,9 @@ type PerChain<T> = Record<ProcessingChain, T>;
 /** A chain's status on a date; `null` is Não processado. */
 export type ChainStatus = Exclude<Freshness, 'NOT_PROCESSED'> | null;
 
-export interface DateStatus {
+interface DateStatus {
   CASH: ChainStatus;
   POSITIONS: ChainStatus;
-  /** A chain's status before it became RUNNING, put back if the date is not committed (OQ-26). */
-  previous: PerChain<ChainStatus>;
 }
 
 /**
@@ -38,7 +36,6 @@ function seedStatuses(): Map<string, DateStatus> {
     statuses.set(date, {
       CASH: at('CASH', 'FRESH'),
       POSITIONS: at('POSITIONS', incomplete ? 'FRESH_WITH_ISSUES' : 'FRESH'),
-      previous: { CASH: null, POSITIONS: null },
     });
   }
   return statuses;
@@ -107,22 +104,15 @@ export function statusOf(date: string, chain: ProcessingChain): Freshness {
   return db.dateStatus.get(date)?.[chain] ?? 'NOT_PROCESSED';
 }
 
-/** Sets a chain's status on a date, keeping what it was when it becomes RUNNING (OQ-26). */
+/**
+ * Sets a chain's status on a date. The fake never leaves a date RUNNING without committing it
+ * (a cancel lets the current date commit; a failure sets it FAILED), so unlike the backend it
+ * keeps no earlier status to put back (OQ-26 item 4).
+ */
 export function setStatus(date: string, chain: ProcessingChain, status: ChainStatus): void {
-  const row = db.dateStatus.get(date) ?? {
-    CASH: null,
-    POSITIONS: null,
-    previous: { CASH: null, POSITIONS: null },
-  };
-  if (status === 'RUNNING') row.previous[chain] = row[chain];
+  const row = db.dateStatus.get(date) ?? { CASH: null, POSITIONS: null };
   row[chain] = status;
   db.dateStatus.set(date, row);
-}
-
-/** Puts back what a chain's date was before a run that did not commit it (OQ-26 item 4). */
-export function restoreStatus(date: string, chain: ProcessingChain): void {
-  const row = db.dateStatus.get(date);
-  if (row?.[chain] === 'RUNNING') row[chain] = row.previous[chain];
 }
 
 /**
@@ -138,16 +128,15 @@ const CHAINS_OF_WRITE = {
 /**
  * A write dated `date` marks its chains STALE on every date ≥ `date` that already has a
  * status, in the same step (OQ-23 item 3); dates without a status stay Não processado. A date
- * being processed keeps RUNNING, and the status it will go back to becomes STALE (OQ-26).
+ * being processed stays RUNNING: its commit sets its status.
  */
-export function markDirty(write: keyof typeof CHAINS_OF_WRITE, date: string): void {
+export function markStale(write: keyof typeof CHAINS_OF_WRITE, date: string): void {
   for (const chain of CHAINS_OF_WRITE[write]) {
     const changed = db.changedFrom[chain];
     if (changed === null || date < changed) db.changedFrom[chain] = date;
     for (const [day, row] of db.dateStatus) {
-      if (day < date || row[chain] === null) continue;
-      if (row[chain] === 'RUNNING') row.previous[chain] = 'STALE';
-      else row[chain] = 'STALE';
+      if (day < date || row[chain] === null || row[chain] === 'RUNNING') continue;
+      row[chain] = 'STALE';
     }
   }
 }

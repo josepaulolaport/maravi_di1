@@ -1,7 +1,7 @@
 import type { IsoDate } from '@/api/contract';
 import type { ProcessingDraft } from '@/shared/processing/ProcessingRequestModal';
 
-// What the Lançamentos "Processar" buttons prefill (user, 2026-10-18; OQ-21 draft). The user
+// What the Lançamentos "Processar" buttons prefill (user, 2026-10-18; OQ-21). The user
 // dropped GET /processing/outdated (P19), so nothing here asks which days are behind: the
 // dates are the period's, or the strip's own D−1 / D0.
 

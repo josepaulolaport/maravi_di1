@@ -871,7 +871,7 @@ describe('Lançamentos (§11.3)', () => {
     });
   });
 
-  describe('Processar (OQ-21 draft, user 2026-10-18)', () => {
+  describe('Processar (OQ-21, user 2026-10-18)', () => {
     async function openProcessar(user: ReturnType<typeof renderApp>['user']) {
       await user.click(screen.getByRole('button', { name: 'Processar' }));
       return within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));

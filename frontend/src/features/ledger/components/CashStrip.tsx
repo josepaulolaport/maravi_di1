@@ -8,7 +8,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { useCashSummary } from '../hooks/useLedger';
 
-// OQ-19 item 3, amended by OQ-21 (draft): Caixa D0 is the published cash on the range's end
+// OQ-19 item 3, amended by OQ-21: Caixa D0 is the published cash on the range's end
 // date, Caixa D−1 the one on the day before, each read from the cash chain of the portfolio
 // summary with its own freshness, apart from positions. Nothing is computed from the rows.
 

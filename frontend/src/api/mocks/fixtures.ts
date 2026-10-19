@@ -225,11 +225,9 @@ export const referencePrices: ReferencePrice[] = [
 export const FIRST_ENTRY_DATE = '2026-10-14';
 
 /**
- * Dirty markers (`processing.calculation_state`), one set per chain (OQ-21 draft): `cash` for
- * the cash chain; `accounting` and `valuation` for the positions chain. The seed has only the
- * 16/10 price correction, which affects positions, never cash.
+ * Per chain, the first seed date that reads stale (OQ-23): the 16/10 price was corrected after
+ * publication, which affects positions, never cash.
  */
-/** Per chain, the first seed date that reads stale: the 16/10 price was corrected after publication. */
 export const seedStaleFrom: Record<'CASH' | 'POSITIONS', string | null> = {
   CASH: null,
   POSITIONS: '2026-10-16',
@@ -238,13 +236,12 @@ export const seedStaleFrom: Record<'CASH' | 'POSITIONS', string | null> = {
 const PUBLISHED_AT = '2026-10-16T18:40:00-03:00';
 
 /**
- * One published day of the seed, for both chains (OQ-21 draft): the handlers serve its cash
+ * One published day of the seed, for both chains (OQ-21): the handlers serve its cash
  * (`cash_balance`, the cash chain) and the rest (the positions chain) separately. `aum` is
  * the scenario's cash + market value, served only when both chains are published.
  */
-export interface SeedSummary {
+interface SeedSummary {
   date: string;
-  publication: 'PUBLISHED';
   published_at: string;
   cash_balance: Decimal;
   /** The day's cash components (OQ-21): −Σ(signed_qty × execution_PU), deposits, withdrawals. */
@@ -261,19 +258,17 @@ export interface SeedSummary {
   pnl_status: CompletenessStatus;
 }
 
-/** A published positions day of the seed; the handlers add its freshness. */
+/** A published positions day of the seed; the handlers add its date status. */
 interface PublishedPositions {
   date: string;
-  publication: 'PUBLISHED';
   published_at: string;
   items: PortfolioPositions['items'];
 }
 
-/** Published days of the seed; freshness is set by the handlers from the dirty markers. */
+/** Published days of the seed; their date status comes from `db.dateStatus` (OQ-23). */
 export const summaries: SeedSummary[] = [
   {
     date: '2026-10-14',
-    publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     cash_balance: '609935.3745326500',
     trades_cash_flow: '-890064.6254673500',
@@ -290,7 +285,6 @@ export const summaries: SeedSummary[] = [
   },
   {
     date: '2026-10-15',
-    publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     cash_balance: '199650.3745326500',
     trades_cash_flow: '-410285.00',
@@ -307,7 +301,6 @@ export const summaries: SeedSummary[] = [
   },
   {
     date: '2026-10-16',
-    publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     cash_balance: '506059.2651460232',
     trades_cash_flow: '356408.8906133732',
@@ -327,7 +320,6 @@ export const summaries: SeedSummary[] = [
 export const positions: PublishedPositions[] = [
   {
     date: '2026-10-14',
-    publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     items: [
       {
@@ -351,7 +343,6 @@ export const positions: PublishedPositions[] = [
   },
   {
     date: '2026-10-15',
-    publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     items: [
       {
@@ -392,7 +383,6 @@ export const positions: PublishedPositions[] = [
   },
   {
     date: '2026-10-16',
-    publication: 'PUBLISHED',
     published_at: PUBLISHED_AT,
     items: [
       {
@@ -435,7 +425,7 @@ export const positions: PublishedPositions[] = [
   },
 ];
 
-/** `stale` is set by the handlers. */
+/** The P&L series of the seed; each point's `status` comes from `db.dateStatus` (OQ-23). */
 export const pnlSeries: Omit<PnlPoint, 'status'>[] = [
   {
     date: '2026-10-14',
@@ -492,7 +482,6 @@ export function dayWithoutInputs(date: string): RecalculatedDay {
   return {
     summary: {
       date,
-      publication: 'PUBLISHED',
       published_at: PUBLISHED_AT,
       cash_balance: '506059.2651460232',
       trades_cash_flow: '0.0000000000',
@@ -509,7 +498,6 @@ export function dayWithoutInputs(date: string): RecalculatedDay {
     },
     positions: {
       date,
-      publication: 'PUBLISHED',
       published_at: PUBLISHED_AT,
       items: [
         unpricedRow(IDS.di1f28, 'DI1F28', '2028-01-03', 6, DI1F28_AVERAGES),
@@ -532,7 +520,6 @@ export const recalculatedDays: Record<string, RecalculatedDay> = {
   '2026-10-16': {
     summary: {
       date: '2026-10-16',
-      publication: 'PUBLISHED',
       published_at: PUBLISHED_AT,
       cash_balance: '506059.2651460232',
       trades_cash_flow: '356408.8906133732',
@@ -549,7 +536,6 @@ export const recalculatedDays: Record<string, RecalculatedDay> = {
     },
     positions: {
       date: '2026-10-16',
-      publication: 'PUBLISHED',
       published_at: PUBLISHED_AT,
       items: [
         {
@@ -585,7 +571,6 @@ export function zeroStateDay(date: string): RecalculatedDay {
   return {
     summary: {
       date,
-      publication: 'PUBLISHED',
       published_at: PUBLISHED_AT,
       cash_balance: '0',
       trades_cash_flow: '0.0000000000',
@@ -600,7 +585,7 @@ export function zeroStateDay(date: string): RecalculatedDay {
       valuation_status: 'COMPLETE',
       pnl_status: 'COMPLETE',
     },
-    positions: { date, publication: 'PUBLISHED', published_at: PUBLISHED_AT, items: [] },
+    positions: { date, published_at: PUBLISHED_AT, items: [] },
     pnl: { date, daily_pnl: '0', cumulative_pnl: '0', pnl_status: 'COMPLETE' },
   };
 }

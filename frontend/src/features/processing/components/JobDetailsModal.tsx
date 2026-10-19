@@ -15,7 +15,7 @@ import type { JobActions } from './HistoryTable';
  * What a cancelled or failed run left published (OQ-23): every date up to its last commit
  * stays; later dates were not processed.
  */
-export function publishedNotice(job: ProcessingRequest): string {
+function publishedNotice(job: ProcessingRequest): string {
   if (job.progress_date === null) {
     return 'Nenhuma data deste processamento foi publicada; os resultados anteriores permanecem inalterados.';
   }

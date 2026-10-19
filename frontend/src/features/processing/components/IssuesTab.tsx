@@ -144,7 +144,7 @@ export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
   );
 }
 
-/** STALE_PREDECESSOR says which chain is behind (OQ-21 draft); the other types do not. */
+/** STALE_PREDECESSOR says which chain is behind (OQ-21); the other types do not. */
 const CHAIN_SUFFIX = { CASH: ' (caixa)', POSITIONS: ' (posições)' } as const;
 
 function IssueRow({ issue }: { issue: Issue }) {

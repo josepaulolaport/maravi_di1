@@ -17,7 +17,7 @@ interface ConfirmProcessingModalProps {
 }
 
 /**
- * "Confirmar processamento" (§10.1, OQ-11, OQ-21 draft): exactly [A, B], its days, its scope
+ * "Confirmar processamento" (§10.1, OQ-11, OQ-21): exactly [A, B], its days, its scope
  * and the state before it for each chain in scope.
  */
 export function ConfirmProcessingModal({ range, onClose, onQueued }: ConfirmProcessingModalProps) {
