@@ -41,7 +41,7 @@ const trade = (date: string) =>
   });
 
 describe('OQ-21 the summary keeps cash, positions and AUM apart', () => {
-  it('§8.2 a fully published day: cash and positions fresh, AUM fresh with its value', async () => {
+  it('§8.2 a fully published day: cash and positions fresh, AUM with its value', async () => {
     const summary = await portfolioApi.getSummary('2026-10-15');
 
     expect(summary).toMatchObject({
@@ -57,19 +57,19 @@ describe('OQ-21 the summary keeps cash, positions and AUM apart', () => {
         cumulative_pnl: '-8034.1345282660',
         pnl_status: 'COMPLETE',
       },
-      aum: { status: 'FRESH', value: '1491965.8654717340' },
+      aum: '1491965.8654717340',
     });
   });
 
-  it('§10.4 a corrected price makes positions stale and AUM stale, never the cash', async () => {
+  it('§10.4 a corrected price makes positions stale, never the cash', async () => {
     const summary = await portfolioApi.getSummary('2026-10-16');
 
     expect(summary.cash).toMatchObject({ status: 'FRESH', balance: '506059.2651460232' });
     expect(summary.positions.status).toBe('STALE');
-    expect(summary.aum).toEqual({ status: 'STALE', value: null });
+    expect(summary.aum).toBeNull();
   });
 
-  it('§12 D3 a day never processed: both chains and AUM unprocessed, every figure null', async () => {
+  it('§12 D3 a day never processed: both chains unprocessed, every figure null, AUM included', async () => {
     const summary = await portfolioApi.getSummary('2026-10-17');
 
     expect(summary.cash).toMatchObject({
@@ -78,7 +78,7 @@ describe('OQ-21 the summary keeps cash, positions and AUM apart', () => {
       published_at: null,
     });
     expect(summary.positions).toMatchObject({ status: 'NOT_PROCESSED', market_value: null });
-    expect(summary.aum).toEqual({ status: 'NOT_PROCESSED', value: null });
+    expect(summary.aum).toBeNull();
   });
 });
 
@@ -126,7 +126,6 @@ describe('OQ-21 a write marks stale only the chains it changes', () => {
     const summary = await portfolioApi.getSummary('2026-10-15');
     expect(summary.cash.status).toBe('STALE');
     expect(summary.positions.status).toBe('FRESH');
-    expect(summary.aum.status).toBe('STALE');
     expect((await portfolioApi.getSummary('2026-10-14')).cash.status).toBe('FRESH');
   });
 
@@ -159,7 +158,7 @@ describe('OQ-21 a job publishes only its scope', () => {
     const summary = await portfolioApi.getSummary('2026-10-18');
     expect(summary.cash).toMatchObject({ status: 'FRESH', balance: '506059.2651460232' });
     expect(summary.positions.status).toBe('NOT_PROCESSED');
-    expect(summary.aum).toEqual({ status: 'NOT_PROCESSED', value: null });
+    expect(summary.aum).toBeNull();
     expect((await portfolioApi.getPositions('2026-10-18')).status).toBe('NOT_PROCESSED');
   });
 
@@ -186,7 +185,7 @@ describe('OQ-21 a job publishes only its scope', () => {
     const summary = await portfolioApi.getSummary('2026-10-18');
     expect(summary.cash.status).toBe('FRESH');
     expect(summary.positions.status).toBe('FRESH_WITH_ISSUES');
-    expect(summary.aum).toEqual({ status: 'FRESH_WITH_ISSUES', value: null });
+    expect(summary.aum).toBeNull();
   });
 
   it('OQ-23 a CASH run writes only the cash status: positions stay stale', async () => {
@@ -195,7 +194,6 @@ describe('OQ-21 a job publishes only its scope', () => {
     const summary = await portfolioApi.getSummary('2026-10-16');
     expect(summary.cash.status).toBe('FRESH');
     expect(summary.positions.status).toBe('STALE');
-    expect(summary.aum.status).toBe('STALE');
   });
 
   it('§10.4 a deposit does not stop a POSITIONS job; it fails a CASH job (fake backend)', async () => {

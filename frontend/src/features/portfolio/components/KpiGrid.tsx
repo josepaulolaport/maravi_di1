@@ -35,7 +35,7 @@ export function KpiGrid({ summary }: { summary: PortfolioSummary }) {
         <Money value={cash.balance} />
       </Kpi>
       <Kpi label="Patrimônio total">
-        <Money value={aum.value} />
+        <Money value={aum} />
       </Kpi>
       <Kpi label="P&L diário">
         <SignedMoney value={positions.daily_pnl} />

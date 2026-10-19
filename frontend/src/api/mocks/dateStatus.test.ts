@@ -31,8 +31,8 @@ const enqueue = (start: string, end: string, scope: ProcessingScope) =>
   processingApi.enqueue({ start_date: start, end_date: end, scope });
 
 async function status(date: string) {
-  const { cash, positions, aum } = await portfolioApi.getSummary(date);
-  return { cash: cash.status, positions: positions.status, aum: aum.status };
+  const { cash, positions } = await portfolioApi.getSummary(date);
+  return { cash: cash.status, positions: positions.status };
 }
 
 const deposit = (date: string) =>
@@ -62,14 +62,14 @@ describe('OQ-23 the run (eight statuses, per-date progress)', () => {
     expect(await polls(job, 2)).toMatchObject({ status: 'RUNNING', progress_date: null });
     expect(await status('2026-10-14')).toMatchObject({ cash: 'RUNNING', positions: 'RUNNING' });
     expect(await polls(job, 1)).toMatchObject({ status: 'RUNNING', progress_date: '2026-10-14' });
-    expect(await status('2026-10-14')).toEqual({ cash: 'FRESH', positions: 'FRESH', aum: 'FRESH' });
+    expect(await status('2026-10-14')).toEqual({ cash: 'FRESH', positions: 'FRESH' });
     expect(await status('2026-10-15')).toMatchObject({ cash: 'RUNNING', positions: 'RUNNING' });
 
     expect(await finish(job)).toMatchObject({
       status: 'COMPLETED',
       progress_date: '2026-10-15',
     });
-    expect(await status('2026-10-15')).toEqual({ cash: 'FRESH', positions: 'FRESH', aum: 'FRESH' });
+    expect(await status('2026-10-15')).toEqual({ cash: 'FRESH', positions: 'FRESH' });
   });
 
   it('OQ-23 a cancel keeps the dates committed, the current one included; later dates are untouched', async () => {
@@ -155,7 +155,6 @@ describe('OQ-23 the status of a date, per chain', () => {
     expect(await status('2026-10-16')).toEqual({
       cash: 'FRESH',
       positions: 'FRESH_WITH_ISSUES',
-      aum: 'FRESH_WITH_ISSUES',
     });
   });
 
@@ -205,13 +204,12 @@ describe('OQ-23 the status of a date, per chain', () => {
     expect(afterDeposit.predecessor).toEqual({ cash: 'NOT_PROCESSED', positions: 'ZERO_STATE' });
   });
 
-  it('OQ-26 AUM takes the less current side', async () => {
-    expect(await status('2026-10-16')).toMatchObject({
-      cash: 'FRESH',
-      positions: 'STALE',
-      aum: 'STALE',
-    });
-    expect((await status('2026-10-17')).aum).toBe('NOT_PROCESSED');
+  it('§8.2 AUM has no status of its own: it is the value, null when either side is missing', async () => {
+    const complete = await portfolioApi.getSummary('2026-10-15');
+    const noPositions = await portfolioApi.getSummary('2026-10-17');
+
+    expect(complete.aum).toBe('1491965.8654717340');
+    expect(noPositions.aum).toBeNull();
   });
 
   it('OQ-23 a trade on a processed date makes both chains stale there', async () => {
@@ -225,6 +223,6 @@ describe('OQ-23 the status of a date, per chain', () => {
       execution_pu: '89000.00',
     });
 
-    expect(await status('2026-10-15')).toEqual({ cash: 'STALE', positions: 'STALE', aum: 'STALE' });
+    expect(await status('2026-10-15')).toEqual({ cash: 'STALE', positions: 'STALE' });
   });
 });

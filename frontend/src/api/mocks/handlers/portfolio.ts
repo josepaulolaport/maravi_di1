@@ -22,21 +22,6 @@ function dateParam(request: Request) {
 
 const freshness = (date: string, chain: ProcessingChain): Freshness => statusOf(date, chain);
 
-/** From the least current to the most (OQ-26 item 8: AUM takes the less current side). */
-const CURRENCY: readonly Freshness[] = [
-  'NOT_PROCESSED',
-  'FAILED',
-  'STALE',
-  'RUNNING',
-  'FRESH_WITH_ISSUES',
-  'FRESH',
-];
-
-/** AUM is as current as its less current side, and unavailable when either side is. */
-function aumFreshness(cash: Freshness, positions: Freshness): Freshness {
-  return CURRENCY.indexOf(cash) <= CURRENCY.indexOf(positions) ? cash : positions;
-}
-
 export function summaryOf(date: string): PortfolioSummary {
   const cash = db.published.cash.get(date);
   const positions = db.published.summaries.get(date);
@@ -63,11 +48,8 @@ export function summaryOf(date: string): PortfolioSummary {
       cumulative_pnl: positions?.cumulative_pnl ?? null,
       pnl_status: positions?.pnl_status ?? null,
     },
-    aum: {
-      status: aumFreshness(cashStatus, positionsStatus),
-      // The scenario's cash + market value, only while both sides are published.
-      value: cash && positions ? positions.aum : null,
-    },
+    // The scenario's cash + market value, only while both sides are published.
+    aum: cash && positions ? positions.aum : null,
   };
 }
 

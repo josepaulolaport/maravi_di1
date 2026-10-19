@@ -54,21 +54,17 @@ export interface PositionsSummary {
   pnl_status: CompletenessStatus | null;
 }
 
-/**
- * AUM = cash + market value (§8.2), where the two chains meet (OQ-21): `null` when either side
- * is missing; its status is the less current of the two (OQ-26 item 8).
- */
-export interface AumSummary {
-  status: Freshness;
-  value: Decimal | null;
-}
-
 /** `GET /portfolio/summary?date=` (OQ-21 draft shape). */
 export interface PortfolioSummary {
   date: IsoDate;
   cash: CashSummary;
   positions: PositionsSummary;
-  aum: AumSummary;
+  /**
+   * AUM = cash + market value (§8.2), where the two chains meet (OQ-21): `null` when either
+   * side is missing. It has no status of its own (user, 2026-10-19): the Caixa and Posições
+   * badges tell how current its two sides are.
+   */
+  aum: Decimal | null;
 }
 
 /** One row of the positions table: an expected asset on the date (OQ-10). */

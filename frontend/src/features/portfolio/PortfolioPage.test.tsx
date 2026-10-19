@@ -47,7 +47,7 @@ function rowOf(assetCode: string) {
 interface SummaryChanges {
   cash?: Partial<PortfolioSummary['cash']>;
   positions?: Partial<PortfolioSummary['positions']>;
-  aum?: Partial<PortfolioSummary['aum']>;
+  aum?: PortfolioSummary['aum'];
 }
 
 /**
@@ -63,7 +63,7 @@ function override15(changes: SummaryChanges, positionsChanges: Partial<Portfolio
         ...summary,
         cash: { ...summary.cash, ...changes.cash },
         positions: { ...summary.positions, ...changes.positions },
-        aum: { ...summary.aum, ...changes.aum },
+        aum: changes.aum === undefined ? summary.aum : changes.aum,
       };
       return HttpResponse.json(body);
     }),
@@ -178,7 +178,7 @@ describe('Carteira (§11.4)', () => {
   });
 
   it('§11.4 OQ-21 stale cash shows on the Caixa badge; positions stay current', async () => {
-    override15({ cash: { status: 'STALE' }, aum: { status: 'STALE' } });
+    override15({ cash: { status: 'STALE' } });
     await openCarteira('2026-10-15');
 
     expectNoCard();
@@ -204,7 +204,6 @@ describe('Carteira (§11.4)', () => {
     override15({
       cash: { status: 'STALE' },
       positions: { status: 'STALE' },
-      aum: { status: 'STALE' },
     });
     await openCarteira('2026-10-15');
 
@@ -226,7 +225,7 @@ describe('Carteira (§11.4)', () => {
           cumulative_pnl: null,
           pnl_status: null,
         },
-        aum: { status: 'NOT_PROCESSED', value: null },
+        aum: null,
       },
       { status: 'NOT_PROCESSED', published_at: null, items: [] },
     );
@@ -333,7 +332,7 @@ describe('Carteira (§11.4)', () => {
     expect(router.state.location.search).toBe(`?date=${todayInSaoPaulo()}`);
   });
   it('§10.4 a stale but complete day: the Posições badge only', async () => {
-    override15({ positions: { status: 'STALE' }, aum: { status: 'STALE' } }, { status: 'STALE' });
+    override15({ positions: { status: 'STALE' } }, { status: 'STALE' });
     await openCarteira('2026-10-15');
 
     expectNoCard();

@@ -27,7 +27,7 @@ function flat(summary: PortfolioSummary) {
     published_at: summary.positions.published_at,
     cash_balance: summary.cash.balance,
     positions_market_value: summary.positions.market_value,
-    aum: summary.aum.value,
+    aum: summary.aum,
     position_pnl: summary.positions.position_pnl,
     trades_pnl: summary.positions.trades_pnl,
     daily_pnl: summary.positions.daily_pnl,
