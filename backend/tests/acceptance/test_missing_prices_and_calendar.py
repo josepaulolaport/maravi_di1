@@ -12,14 +12,13 @@ import pytest
 
 from di1.modules.pnl.public import CalculationCompleteness, MissingReferencePrice
 from di1.modules.portfolio.public import (
-    AccountingState,
-    AssetValuationInput,
-    PortfolioAccounting,
-    ReferenceSource,
-    ValuationCalculator,
+    CashBalance,
+    CashCalculator,
+    PositionsEngine,
+    PositionState,
     ValuationStatus,
 )
-from tests.acceptance.harness import DI1F28, DI1F29, MATURITIES, Facts, run, trade
+from tests.acceptance.harness import DI1F28, DI1F29, Facts, run, run_positions, trade
 
 FRIDAY = date(2027, 1, 8)
 SATURDAY = date(2027, 1, 9)
@@ -47,14 +46,17 @@ def test_every_calendar_day_is_processed_weekends_included() -> None:
 
 
 def test_a_day_cannot_be_skipped() -> None:
-    friday = PortfolioAccounting().calculate_day(
-        AccountingState.zero(date(2027, 1, 7)), [], Decimal(0), Decimal(0), FRIDAY
+    # Each chain starts D from the close of D−1: neither accepts Friday's close for Sunday.
+    thursday = date(2027, 1, 7)
+    positions = PositionsEngine().calculate_day(PositionState.zero(thursday), [], FRIDAY)
+    cash = CashCalculator().calculate_day(
+        CashBalance.zero(thursday), [], Decimal(0), Decimal(0), FRIDAY
     )
 
     with pytest.raises(ValueError, match="the previous state must be of 2027-01-09"):
-        PortfolioAccounting().calculate_day(
-            friday.closing_state(), [], Decimal(0), Decimal(0), SUNDAY
-        )
+        PositionsEngine().calculate_day(positions.closing_state(), [], SUNDAY)
+    with pytest.raises(ValueError, match="the previous state must be of 2027-01-09"):
+        CashCalculator().calculate_day(cash.closing_balance(), [], Decimal(0), Decimal(0), SUNDAY)
 
 
 def test_no_price_on_saturday_leaves_dependent_figures_null() -> None:
@@ -63,13 +65,13 @@ def test_no_price_on_saturday_leaves_dependent_figures_null() -> None:
     # Quantity, average cost and cash are still computed (§8.3).
     assert saturday.position(DI1F28).quantity == 2
     assert saturday.position(DI1F28).average_entry_pu == Decimal("90000")
-    assert saturday.accounting.cash_balance == Decimal("-180000")
+    assert saturday.cash.cash_balance == Decimal("-180000")
     # No carry-forward of Friday's 90100: the figures are null, never zero (§5, §8.3).
     assert saturday.valued(DI1F28).reference_pu is None
     assert saturday.valued(DI1F28).financial_total is None
     assert saturday.valued(DI1F28).status is ValuationStatus.MISSING
     assert saturday.valuation.positions_market_value is None
-    assert saturday.valuation.aum is None
+    assert saturday.aum is None
     assert saturday.asset_pnl[DI1F28].position_pnl is None
     assert saturday.asset_pnl[DI1F28].missing_prices == {MissingReferencePrice.CURRENT}
     assert saturday.pnl.daily_pnl is None
@@ -85,7 +87,7 @@ def test_missing_previous_price_blocks_position_pnl_but_not_market_value() -> No
     assert sunday.asset_pnl[DI1F28].missing_prices == {MissingReferencePrice.PREVIOUS}
     # Sunday's own price values the position: 2 × 90300 = 180600; AUM = −180000 + 180600.
     assert sunday.valued(DI1F28).financial_total == Decimal("180600")
-    assert sunday.valuation.aum == Decimal("600")
+    assert sunday.aum == Decimal("600")
     assert sunday.pnl.daily_pnl is None
 
 
@@ -101,10 +103,10 @@ def test_both_prices_missing() -> None:
     }
     assert sunday.asset_pnl[DI1F28].position_pnl is None
     assert sunday.valued(DI1F28).financial_total is None
-    assert sunday.valuation.aum is None
+    assert sunday.aum is None
     assert sunday.pnl.daily_pnl is None
     assert sunday.position(DI1F28).quantity == 2
-    assert sunday.accounting.cash_balance == Decimal("-180000")
+    assert sunday.cash.cash_balance == Decimal("-180000")
 
 
 def test_cumulative_pnl_stays_unavailable_from_the_first_gap() -> None:
@@ -159,7 +161,7 @@ def test_same_day_round_trip_needs_the_day_price() -> None:
     assert without_price.position(DI1F28).quantity == 0
     assert without_price.valued(DI1F28).financial_total == 0
     assert without_price.valued(DI1F28).status is ValuationStatus.NOT_REQUIRED
-    assert without_price.valuation.aum == Decimal("300")  # cash 90300 − 90000
+    assert without_price.aum == Decimal("300")  # cash 90300 − 90000
     # ... but its trades P&L is not computable without the day's price (§8.3).
     assert without_price.pnl.trades_pnl is None
     assert without_price.pnl.status is CalculationCompleteness.MISSING
@@ -191,21 +193,17 @@ def test_day_without_expected_asset() -> None:
     assert wednesday.pnl.status is CalculationCompleteness.COMPLETE
     assert wednesday.pnl.cumulative_pnl == Decimal("250")  # carried forward (OQ-22)
     assert wednesday.valuation.positions_market_value == 0
-    assert wednesday.valuation.aum == wednesday.accounting.cash_balance == Decimal("250")
+    assert wednesday.aum == wednesday.cash.cash_balance == Decimal("250")
 
 
 def test_aum_is_null_without_a_cash_balance() -> None:
     # The positions chain alone, with the cash chain not processed on the date (OQ-21, OQ-38):
     # the market value is published and AUM is null.
-    valuation = ValuationCalculator().calculate_day(
-        FRIDAY,
-        [
-            AssetValuationInput(
-                DI1F28, 1, MATURITIES[DI1F28], Decimal("90100"), ReferenceSource.MANUAL
-            )
-        ],
-        cash_balance=None,
+    facts = Facts(
+        trades=[trade(DI1F28, FRIDAY, 1, "90000")], prices={(DI1F28, FRIDAY): Decimal("90100")}
     )
 
-    assert valuation.positions_market_value == Decimal("90100")
-    assert valuation.aum is None
+    friday = run_positions(facts, FRIDAY, FRIDAY)[FRIDAY]
+
+    assert friday.valuation.positions_market_value == Decimal("90100")
+    assert friday.aum is None
