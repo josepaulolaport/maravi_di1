@@ -70,7 +70,7 @@ frontend/src/
     - cancel a job; cancelling and queuing a new request are separate actions, with no "Cancelar e criar novo processamento" (OQ-30);
     - publication is per date (OQ-23): a cancelled or failed job keeps the dates it committed, and later dates are untouched; it offers "Solicitar novo processamento", prefilled from the failed date, or the first date not reached, to the original end;
     - the job details show `error_code`/`error_message` on Falhou and also on Concluído com pendências, where they are set when one chain of a Tudo job failed and the other reached the end, and on Cancelado when a Tudo job is cancelled after one chain failed (OQ-36);
-    - a Concluído com pendências job where a chain failed also offers "Solicitar novo processamento", prefilled with the failed chain's scope (Caixa or Posições, from `failed_chain`) from `failed_date` to the original end; the job details show `failed_date` and `failed_chain` (OQ-40);
+    - a Concluído com pendências or Cancelado ALL job where a chain failed also offers "Solicitar novo processamento", prefilled with the failed chain's scope (Caixa or Posições, from `failed_chain`) from `failed_date` to the original end; on Cancelado, the plain retry from the first date not reached stays available too; the job details show `failed_date` and `failed_chain` (OQ-40 items 3 and 6);
     - finished and cancelled jobs stay in the history; no "Motivo" column, no duplicate blocking.
   - No financial KPIs on this screen.
 - **Ativos:**
