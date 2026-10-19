@@ -341,6 +341,7 @@ Duas abas: **Pendências** e **Processamentos**.
 - Seleção de **uma data**; consulta a posições e métricas anteriormente publicadas, sem recalcular no GET.
 - Indicadores: **Saldo em caixa**, **AUM/Patrimônio**, **P&L diário**, **P&L de posições** e **P&L de operações**.
 - **Gráfico compacto de P&L acumulado** no nível da carteira, somente onde houver histórico completo e válido.
+- O gráfico termina sempre na data selecionada da Carteira (mesma publicação dos indicadores); o usuário escolhe apenas a **data inicial**, anterior a essa data. Padrão: os 30 dias corridos que terminam na data. A data inicial fica na URL (`?pnl_start=`); valor inválido é ignorado (OQ-27).
 - Tabela de posições consolida: ativo, vencimento, quantidade, PU médio, taxa média, PU de referência, taxa de referência (quando disponível), **valor de mercado** (`financial_total`), P&L posições e P&L operações.
 - Os resultados por ativo e o total do portfólio derivam da mesma publicação coerente; não juntar preço novo com P&L velho.
 - Exibir claramente métricas ausentes/incompletas ou desatualizadas; oferecer caminho contextual para Pendências ou Processamentos.
@@ -356,7 +357,7 @@ Duas abas: **Pendências** e **Processamentos**.
 - **Paginação** (usuário, 18/10/2026): listas paginadas recebem `?limit=&cursor=` e devolvem `{items, next_cursor}`, com cursor por chave: `(data, hora, seq)` para lançamentos e `(created_at, id)` para processamentos.
 - Lançamentos usam uma única rota para os dois tipos, que substitui as rotas separadas de operações e de movimentações; a exclusão múltipla é um único pedido com a lista de ids (OQ-24).
 - **Erros** (OQ-15) seguem `application/problem+json` (RFC 9457) com `errors: [{code, message, field}]`; mensagens em pt-BR, códigos em inglês, catálogo em `interfaces.md`.
-- O gráfico de P&L acumulado da Carteira usa `GET /portfolio/pnl` (OQ-16).
+- O gráfico de P&L acumulado da Carteira usa `GET /portfolio/pnl` (OQ-16), com `end_date` = data da Carteira e `start_date` escolhida pelo usuário (OQ-27).
 - Contratos podem evoluir durante o desenvolvimento; mudanças compartilhadas devem ser coordenadas entre Integrador, backend e mocks MSW. Não congelar uma API incorreta só para preservar mocks.
 
 ## 13. Requisitos de qualidade e testes de aceitação
@@ -413,6 +414,7 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - Hora obrigatória em todo lançamento; ordem `(data, hora, seq)` entre operações e movimentações (OQ-13, OQ-24).
 - Erros em problem+json (RFC 9457) com catálogo de códigos (OQ-15).
 - `GET /portfolio/pnl` alimenta o gráfico de P&L acumulado (OQ-16).
+- Gráfico de P&L acumulado da Carteira: só data inicial (anterior à data da Carteira, padrão 30 dias, na URL); termina sempre na data da Carteira (usuário, 18/10/2026, sessão do frontend; OQ-27).
 - Lane H é dona de `platform/**` (OQ-17).
 - Caixa e posições são duas cadeias processáveis separadamente (escopos Caixa, Posições e Tudo), cada uma com seu status por data (OQ-23); caixa publicado em `cash_balances`; AUM recalculado por quem publica (OQ-21).
 - Caixa de A−1 não publicado recusa o job ao iniciar; caixa desatualizado publica marcado; posições seguem OQ-11; pendência de predecessor indica a cadeia; dia sem ativo esperado é processado com P&L 0 e acumulado levado adiante; sem processo automático à meia-noite (OQ-22).
