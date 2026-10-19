@@ -86,9 +86,11 @@ class PortfolioResultsWriter(Protocol):
 
     ``other_chain_processed`` is Processing's answer for the other chain on that date: ``True``
     when it is ``PROCESSED`` or ``PROCESSED_WITH_ISSUES``. When ``False`` (``FAILED`` or not
-    processed) the written AUM is null (OQ-38). ALL writes both chains in the same transaction:
-    the first call passes ``False`` and the second, made after both chains are computed, passes
-    the first chain's outcome, so AUM never sees a chain ``RUNNING``."""
+    processed) the written AUM is null (OQ-38). ALL writes both chains in the same transaction,
+    positions first, then cash (integrator choice): ``write_positions_day`` passes ``False`` and
+    ``write_cash_day``, made after both chains are computed, passes the positions chain's outcome,
+    so AUM never sees a chain ``RUNNING``. When only one chain is alive on an ALL date (OQ-36),
+    Processing makes only that chain's call."""
 
     async def write_positions_day(
         self,

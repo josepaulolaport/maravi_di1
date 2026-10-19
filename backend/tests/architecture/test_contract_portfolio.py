@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import typing
 from datetime import date
 
 import pytest
@@ -108,6 +109,12 @@ def test_the_writer_publishes_one_date_per_chain() -> None:
         assert signature.parameters["uow"].kind is inspect.Parameter.KEYWORD_ONLY
         # OQ-38: Processing says whether the other chain of the date is processed.
         assert signature.parameters["other_chain_processed"].kind is inspect.Parameter.KEYWORD_ONLY
+        assert signature.parameters["other_chain_processed"].default is inspect.Parameter.empty
+    for method in (
+        PortfolioResultsWriter.write_positions_day,
+        PortfolioResultsWriter.write_cash_day,
+    ):
+        assert typing.get_type_hints(method)["other_chain_processed"] is bool
     assert not hasattr(PortfolioResultsWriter, "publish_range")
 
 
