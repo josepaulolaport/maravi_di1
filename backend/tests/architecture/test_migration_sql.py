@@ -1,6 +1,6 @@
 """The reviewed SQL of the Alembic revisions (skill `db-migration`; plan §3).
 
-Released revisions never change, so the SQL of 0001 and 0002 is pinned here by hash.
+Released revisions never change, so the SQL of 0001 to 0004 is pinned here by hash.
 `docs/schema.sql` is the result of all revisions, not the text of one;
 `tests/integration/test_migrations_match_schema.py` checks on PostgreSQL that the revisions build
 exactly what `docs/schema.sql` builds. No database is needed here, so this runs in the pre-commit
@@ -19,6 +19,22 @@ RELEASED_SHA256 = {
     "0002_cash_chain.sql": "24e558e4eff422e63debecdd3c6111d2a5c30147858dc6c7f81829bcb00e640f",
     "0002_cash_chain_downgrade.sql": (
         "9b0c987dc9b14df71d99339207c43ce6460a0757bd8ef7cce15b9a4a7712737b"
+    ),
+    "0003_one_status_per_date.sql": (
+        "205546ae1cc21738293e3a944a1c55bd01f43ab42a3f35db9a53152ae5715f38"
+    ),
+    "0003_one_status_per_date_downgrade.sql": (
+        "89afdaf018799d5bcd9f424913fb175381a17200de8cfc48201b5e05a91c48a7"
+    ),
+    "0004_no_reference_copy.sql": (
+        "83a5a462c086d1fc2d90487102fdf994f20c82fa76ad12c205a8eb9f4e84efd4"
+    ),
+    "0004_no_reference_copy_downgrade.sql": (
+        "983e8f0fd1c1b145f27f28cf103d616b6a0137238786502a488d937c68d88d2c"
+    ),
+    "0004_no_staleness.sql": "b9b4e9a1ba0c33b293ea3d3c1caa8ff2f9239ef96b8e0885d5bcc9c392bcc3fb",
+    "0004_no_staleness_downgrade.sql": (
+        "355a6566ed7716131299e88535c3c3d33f20fb0cd2a9745f81a3326f6b62e430"
     ),
 }
 

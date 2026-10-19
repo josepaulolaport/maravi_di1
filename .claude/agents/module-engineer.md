@@ -13,11 +13,11 @@ You are a senior Python engineer: FastAPI, SQLAlchemy 2 async and PostgreSQL. Yo
 |---|---|---|---|
 | A | `asset` | 1 | type → class → product → instrument; `asset.futures` specs; case-insensitive codes; `InstrumentDescriptor` |
 | B | `pricing` | 1 (calculator), 2 (service) | pure DI1 DC/365 calculator, PU ↔ rate, input kind; `PricingService.calculate(instrument_id, reference_date, quote)` reading the instrument through `AssetReader` |
-| C | `ledger` | 2 | one immutable `ledger.entries` table for trades and cash movements (OQ-24), batch soft delete, PU/rate via Pricing, invalidation in the same UoW |
-| D | `prices` | 2 | `PriceService`: MANUAL/B3 observations, one per asset, date and source, corrected in place or removed (OQ-25), exact-date preferred reads, invalidation in the same UoW |
+| C | `ledger` | 2 | one immutable `ledger.entries` table for trades and cash movements (OQ-24), batch soft delete, PU/rate via Pricing, no invalidation (OQ-31) |
+| D | `prices` | 2 | `PriceService`: MANUAL/B3 observations, one per asset, date and source, corrected in place or removed (OQ-25), exact-date preferred reads, no invalidation (OQ-31) |
 | E | `portfolio` | 1 (pure accounting), 3 (persistence and read) | positions and cash chains, valuation (OQ-21); `PortfolioResultsWriter` per date (OQ-23) into `positions`, `position_metrics`, `portfolio_metrics`, `cash_balances`; `PortfolioQueryService` |
 | F | `pnl` | 1 | pure per-asset attribution and portfolio aggregation, completeness states |
-| G | `processing` | 2 (request API), 4 (worker) | requests, cancellation, invalidator, dispatcher, `PortfolioRangeProcessor`, `date_status` and per-date publication |
+| G | `processing` | 2 (request API), 4 (worker) | requests, cancellation, dispatcher, `PortfolioRangeProcessor`, `date_status` with the processing times and per-date publication (OQ-31) |
 
 ## You own
 
@@ -39,10 +39,10 @@ Nothing else. To change anything outside, raise a contract-change request to the
 
 - **Tests first** (skill `tdd`). The cases come from spec §13 and from your wave's test list. Expected values come from the docs.
 - **Domain code** is pure. **Services** are cohesive. **SQL** lives in `infrastructure/persistence/queries`; other outbound adapters live elsewhere in `infrastructure/`. RabbitMQ consumers and handlers live in `presentation/messaging/` and hold no business logic. `Depends` appears only in `presentation/http`. No ORM type crosses a module boundary.
-- **Writes** (C, D) save the fact and call `FinancialResultInvalidator` in the same UoW. They never enqueue processing.
+- **Writes** (C, D) only save the fact in their UoW: no invalidation and no call to Processing (OQ-31). They never enqueue processing.
 - **Lane-specific traps:**
   - B, F and E (pure accounting) contain no persistence.
-  - G guarantees exactly one active job, overlapping queued jobs, cooperative cancellation, one transaction per date with the D−1/D `date_status` row locks and the claim-token check, the predecessor rule, failure and cancellation that leave later dates untouched, and recovery from `progress_date` (OQ-23).
+  - G guarantees exactly one active job, overlapping queued jobs, cooperative cancellation, one transaction per date with the D−1/D `date_status` row locks and the claim-token check, the per-day predecessor rule (OQ-31), failure and cancellation that leave later dates untouched, and recovery from `progress_date` (OQ-23).
 - **Commits:** follow the `commit` skill, and commit only after the user approves the diff.
 - **When ready:** run `pr-ready`. It runs the `reviewer`, pushes the branch and opens a GitHub PR. Never merge.
 

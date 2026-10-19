@@ -1,4 +1,4 @@
-"""Processing's frozen public contract and the invalidator fake (plan §3, W0.3b)."""
+"""Processing's frozen public contract (plan §3, W0.3b; OQ-31)."""
 
 from __future__ import annotations
 
@@ -7,22 +7,15 @@ from datetime import date, datetime
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.processing.public import (
     ChainStatus,
-    FinancialResultInvalidator,
+    DateStatus,
     ProcessingRequest,
     ProcessingScope,
     ProcessingStatus,
 )
 from di1.shared.clock import SAO_PAULO
-from tests.fakes.processing import (
-    CashMovementsChanged,
-    PricesChanged,
-    RecordingInvalidator,
-    TradesChanged,
-)
 
 
 def test_processing_status_has_the_eight_schema_statuses() -> None:
@@ -64,37 +57,31 @@ def test_a_request_is_frozen_and_covers_exactly_its_range() -> None:
         request.status = ProcessingStatus.RUNNING  # type: ignore[misc]
 
 
-class _UnusedUnitOfWork:
-    @property
-    def session(self) -> AsyncSession:
-        raise AssertionError("the invalidator fake never touches the session")
+def test_processing_has_no_invalidator() -> None:
+    # OQ-31: a write saves only the fact; nothing is marked stale.
+    import di1.modules.processing.public as processing_public
 
-    async def commit(self) -> None:
-        raise AssertionError("the invalidator never commits")
-
-
-async def test_the_fake_invalidator_records_calls_with_their_unit_of_work() -> None:
-    invalidator: FinancialResultInvalidator = RecordingInvalidator()
-    uow = _UnusedUnitOfWork()
-    asset_id = uuid4()
-
-    await invalidator.trades_changed(date(2026, 10, 1), uow=uow)
-    await invalidator.cash_movements_changed(date(2026, 10, 3), uow=uow)
-    await invalidator.prices_changed(asset_id, date(2026, 10, 2), uow=uow)
-
-    assert isinstance(invalidator, RecordingInvalidator)
-    assert invalidator.calls == [
-        TradesChanged(date(2026, 10, 1), uow),
-        CashMovementsChanged(date(2026, 10, 3), uow),
-        PricesChanged(asset_id, date(2026, 10, 2), uow),
-    ]
+    assert not hasattr(processing_public, "FinancialResultInvalidator")
 
 
 def test_chain_status_matches_the_schema_check() -> None:
     assert {status.value for status in ChainStatus} == {
-        "FRESH",
-        "FRESH_WITH_ISSUES",
-        "STALE",
+        "PROCESSED",
+        "PROCESSED_WITH_ISSUES",
         "RUNNING",
         "FAILED",
     }
+
+
+def test_a_date_status_holds_both_chains_and_their_processing_times() -> None:
+    processed_at = datetime(2026, 10, 19, 9, 30, tzinfo=SAO_PAULO)
+    status = DateStatus(
+        date=date(2026, 10, 1),
+        portfolio=ChainStatus.PROCESSED_WITH_ISSUES,
+        cash=None,
+        portfolio_processed_at=processed_at,
+        cash_processed_at=None,
+    )
+
+    assert (status.portfolio, status.cash) == (ChainStatus.PROCESSED_WITH_ISSUES, None)
+    assert (status.portfolio_processed_at, status.cash_processed_at) == (processed_at, None)

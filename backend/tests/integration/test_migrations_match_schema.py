@@ -109,3 +109,27 @@ def test_downgrade_to_0002_gives_back_its_schema(database_url: str) -> None:
         at_0002 = catalog(reference_url)
     for part in ("columns", "constraints", "indexes"):
         assert downgraded[part] == at_0002[part], part
+
+
+def test_downgrade_to_0003_gives_back_its_schema(database_url: str) -> None:
+    command.upgrade(_alembic(database_url), "head")
+    command.downgrade(_alembic(database_url), "0003")
+
+    downgraded = catalog(database_url)
+    with database() as reference_url:
+        command.upgrade(_alembic(reference_url), "0003")
+        at_0003 = catalog(reference_url)
+    for part in ("columns", "constraints", "indexes"):
+        assert downgraded[part] == at_0003[part], part
+
+
+def test_downgrade_to_0004_gives_back_its_schema(database_url: str) -> None:
+    command.upgrade(_alembic(database_url), "head")
+    command.downgrade(_alembic(database_url), "0004")
+
+    downgraded = catalog(database_url)
+    with database() as reference_url:
+        command.upgrade(_alembic(reference_url), "0004")
+        at_0004 = catalog(reference_url)
+    for part in ("columns", "constraints", "indexes"):
+        assert downgraded[part] == at_0004[part], part

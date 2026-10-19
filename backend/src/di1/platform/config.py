@@ -6,6 +6,8 @@ echo their input, so a URL with a password never reaches a log or a traceback.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
@@ -82,3 +84,24 @@ class BrokerSettings(BaseSettings):
 def get_broker_settings() -> BrokerSettings:
     """Read the broker settings from the environment now (never at import time)."""
     return BrokerSettings()
+
+
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+
+class LoggingSettings(BaseSettings):
+    """Logging, configured once at each process's startup (`di1.platform.observability`)."""
+
+    model_config = SettingsConfigDict(frozen=True, extra="ignore")
+
+    log_level: LogLevel = "INFO"
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _upper_case(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
+
+
+def get_logging_settings() -> LoggingSettings:
+    """Read the logging settings from the environment now (never at import time)."""
+    return LoggingSettings()
