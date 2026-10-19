@@ -82,8 +82,15 @@ __all__ = [
 class PortfolioResultsWriter(Protocol):
     """Publishes one date of a chain inside Processing's date transaction; never commits. Each
     call replaces that date's rows (rows of assets no longer expected on the date are deleted,
-    OQ-10) and recomputes the date's AUM from the other chain's published value (OQ-21); ALL
-    calls both in the same transaction."""
+    OQ-10) and recomputes the date's AUM from the other chain's published value (OQ-21).
+
+    ``other_chain_processed`` is Processing's answer for the other chain on that date: ``True``
+    when it is ``PROCESSED`` or ``PROCESSED_WITH_ISSUES``. When ``False`` (``FAILED``,
+    ``RUNNING`` or not processed) the written AUM is null (OQ-38, OQ-40). ALL writes both chains
+    in the same transaction, positions first, then cash (integrator choice):
+    ``write_positions_day`` passes ``False`` and ``write_cash_day``, made after both chains are
+    computed, passes the positions chain's outcome, so AUM never sees a chain ``RUNNING``. When
+    only one chain is alive on an ALL date (OQ-36), Processing makes only that chain's call."""
 
     async def write_positions_day(
         self,
@@ -93,6 +100,7 @@ class PortfolioResultsWriter(Protocol):
         pnl: PortfolioPnLResult,
         *,
         uow: UnitOfWork,
+        other_chain_processed: bool,
     ) -> None:
         """``positions``, ``position_metrics`` and ``portfolio_metrics`` for ``day.date``: the
         quantities and averages of ``day``, each expected asset's ``financial_total`` and P&L
@@ -101,11 +109,15 @@ class PortfolioResultsWriter(Protocol):
 
         The assets of ``day.positions``, ``valuation.assets`` and ``asset_pnl`` must be the same
         set, the expected assets of the date; the writer raises ``ValueError`` otherwise.
-        ``valuation.aum`` is not stored: the written AUM is recomputed from the published cash."""
+        ``valuation.aum`` is not stored: the written AUM is recomputed from the published cash,
+        or null when ``other_chain_processed`` is ``False`` (OQ-38)."""
         ...
 
-    async def write_cash_day(self, day: CashDay, *, uow: UnitOfWork) -> None:
-        """The ``cash_balances`` row for ``day.date``."""
+    async def write_cash_day(
+        self, day: CashDay, *, uow: UnitOfWork, other_chain_processed: bool
+    ) -> None:
+        """The ``cash_balances`` row for ``day.date``, and the date's AUM (null when
+        ``other_chain_processed`` is ``False``, OQ-38)."""
         ...
 
 
