@@ -204,8 +204,8 @@ class PriceService:
 
 
 class PreferredPriceReader:
-    """`prices.public.PriceReader` over the repository of one session: exact dates only,
-    MANUAL before B3, in one query for any number of pairs."""
+    """`prices.public.PriceReader` and `prices.public.LatestPriceReader` over the repository of
+    one session: MANUAL before B3, in one query for any number of assets."""
 
     def __init__(self, repository: ReferencePriceRepository) -> None:
         self._repository = repository
@@ -228,3 +228,17 @@ class PreferredPriceReader:
             by_pair[(observation.asset_id, observation.reference_date)].append(observation)
         preferred = {pair: choose_preferred(found) for pair, found in by_pair.items()}
         return {pair: record for pair, record in preferred.items() if record is not None}
+
+    async def get_latest_preferred_many(
+        self, asset_ids: Collection[UUID]
+    ) -> Mapping[UUID, ReferencePriceRecord]:
+        """For each asset, the preferred price of the latest date that has one, for
+        ``Instrument.last_reference`` (OQ-48); assets without a price are absent."""
+        if not asset_ids:
+            return {}
+        observations = await self._repository.find_on_latest_date(asset_ids)
+        by_asset: defaultdict[UUID, list[ReferencePriceRecord]] = defaultdict(list)
+        for observation in observations:
+            by_asset[observation.asset_id].append(observation)
+        preferred = {asset_id: choose_preferred(found) for asset_id, found in by_asset.items()}
+        return {asset_id: record for asset_id, record in preferred.items() if record is not None}

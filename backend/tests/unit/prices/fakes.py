@@ -146,6 +146,15 @@ class InMemoryRepository:
             r for r in self.rows.values() if r.asset_id in asset_ids and r.reference_date in dates
         ]
 
+    async def find_on_latest_date(
+        self, asset_ids: Collection[UUID]
+    ) -> Sequence[ReferencePriceRecord]:
+        latest: dict[UUID, date] = {}
+        for r in self.rows.values():
+            if r.asset_id in asset_ids:
+                latest[r.asset_id] = max(latest.get(r.asset_id, r.reference_date), r.reference_date)
+        return [r for r in self.rows.values() if latest.get(r.asset_id) == r.reference_date]
+
     async def find_in_range(
         self, asset_id: UUID, start_date: date, end_date: date
     ) -> Sequence[ReferencePriceRecord]:

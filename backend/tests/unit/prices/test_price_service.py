@@ -3,6 +3,7 @@ interfaces.md "Prices"; OQ-25, OQ-26 item 7, OQ-31)."""
 
 from __future__ import annotations
 
+import inspect
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
@@ -14,7 +15,7 @@ from di1.modules.prices.application.services.price_service import (
     PriceService,
     SetReferencePrice,
 )
-from di1.modules.prices.public import PriceReader, PriceSource
+from di1.modules.prices.public import LatestPriceReader, PriceReader, PriceSource
 from di1.modules.pricing.public import Quote
 from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
@@ -370,3 +371,49 @@ class TestPreferredReader:
     async def test_nothing_asked_reads_nothing(self, world: World) -> None:
         assert await world.reader.get_preferred_many([], [DAY]) == {}
         assert await world.reader.get_preferred_many([world.asset.id], []) == {}
+
+
+class TestLatestPreferred:
+    """`get_latest_preferred_many`, for ``Instrument.last_reference`` (OQ-48)."""
+
+    def test_it_satisfies_the_public_contract(self, world: World) -> None:
+        # The annotation makes mypy check the reader against the Protocol; the signature check
+        # catches a renamed or reordered parameter at run time too.
+        reader: LatestPriceReader = world.reader
+        assert inspect.signature(type(reader).get_latest_preferred_many) == inspect.signature(
+            LatestPriceReader.get_latest_preferred_many
+        )
+
+    async def test_the_latest_date_wins_over_the_source(self, world: World) -> None:
+        # MANUAL on 14/10 is older than B3 on 16/10: the latest date comes first, then MANUAL > B3.
+        await world.service.set_reference_price(
+            world.request(reference_date=date(2026, 10, 14)), uow=FakeUnitOfWork()
+        )
+        b3 = await world.service.set_reference_price(
+            world.request(source=PriceSource.B3, pu="89240.4279488087"), uow=FakeUnitOfWork()
+        )
+
+        assert await world.reader.get_latest_preferred_many([world.asset.id]) == {
+            world.asset.id: b3
+        }
+
+    async def test_on_the_latest_date_manual_wins_over_b3(self, world: World) -> None:
+        await world.service.set_reference_price(
+            world.request(source=PriceSource.B3, pu="89240.4279488087"), uow=FakeUnitOfWork()
+        )
+        manual = await world.service.set_reference_price(world.request(), uow=FakeUnitOfWork())
+
+        assert await world.reader.get_latest_preferred_many([world.asset.id]) == {
+            world.asset.id: manual
+        }
+
+    async def test_assets_without_a_price_are_absent(self, world: World) -> None:
+        other = world.assets.add(instrument(maturity_date=date(2029, 1, 2)))
+        price = await world.service.set_reference_price(world.request(), uow=FakeUnitOfWork())
+
+        found = await world.reader.get_latest_preferred_many([world.asset.id, other.id, uuid4()])
+
+        assert found == {world.asset.id: price}
+
+    async def test_nothing_asked_reads_nothing(self, world: World) -> None:
+        assert await world.reader.get_latest_preferred_many([]) == {}

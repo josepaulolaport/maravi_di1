@@ -248,6 +248,108 @@ class TestPreferred:
         assert len([s for s in statements if "reference_prices" in s]) == 1
 
 
+class TestLatestPreferred:
+    """`get_latest_preferred_many` on PostgreSQL (OQ-48): per asset, the preferred price of the
+    latest date that has one, for any number of assets in one statement."""
+
+    async def test_latest_date_then_manual_over_b3_in_one_statement(
+        self,
+        service: PriceService,
+        session_factory: async_sessionmaker[AsyncSession],
+        engine: AsyncEngine,
+    ) -> None:
+        await _set(service, session_factory, _manual("89006.4625467350", day=date(2026, 10, 14)))
+        await _set(service, session_factory, _manual("89240.4279488087", source=PriceSource.B3))
+        manual_16 = await _set(service, session_factory, _manual("89250.3147019396"))
+        await _set(  # an older MANUAL of DI1F29, not its latest
+            service,
+            session_factory,
+            SetReferencePrice(
+                asset_id=DI1F29,
+                reference_date=date(2026, 10, 9),
+                input_kind=InputKind.PU,
+                pu=Decimal("80100"),
+                rate=None,
+            ),
+        )
+        newer_b3 = await _set(
+            service,
+            session_factory,
+            SetReferencePrice(
+                asset_id=DI1F29,
+                reference_date=date(2026, 10, 15),
+                input_kind=InputKind.PU,
+                pu=Decimal("80206.1333187932"),
+                rate=None,
+                source=PriceSource.B3,
+            ),
+        )
+        statements: list[str] = []
+
+        def count(_conn: object, _cursor: object, statement: str, *_: object) -> None:
+            statements.append(statement)
+
+        event.listen(engine.sync_engine, "before_cursor_execute", count)
+        try:
+            async with session_factory() as session:
+                found = await PreferredPriceReader(
+                    SqlReferencePriceRepository(session)
+                ).get_latest_preferred_many([DI1F28, DI1F29, MATURED])
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", count)
+
+        assert found == {DI1F28: manual_16, DI1F29: newer_b3}
+        assert len(statements) == 1
+
+    async def test_removing_the_latest_price_falls_back_to_the_previous_date(
+        self, service: PriceService, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        manual_14 = await _set(
+            service, session_factory, _manual("89006.4625467350", day=date(2026, 10, 14))
+        )
+        b3_16 = await _set(
+            service, session_factory, _manual("89240.4279488087", source=PriceSource.B3)
+        )
+
+        async with SqlAlchemyUnitOfWork(session_factory) as uow:
+            await service.remove_reference_price(b3_16.id, uow=uow)
+
+        assert await _latest(session_factory, DI1F28) == manual_14
+
+    async def test_removing_manual_on_the_latest_date_lets_b3_of_that_date_prevail(
+        self, service: PriceService, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        b3_16 = await _set(
+            service, session_factory, _manual("89240.4279488087", source=PriceSource.B3)
+        )
+        manual_16 = await _set(service, session_factory, _manual("89250.3147019396"))
+        assert await _latest(session_factory, DI1F28) == manual_16
+
+        async with SqlAlchemyUnitOfWork(session_factory) as uow:
+            await service.remove_reference_price(manual_16.id, uow=uow)
+
+        assert await _latest(session_factory, DI1F28) == b3_16
+
+    async def test_no_asset_asked_runs_no_query(
+        self, session_factory: async_sessionmaker[AsyncSession], engine: AsyncEngine
+    ) -> None:
+        statements: list[str] = []
+
+        def count(_conn: object, _cursor: object, statement: str, *_: object) -> None:
+            statements.append(statement)
+
+        event.listen(engine.sync_engine, "before_cursor_execute", count)
+        try:
+            async with session_factory() as session:
+                found = await PreferredPriceReader(
+                    SqlReferencePriceRepository(session)
+                ).get_latest_preferred_many([])
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", count)
+
+        assert (found, statements) == ({}, [])
+
+
 class TestNoProcessingSideEffects:
     async def test_set_correct_and_remove_touch_no_processing_table(
         self,
@@ -315,6 +417,16 @@ class TestCorrection:
             ErrorCode.CONTRACT_MATURED,
         )
         assert await _rows(engine) == []
+
+
+async def _latest(
+    factory: async_sessionmaker[AsyncSession], asset_id: UUID
+) -> ReferencePriceRecord | None:
+    async with factory() as session:
+        found = await PreferredPriceReader(
+            SqlReferencePriceRepository(session)
+        ).get_latest_preferred_many([asset_id])
+    return found.get(asset_id)
 
 
 async def _processed_dates(engine: AsyncEngine, dates: list[date]) -> None:

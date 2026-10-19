@@ -54,6 +54,13 @@ class ReferencePriceRepository(Protocol):
         """Every observation, of either source, of those assets on exactly those dates."""
         ...
 
+    async def find_on_latest_date(
+        self, asset_ids: Collection[UUID]
+    ) -> Sequence[ReferencePriceRecord]:
+        """For each of those assets, every observation, of either source, on the latest date that
+        has one; assets without any observation contribute nothing."""
+        ...
+
     async def find_in_range(
         self, asset_id: UUID, start_date: date, end_date: date
     ) -> Sequence[ReferencePriceRecord]:

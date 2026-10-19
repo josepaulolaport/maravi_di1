@@ -92,6 +92,25 @@ def select_prices(asset_ids: Collection[UUID], dates: Collection[date]) -> Execu
     )
 
 
+def select_prices_on_latest_date(asset_ids: Collection[UUID]) -> Executable:
+    """Every observation of each asset on its latest date with one: at most one row per source,
+    for any number of assets in one statement. Which source is preferred is the caller's rule."""
+    latest = (
+        select(
+            ReferencePriceModel.asset_id,
+            func.max(ReferencePriceModel.reference_date).label("reference_date"),
+        )
+        .where(ReferencePriceModel.asset_id.in_(list(asset_ids)))
+        .group_by(ReferencePriceModel.asset_id)
+        .subquery()
+    )
+    return select(*_COLUMNS).join(
+        latest,
+        (ReferencePriceModel.asset_id == latest.c.asset_id)
+        & (ReferencePriceModel.reference_date == latest.c.reference_date),
+    )
+
+
 def select_prices_in_range(asset_id: UUID, start_date: date, end_date: date) -> Executable:
     return select(*_COLUMNS).where(
         ReferencePriceModel.asset_id == asset_id,
