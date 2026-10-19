@@ -6,6 +6,8 @@ secrets) and "Commands" (`DATABASE_URL` in the SQLAlchemy ``postgresql+psycopg``
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -14,6 +16,7 @@ from di1.platform.config import (
     LoggingSettings,
     Settings,
     get_broker_settings,
+    get_heartbeat_settings,
     get_logging_settings,
     get_settings,
 )
@@ -279,3 +282,24 @@ def test_the_log_level_is_case_insensitive(
     monkeypatch.setenv("LOG_LEVEL", value)
 
     assert LoggingSettings().log_level == level
+
+
+def test_heartbeat_settings_default_to_no_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("HEARTBEAT_FILE", "HEARTBEAT_INTERVAL_SECONDS", "HEARTBEAT_MAX_AGE_SECONDS"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = get_heartbeat_settings()
+
+    assert settings.heartbeat_file is None
+    assert (settings.heartbeat_interval_seconds, settings.heartbeat_max_age_seconds) == (5.0, 30.0)
+
+
+def test_heartbeat_values_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HEARTBEAT_FILE", "/tmp/di1-worker.heartbeat")
+    monkeypatch.setenv("HEARTBEAT_INTERVAL_SECONDS", "2")
+    monkeypatch.setenv("HEARTBEAT_MAX_AGE_SECONDS", "60")
+
+    settings = get_heartbeat_settings()
+
+    assert settings.heartbeat_file == Path("/tmp/di1-worker.heartbeat")
+    assert (settings.heartbeat_interval_seconds, settings.heartbeat_max_age_seconds) == (2.0, 60.0)

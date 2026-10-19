@@ -6,6 +6,7 @@ echo their input, so a URL with a password never reaches a log or a traceback.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
@@ -87,6 +88,23 @@ class BrokerSettings(BaseSettings):
 def get_broker_settings() -> BrokerSettings:
     """Read the broker settings from the environment now (never at import time)."""
     return BrokerSettings()
+
+
+class HeartbeatSettings(BaseSettings):
+    """The heartbeat file of a worker process (`di1.platform.observability.heartbeat`) and its
+    health check (`di1.workers.healthcheck`), which read the same variables. No file, no
+    heartbeat."""
+
+    model_config = SettingsConfigDict(frozen=True, extra="ignore")
+
+    heartbeat_file: Path | None = None
+    heartbeat_interval_seconds: float = Field(default=5.0, gt=0)
+    heartbeat_max_age_seconds: float = Field(default=30.0, gt=0)
+
+
+def get_heartbeat_settings() -> HeartbeatSettings:
+    """Read the heartbeat settings from the environment now (never at import time)."""
+    return HeartbeatSettings()
 
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]

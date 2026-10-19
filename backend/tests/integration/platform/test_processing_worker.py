@@ -39,6 +39,7 @@ from di1.platform.messaging.worker import (
     ConsumerRegistration,
     WorkerResources,
 )
+from di1.platform.observability.heartbeat import Heartbeat
 from di1.shared.clock import FixedClock
 from di1.workers import main as worker
 from di1.workers.main import run_worker
@@ -157,6 +158,45 @@ async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
     assert await _ready_messages(broker, spec.name) == 0
     [resources] = given
     assert resources.clock is clock
+
+
+async def test_the_worker_beats_its_heartbeat_from_its_start_until_it_stops(
+    settings: Settings,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    tmp_path: Path,
+) -> None:
+    """The heartbeat shows the event loop is responsive (compose.yaml's health check), also
+    during the startup step: recovery may run a long range before the worker consumes."""
+    path = tmp_path / "worker.heartbeat"
+    release = asyncio.Event()
+
+    async def recover(resources: WorkerResources) -> None:
+        await release.wait()
+
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings,
+            consumers=lambda resources: [],
+            stop=stop,
+            topology=topology,
+            on_startup=recover,
+            heartbeat=Heartbeat(path),
+            heartbeat_interval_seconds=0.05,
+        )
+    )
+    await eventually(path.exists)
+    os.utime(path, (1000.0, 1000.0))
+    await eventually(lambda: path.stat().st_mtime > 1000.0)  # still beating, mid-startup
+
+    release.set()
+    stop.set()
+    await asyncio.wait_for(running, timeout=10)
+    os.utime(path, (1000.0, 1000.0))
+    await asyncio.sleep(0.2)
+    assert path.stat().st_mtime == 1000.0  # stopped with the worker
 
 
 async def _is_consumed(broker: AbstractRobustConnection, name: str) -> bool:

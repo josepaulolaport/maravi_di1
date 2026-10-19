@@ -40,6 +40,10 @@ with status 1, Docker restarts it, and the startup hook resumes the run (OQ-45).
 Then it closes the broker connection and the engine. A failure is logged through the
 configured logging and ends the process with status 1.
 
+With ``HEARTBEAT_FILE`` set (`di1.platform.config.HeartbeatSettings`), a task of the event loop
+touches that file every ``HEARTBEAT_INTERVAL_SECONDS`` while the process runs; compose.yaml's
+health check (`di1.workers.healthcheck`) reads its age.
+
 `main` takes the consumers and the startup hook from the composition root
 (``composition.consumers``): Processing's doorbell consumer, and its recovery then drain.
 """
@@ -56,7 +60,13 @@ from aio_pika.abc import AbstractIncomingMessage, AbstractQueue, AbstractRobustC
 
 from di1.composition import consumers as composition
 from di1.platform.clock import SystemClock
-from di1.platform.config import BrokerSettings, Settings, get_broker_settings, get_settings
+from di1.platform.config import (
+    BrokerSettings,
+    Settings,
+    get_broker_settings,
+    get_heartbeat_settings,
+    get_settings,
+)
 from di1.platform.database.engine import check_connection, create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import unit_of_work_factory
@@ -74,6 +84,7 @@ from di1.platform.messaging.worker import (
     StartupHook,
     WorkerResources,
 )
+from di1.platform.observability.heartbeat import Heartbeat, beat_until_stopped
 from di1.shared.clock import Clock
 from di1.workers.lifecycle import (
     CLOSE_TIMEOUT_SECONDS,
@@ -96,6 +107,51 @@ async def run_worker(
     topology: Topology | None = None,
     clock: Clock | None = None,
     on_startup: StartupHook | None = None,
+    heartbeat: Heartbeat | None = None,
+    heartbeat_interval_seconds: float = 5.0,
+) -> None:
+    """`_serve`, with ``heartbeat`` beaten every ``heartbeat_interval_seconds`` from a task of
+    the event loop, from the start (the startup step included) until the worker stops: a
+    fresh file shows the loop is responsive (compose.yaml's health check)."""
+    if heartbeat is None:
+        await _serve(
+            settings,
+            broker_settings,
+            consumers=consumers,
+            stop=stop,
+            topology=topology,
+            clock=clock,
+            on_startup=on_startup,
+        )
+        return
+    stopped = asyncio.Event()
+    beating = asyncio.create_task(
+        beat_until_stopped(heartbeat, stopped, interval_seconds=heartbeat_interval_seconds)
+    )
+    try:
+        await _serve(
+            settings,
+            broker_settings,
+            consumers=consumers,
+            stop=stop,
+            topology=topology,
+            clock=clock,
+            on_startup=on_startup,
+        )
+    finally:
+        stopped.set()
+        await beating
+
+
+async def _serve(
+    settings: Settings,
+    broker_settings: BrokerSettings,
+    *,
+    consumers: ConsumerFactory,
+    stop: asyncio.Event,
+    topology: Topology | None,
+    clock: Clock | None,
+    on_startup: StartupHook | None,
 ) -> None:
     """Run ``on_startup`` once, then consume until ``stop`` is set or the work after an ack
     fails; then stop consuming, cancel the deliveries and the run in progress, and close the
@@ -268,17 +324,20 @@ class _RunningConsumers:
 
 
 def main() -> None:
-    run_process(
-        "processing worker",
-        lambda stop: run_worker(
+    def run(stop: asyncio.Event) -> Awaitable[None]:
+        heartbeat_settings = get_heartbeat_settings()
+        path = heartbeat_settings.heartbeat_file
+        return run_worker(
             get_settings(),
             get_broker_settings(),
             consumers=composition.consumers,
             on_startup=composition.processing_startup,
             stop=stop,
-        ),
-        logger,
-    )
+            heartbeat=Heartbeat(path) if path is not None else None,
+            heartbeat_interval_seconds=heartbeat_settings.heartbeat_interval_seconds,
+        )
+
+    run_process("processing worker", run, logger)
 
 
 if __name__ == "__main__":
