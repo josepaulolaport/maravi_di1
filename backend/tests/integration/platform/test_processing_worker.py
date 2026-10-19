@@ -1,14 +1,16 @@
 """The processing worker process: consumes its registered queues through the consumer base,
 runs the work after the ack, and shuts down cleanly on SIGTERM, during startup and during work.
 
-interfaces.md "Transaction boundaries" 6 and 7 (at-least-once; ACK only after the durable
-state change; recovery from the lease after a crash) and "DI composition" (plain factories);
-plan §7. The handler here is a fake: the real one is Processing's.
+interfaces.md "Transaction boundaries" 7 (at-least-once; ACK only after the durable state
+change) and "DI composition" (plain factories); plan §7. One worker only (user decision): a run
+left RUNNING resumes at the worker's next start, through ``on_startup``. The handler here is a
+fake: the real one is Processing's.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import signal
@@ -31,7 +33,7 @@ from di1.platform.messaging.connection import connect
 from di1.platform.messaging.consumer import AfterAck
 from di1.platform.messaging.envelope import Envelope
 from di1.platform.messaging.publisher import MessagePublisher
-from di1.platform.messaging.topology import QueueSpec, Topology
+from di1.platform.messaging.topology import QueueSpec, Topology, declare_queue
 from di1.platform.messaging.worker import (
     ConsumerFactory,
     ConsumerRegistration,
@@ -179,7 +181,7 @@ async def test_a_stop_during_the_run_after_the_ack_cancels_it_and_the_message_st
     publisher: MessagePublisher,
 ) -> None:
     """SIGTERM mid-range: the run is cancelled (its open date transaction rolls back), the claim
-    stays committed and the message is not redelivered: the lease recovers the run."""
+    stays committed and the message is not redelivered: the run resumes at the next start."""
     spec = queue_spec(topology, "test.command")
     handler = _Run(hold_after_ack=True)
     stop = asyncio.Event()
@@ -558,3 +560,197 @@ async def test_a_worker_startup_failure_is_logged_and_exits_with_status_1(
     # Run with ``-m``, the module's logger is ``__main__``.
     assert re.search(r"Z ERROR __main__ processing worker failed\n", output), output
     assert "s3cret-pw" not in output
+
+
+# The startup hook: Processing's recovery (a run left RUNNING resumes after its
+# ``progress_date``), run once before the worker consumes. One worker only (user decision).
+
+
+async def test_the_startup_hook_runs_once_before_the_first_delivery(
+    settings: Settings,
+    engine: AsyncEngine,
+    broker: AbstractRobustConnection,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    publisher: MessagePublisher,
+) -> None:
+    """A command already queued waits until the recovery has committed."""
+    spec = queue_spec(topology, "test.command")
+    channel = await broker.channel()
+    await declare_queue(channel, topology, spec, settings=broker_settings)
+    await channel.close()
+    queued = make_envelope()
+    await publisher.publish(queued)
+    recovered = make_envelope().message_id
+    order: list[str] = []
+    release = asyncio.Event()
+
+    async def recover(resources: WorkerResources) -> None:
+        order.append("startup")
+        await release.wait()
+        async with resources.uow_factory() as uow:
+            await uow.session.execute(EFFECT, {"m": recovered})
+            await uow.commit()
+
+    class _Claim(_Run):
+        async def __call__(self, envelope: Envelope, *, uow: UnitOfWork) -> AfterAck:
+            order.append("claim")
+            return await super().__call__(envelope, uow=uow)
+
+    handler = _Claim()
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings,
+            consumers=_consumers(spec, handler),
+            stop=stop,
+            topology=topology,
+            on_startup=recover,
+        )
+    )
+    await eventually(lambda: order == ["startup"])
+    await asyncio.sleep(0.3)
+    assert order == ["startup"]
+
+    release.set()
+
+    await eventually(lambda: handler.ran == [queued])
+    stop.set()
+    await asyncio.wait_for(running, timeout=10)
+    assert order == ["startup", "claim"]
+    assert await effects(engine) == [recovered, queued.message_id]
+
+
+async def _queued_before_start(
+    broker: AbstractRobustConnection,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    publisher: MessagePublisher,
+) -> QueueSpec:
+    """A command waiting in the worker's queue before the worker starts."""
+    spec = queue_spec(topology, "test.command")
+    channel = await broker.channel()
+    await declare_queue(channel, topology, spec, settings=broker_settings)
+    await channel.close()
+    envelope = make_envelope()
+    await publisher.publish(envelope)
+    return spec
+
+
+async def test_a_failing_startup_hook_ends_the_worker_before_it_consumes(
+    settings: Settings,
+    engine: AsyncEngine,
+    broker: AbstractRobustConnection,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    publisher: MessagePublisher,
+) -> None:
+    """The process then exits 1 (`di1.workers.lifecycle.run_process`) and Docker restarts it.
+    The hook takes a moment before failing, so a worker that consumed early would claim."""
+    spec = await _queued_before_start(broker, broker_settings, topology, publisher)
+    handler = _Run()
+
+    async def recover(resources: WorkerResources) -> None:
+        await asyncio.sleep(0.3)
+        raise RuntimeError("recovery failed")
+
+    with pytest.raises(RuntimeError, match="recovery failed"):
+        await asyncio.wait_for(
+            run_worker(
+                settings,
+                broker_settings,
+                consumers=_consumers(spec, handler),
+                stop=asyncio.Event(),
+                topology=topology,
+                on_startup=recover,
+            ),
+            timeout=10,
+        )
+    assert handler.claimed == []
+    assert await effects(engine) == []
+    assert await _ready_messages(broker, spec.name) == 1
+
+
+async def test_a_stop_during_the_startup_hook_cancels_it_and_consumes_nothing(
+    settings: Settings,
+    engine: AsyncEngine,
+    broker: AbstractRobustConnection,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    publisher: MessagePublisher,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A long recovery must not keep SIGTERM waiting; it runs again on the next start."""
+    caplog.set_level(logging.INFO, logger=worker.__name__)
+    spec = await _queued_before_start(broker, broker_settings, topology, publisher)
+    handler = _Run()
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def recover(resources: WorkerResources) -> None:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings,
+            consumers=_consumers(spec, handler),
+            stop=stop,
+            topology=topology,
+            on_startup=recover,
+        )
+    )
+    await asyncio.wait_for(entered.wait(), timeout=10)
+
+    stop.set()
+
+    await asyncio.wait_for(running, timeout=2)
+    assert cancelled.is_set()
+    assert handler.claimed == []
+    assert await _ready_messages(broker, spec.name) == 1
+    assert "worker stopped during its startup step" in caplog.text
+
+
+async def test_a_startup_hook_that_ignores_its_cancellation_does_not_hold_the_stop(
+    settings: Settings,
+    broker_settings: BrokerSettings,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A recovery that swallows the cancellation (a retry around a commit) is waited for at
+    most `CLOSE_TIMEOUT_SECONDS`, then left behind with a warning, before Docker's SIGKILL."""
+    monkeypatch.setattr(worker, "CLOSE_TIMEOUT_SECONDS", 0.3)
+    entered = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def recover(resources: WorkerResources) -> None:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await finish.wait()
+
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings,
+            consumers=lambda resources: (),
+            stop=stop,
+            on_startup=recover,
+        )
+    )
+    await asyncio.wait_for(entered.wait(), timeout=10)
+
+    stop.set()
+
+    await asyncio.wait_for(running, timeout=3)
+    assert "the startup step did not stop in 0.3 s" in caplog.text
+    finish.set()

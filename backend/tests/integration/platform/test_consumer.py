@@ -459,7 +459,7 @@ async def test_a_delivery_during_a_run_is_acked_at_once_and_its_run_waits(
     engine: AsyncEngine,
     runner: AfterAckRunner,
 ) -> None:
-    """A second command (a duplicate resent by the relay, a re-dispatch) never sits unacked
+    """A second command (a duplicate resent by the relay) never sits unacked
     behind a run, where the broker's consumer timeout would close the channel; the runs
     themselves go one at a time (one run at a time per process)."""
     first, second = make_envelope(), make_envelope()

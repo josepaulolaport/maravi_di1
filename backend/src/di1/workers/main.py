@@ -16,22 +16,28 @@ shared by its consumers: one run at a time, in a task of the worker's own, so a 
 connection does not cancel it. Startup checks that PostgreSQL answers, so a wrong database
 fails the process instead of every command.
 
+The system runs exactly one worker (user decision). Before it consumes, the worker awaits its
+startup hook once (`di1.platform.messaging.worker.StartupHook`): Processing's recovery, under
+which a run left RUNNING by a stopped or crashed worker resumes after its ``progress_date``.
+A failing hook ends the process with status 1, before anything is consumed.
+
 SIGTERM or SIGINT stops it at any time, even while the broker or the database has not
 answered yet. On a stop the worker stops consuming and cancels what is in progress:
 
 - a delivery not yet acknowledged rolls back and, when the connection closes, returns to the
   queue; one that arrives during the stop is left for the next worker the same way;
 - the run in progress is cancelled: its open date transaction rolls back, the dates it
-  committed stay published, and the run is recovered from its lease by the dispatcher
-  (interfaces.md "Transaction boundaries" 6); a run still waiting is dropped and recovered
-  the same way.
+  committed stay published, and the startup hook resumes it on the next start (one worker,
+  OQ-45); a run still waiting is dropped and resumed the same way;
+- a startup hook in progress is cancelled, and runs again on the next start.
 
 Then it closes the broker connection and the engine. A failure is logged through the
 configured logging and ends the process with status 1.
 
-Until the composition root provides the consumers (``composition.consumers``, integrator),
-`main` registers none: the worker consumes nothing, and a command published meanwhile waits in
-its queue.
+Until the composition root provides the consumers and the startup hook
+(``composition.consumers``, integrator), `main` registers none and runs no recovery: the
+worker consumes nothing, a command published meanwhile waits in its queue, and a run left
+RUNNING stays so.
 """
 
 from __future__ import annotations
@@ -59,6 +65,7 @@ from di1.platform.messaging.topology import Topology, declare_queue
 from di1.platform.messaging.worker import (
     ConsumerFactory,
     ConsumerRegistration,
+    StartupHook,
     WorkerResources,
 )
 from di1.shared.clock import Clock
@@ -82,9 +89,10 @@ async def run_worker(
     stop: asyncio.Event,
     topology: Topology | None = None,
     clock: Clock | None = None,
+    on_startup: StartupHook | None = None,
 ) -> None:
-    """Consume until ``stop`` is set, then stop consuming, cancel the deliveries and the run in
-    progress, and close the broker connection and the engine."""
+    """Run ``on_startup`` once, then consume until ``stop`` is set; then stop consuming, cancel
+    the deliveries and the run in progress, and close the broker connection and the engine."""
     topology = topology if topology is not None else Topology()
     engine = create_engine(settings)
     try:
@@ -99,6 +107,11 @@ async def run_worker(
         if stop.is_set():
             logger.info("worker stopped before the database answered")
             return
+        if on_startup is not None:
+            if not await _run_startup_step(on_startup(resources), stop):
+                logger.info("worker stopped during its startup step")
+                return
+            logger.info("worker startup step done")
         connection = await unless_stopped(
             connect(broker_settings, connection_name=CONNECTION_NAME),
             stop,
@@ -124,6 +137,30 @@ async def run_worker(
     finally:
         await engine.dispose()
     logger.info("worker stopped")
+
+
+async def _run_startup_step(step: Awaitable[None], stop: asyncio.Event) -> bool:
+    """Await ``step``; return `False` if ``stop`` came first. The step is then cancelled and
+    waited for at most `CLOSE_TIMEOUT_SECONDS`: a step that ignores its cancellation is left
+    behind with a warning rather than holding the stop until Docker's SIGKILL. A failure of the
+    step is raised."""
+    running = asyncio.ensure_future(step)
+    stopping = asyncio.ensure_future(stop.wait())
+    try:
+        await asyncio.wait({running, stopping}, return_when=asyncio.FIRST_COMPLETED)
+    except BaseException:
+        running.cancel()
+        raise
+    finally:
+        stopping.cancel()
+    if running.done():
+        running.result()
+        return not stop.is_set()
+    running.cancel()
+    _, pending = await asyncio.wait({running}, timeout=CLOSE_TIMEOUT_SECONDS)
+    if pending:
+        logger.warning("the startup step did not stop in %s s", CLOSE_TIMEOUT_SECONDS)
+    return False
 
 
 @dataclass
