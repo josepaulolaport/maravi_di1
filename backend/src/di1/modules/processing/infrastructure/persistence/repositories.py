@@ -50,6 +50,9 @@ def _to_request(row: Row[Any]) -> ProcessingRequest:
         error_code=row.error_code,
         error_message=row.error_message,
         updated_at=row.updated_at,
+        # The columns arrive with migration 0006 (PR #58, OQ-40); only the Wave 4 worker sets them.
+        failed_date=None,
+        failed_chain=None,
     )
 
 
