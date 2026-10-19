@@ -94,7 +94,7 @@ class FormulaPricing:
             raise DomainError(
                 ErrorDetail(
                     ErrorCode.CONTRACT_MATURED,
-                    "A data é posterior ao vencimento do contrato.",
+                    "O contrato já venceu nesta data.",
                     "reference_date",
                 )
             )
@@ -106,7 +106,7 @@ class FormulaPricing:
                 rate = (face_value / quote.value) ** (DAYS_PER_YEAR / Decimal(days)) - 1
             return Price(pu=quote.value, rate=quantize_rate(rate), input_kind=quote.kind)
         if days == 0:
-            raise _refused("No vencimento, informe o PU, não a taxa.", "rate")
+            raise _refused("Na data de vencimento informe o PU.", "rate")
         with financial_context():
             pu = face_value / (1 + quote.value) ** (Decimal(days) / DAYS_PER_YEAR)
         stored = quantize_pu(pu)

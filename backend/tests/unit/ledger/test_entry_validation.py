@@ -3,18 +3,22 @@
 Rules: spec §6, §6.1, §6.2, §4.1; OQ-1 (maturity), OQ-3 (typed decimals rejected, never rounded),
 OQ-13/OQ-24 (time required, one entry type per row), OQ-14 (nothing after today; bounds are only
 the schema's CHECKs: rate > −1, PU > 0, quantity ≠ 0, amount ≠ 0, plus the column ranges
-INTEGER and NUMERIC(20,2)). All the input errors are reported together; maturity is checked once
-the input is well formed.
+INTEGER and NUMERIC(20,2)). All the errors are reported together, the maturity's included.
+
+The typed quote's rules are Pricing's one validation (code-review finding H3), which Ledger runs
+on its request fields; these tests run it through Ledger's own binding.
 """
 
 from __future__ import annotations
 
 from datetime import date, time
 from decimal import Decimal
+from functools import partial
 from uuid import UUID
 
 import pytest
 
+from di1.modules.ledger.application.services.ledger_service import validate_trade_quote
 from di1.modules.ledger.domain.entries import (
     EntryDraft,
     EntryType,
@@ -22,11 +26,13 @@ from di1.modules.ledger.domain.entries import (
     NewCashMovement,
     NewTrade,
     validate_cash_movement,
-    validate_trade,
 )
+from di1.modules.ledger.domain.entries import validate_trade as validate_any_trade
 from di1.shared.clock import SAO_PAULO
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
+
+validate_trade = partial(validate_any_trade, validate_quote=validate_trade_quote)
 
 TODAY = date(2026, 10, 18)
 ASSET = UUID("6f1c2a10-0000-4000-8000-0000000000f8")
@@ -288,6 +294,38 @@ def test_a_rate_typed_on_the_maturity_date_is_rejected() -> None:
 
     assert _errors(error) == {(ErrorCode.VALIDATION_ERROR, "execution_rate")}
     assert error.value.errors[0].message == "Na data de vencimento informe o PU."
+
+
+@pytest.mark.parametrize("execution_rate", [None, Decimal("0.1234567890123"), Decimal("-2")])
+def test_on_the_maturity_date_a_rate_trade_gets_one_message_on_the_rate(
+    execution_rate: Decimal | None,
+) -> None:
+    # The rate is not typed on that date at all: a missing or invalid rate is not reported next
+    # to "informe o PU", which would contradict it.
+    with pytest.raises(DomainError) as error:
+        validate_trade(
+            _trade(entry_date=date(2026, 10, 16), execution_rate=execution_rate),
+            today=TODAY,
+            instrument=MATURING,
+        )
+
+    assert [(e.code, e.message, e.field) for e in error.value.errors] == [
+        (ErrorCode.VALIDATION_ERROR, "Na data de vencimento informe o PU.", "execution_rate")
+    ]
+
+
+def test_a_matured_date_is_reported_with_the_other_input_errors() -> None:
+    with pytest.raises(DomainError) as error:
+        validate_trade(
+            _trade(entry_date=date(2026, 10, 17), signed_quantity=0),
+            today=TODAY,
+            instrument=MATURING,
+        )
+
+    assert _errors(error) == {
+        (ErrorCode.CONTRACT_MATURED, "date"),
+        (ErrorCode.VALIDATION_ERROR, "signed_quantity"),
+    }
 
 
 def test_a_trade_after_the_maturity_date_is_rejected() -> None:

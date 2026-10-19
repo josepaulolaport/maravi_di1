@@ -23,13 +23,16 @@ from di1.modules.prices.application.interfaces.ports import (
 )
 from di1.modules.prices.domain.reference_price import choose_preferred, validate_reference_price
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
-from di1.modules.pricing.public import PricingService, Quote
+from di1.modules.pricing.public import PricingService, Quote, QuoteValidator
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 
 logger = logging.getLogger(__name__)
+
+_validate_quote = QuoteValidator()
+"""Pricing's one quote validation; the price request's fields already use Pricing's names."""
 
 _UNKNOWN_ASSET = ErrorDetail(ErrorCode.VALIDATION_ERROR, "Selecione um contrato.", "asset_id")
 _PRICE_NOT_FOUND = ErrorDetail(ErrorCode.NOT_FOUND, "Preço de referência não encontrado.")
@@ -186,6 +189,7 @@ class PriceService:
                 input_kind=input_kind,
                 pu=pu,
                 rate=rate,
+                validate_quote=_validate_quote,
             )
         except DomainError as error:
             if instrument is None:

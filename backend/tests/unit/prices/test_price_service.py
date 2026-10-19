@@ -166,7 +166,7 @@ class TestSet:
             ErrorDetail(
                 ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", "reference_date"
             ),
-            ErrorDetail(ErrorCode.VALIDATION_ERROR, "O valor deve ser maior que zero.", "pu"),
+            ErrorDetail(ErrorCode.VALIDATION_ERROR, "O PU deve ser maior que zero.", "pu"),
         )
         assert world.pricing.calls == []
         self._assert_nothing_written(world, uow)

@@ -5,10 +5,10 @@
   amount: positive aporte, negative retirada, never 0.
 - Both have a date and a required time (São Paulo) and one ``seq`` shared by both types; their
   order is ``(entry_date, entry_time, seq)`` (OQ-13, OQ-24).
-- Nothing is dated after today (OQ-14); a trade may be dated up to its contract's maturity,
-  inclusive, and on that date the PU is typed (OQ-1). Typed values with more decimal places than
-  stored are rejected, never rounded (OQ-3). The value bounds are only the schema's CHECKs and
-  column ranges (OQ-14).
+- Nothing is dated after today (OQ-14). The typed PU or rate, its decimals, its bounds and the
+  maturity rules (OQ-1, OQ-3, OQ-14) are Pricing's one quote validation, which the caller passes
+  in as a `QuoteRule` (``pricing.public.QuoteValidator``): domain code imports no other module.
+  The other value bounds are only the schema's CHECKs and column ranges (OQ-14).
 - A trade's cash effect is not stored: −signed_quantity × execution_pu, computed on read (§7.3).
 - Entries are never edited. A batch delete removes entries of either type for good, all or
   nothing (OQ-24; user decision 2026-10-19: no soft delete).
@@ -19,14 +19,15 @@ client keys its messages on (frontend contract ``ledger.ts``).
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import StrEnum
+from typing import Protocol
 from uuid import UUID
 
-from di1.shared.decimals import PU_PLACES, RATE_PLACES, financial_context, fits_places
+from di1.shared.decimals import financial_context, fits_places
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 
@@ -63,6 +64,21 @@ class EntryDraft:
     execution_pu: Decimal | None = None
     execution_rate: Decimal | None = None
     cash_amount: Decimal | None = None
+
+
+class QuoteRule(Protocol):
+    """The validation of a typed quote, reported on this module's request fields: the typed
+    value, or ``None``, and every problem found (``pricing.public.QuoteValidator``)."""
+
+    def __call__(
+        self,
+        kind: InputKind,
+        *,
+        pu: Decimal | None,
+        rate: Decimal | None,
+        reference_date: date,
+        maturity_date: date | None,
+    ) -> tuple[Decimal | None, Sequence[ErrorDetail]]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,10 +147,14 @@ class LedgerEntry:
 
 
 def validate_trade(
-    draft: EntryDraft, *, today: date, instrument: KnownInstrument | None
+    draft: EntryDraft,
+    *,
+    today: date,
+    instrument: KnownInstrument | None,
+    validate_quote: QuoteRule,
 ) -> NewTrade:
     """The trade a draft describes; ``instrument`` is ``None`` when ``draft.asset_id`` names no
-    contract. Raises `DomainError` with every input error, then with the maturity error."""
+    contract. Raises `DomainError` with every problem found, the quote's included."""
     if draft.type is not EntryType.TRADE:
         raise ValueError(f"validate_trade expects a TRADE draft, got {draft.type}")
     errors = _date_errors(draft.entry_date, today) + _time_errors(draft.entry_time)
@@ -150,21 +170,23 @@ def validate_trade(
         )
     if draft.cash_amount is not None:
         errors.append(_invalid("Uma operação não tem valor de caixa.", "cash_amount"))
-    typed_value, quote_errors = _typed_quote(draft)
-    errors.extend(quote_errors)
+    typed_value = None
+    if draft.input_kind is None:
+        errors.append(_invalid("Informe o PU ou a taxa.", "input_kind"))
+    else:
+        typed_value, quote_errors = validate_quote(
+            draft.input_kind,
+            pu=draft.execution_pu,
+            rate=draft.execution_rate,
+            reference_date=draft.entry_date,
+            maturity_date=None if instrument is None else instrument.maturity_date,
+        )
+        errors.extend(quote_errors)
     if errors:
         raise DomainError(*errors)
 
-    assert draft.asset_id is not None and instrument is not None
-    assert draft.signed_quantity is not None and draft.input_kind is not None
-    assert typed_value is not None
-    maturity = instrument.maturity_date
-    if maturity is not None and draft.entry_date > maturity:
-        raise DomainError(
-            ErrorDetail(ErrorCode.CONTRACT_MATURED, "O contrato já venceu nesta data.", "date")
-        )
-    if draft.entry_date == maturity and draft.input_kind is InputKind.RATE:
-        raise DomainError(_invalid("Na data de vencimento informe o PU.", "execution_rate"))
+    assert draft.asset_id is not None and draft.signed_quantity is not None
+    assert draft.input_kind is not None and typed_value is not None
     return NewTrade(
         asset_id=draft.asset_id,
         entry_date=draft.entry_date,
@@ -216,43 +238,6 @@ def entries_to_delete(
     if any(entry_id not in existing_ids for entry_id in requested_ids):
         raise DomainError(ErrorDetail(ErrorCode.NOT_FOUND, "Lançamento não encontrado."))
     return tuple(dict.fromkeys(requested_ids))
-
-
-def _typed_quote(draft: EntryDraft) -> tuple[Decimal | None, list[ErrorDetail]]:
-    kind = draft.input_kind
-    if kind is None:
-        return None, [_invalid("Informe o PU ou a taxa.", "input_kind")]
-    if kind is InputKind.PU:
-        typed, typed_field, other, other_field = (
-            draft.execution_pu,
-            "execution_pu",
-            draft.execution_rate,
-            "execution_rate",
-        )
-    else:
-        typed, typed_field, other, other_field = (
-            draft.execution_rate,
-            "execution_rate",
-            draft.execution_pu,
-            "execution_pu",
-        )
-    errors: list[ErrorDetail] = []
-    if other is not None:
-        errors.append(_invalid("Informe apenas o PU ou a taxa, não os dois.", other_field))
-    if typed is None:
-        missing = "Informe o PU." if kind is InputKind.PU else "Informe a taxa."
-        errors.append(_invalid(missing, typed_field))
-        return None, errors
-    places = PU_PLACES if kind is InputKind.PU else RATE_PLACES
-    if not typed.is_finite():
-        errors.append(_invalid("Informe um número válido.", typed_field))
-    elif not fits_places(typed, places):
-        errors.append(_places_error(places, typed_field))
-    elif kind is InputKind.PU and typed <= 0:
-        errors.append(_invalid("O PU deve ser maior que zero.", typed_field))
-    elif kind is InputKind.RATE and typed <= -1:
-        errors.append(_invalid("A taxa deve ser maior que −100%.", typed_field))
-    return (typed if not errors else None), errors
 
 
 def _date_errors(entry_date: date, today: date) -> list[ErrorDetail]:
