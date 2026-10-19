@@ -35,7 +35,7 @@ The toolchain is locked (user, 2026-10-18). Do not add other libraries without t
 
 Each package is the current stable major published before 2026-10-04, the same cut-off as the backend, pinned to an exact version. One exception: **TypeScript is 6.0.x**, not 7, because typescript-eslint 8.71 supports only `typescript <6.1.0`. Supporting packages of the locked tools are allowed: `@eslint/js`, `globals`, `eslint-config-prettier`, `@testing-library/dom` and `@testing-library/jest-dom`, and `recharts` (peer of `@mantine/charts`).
 
-**API types.** Until the backend serves them, `frontend/src/api/` holds hand-written response types and MSW fixtures: a **draft contract** derived from the spec and the Figma. Every field not named in the docs is listed as a contract proposal in the PR. The integrator reconciles the draft with the backend when the endpoint is built. At integration (Wave 5) the hand-written types are replaced by types generated from the backend's OpenAPI with `openapi-typescript` (`npm run gen:api`).
+**API types.** `frontend/src/api/contract/` holds the hand-written request and response types: the adopted HTTP contract (OQ-26 item 8, frozen at 57b4df0), which the backend now serves and its contract tests check (`backend/tests/architecture/test_contract_*.py`); the real-API QA (`docs/qa/real-api-qa-2026-10-19.md`) found no mismatch. The MSW fixtures in `mocks/` follow the same types. A new or changed field is a contract change: propose it in the PR and the integrator applies it to the backend. Types generated from OpenAPI (`openapi-typescript`, `npm run gen:api`) were planned for Wave 5 but not adopted; there is no such script.
 
 ```text
 frontend/src/
@@ -119,7 +119,7 @@ frontend/src/
   - a spec gap.
 
   Never edit those paths, even "just one line".
-- **Worktree setup.** Run `npm ci` once in your worktree before the first commit. The pre-commit hook runs eslint, tsc and vitest on staged frontend files as soon as `frontend/package.json` exists, and fails without `node_modules`. Development runs `npm run dev` against MSW; the backend is not needed. The integrator adds the frontend to Docker Compose in W0.6.
+- **Worktree setup.** Run `npm ci` once in your worktree before the first commit. The pre-commit hook runs eslint, tsc and vitest on staged frontend files as soon as `frontend/package.json` exists, and fails without `node_modules`. Development runs `npm run dev` against MSW by default, with no backend; `VITE_API_MOCKS=false` runs it against the real API (README "Run the application"). Compose serves the built UI as the `web` service (#99).
 
 ## Commands (from `frontend/`)
 
@@ -128,7 +128,7 @@ The scaffold creates these scripts:
 ```bash
 npm ci                 # once per worktree
 npm run dev            # Vite dev server, API mocked by MSW
+VITE_API_MOCKS=false npm run dev   # against the real API (proxy; API_PROXY_TARGET for another port)
 npm test               # Vitest
 npm run lint && npm run typecheck
-npm run gen:api        # Wave 5: types from the backend OpenAPI (openapi-typescript)
 ```
