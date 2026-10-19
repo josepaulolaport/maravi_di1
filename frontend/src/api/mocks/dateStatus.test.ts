@@ -333,6 +333,21 @@ describe('OQ-23 the status of a date, per chain', () => {
     expect(afterDeposit.predecessor).toEqual({ cash: 'NOT_PROCESSED', positions: 'ZERO_STATE' });
   });
 
+  it.each<ProcessingScope>(['CASH', 'POSITIONS', 'ALL'])(
+    'OQ-39 a %s preview returns both chains',
+    async (scope) => {
+      await finish(await enqueue('2026-10-17', '2026-10-17', 'CASH'));
+
+      const preview = await processingApi.preview({
+        start_date: '2026-10-18',
+        end_date: '2026-10-18',
+        scope,
+      });
+
+      expect(preview.predecessor).toEqual({ cash: 'PROCESSED', positions: 'NOT_PROCESSED' });
+    },
+  );
+
   it('§8.2 AUM has no status of its own: it is the value, null when either side is missing', async () => {
     const complete = await portfolioApi.getSummary('2026-10-15');
     const noPositions = await portfolioApi.getSummary('2026-10-17');

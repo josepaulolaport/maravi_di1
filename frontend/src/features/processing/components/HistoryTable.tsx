@@ -13,16 +13,18 @@ import { SCOPE_LABELS } from '@/shared/processing/scope';
 
 import { formatPeriod, formatProgress, shortId } from '../format';
 import type { useProcessingRequests } from '../hooks/useProcessing';
-import { canCancel, canRequestAgain, jobStatusBadge, progressOf } from '../jobStatus';
+import { canCancel, jobStatusBadge, progressOf, retryRequests } from '../jobStatus';
+import type { RetryRequest } from '../jobStatus';
 
 /**
  * What the user can do with a job, from its row menu or its details modal (OQ-20). Cancel and
- * queue are separate actions: there is no cancel and replace (OQ-30).
+ * queue are separate actions: there is no cancel and replace (OQ-30). A new request prefills
+ * one of the run's `retryRequests` (OQ-23, OQ-40).
  */
 export interface JobActions {
   onDetails: (job: ProcessingRequest) => void;
   onCancel: (job: ProcessingRequest) => void;
-  onRequestAgain: (job: ProcessingRequest) => void;
+  onRequestAgain: (retry: RetryRequest) => void;
 }
 
 function matchesSearch(job: ProcessingRequest, search: string): boolean {
@@ -169,15 +171,16 @@ function JobRow({ job, actions }: { job: ProcessingRequest; actions: JobActions 
                 Cancelar processamento
               </Menu.Item>
             )}
-            {canRequestAgain(job.status) && (
+            {retryRequests(job).map((retry) => (
               <Menu.Item
+                key={retry.label}
                 onClick={() => {
-                  actions.onRequestAgain(job);
+                  actions.onRequestAgain(retry);
                 }}
               >
-                Solicitar novo processamento
+                {retry.label}
               </Menu.Item>
-            )}
+            ))}
           </Menu.Dropdown>
         </Menu>
       </Table.Td>

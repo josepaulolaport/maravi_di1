@@ -9,7 +9,7 @@ import {
 import { http, HttpResponse } from 'msw';
 
 import type { ProcessingRequest } from '@/api/contract';
-import { db } from '@/api/mocks/db';
+import { db, setStatus } from '@/api/mocks/db';
 import { url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { renderApp } from '@/test/render';
@@ -283,6 +283,40 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     ).toBeInTheDocument();
     expect(modal.getByText('1')).toBeInTheDocument();
   });
+
+  it('OQ-36 in Tudo, a day before missing for one chain only warns that this chain fails and the other goes on', async () => {
+    // Cash has 17/10; positions do not.
+    setStatus('2026-10-17', 'CASH', 'PROCESSED');
+    const { user } = renderApp(`${PAGE}&inicio=2026-10-18&fim=2026-10-18`);
+
+    await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
+
+    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    const warnings = await modal.findAllByRole('alert');
+    expect(warnings.map((w) => w.textContent)).toEqual([
+      'O fechamento das posições de 17/10/2026 não foi processado. O fechamento das posições falhará no primeiro dia (dia anterior não processado), sem publicar nenhum dia; o fechamento do caixa seguirá até o fim do período. Processe antes um intervalo que inclua esse dia.',
+    ]);
+  });
+
+  it.each([
+    ['Caixa', 'Estado anterior do caixa', 0],
+    ['Posições', 'Estado anterior das posições', 1],
+  ])(
+    'OQ-39 the preview returns both chains; %s shows and warns only for its own chain',
+    async (scope, shown, warnings) => {
+      // Cash has 17/10; positions do not. The mock answers both chains for any scope.
+      setStatus('2026-10-17', 'CASH', 'PROCESSED');
+      const { user } = renderApp(`${PAGE}&inicio=2026-10-18&fim=2026-10-18`);
+
+      await user.click(await screen.findByRole('radio', { name: scope }));
+      await user.click(screen.getByRole('button', { name: 'Solicitar processamento' }));
+
+      const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+      await modal.findByRole('group', { name: shown });
+      expect(modal.getAllByRole('group', { name: /Estado anterior/ })).toHaveLength(1);
+      expect(modal.queryAllByRole('alert')).toHaveLength(warnings);
+    },
+  );
 
   it('OQ-21 the scope defaults to Tudo and Caixa warns only about the cash chain', async () => {
     const { user } = renderApp(`${PAGE}&inicio=2026-10-17&fim=2026-10-18`);
@@ -884,6 +918,115 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
       ),
     ).toBeInTheDocument();
     expect(modal.getByRole('button', { name: 'Solicitar novo processamento' })).toBeInTheDocument();
+  });
+
+  /** A Tudo run where positions failed on 17/10 and cash went on to the end (OQ-36). */
+  const PARTIAL = {
+    status: 'COMPLETED_WITH_ISSUES',
+    start_date: '2026-10-16',
+    progress_date: '2026-10-18',
+    error_code: 'POSITIONS_PREDECESSOR_MISSING',
+    error_message: 'Dia anterior não processado',
+    failed_date: '2026-10-17',
+    failed_chain: 'POSITIONS',
+    dispatched_at: '2026-10-18T10:00:01-03:00',
+    started_at: '2026-10-18T10:00:02-03:00',
+    finished_at: '2026-10-18T10:00:09-03:00',
+  } as const;
+
+  it('OQ-36 OQ-40 a Concluído com pendências Tudo run where a chain failed shows the error, its date and chain', async () => {
+    seedJob(PARTIAL);
+    const { user } = renderApp(PAGE);
+
+    const menu = within(
+      await openMenu(user, '16/10/2026 a 18/10/2026', 'Concluído com pendências'),
+    );
+    expect(menu.getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+      'Ver detalhes',
+      'Solicitar novo processamento (Posições)',
+    ]);
+    await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
+
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    expect(modal.getByRole('alert')).toHaveTextContent('Dia anterior não processado');
+    expect(field(modal, 'Data com erro').getByText('17/10/2026')).toBeInTheDocument();
+    expect(field(modal, 'Cadeia com erro').getByText('Posições')).toBeInTheDocument();
+    expect(
+      modal.getByText(
+        'O fechamento das posições falhou em 17/10/2026; suas datas seguintes não foram processadas. O fechamento do caixa foi processado até o fim do período.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('OQ-40 the failed-chain retry prefills that chain from failed_date to the original end', async () => {
+    seedJob(PARTIAL);
+    const { user, router } = renderApp(PAGE);
+
+    const menu = within(
+      await openMenu(user, '16/10/2026 a 18/10/2026', 'Concluído com pendências'),
+    );
+    await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    await user.click(
+      modal.getByRole('button', { name: 'Solicitar novo processamento (Posições)' }),
+    );
+
+    expect(router.state.location.search).toBe(
+      '?tab=processamentos&inicio=2026-10-17&fim=2026-10-18&escopo=posicoes',
+    );
+    expect(screen.getByRole('radio', { name: 'Posições' })).toBeChecked();
+  });
+
+  it('OQ-36 OQ-40 a Cancelado Tudo run after a chain failed keeps the error and offers both retries', async () => {
+    seedJob({
+      status: 'CANCELLED',
+      start_date: '2026-10-15',
+      progress_date: '2026-10-16',
+      error_code: 'MOCK_INPUTS_CHANGED',
+      error_message: 'Falha ao processar o caixa de 16/10/2026.',
+      failed_date: '2026-10-16',
+      failed_chain: 'CASH',
+      started_at: '2026-10-18T10:00:02-03:00',
+      finished_at: '2026-10-18T10:00:09-03:00',
+      cancel_requested_at: '2026-10-18T10:00:05-03:00',
+    });
+    const { user, router } = renderApp(PAGE);
+
+    let menu = within(await openMenu(user, '15/10/2026 a 18/10/2026', 'Cancelado'));
+    expect(menu.getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+      'Ver detalhes',
+      'Solicitar novo processamento',
+      'Solicitar novo processamento (Caixa)',
+    ]);
+    await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    expect(modal.getByRole('alert')).toHaveTextContent('Falha ao processar o caixa de 16/10/2026.');
+    expect(field(modal, 'Cadeia com erro').getByText('Caixa')).toBeInTheDocument();
+    await user.click(modal.getByRole('button', { name: 'Solicitar novo processamento' }));
+    expect(router.state.location.search).toBe(
+      '?tab=processamentos&inicio=2026-10-17&fim=2026-10-18&escopo=tudo',
+    );
+
+    menu = within(await openMenu(user, '15/10/2026 a 18/10/2026', 'Cancelado'));
+    await user.click(menu.getByRole('menuitem', { name: 'Solicitar novo processamento (Caixa)' }));
+    expect(router.state.location.search).toBe(
+      '?tab=processamentos&inicio=2026-10-16&fim=2026-10-18&escopo=caixa',
+    );
+  });
+
+  it('OQ-36 a Concluído com pendências run with only missing prices shows no error and no retry', async () => {
+    const { user } = renderApp(PAGE);
+
+    const menu = within(
+      await openMenu(user, '14/10/2026 a 16/10/2026', 'Concluído com pendências'),
+    );
+    expect(menu.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Ver detalhes']);
+    await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
+
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    expect(modal.queryByRole('alert')).not.toBeInTheDocument();
+    expect(modal.queryByRole('group', { name: 'Cadeia com erro' })).not.toBeInTheDocument();
+    expect(modal.queryByRole('button', { name: /Solicitar novo/ })).not.toBeInTheDocument();
   });
 
   it('§11.1 still shows an error box for a failed job without a message', async () => {

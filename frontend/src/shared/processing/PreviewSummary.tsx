@@ -27,9 +27,23 @@ const blocks = (state: PredecessorState) =>
   state !== 'ZERO_STATE' && state !== 'PROCESSED' && state !== 'PROCESSED_WITH_ISSUES';
 
 /**
+ * What happens on the first date when `chain` fails there. On a Tudo run where the other chain
+ * can run, only `chain` stops and the other goes on to the end (OQ-36); otherwise the run fails.
+ */
+function consequence(chain: ProcessingChain, otherGoesOn: boolean): string {
+  const other: ProcessingChain = chain === 'CASH' ? 'POSITIONS' : 'CASH';
+  return otherGoesOn
+    ? `o fechamento ${CHAIN_OF[chain]} falhará no primeiro dia (dia anterior não processado), sem publicar nenhum dia; o fechamento ${CHAIN_OF[other]} seguirá até o fim do período.`
+    : 'este processamento falhará no primeiro dia (dia anterior não processado), sem publicar nenhum dia.';
+}
+
+const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/**
  * What "Confirmar processamento" shows (§10.1, OQ-11, OQ-21): exactly [A, B], its days,
- * the scope, and the state before it for each chain in scope, warning when the run would fail
- * on its first date because the day before is not processed (OQ-31).
+ * the scope, and the state before it for each chain in scope, warning when a chain would fail
+ * on its first date because the day before is not processed (OQ-31). The preview carries both
+ * chains whatever the scope; only the scope's chains are shown and warned about (OQ-39).
  */
 export function PreviewSummary({ preview }: { preview: ProcessingPreview }) {
   const chains = chainsOf(preview.scope);
@@ -37,6 +51,8 @@ export function PreviewSummary({ preview }: { preview: ProcessingPreview }) {
   const stateOf = (chain: ProcessingChain) =>
     chain === 'CASH' ? preview.predecessor.cash : preview.predecessor.positions;
   const blocking = chains.filter((chain) => blocks(stateOf(chain)));
+  // A Tudo run with one chain blocked: the other still runs to the end (OQ-36).
+  const otherGoesOn = preview.scope === 'ALL' && blocking.length === 1;
   return (
     <Stack gap="sm">
       <Field label="Período solicitado">{formatPeriod(preview.start_date, preview.end_date)}</Field>
@@ -57,8 +73,8 @@ export function PreviewSummary({ preview }: { preview: ProcessingPreview }) {
         >
           <Text size="sm">
             {stateOf(chain) === 'RUNNING'
-              ? `O fechamento ${CHAIN_OF[chain]} de ${predecessor} ainda está em processamento. Se não terminar antes, este processamento falhará no primeiro dia (dia anterior não processado), sem publicar nenhum dia.`
-              : `O fechamento ${CHAIN_OF[chain]} de ${predecessor} não foi processado. Este processamento falhará no primeiro dia (dia anterior não processado), sem publicar nenhum dia. Processe antes um intervalo que inclua esse dia.`}
+              ? `O fechamento ${CHAIN_OF[chain]} de ${predecessor} ainda está em processamento. Se não terminar antes, ${consequence(chain, otherGoesOn)}`
+              : `O fechamento ${CHAIN_OF[chain]} de ${predecessor} não foi processado. ${capitalized(consequence(chain, otherGoesOn))} Processe antes um intervalo que inclua esse dia.`}
           </Text>
         </Alert>
       ))}
