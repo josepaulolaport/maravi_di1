@@ -250,7 +250,7 @@ Run locally on 2026-10-19 on `bbf7027` (#108) plus this PR's docs-only commits (
 - `make lint`: ruff format "348 files already formatted"; mypy "Success: no issues found in 343 source files"; eslint and `tsc --noEmit` clean, "All matched files use Prettier code style!".
 - `make test-backend` (throwaway PostgreSQL 16 and RabbitMQ 4.1): `alembic heads: 0006 (head)`, `alembic current after upgrade head: 0006 (head)`; "1366 passed in 252.88s", 0 skipped; coverage 99%.
 - `make test-frontend`: "Test Files 33 passed (33)", "Tests 554 passed (554)". A first run in parallel with `make test-backend` and `make e2e` had 2 timeouts in `ProcessingTab.test.tsx`; the rerun alone passed.
-- `make e2e` (throwaway Compose stack, its own project: postgres, rabbitmq, migrate, seed, api, demo, outbox-relay, worker, web): the challenge example dated today, 14 checks ok (PU 90909.0909090909, run `COMPLETED`, cash and positions `PROCESSED`, cash 109090.9090909091, AUM 200000, one position of quantity 1), "E2E SMOKE PASSED", and the `web` service serves the UI and forwards the API.
+- `make e2e` (throwaway Compose stack, its own project: postgres, rabbitmq, migrate, seed, api, demo, outbox-relay, worker, web): the challenge example dated today, 13 checks ok (PU 90909.0909090909, run `COMPLETED`, cash and positions `PROCESSED`, cash 109090.9090909091, AUM 200000, one position of quantity 1), "E2E SMOKE PASSED", and the `web` service serves the UI and forwards the API.
 
 ### Done, by area
 
