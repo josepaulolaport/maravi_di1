@@ -1,6 +1,6 @@
 # Maravi DI1 — Module-based parallel implementation plan
 
-**Status:** implementation blueprint, 2026-10-18. **Sources of truth:** `docs/maravi_business_specification.md`, `docs/schema.md`, `docs/schema.sql`, `docs/interfaces.md`, and the decisions confirmed in conversation (open ones in `docs/open-questions.md`). If these disagree, flag the discrepancy before implementation; do not silently alter domain rules.
+**Status:** implementation blueprint, 2026-10-18; progress and remaining work as of 2026-10-19 in §12. **Sources of truth:** `docs/maravi_business_specification.md`, `docs/schema.md`, `docs/schema.sql`, `docs/interfaces.md`, and the decisions confirmed in conversation (open ones in `docs/open-questions.md`). If these disagree, flag the discrepancy before implementation; do not silently alter domain rules.
 
 ## 0. Non-negotiable architecture
 
@@ -231,11 +231,43 @@ Do not merge branches merely because code compiles. Require reviewer sign-off an
 
 ## 11. Open decisions requiring human sign-off before relevant code
 
-Items 1–4 below were answered on 2026-10-18 (`docs/open-questions.md`); only OQ-18 (challenge discrepancies) remains open.
-
-1. Precision/rounding — OQ-3.
-2. Maturity settlement — OQ-1.
-3. Multiplier — OQ-2.
-4. Zero-day trades and non-business dates — OQ-1, OQ-7.
+None. OQ-1 to OQ-28 are answered (`docs/open-questions.md`); a new gap goes through the `spec-gap` skill before any code depends on it.
 
 **Post-completion TODO:** asynchronous CSV reference-price import and optional B3 extraction feeding `PriceService` via RabbitMQ adapter, not part of initial implementation.
+
+## 12. Progress and remaining work (2026-10-19)
+
+Verified on `main` at `81cbbb7`: `make lint-backend` clean; `make test-backend` 513 passed with PostgreSQL 16 and RabbitMQ 4.1 (0 skipped), migrations at head `0003`; frontend lint, typecheck, Prettier, 468 tests and `vite build` pass.
+
+### Done
+
+| Area | On `main` |
+|---|---|
+| Docs | OQ-1 to OQ-28 answered: cash and positions chains (OQ-21, OQ-22), per-date status with no staging (OQ-23), one ledger entry (OQ-24), prices without revisions (OQ-25), follow-ups and HTTP contract (OQ-26), chart start date (OQ-27), AUM without status (OQ-28) |
+| Schema | Alembic 0001 + 0002 + 0003 = `docs/schema.sql`, equivalence-tested |
+| Shared | decimals (OQ-3), clock, calendar, error catalogue (OQ-15), `InputKind` |
+| Platform (H) | config, system clock, async engine/session, Unit of Work; messaging: envelope, outbox, relay with confirms, inbox, publisher, consumer, topology |
+| Composition (X) | app factory `main.py`, `/health`, problem+json handlers, empty router and dependency wiring |
+| Contracts (`public.py`) | asset, ledger, prices, processing (invalidator, scope, statuses, request); fake invalidator in `tests/fakes/processing.py` |
+| Domain | pricing DI1 calculator (B); portfolio positions, average cost, cash, valuation, accounting (E); P&L position, trades, asset, portfolio (F), one file per metric |
+| CI | path-scoped backend and frontend jobs, `ci-ok`, CodeRabbit review |
+| Frontend (I) | Carteira, Lançamentos, Ativos, Central de Controle on MSW, against the OQ-26 contract |
+
+Gates: G0 met except Compose; G1 waits on lane A (Asset).
+
+### Remaining, by lane
+
+| Lane | Next work | Depends on |
+|---|---|---|
+| X | `pricing/public.py`, `portfolio/public.py` (`PortfolioResultsWriter`, `PortfolioQueryService`), `pnl/public.py`; RabbitMQ service in CI (`TEST_RABBITMQ_URL`, `TEST_RABBITMQ_MANAGEMENT_URL`, `REQUIRE_BROKER_TESTS=1`); Compose with PostgreSQL, RabbitMQ, a migrate job and the api, plus the Dockerfile (workers later); wire each lane's router in `composition/`; README demo with the challenge example dated today (D4) | — |
+| A Asset | models and repository over `asset.*`, `AssetService`, `AssetReader` implementation, HTTP (`/instrument-types`, `/products`, `/instruments`) | — |
+| B Pricing | `PricingService.calculate(instrument_id, reference_date, quote)` over the calculator, reading the instrument through `AssetReader` | `pricing/public.py` |
+| C Ledger | `ledger.entries` persistence, `LedgerService` create and batch soft delete (`deletion_batch_id`), `LedgerReader.get_trades`/`get_cash_movements`, invalidation by type in the same UoW, HTTP `/ledger/entries` (paginated) and `/ledger/entries/deletions` | asset and pricing public contracts (fakes until they land) |
+| D Prices | one observation per asset, date and source; `PriceService` set, correct in place, remove; `PriceReader` exact-date preferred reads (MANUAL > B3); `prices_changed` in the same UoW; HTTP | asset and pricing public contracts |
+| G Processing | request API: preview, enqueue, paginated history, cancel, cancel-and-replace, `FinancialResultInvalidator` over `processing.date_status`, issues. Then Wave 4: dispatcher, claim and lease, one transaction per date, `RUNNING` restore, recovery from `progress_date` | request API: none; worker: E's writer, H's workers |
+| E Portfolio | Wave 3: `PortfolioResultsWriter.write_positions_day`/`write_cash_day` with the AUM recomputation, `PortfolioQueryService` (summary, positions, P&L series), mapping `ledger.public.TradeRecord` onto the domain trade | `portfolio/public.py` |
+| F PnL | free: spec §13 acceptance fixtures across portfolio and P&L, or pair with G on the worker | — |
+| H Platform | H3 logging and `workers/outbox_relay.py` bootstrap; worker entry points for G; Compose infra with X | — |
+| I Frontend | mark `frontend/src/api/README.md` as the adopted contract (OQ-26) instead of "not yet named in interfaces.md"; then Wave 5: swap MSW for the real API endpoint by endpoint, OpenAPI-generated types | backend endpoints |
+
+Waves 3–5 and gates G2–G5 are unchanged (§5–§9); they now use the per-date publication of OQ-23.
