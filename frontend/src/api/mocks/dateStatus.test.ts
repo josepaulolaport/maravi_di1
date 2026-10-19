@@ -258,6 +258,54 @@ describe('OQ-23 the status of a date, per chain', () => {
     expect(noPositions.aum).toBeNull();
   });
 
+  it('OQ-38 a chain written while the other is processed keeps AUM = cash + market value', async () => {
+    await finish(await enqueue('2026-10-15', '2026-10-15', 'CASH'));
+
+    expect((await portfolioApi.getSummary('2026-10-15')).aum).toBe('1491965.8654717340');
+  });
+
+  it('OQ-38 OQ-40 a chain written while the other is Erro on that date leaves AUM null', async () => {
+    // The fake cannot recompute 15/10's cash after a deposit dated then: cash reads Erro.
+    await deposit('2026-10-15');
+    await finish(await enqueue('2026-10-15', '2026-10-15', 'CASH'));
+    expect((await portfolioApi.getSummary('2026-10-15')).aum).toBe('1491965.8654717340');
+
+    await finish(await enqueue('2026-10-15', '2026-10-15', 'POSITIONS'));
+
+    const summary = await portfolioApi.getSummary('2026-10-15');
+    expect(summary.cash.status).toBe('FAILED');
+    expect(summary.positions.status).toBe('PROCESSED');
+    expect(summary.cash.balance).not.toBeNull();
+    expect(summary.positions.market_value).not.toBeNull();
+    expect(summary.aum).toBeNull();
+  });
+
+  it('OQ-38 a chain written while the other is not processed leaves AUM null', async () => {
+    await finish(await enqueue('2026-10-17', '2026-10-17', 'CASH'));
+
+    const summary = await portfolioApi.getSummary('2026-10-17');
+    expect(summary.cash.balance).not.toBeNull();
+    expect(summary.aum).toBeNull();
+  });
+
+  it('OQ-40 the zero state needs no earlier status for the chain: a gap after one fails the date', async () => {
+    // Nothing is dated before 14/10, so 01/10 is processed from the zero state.
+    expect((await finish(await enqueue('2026-10-01', '2026-10-01', 'CASH'))).status).toBe(
+      'COMPLETED',
+    );
+
+    const preview = await processingApi.preview({
+      start_date: '2026-10-05',
+      end_date: '2026-10-05',
+      scope: 'ALL',
+    });
+    const job = await finish(await enqueue('2026-10-05', '2026-10-05', 'CASH'));
+
+    // Cash has a status on 01/10, so 04/10 unprocessed is a gap; positions have none.
+    expect(preview.predecessor).toEqual({ cash: 'NOT_PROCESSED', positions: 'ZERO_STATE' });
+    expect(job).toMatchObject({ status: 'FAILED', error_code: 'CASH_PREDECESSOR_MISSING' });
+  });
+
   it('OQ-31 a trade on a processed date leaves both chains as they were', async () => {
     await ledgerApi.createEntry({
       type: 'TRADE',

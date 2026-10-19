@@ -43,8 +43,8 @@ export function summaryOf(date: string): PortfolioSummary {
       cumulative_pnl: positions?.cumulative_pnl ?? null,
       pnl_status: positions?.pnl_status ?? null,
     },
-    // The scenario's cash + market value, only while both sides are published.
-    aum: cash && positions ? positions.aum : null,
+    // As the last chain written on the date stored it (OQ-38, OQ-40), while both sides exist.
+    aum: cash && positions ? (db.published.aum.get(date) ?? null) : null,
   };
 }
 

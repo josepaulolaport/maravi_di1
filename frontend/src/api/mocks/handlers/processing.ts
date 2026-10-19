@@ -48,18 +48,27 @@ export function chainsOf(scope: ProcessingScope): ProcessingChain[] {
 
 const now = () => new Date().toISOString();
 
+const isProcessed = (status: PredecessorState) =>
+  status === 'PROCESSED' || status === 'PROCESSED_WITH_ISSUES';
+
 /**
- * Whether a chain is in its zero state on `date` (OQ-26 item 3): positions, when no trade is
- * dated on or before it; cash, when no entry of either type is.
+ * Whether a chain is in its zero state after `date`, the day before the one processed (OQ-40
+ * item 5): no date up to it has any status for the chain, and no entry of the chain's type is
+ * dated on or before it (positions: a trade; cash: an entry of either type, OQ-26 item 3).
  */
 function inZeroState(date: string, chain: ProcessingChain): boolean {
+  for (const [day, row] of db.dateStatus) {
+    if (day <= date && row[chain] !== null) return false;
+  }
   return !db.entries.some((e) => e.date <= date && (chain === 'CASH' || e.type === 'TRADE'));
 }
 
 /** The day before `start` for one chain (OQ-11, OQ-26): its status, or the zero state. */
 function predecessorState(start: string, chain: ProcessingChain): PredecessorState {
   const predecessor = addDays(start, -1);
-  return inZeroState(predecessor, chain) ? 'ZERO_STATE' : statusOf(predecessor, chain);
+  const status = statusOf(predecessor, chain);
+  if (status !== 'NOT_PROCESSED') return status;
+  return inZeroState(predecessor, chain) ? 'ZERO_STATE' : status;
 }
 
 /** The scenario's results for `date`, valid only while its inputs are unchanged. */
@@ -130,6 +139,13 @@ function commitDate(job: ProcessingRequest, date: string): void {
     setStatus(date, chain, status);
     statuses.push(status);
   }
+  // AUM follows the other chain's status on the date, whichever run wrote it (OQ-38, OQ-40):
+  // with both chains written here, both are processed now.
+  const other = (['CASH', 'POSITIONS'] as const).find((chain) => !chains.includes(chain));
+  db.published.aum.set(
+    date,
+    other === undefined || isProcessed(statusOf(date, other)) ? day.summary.aum : null,
+  );
   db.written.set(job.id, statuses);
   Object.assign(job, { progress_date: date, updated_at: now() });
 }

@@ -60,6 +60,7 @@ Recorded by lane X in PR #54; the mock follows them.
 - OQ-33: a contract code is trimmed and upper-cased; an unknown id in a body is 422 on that field (404 only for a path id); `search` ignores case and accents; `Instrument.last_reference` is always `null` for now, shown as "—".
 - OQ-35: Portfolio reads after today are 422 `FUTURE_DATE`: on `date` for the summary and the positions, on `end_date` only for the P&L series (a later `start_date` is `INVALID_RANGE`).
 - OQ-37: `GET /processing/issues` is deduplicated on read: a missing price once per (asset, `required_price_date`), an expired open position once per asset, each with its earliest `affected_date`. The Pendências table still shows the date to act on (the needed price date).
+- OQ-38, OQ-40 items 2 and 5: a chain written on a date stores that date's AUM as cash + market value only when the other chain is `PROCESSED` or `PROCESSED_WITH_ISSUES` there, whichever run wrote it; otherwise `null`. A chain is in its zero state on D only when no date before D has any status for it and no entry of its type is dated on or before D−1, so a gap after an earlier status fails D.
 
 ## Decided gap
 
