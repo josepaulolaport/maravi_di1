@@ -242,7 +242,7 @@ class PnLPointView:
     range_cumulative_pnl: Decimal
     """Never ``None``: a date without a usable daily P&L adds 0 (OQ-41)."""
     pnl_status: CalculationCompleteness | None
-    """``None`` on a date not processed."""
+    """``None`` on a date not processed, ``FAILED`` or ``RUNNING`` (OQ-41)."""
     status: ChainStatus | None
     """The positions chain status of the date; ``None`` is not processed, which the HTTP layer
     renames to ``NOT_PROCESSED`` as in every other read (OQ-41)."""
