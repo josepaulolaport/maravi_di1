@@ -6,9 +6,9 @@ daily`` and stays ``None`` once the chain is broken (``previous_cumulative`` is 
 caller passes 0 before the first entry (OQ-4). Deposits and withdrawals are not inputs: they are
 never P&L (§8.1).
 
-The calculator does not know whether the day's starting state is current. When the state before
-a requested range is stale or missing (OQ-11, ``STALE_PREDECESSOR``), the caller publishes those
-days with null P&L and ``pnl_status = MISSING`` instead of this result.
+The calculator assumes a valid D-1 state. Processing calls it for D only when D-1 is processed or
+is the positions chain's zero state; otherwise the run fails on D with
+``POSITIONS_PREDECESSOR_MISSING`` before any P&L is calculated (OQ-31).
 """
 
 from __future__ import annotations
