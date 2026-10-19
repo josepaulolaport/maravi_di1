@@ -300,3 +300,22 @@ def test_a_later_run_prunes_only_the_issues_of_its_own_chain(
     command.upgrade(_alembic(database_url), "0003")
 
     assert fetch(database_url, "SELECT count(*) FROM processing.issues") == [(kept,)]
+
+
+@pytest.mark.parametrize("target", ["0003", "0002"])
+def test_allow_data_loss_does_not_bypass_the_active_job_check(
+    database_url: str, target: str
+) -> None:
+    command.upgrade(_alembic(database_url), "0002" if target == "0003" else "0003")
+    dates = (
+        "requested_start_date, requested_end_date" if target == "0003" else "start_date, end_date"
+    )
+    execute(
+        database_url,
+        f"INSERT INTO processing.requests (scope, {dates}, status)"
+        " VALUES ('ALL', '2026-10-01', '2026-10-02', 'RUNNING')",
+    )
+
+    migrate = command.upgrade if target == "0003" else command.downgrade
+    with pytest.raises(RuntimeError, match="job is active"):
+        migrate(_alembic(database_url, "allow_data_loss=true"), target)

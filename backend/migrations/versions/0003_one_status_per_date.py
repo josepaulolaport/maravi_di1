@@ -58,12 +58,12 @@ def _data_loss_allowed() -> bool:
 
 
 def _refuse_while_a_job_is_active() -> None:
-    if context.is_offline_mode() or _data_loss_allowed():
+    # Not bypassed by allow_data_loss: that option only accepts losing rows on a downgrade.
+    if context.is_offline_mode():
         return
     if op.get_bind().exec_driver_sql(ACTIVE_JOB).scalar():
         raise RuntimeError(
-            "Refusing to migrate 0003 while a processing job is active; cancel it first, or rerun "
-            "with `-x allow_data_loss=true`."
+            "Refusing to migrate 0003 while a processing job is active; cancel it first."
         )
 
 
