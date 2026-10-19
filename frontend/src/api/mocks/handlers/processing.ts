@@ -203,12 +203,13 @@ function tick(): void {
       });
       return;
     }
-    if (active.cancel_requested_at !== null) {
-      finish(active, { status: 'CANCELLED' });
-      return;
-    }
     Object.assign(active, { status: 'RUNNING', started_at: now(), updated_at: now() });
     startDate(active, start);
+    return;
+  }
+  if (active?.status === 'CANCELLING' && active.started_at === null) {
+    // Cancelled while dispatched (GAP-G-2): it ends without running a date.
+    finish(active, { status: 'CANCELLED' });
     return;
   }
   if (active?.status === 'RUNNING' || active?.status === 'CANCELLING') {
@@ -271,7 +272,8 @@ function cancel(request: ProcessingRequest): ProcessingRequest {
   Object.assign(request, { cancel_requested_at: now(), updated_at: now() });
   if (request.status === 'QUEUED') {
     Object.assign(request, { status: 'CANCELLED', finished_at: now() });
-  } else if (request.status === 'RUNNING') {
+  } else {
+    // DISPATCHED (GAP-G-2) or RUNNING: cooperative, it ends at the next safe point.
     request.status = 'CANCELLING';
   }
   return request;

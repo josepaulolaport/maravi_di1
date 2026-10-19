@@ -487,6 +487,25 @@ describe('mock processing', () => {
     expect((await poll(queued.id)).status).toBe('CANCELLED');
   });
 
+  it('GAP-G-2 cancelling a dispatched run moves it to CANCELLING, then CANCELLED with no date run', async () => {
+    const job = await processingApi.enqueue({
+      start_date: '2026-10-14',
+      end_date: '2026-10-15',
+      scope: 'ALL',
+    });
+    await poll(job.id); // DISPATCHED
+
+    const cancelling = await processingApi.cancel(job.id);
+
+    expect(cancelling.status).toBe('CANCELLING');
+    expect(cancelling.cancel_requested_at).not.toBeNull();
+    expect((await problemOf(processingApi.cancel(job.id))).errors?.[0]?.code).toBe(
+      'JOB_NOT_CANCELLABLE',
+    );
+    expect(await poll(job.id)).toMatchObject({ status: 'CANCELLED', progress_date: null });
+    expect((await chainStatus('2026-10-14')).cash).toBe('FRESH');
+  });
+
   it('§10.2 runs one job at a time: the next stays queued until the active one ends', async () => {
     const first = await processingApi.enqueue({
       start_date: '2026-10-14',

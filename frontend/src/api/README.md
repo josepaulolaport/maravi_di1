@@ -1,4 +1,6 @@
-# API layer (draft contract)
+# API layer
+
+The shapes in `contract/` are the adopted HTTP contract (OQ-26 item 8), frozen at 57b4df0 (Lead Backend, 2026-10-19); `docs/interfaces.md` records them. The proposals below are kept as the history of each decision.
 
 - `contract/`: response and request types. snake_case names follow `docs/schema.sql`; decimals are strings; `null` means unavailable.
 - `http.ts`: the only HTTP client. JSON in and out; RFC 9457 problem+json errors become `ApiError` (OQ-15).
@@ -10,7 +12,7 @@ At Wave 5 the hand-written types are replaced by types generated from the backen
 
 ## Contract proposals for the integrator
 
-Everything below is used by the frontend but not yet named in `docs/interfaces.md` or `docs/schema.sql`.
+Each row was proposed by lane I and is now part of the adopted contract (OQ-26 item 8).
 
 | #   | Proposal                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Why                                                                                                                   |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
