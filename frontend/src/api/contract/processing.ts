@@ -1,4 +1,5 @@
 import type { IsoDate, IsoDateTime } from './common';
+import type { Freshness } from './portfolio';
 
 // Processing (spec §10, schema `processing.*`). Central de Controle (§11.1, OQ-20).
 
@@ -20,8 +21,7 @@ export type JobStatus =
   | 'CANCELLED'
   | 'COMPLETED'
   | 'COMPLETED_WITH_ISSUES'
-  | 'FAILED'
-  | 'SUPERSEDED';
+  | 'FAILED';
 
 /**
  * `GET /processing/requests?limit&cursor` (newest first, by (created_at, id); a `Page`, P21),
@@ -29,25 +29,27 @@ export type JobStatus =
  */
 export interface ProcessingRequest {
   id: string;
-  /** The job processes exactly this range (OQ-11). */
-  requested_start_date: IsoDate;
-  requested_end_date: IsoDate;
-  /** Draft (OQ-21): the chain(s) this job recomputes and publishes. */
+  /** The chain(s) this run processes (OQ-21). */
   scope: ProcessingScope;
+  /** The run processes exactly this range, in calendar order (OQ-11, OQ-23). */
+  start_date: IsoDate;
+  end_date: IsoDate;
   status: JobStatus;
-  created_at: IsoDateTime;
-  dispatched_at: IsoDateTime | null;
-  started_at: IsoDateTime | null;
-  finished_at: IsoDateTime | null;
-  cancel_requested_at: IsoDateTime | null;
-  /** Days staged so far ("x / y dias"); nothing is published before the end (§10.4). */
-  processed_days: number;
-  total_days: number;
-  /** The date being processed while RUNNING. */
+  /**
+   * The last date the run committed (OQ-23): each date is published on its own, so every date
+   * up to it stays published whatever the run's end. `null` before the first one. Days done
+   * and the date being processed derive from it and the range.
+   */
   progress_date: IsoDate | null;
   error_code: string | null;
   /** pt-BR, for FAILED. */
   error_message: string | null;
+  created_at: IsoDateTime;
+  updated_at: IsoDateTime;
+  dispatched_at: IsoDateTime | null;
+  started_at: IsoDateTime | null;
+  finished_at: IsoDateTime | null;
+  cancel_requested_at: IsoDateTime | null;
 }
 
 /** `POST /processing/requests` and the preview. */
@@ -59,11 +61,13 @@ export interface ProcessingRangeRequest {
 }
 
 /**
- * State of the day before the range (OQ-11): ZERO_STATE when nothing was recorded before it
- * (valid), VALID when published and current, STALE or NOT_PROCESSED otherwise (the job still
- * runs, and its days read as stale with a STALE_PREDECESSOR issue).
+ * The day before the range, per chain (OQ-11, OQ-26 item 8): its chain status (`Freshness`),
+ * or ZERO_STATE when the chain has nothing before it (positions: no trade; cash: no entry of
+ * either type). Unless it is FRESH, FRESH_WITH_ISSUES or ZERO_STATE, the run's dates are
+ * written STALE with a STALE_PREDECESSOR issue; a cash day never processed refuses a CASH or
+ * ALL run when it starts (OQ-22).
  */
-export type PredecessorState = 'ZERO_STATE' | 'VALID' | 'STALE' | 'NOT_PROCESSED';
+export type PredecessorState = Freshness | 'ZERO_STATE';
 
 /** Proposal: `GET /processing/preview?start_date&end_date` (`ProcessingService.preview_range`). */
 export interface ProcessingPreview {

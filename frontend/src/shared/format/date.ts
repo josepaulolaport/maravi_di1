@@ -57,6 +57,11 @@ export function addDays(value: IsoDate, amount: number): IsoDate {
   return new Date(Date.parse(`${value}T00:00:00Z`) + amount * DAY_MS).toISOString().slice(0, 10);
 }
 
+/** Calendar days from `start` to `end`, both included (a count of days, never money). */
+export function daysInclusive(start: IsoDate, end: IsoDate): number {
+  return (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / DAY_MS + 1;
+}
+
 export function isIsoDate(value: string | null | undefined): value is IsoDate {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const time = Date.parse(`${value}T00:00:00Z`);

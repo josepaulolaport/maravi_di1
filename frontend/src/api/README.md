@@ -3,8 +3,8 @@
 - `contract/`: response and request types. snake_case names follow `docs/schema.sql`; decimals are strings; `null` means unavailable.
 - `http.ts`: the only HTTP client. JSON in and out; RFC 9457 problem+json errors become `ApiError` (OQ-15).
 - `endpoints.ts`: one typed function per endpoint. Feature hooks call these.
-- `mocks/`: the MSW fake backend: a stateful in-memory store (`db.ts`) seeded from one coherent scenario (`fixtures.ts`), with the documented validations, dirty markers and a job that advances one step per poll.
-  - A finished job publishes the scenario's precomputed results for its days, replaces the range's Pendências and moves the dirty markers inside the range to end + 1 (OQ-12). The fake does not calculate: once a write touches a day, any job whose range reaches that day ends **Falhou** with a "Backend simulado" message and publishes nothing.
+- `mocks/`: the MSW fake backend: a stateful in-memory store (`db.ts`) seeded from one coherent scenario (`fixtures.ts`), with the documented validations, one status per date and chain (`processing.date_status`, OQ-23), and a run that advances one step per poll: dispatch, then one date per poll. Its "today" is the app's clock (São Paulo); the tests pin that clock to `MOCK_TODAY`.
+  - A run publishes each date as it commits it: the scenario's precomputed results, that chain's Pendências for the date replaced (OQ-26), and the date's status. The fake does not calculate: a date on or after a write since the seed fails, so the run ends **Falhou** with a "Backend simulado" message there, and the dates before it stay published.
 
 At Wave 5 the hand-written types are replaced by types generated from the backend's OpenAPI (`npm run gen:api`).
 
@@ -35,23 +35,24 @@ Everything below is used by the frontend but not yet named in `docs/interfaces.m
 | P20 | One ledger entry (user, 2026-10-18: "Their separation should be their type only"): `type: TRADE \| CASH`, `date`, `time` (required on both), a shared `seq`, `cash_amount`. A trade adds its asset, `signed_quantity`, PU, rate and `input_kind`; a cash entry is an aporte (`cash_amount` > 0) or a retirada (< 0), with no description. `POST /ledger/entries` creates either type and replaces `POST /trades` and `POST /cash-movements`; `GET /trades` and `GET /cash-movements` are dropped. The user also wants one table in the database (`ledger.entries`): a schema change for lane X | Trades and cash entries are listed, created and deleted the same way                                                  |
 | P21 | Keyset pagination (lane X, approved by the user 2026-10-18): `?limit=&cursor=` → `{items, next_cursor}` (`Page<T>`), `next_cursor` opaque and `null` on the last page, no total. On `GET /ledger/entries` (order `(date, time, seq)`) and `GET /processing/requests` (`(created_at, id)`, newest first). `limit` 1–200, default 50; the screens read 50 entries or 20 jobs per page, with "Carregar mais"                                                                                                                                                                                      | Lists grow without bound; the browser never pages or sorts                                                            |
 
-## Draft: OQ-21, cash and positions as separate chains
+## OQ-21 to OQ-26: two chains, one status per date, per-date publication
 
-The user decided (2026-10-18) that cash and positions are two separately processed chains; lane X is recording it as OQ-21. Until `docs/interfaces.md` publishes the names, these fields are a **draft** and are aligned afterwards (if anything differs, the docs win):
+Recorded by lane X (OQ-21, OQ-22; OQ-23 to OQ-26 in PR #43). The user ruled that these shapes are the HTTP contract, with the corrections agreed with lane X (OQ-26 item 8):
 
 - `ProcessingScope = CASH | POSITIONS | ALL`: required on `POST /processing/requests`, on cancel-and-replace and on the preview; echoed on every `ProcessingRequest`.
-- `ProcessingPreview.predecessor = {cash, positions}`, replacing `predecessor_state`.
+- `ProcessingPreview.predecessor = {cash, positions}`, replacing `predecessor_state`: start−1's chain status, or `ZERO_STATE` when that chain has nothing before it (positions: no trade; cash: no entry of either type, OQ-26). There is no `VALID`.
 - `Issue.chain`: for `STALE_PREDECESSOR`, the chain whose day before is behind; `null` for the other types. A missing price and an expired open position are facts of the positions chain.
-- `PortfolioSummary = {date, cash, positions, aum}`, each with its own `status: FRESH | STALE | NOT_PROCESSED`. The cash also carries its day's components: `trades_cash_flow`, `deposits` and `withdrawals` (user, 2026-10-18).
+- `PortfolioSummary = {date, cash, positions, aum}`, each with its own `status`, the date's chain status from `processing.date_status` (OQ-23): `FRESH` Atualizado, `FRESH_WITH_ISSUES` Atualizado com pendências, `STALE` Desatualizado, `RUNNING` Processando, `FAILED` Erro, `NOT_PROCESSED` Não processado. The cash also carries its day's components: `trades_cash_flow`, `deposits` and `withdrawals` (user, 2026-10-18).
   - `cash.balance` comes from `portfolio.cash_balances`;
   - `positions` holds the market value, the valuation status and the P&L;
-  - `aum.value` is `null` when either side is missing, and `aum.status` is the less current of the two.
+  - `aum.value` is `null` when either side is missing, and `aum.status` is the less current of the two, in this order from least current: Não processado, Erro, Desatualizado, Processando, Atualizado com pendências, Atualizado (the order is lane I's reading of "less current"; to confirm with lane X).
 - Freshness everywhere (user, 2026-10-18): `PortfolioPositions` is `{date, status, published_at, items}`, and each `PnlPoint` has `status` instead of `stale`, both for the positions chain. This replaces P9's `publication` + `stale`.
 - OQ-22 (user, 2026-10-18): a CASH or ALL job whose day before has no published cash, while entries are dated on or before it, is refused when it starts. It ends `FAILED` with `error_code = CASH_PREDECESSOR_MISSING`, and the preview warns. Positions still run after a missing day (OQ-11). `Issue.chain` is set only on `STALE_PREDECESSOR`.
-- What goes stale after a write:
+- What goes stale after a write (on every date ≥ its date that already has a status; OQ-23 item 3):
   - a trade: cash and positions;
   - a cash entry: cash only;
   - a reference price: positions only.
+- A run (OQ-23): `ProcessingRequest = {id, scope, start_date, end_date, status, progress_date, error_code, error_message, created_at, updated_at, dispatched_at, started_at, finished_at, cancel_requested_at}`, eight statuses (no `SUPERSEDED`). Each date is published on its own: `progress_date` is the last one committed; days done and the date being processed derive from it. A failure at a date marks it `FAILED` and ends the run; a cancel lets the current date commit, and a cancel during the last date ends `COMPLETED` (or `COMPLETED_WITH_ISSUES`, OQ-26 item 9). A run ends `COMPLETED_WITH_ISSUES` when a date it wrote is `FRESH_WITH_ISSUES` or `STALE`. "Solicitar novo processamento" prefills from the failed date, or the first date not reached, to the original end.
 
 ## Decided gap
 

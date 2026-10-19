@@ -443,18 +443,18 @@ describe('mock processing', () => {
     return processingApi.getRequest(id);
   }
 
-  it('§10.2 runs one queued job day by day to completion', async () => {
+  it('§10.2 OQ-23 runs one queued job date by date to completion', async () => {
     const job = await processingApi.enqueue({
       start_date: '2026-10-14',
       end_date: '2026-10-15',
       scope: 'ALL',
     });
-    expect(job).toMatchObject({ status: 'QUEUED', total_days: 2, processed_days: 0 });
+    expect(job).toMatchObject({ status: 'QUEUED', progress_date: null });
 
     expect((await poll(job.id)).status).toBe('DISPATCHED');
+    expect(await poll(job.id)).toMatchObject({ status: 'RUNNING', progress_date: null });
     expect(await poll(job.id)).toMatchObject({ status: 'RUNNING', progress_date: '2026-10-14' });
-    expect(await poll(job.id)).toMatchObject({ processed_days: 1, progress_date: '2026-10-15' });
-    expect(await poll(job.id)).toMatchObject({ status: 'COMPLETED', processed_days: 2 });
+    expect(await poll(job.id)).toMatchObject({ status: 'COMPLETED', progress_date: '2026-10-15' });
   });
 
   it('§10.3 ends with COMPLETED_WITH_ISSUES when the range has a missing price', async () => {
@@ -506,11 +506,11 @@ describe('mock processing', () => {
     expect((await poll(second.id)).status).toBe('DISPATCHED');
   });
 
-  it('§10.2 marks a job SUPERSEDED when an input changes during the run', async () => {
+  it('OQ-23 a write during a run marks only its chain stale; the run goes on (no SUPERSEDED)', async () => {
     const job = await processingApi.enqueue({
       start_date: '2026-10-14',
       end_date: '2026-10-15',
-      scope: 'ALL',
+      scope: 'POSITIONS',
     });
     await poll(job.id); // DISPATCHED
     await poll(job.id); // RUNNING
@@ -523,8 +523,8 @@ describe('mock processing', () => {
     });
     await poll(job.id);
 
-    expect((await poll(job.id)).status).toBe('SUPERSEDED');
-    // A deposit changes only the cash chain (OQ-21 draft).
+    expect((await poll(job.id)).status).toBe('COMPLETED');
+    // A deposit changes only the cash chain (OQ-21).
     expect(await chainStatus('2026-10-15')).toEqual({ cash: 'STALE', positions: 'FRESH' });
   });
 
@@ -566,15 +566,19 @@ describe('mock processing', () => {
     });
 
     expect(result.cancelled.status).toBe('CANCELLED');
-    expect(result.replacement).toMatchObject({ status: 'QUEUED', total_days: 5 });
+    expect(result.replacement).toMatchObject({
+      status: 'QUEUED',
+      start_date: '2026-10-14',
+      end_date: '2026-10-18',
+    });
   });
 
   it.each([
     ['2026-10-14', 'ZERO_STATE'],
-    ['2026-10-16', 'VALID'],
+    ['2026-10-16', 'FRESH'],
     ['2026-10-17', 'STALE'],
     ['2026-10-18', 'NOT_PROCESSED'],
-  ])('OQ-11 previews a range starting %s with predecessor %s', async (start, state) => {
+  ])('OQ-11 OQ-26 previews a range starting %s with predecessor %s', async (start, state) => {
     const preview = await processingApi.preview({
       start_date: start,
       end_date: '2026-10-18',
@@ -723,7 +727,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
     ]);
   });
 
-  it('OQ-12 keeps a marker before the range: 17–18/10 publish but read as stale', async () => {
+  it('OQ-23 after a stale 16/10, 17–18/10 publish but are written stale', async () => {
     expect((await run('2026-10-17', '2026-10-18')).status).toBe('COMPLETED_WITH_ISSUES');
 
     for (const date of ['2026-10-16', '2026-10-17', '2026-10-18']) {
@@ -741,7 +745,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
           scope: 'ALL',
         })
       ).predecessor,
-    ).toEqual({ cash: 'VALID', positions: 'VALID' });
+    ).toEqual({ cash: 'FRESH', positions: 'FRESH_WITH_ISSUES' });
 
     // OQ-22: cash after a day with no published cash is refused; positions still run (OQ-11).
     const positionsJob = await processingApi.enqueue({
@@ -759,7 +763,11 @@ describe('mock publication (a finished job publishes the precomputed results of 
     );
 
     await run('2026-10-17', '2026-10-18');
-    expect(await chainStatus('2026-10-18')).toEqual({ cash: 'FRESH', positions: 'FRESH' });
+    // Current again; 18/10 has no prices, so positions read Atualizado com pendências (OQ-23).
+    expect(await chainStatus('2026-10-18')).toEqual({
+      cash: 'FRESH',
+      positions: 'FRESH_WITH_ISSUES',
+    });
     expect((await processingApi.listIssues()).items).not.toContainEqual(
       expect.objectContaining({ issue_type: 'STALE_PREDECESSOR' }),
     );
@@ -816,13 +824,14 @@ describe('mock publication (a finished job publishes the precomputed results of 
     expect(flat(await portfolioApi.getSummary('2026-10-14')).aum).toBe('1500000.0000000000');
   });
 
-  it('§10.3 does not duplicate Pendências when ranges are processed again', async () => {
+  it('§10.3 OQ-26 does not duplicate Pendências: a reprocessed date replaces its issues', async () => {
     await run('2026-10-17', '2026-10-18');
     await run('2026-10-17', '2026-10-18');
+    // OQ-23: each date after a stale one is written stale, with its own issue.
     const stalePredecessors = (await processingApi.listIssues()).items.filter(
       (i) => i.issue_type === 'STALE_PREDECESSOR',
     );
-    expect(stalePredecessors.map((i) => i.affected_date)).toEqual(['2026-10-17']);
+    expect(stalePredecessors.map((i) => i.affected_date)).toEqual(['2026-10-18', '2026-10-17']);
 
     await run('2026-10-16', '2026-10-18');
     await run('2026-10-16', '2026-10-18');
@@ -875,17 +884,21 @@ describe('mock publication (a finished job publishes the precomputed results of 
       () => pricesApi.removeReferencePrice(PRICE_IDS.f28_1016),
       '16/10/2026',
     ],
-  ])('§10.4 the mock fails a job after a write through %s', async (_path, write, shown) => {
-    await write();
+  ])(
+    'OQ-23 the mock fails a run at the first date a write through %s changed',
+    async (_path, write, shown) => {
+      await write();
 
-    const job = await run('2026-10-16', '2026-10-18');
+      const job = await run('2026-10-16', '2026-10-18');
 
-    expect(job.status).toBe('FAILED');
-    expect(job.error_message).toContain(`a partir de ${shown}`);
-    expect((await portfolioApi.getSummary('2026-10-18')).positions.status).toBe('NOT_PROCESSED');
-  });
+      expect(job.status).toBe('FAILED');
+      expect(job.error_message).toContain(`Backend simulado: ${shown} depende`);
+      // Later dates are untouched (OQ-23 item 5).
+      expect((await portfolioApi.getSummary('2026-10-18')).positions.status).toBe('NOT_PROCESSED');
+    },
+  );
 
-  it('§10.4 a write made while the job is queued fails it rather than superseding it', async () => {
+  it('OQ-23 a write made while the job is queued fails it at that date (fake backend)', async () => {
     const job = await processingApi.enqueue({
       start_date: '2026-10-16',
       end_date: '2026-10-18',
@@ -907,29 +920,35 @@ describe('mock publication (a finished job publishes the precomputed results of 
   });
 
   it.each([
-    ['2026-10-17', '2026-10-16', '2026-10-18', '17/10/2026'],
-    ['2026-10-15', '2026-10-16', '2026-10-16', '15/10/2026'],
+    ['2026-10-17', '2026-10-16', '2026-10-18', '17/10/2026', '2026-10-16'],
+    ['2026-10-15', '2026-10-16', '2026-10-16', '16/10/2026', null],
   ])(
-    '§10.4 the mock fails a job whose range depends on a day changed since the seed (%s)',
-    async (changed, start, end, shown) => {
+    'OQ-23 the mock fails a run at the first date changed since the seed (%s): earlier dates stay',
+    async (changed, start, end, shown, committed) => {
       await ledgerApi.createEntry({
         type: 'CASH',
         date: changed,
         time: '12:00:00',
         cash_amount: '1000.00',
       });
-      const issuesBefore = (await processingApi.listIssues()).items;
 
       const job = await run(start, end);
 
       expect(job).toMatchObject({
         status: 'FAILED',
-        error_message: `Backend simulado: os resultados a partir de ${shown} dependem de lançamentos ou preços alterados e só podem ser recalculados pelo backend real. Nenhum dia foi publicado.`,
+        progress_date: committed,
+        error_code: 'MOCK_INPUTS_CHANGED',
+        error_message: `Backend simulado: ${shown} depende de lançamentos ou preços alterados e só pode ser recalculado pelo backend real. As datas anteriores continuam publicadas.`,
       });
-      // All or nothing (§10.4): no day of the range was published.
-      expect(flat(await portfolioApi.getSummary('2026-10-16')).trades_pnl).toBe('-394.7129232316');
+      const failed = committed === null ? start : '2026-10-17';
+      expect((await chainStatus(failed)).cash).toBe('FAILED');
+      // The failed date keeps its previously published data (OQ-23 item 2).
+      if (committed === null) {
+        expect(flat(await portfolioApi.getSummary('2026-10-16')).trades_pnl).toBe(
+          '-394.7129232316',
+        );
+      }
       expect((await portfolioApi.getSummary('2026-10-18')).positions.status).toBe('NOT_PROCESSED');
-      expect((await processingApi.listIssues()).items).toEqual(issuesBefore);
     },
   );
 });

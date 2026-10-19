@@ -8,12 +8,18 @@ export type CompletenessStatus = 'COMPLETE' | 'MISSING';
 export type AssetValuationStatus = CompletenessStatus | 'NOT_REQUIRED';
 
 /**
- * DRAFT (OQ-21): how current one chain's published result for a date is. FRESH: published and
- * current; STALE: published, but an input changed afterwards (date ≥ a dirty marker, §10.4),
- * figures still shown, flagged (§8.3); NOT_PROCESSED: never published. Every portfolio read
- * uses it (user, 2026-10-18: "Freshness everywhere").
+ * The status of one chain on one date (OQ-23, `processing.date_status`), the only source of
+ * freshness; every portfolio read and both badges use it:
+ * - FRESH (Atualizado) and FRESH_WITH_ISSUES (Atualizado com pendências: a missing price or an
+ *   expired open position);
+ * - STALE (Desatualizado): an input changed after publication, or the day before was not
+ *   current when it was processed; the figures are still shown, flagged (§8.3);
+ * - RUNNING (Processando): a run is processing the date now;
+ * - FAILED (Erro): the last attempt failed; the date keeps its previously published data;
+ * - NOT_PROCESSED (Não processado): no status yet.
  */
-export type Freshness = 'FRESH' | 'STALE' | 'NOT_PROCESSED';
+export type Freshness =
+  'FRESH' | 'FRESH_WITH_ISSUES' | 'STALE' | 'RUNNING' | 'FAILED' | 'NOT_PROCESSED';
 
 /** The cash chain of a date (OQ-21 draft): `portfolio.cash_balances`. */
 export interface CashSummary {
@@ -49,8 +55,8 @@ export interface PositionsSummary {
 }
 
 /**
- * AUM = cash + market value (§8.2), where the two chains meet (OQ-21 draft): `null` when either
- * side is missing; NOT_PROCESSED when either side is, STALE when either side is stale.
+ * AUM = cash + market value (§8.2), where the two chains meet (OQ-21): `null` when either side
+ * is missing; its status is the less current of the two (OQ-26 item 8).
  */
 export interface AumSummary {
   status: Freshness;
@@ -108,6 +114,6 @@ export interface PnlPoint {
   daily_pnl: Decimal | null;
   cumulative_pnl: Decimal | null;
   pnl_status: CompletenessStatus;
-  /** FRESH or STALE: only published days are listed. */
+  /** The date's positions status; only published days are listed, so never NOT_PROCESSED. */
   status: Freshness;
 }

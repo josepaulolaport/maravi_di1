@@ -11,6 +11,7 @@ import { http, HttpResponse } from 'msw';
 
 import { cashEntries, IDS, instruments, products, tradeEntries } from '@/api/mocks/fixtures';
 import { ledgerApi } from '@/api/endpoints';
+import { setStatus } from '@/api/mocks/db';
 import { fieldError, problem, url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { addDays, formatDate, todayInSaoPaulo } from '@/shared/format';
@@ -385,6 +386,16 @@ describe('Lançamentos (§11.3)', () => {
       expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('15/10/2026');
       expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('16/10/2026');
       expect(modal.getByRole('radio', { name: 'Caixa' })).toBeChecked();
+    });
+
+    it('OQ-23 a failed cash date keeps its published cash, reads "Erro" and offers "Processar caixa"', async () => {
+      setStatus('2026-10-16', 'CASH', 'FAILED');
+      await openLedger();
+
+      const end = within(screen.getByRole('group', { name: 'Caixa D0' }));
+      expect(await end.findByText('R$ 506.059,27')).toBeInTheDocument();
+      expect(end.getByText('Erro')).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Processar caixa' })).toBeInTheDocument();
     });
 
     it('§11.3 shows unprocessed dates as unavailable, never as zero', async () => {

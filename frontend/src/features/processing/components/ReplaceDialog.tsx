@@ -61,8 +61,8 @@ interface ReplaceFormProps {
 }
 
 function ReplaceForm({ job, replace, onClose, today }: ReplaceFormProps) {
-  const [start, setStart] = useState<IsoDate | null>(job.requested_start_date);
-  const [end, setEnd] = useState<IsoDate | null>(job.requested_end_date);
+  const [start, setStart] = useState<IsoDate | null>(job.start_date);
+  const [end, setEnd] = useState<IsoDate | null>(job.end_date);
   const [scope, setScope] = useState<ProcessingScope>(job.scope);
   // One request per click, before `isPending` is rendered (two would queue two jobs, §10.2).
   const sending = useRef(false);
@@ -90,10 +90,9 @@ function ReplaceForm({ job, replace, onClose, today }: ReplaceFormProps) {
   return (
     <Stack gap="md">
       <Text size="sm">
-        O processamento {shortId(job.id)} (
-        {formatPeriod(job.requested_start_date, job.requested_end_date)}, {SCOPE_LABELS[job.scope]})
-        será cancelado e um novo processamento será colocado na fila com o intervalo e o escopo
-        abaixo.
+        O processamento {shortId(job.id)} ({formatPeriod(job.start_date, job.end_date)},{' '}
+        {SCOPE_LABELS[job.scope]}) será cancelado e um novo processamento será colocado na fila com
+        o intervalo e o escopo abaixo.
       </Text>
       <RangeFields
         start={start}

@@ -1,13 +1,48 @@
-import type { ProcessingChain } from '../contract';
+import type { Freshness, ProcessingChain } from '../contract';
 import * as fixtures from './fixtures';
 
 // In-memory state of the fake backend. Mutations (POST/DELETE) change it for the session;
 // tests call `resetDb()` before each test so every test starts from the fixtures.
 //
-// Cash and positions are two chains processed separately (OQ-21 draft): each has its own
-// published results, dirty markers, revision and "changed since the seed" date.
+// Cash and positions are two chains (OQ-21). Each date has one status per chain, as in
+// `processing.date_status` (OQ-23): the only source of freshness; there are no dirty markers
+// and no revision counters.
 
 type PerChain<T> = Record<ProcessingChain, T>;
+
+/** A chain's status on a date; `null` is Não processado. */
+export type ChainStatus = Exclude<Freshness, 'NOT_PROCESSED'> | null;
+
+export interface DateStatus {
+  CASH: ChainStatus;
+  POSITIONS: ChainStatus;
+  /** A chain's status before it became RUNNING, put back if the date is not committed (OQ-26). */
+  previous: PerChain<ChainStatus>;
+}
+
+/**
+ * The seed's statuses, as migration 0003 backfills them (OQ-23 item 11): every published date
+ * FRESH, FRESH_WITH_ISSUES when its valuation or P&L is missing, STALE from the seed's stale
+ * date on.
+ */
+function seedStatuses(): Map<string, DateStatus> {
+  const statuses = new Map<string, DateStatus>();
+  const staleFrom = fixtures.seedStaleFrom;
+  for (const summary of fixtures.summaries) {
+    const date = summary.date;
+    const incomplete = summary.valuation_status === 'MISSING' || summary.pnl_status === 'MISSING';
+    const at = (chain: ProcessingChain, fresh: ChainStatus): ChainStatus => {
+      const from = staleFrom[chain];
+      return from !== null && date >= from ? 'STALE' : fresh;
+    };
+    statuses.set(date, {
+      CASH: at('CASH', 'FRESH'),
+      POSITIONS: at('POSITIONS', incomplete ? 'FRESH_WITH_ISSUES' : 'FRESH'),
+      previous: { CASH: null, POSITIONS: null },
+    });
+  }
+  return statuses;
+}
 
 function createDb() {
   return {
@@ -17,8 +52,7 @@ function createDb() {
     referencePrices: structuredClone(fixtures.referencePrices),
     requests: structuredClone(fixtures.processingRequests),
     issues: structuredClone(fixtures.issues),
-    dirty: { ...fixtures.initialDirty },
-    /** Published results by date; jobs replace the days of their scope. */
+    /** Published results by date; a run replaces each date of its scope as it commits it. */
     published: {
       /** The cash chain (`portfolio.cash_balances`). */
       cash: new Map(
@@ -38,15 +72,15 @@ function createDb() {
       positions: new Map(fixtures.positions.map((p) => [p.date, structuredClone(p)])),
       pnl: new Map(fixtures.pnlSeries.map((p) => [p.date, structuredClone(p)])),
     },
+    /** `processing.date_status`: one status per date and chain (OQ-23). */
+    dateStatus: seedStatuses(),
     /**
      * Per chain, the earliest date touched by a write since the seed. From it on, that chain's
      * precomputed results no longer match the inputs, and the fake cannot recalculate them.
      */
     changedFrom: { CASH: null, POSITIONS: null } as PerChain<string | null>,
-    /** Bumped by every write to a chain's inputs, like the backend's revisions (§10.2). */
-    revision: { CASH: 0, POSITIONS: 0 } as PerChain<number>,
-    /** The revisions each job saw when it started running. */
-    startRevision: new Map<string, PerChain<number>>(),
+    /** The statuses each run wrote, for its end: COMPLETED or COMPLETED_WITH_ISSUES. */
+    written: new Map<string, ChainStatus[]>(),
     nextSeq: fixtures.ledgerEntries.length + 1,
     nextId: 1,
   };
@@ -68,8 +102,31 @@ export function newId(): string {
   return `9a${String(n).padStart(6, '0')}-0000-4000-8000-${String(n).padStart(12, '0')}`;
 }
 
+/** A chain's status on a date (OQ-23); no status is Não processado. */
+export function statusOf(date: string, chain: ProcessingChain): Freshness {
+  return db.dateStatus.get(date)?.[chain] ?? 'NOT_PROCESSED';
+}
+
+/** Sets a chain's status on a date, keeping what it was when it becomes RUNNING (OQ-26). */
+export function setStatus(date: string, chain: ProcessingChain, status: ChainStatus): void {
+  const row = db.dateStatus.get(date) ?? {
+    CASH: null,
+    POSITIONS: null,
+    previous: { CASH: null, POSITIONS: null },
+  };
+  if (status === 'RUNNING') row.previous[chain] = row[chain];
+  row[chain] = status;
+  db.dateStatus.set(date, row);
+}
+
+/** Puts back what a chain's date was before a run that did not commit it (OQ-26 item 4). */
+export function restoreStatus(date: string, chain: ProcessingChain): void {
+  const row = db.dateStatus.get(date);
+  if (row?.[chain] === 'RUNNING') row[chain] = row.previous[chain];
+}
+
 /**
- * The chains a write changes (OQ-21 draft): a trade changes cash and positions; a cash
+ * The chains a write changes (OQ-23 item 3): a trade changes cash and positions; a cash
  * movement only cash; a reference price only positions (valuation and P&L).
  */
 const CHAINS_OF_WRITE = {
@@ -78,30 +135,21 @@ const CHAINS_OF_WRITE = {
   price: ['POSITIONS'],
 } as const satisfies Record<string, readonly ProcessingChain[]>;
 
-/** Marks what a write changes dirty from `date`, in the same step as the write (§10.4). */
-export function markDirty(write: keyof typeof CHAINS_OF_WRITE, date: string): void {
-  const earliest = (current: string | null) =>
-    current === null || date < current ? date : current;
-  for (const chain of CHAINS_OF_WRITE[write]) {
-    db.revision[chain] += 1;
-    db.changedFrom[chain] = earliest(db.changedFrom[chain]);
-  }
-  if (write === 'trade' || write === 'cash') db.dirty.cash = earliest(db.dirty.cash);
-  if (write === 'trade') db.dirty.accounting = earliest(db.dirty.accounting);
-  if (write === 'price') db.dirty.valuation = earliest(db.dirty.valuation);
-}
-
-/** The dirty markers of a chain. */
-function markersOf(chain: ProcessingChain): (string | null)[] {
-  return chain === 'CASH' ? [db.dirty.cash] : [db.dirty.accounting, db.dirty.valuation];
-}
-
 /**
- * A chain's published date is stale when it is on or after one of its dirty markers. A range
- * published after a stale or unprocessed day sets its chain's marker to its start (OQ-11).
+ * A write dated `date` marks its chains STALE on every date ≥ `date` that already has a
+ * status, in the same step (OQ-23 item 3); dates without a status stay Não processado. A date
+ * being processed keeps RUNNING, and the status it will go back to becomes STALE (OQ-26).
  */
-export function isStale(date: string, chain: ProcessingChain): boolean {
-  return markersOf(chain).some((marker) => marker !== null && date >= marker);
+export function markDirty(write: keyof typeof CHAINS_OF_WRITE, date: string): void {
+  for (const chain of CHAINS_OF_WRITE[write]) {
+    const changed = db.changedFrom[chain];
+    if (changed === null || date < changed) db.changedFrom[chain] = date;
+    for (const [day, row] of db.dateStatus) {
+      if (day < date || row[chain] === null) continue;
+      if (row[chain] === 'RUNNING') row.previous[chain] = 'STALE';
+      else row[chain] = 'STALE';
+    }
+  }
 }
 
 /** Whether a chain has published results for `date`. */

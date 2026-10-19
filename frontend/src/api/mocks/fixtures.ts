@@ -23,7 +23,7 @@ import type {
 //   14/10  Aporte 1.500.000,00; compra 10 DI1F28 a 10,00% a.a.
 //   15/10  Compra 5 DI1F29 a PU 82.057,00 (B3 price for DI1F28)
 //   16/10  Venda 4 DI1F28 a 9,95% a.a.; retirada 50.000,00
-//          A job started at 17:20 is SUPERSEDED: the withdrawal was recorded at 17:30, mid-run.
+//          A run started at 17:20 was cancelled after committing 14/10 and 15/10 (OQ-23).
 //          No DI1F29 price  → Pendência, P&L incomplete (null), job COMPLETED_WITH_ISSUES.
 //          DI1F28 price corrected after publication (replaced) → 16/10 is stale.
 //   17/10, 18/10  not processed (weekend; no prices).
@@ -229,10 +229,10 @@ export const FIRST_ENTRY_DATE = '2026-10-14';
  * the cash chain; `accounting` and `valuation` for the positions chain. The seed has only the
  * 16/10 price correction, which affects positions, never cash.
  */
-export const initialDirty = {
-  cash: null as string | null,
-  accounting: null as string | null,
-  valuation: '2026-10-16' as string | null,
+/** Per chain, the first seed date that reads stale: the 16/10 price was corrected after publication. */
+export const seedStaleFrom: Record<'CASH' | 'POSITIONS', string | null> = {
+  CASH: null,
+  POSITIONS: '2026-10-16',
 };
 
 const PUBLISHED_AT = '2026-10-16T18:40:00-03:00';
@@ -487,8 +487,8 @@ function unpricedRow(
   };
 }
 
-/** A day after the last input (17/10, 18/10): no trades, no cash, no prices. */
-function dayWithoutInputs(date: string): RecalculatedDay {
+/** A day after the last input (17/10 on): no trades, no cash, no prices. */
+export function dayWithoutInputs(date: string): RecalculatedDay {
   return {
     summary: {
       date,
@@ -612,80 +612,70 @@ const REQUEST_IDS = {
   withIssues: '7f3c9a02-0000-4000-8000-000000000002',
   cancelled: '7f3c9a03-0000-4000-8000-000000000003',
   failed: '7f3c9a04-0000-4000-8000-000000000004',
-  superseded: '7f3c9a05-0000-4000-8000-000000000005',
+  cancelledMidway: '7f3c9a05-0000-4000-8000-000000000005',
 } as const;
 
 function job(
   id: string,
   start: string,
   end: string,
-  total: number,
   status: ProcessingRequest['status'],
   createdAt: string,
   extra: Partial<ProcessingRequest> = {},
 ): ProcessingRequest {
   return {
     id,
-    requested_start_date: start,
-    requested_end_date: end,
     scope: 'ALL',
+    start_date: start,
+    end_date: end,
     status,
+    progress_date: end,
+    error_code: null,
+    error_message: null,
     created_at: createdAt,
+    updated_at: createdAt,
     dispatched_at: createdAt,
     started_at: createdAt,
     finished_at: createdAt,
     cancel_requested_at: null,
-    processed_days: total,
-    total_days: total,
-    progress_date: null,
-    error_code: null,
-    error_message: null,
     ...extra,
   };
 }
 
-/** Oldest first; the handlers return them newest first. No job is active at start. */
+/**
+ * Oldest first; the handlers return them newest first. No job is active at start. Each run
+ * publishes its dates one by one (OQ-23): `progress_date` is the last one it committed.
+ */
 export const processingRequests: ProcessingRequest[] = [
-  job(REQUEST_IDS.failed, '2026-10-01', '2026-10-05', 5, 'FAILED', '2026-10-14T08:00:00-03:00', {
-    processed_days: 2,
+  job(REQUEST_IDS.failed, '2026-10-01', '2026-10-05', 'FAILED', '2026-10-14T08:00:00-03:00', {
+    progress_date: null,
     error_code: 'UNEXPECTED_ERROR',
-    error_message:
-      'Falha inesperada ao gravar os resultados. Nenhum dia foi publicado; tente novamente.',
+    error_message: 'Falha inesperada ao gravar os resultados de 01/10/2026. Tente novamente.',
   }),
+  job(REQUEST_IDS.cancelled, '2026-10-10', '2026-10-12', 'CANCELLED', '2026-10-14T08:30:00-03:00', {
+    progress_date: null,
+    started_at: null,
+    cancel_requested_at: '2026-10-14T08:30:05-03:00',
+  }),
+  job(REQUEST_IDS.completed, '2026-10-14', '2026-10-15', 'COMPLETED', '2026-10-15T18:00:00-03:00'),
+  // Cancelled after committing 14/10 and 15/10, which stay published; 16/10 was not reached.
   job(
-    REQUEST_IDS.cancelled,
-    '2026-10-10',
-    '2026-10-12',
-    3,
-    'CANCELLED',
-    '2026-10-14T08:30:00-03:00',
-    {
-      processed_days: 1,
-      cancel_requested_at: '2026-10-14T08:30:05-03:00',
-    },
-  ),
-  job(
-    REQUEST_IDS.completed,
-    '2026-10-14',
-    '2026-10-15',
-    2,
-    'COMPLETED',
-    '2026-10-15T18:00:00-03:00',
-  ),
-  job(
-    REQUEST_IDS.superseded,
+    REQUEST_IDS.cancelledMidway,
     '2026-10-14',
     '2026-10-16',
-    3,
-    'SUPERSEDED',
+    'CANCELLED',
     '2026-10-16T17:20:00-03:00',
-    { finished_at: '2026-10-16T17:31:00-03:00' },
+    {
+      progress_date: '2026-10-15',
+      cancel_requested_at: '2026-10-16T17:30:40-03:00',
+      finished_at: '2026-10-16T17:31:00-03:00',
+      updated_at: '2026-10-16T17:31:00-03:00',
+    },
   ),
   job(
     REQUEST_IDS.withIssues,
     '2026-10-14',
     '2026-10-16',
-    3,
     'COMPLETED_WITH_ISSUES',
     '2026-10-16T18:35:00-03:00',
   ),

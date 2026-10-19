@@ -15,6 +15,7 @@ import { HistoryTable } from './HistoryTable';
 import { JobDetailsModal } from './JobDetailsModal';
 import { isValidRange } from '@/shared/processing/RangeFields';
 import { ReplaceDialog } from './ReplaceDialog';
+import { nextDate } from '../jobStatus';
 import { RequestCard } from './RequestCard';
 
 type Dialog = { kind: 'details' | 'cancel' | 'replace'; jobId: string } | null;
@@ -65,7 +66,8 @@ export function ProcessingTab({
   };
   const requestAgain = (job: ProcessingRequest) => {
     setDialog(null);
-    onRequestAgain(job.requested_start_date, job.requested_end_date, job.scope);
+    // From where the run stopped to its original end (OQ-23 item 10).
+    onRequestAgain(nextDate(job), job.end_date, job.scope);
   };
 
   return (

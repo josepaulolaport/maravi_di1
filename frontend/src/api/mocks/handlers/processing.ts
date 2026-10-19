@@ -12,8 +12,10 @@ import type {
   ProcessingScope,
 } from '../../contract';
 import { addDays, daysInclusive } from '../dates';
-import { db, isPublished, isStale, newId } from '../db';
+import { db, isPublished, newId, setStatus, statusOf } from '../db';
+import type { ChainStatus } from '../db';
 import {
+  dayWithoutInputs,
   FIRST_ENTRY_DATE,
   recalculatedDays,
   summaries,
@@ -22,7 +24,6 @@ import {
   zeroStateDay,
 } from '../fixtures';
 import type { RecalculatedDay } from '../fixtures';
-import { firstEntryDate } from './portfolio';
 import {
   fieldError,
   latency,
@@ -37,21 +38,28 @@ import {
 const ACTIVE: JobStatus[] = ['DISPATCHED', 'RUNNING', 'CANCELLING'];
 const CANCELLABLE: JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING'];
 const SCOPES: readonly ProcessingScope[] = ['CASH', 'POSITIONS', 'ALL'];
+/** A date written with one of these makes the run end COMPLETED_WITH_ISSUES (OQ-23 item 8). */
+const WITH_ISSUES: readonly ChainStatus[] = ['FRESH_WITH_ISSUES', 'STALE'];
 
-/** The chains a scope processes (OQ-21 draft). */
+/** The chains a scope processes (OQ-21). */
 export function chainsOf(scope: ProcessingScope): ProcessingChain[] {
   return scope === 'ALL' ? ['CASH', 'POSITIONS'] : [scope];
 }
 
 const now = () => new Date().toISOString();
 
-/** State of the day before `start` for one chain (OQ-11), for the preview and the worker. */
+/**
+ * Whether a chain is in its zero state on `date` (OQ-26 item 3): positions, when no trade is
+ * dated on or before it; cash, when no entry of either type is.
+ */
+function inZeroState(date: string, chain: ProcessingChain): boolean {
+  return !db.entries.some((e) => e.date <= date && (chain === 'CASH' || e.type === 'TRADE'));
+}
+
+/** The day before `start` for one chain (OQ-11, OQ-26): its status, or the zero state. */
 function predecessorState(start: string, chain: ProcessingChain): PredecessorState {
   const predecessor = addDays(start, -1);
-  const first = firstEntryDate();
-  if (first === undefined || predecessor < first) return 'ZERO_STATE';
-  if (!isPublished(predecessor, chain)) return 'NOT_PROCESSED';
-  return isStale(predecessor, chain) ? 'STALE' : 'VALID';
+  return inZeroState(predecessor, chain) ? 'ZERO_STATE' : statusOf(predecessor, chain);
 }
 
 /** The scenario's results for `date`, valid only while its inputs are unchanged. */
@@ -63,53 +71,58 @@ function precomputedDay(date: string): RecalculatedDay {
   const point = pnlSeries.find((p) => p.date === date);
   if (summary && rows && point) return { summary, positions: rows, pnl: point };
   if (date < FIRST_ENTRY_DATE) return zeroStateDay(date);
-  throw new Error(`The mock scenario has no results for ${date}.`);
+  return dayWithoutInputs(date);
 }
 
 const formatDateBr = (date: string) => date.split('-').reverse().join('/');
 
-/** Whether a publish of `chains` over [start, end] replaces `issue` with the current ones. */
-function replacedBy(
-  chains: ProcessingChain[],
-  start: string,
-  end: string,
-  issue: (typeof db.issues)[number],
-): boolean {
-  if (issue.affected_date < start || issue.affected_date > end) return false;
-  if (issue.issue_type === 'MISSING_REFERENCE_PRICE') return chains.includes('POSITIONS');
-  if (issue.issue_type === 'STALE_PREDECESSOR') {
-    return issue.chain !== null && chains.includes(issue.chain);
-  }
-  return false;
+/** The chain an issue belongs to: a missing price and an expired position are facts of positions. */
+function chainOfIssue(issue: (typeof db.issues)[number]): ProcessingChain | null {
+  return issue.issue_type === 'STALE_PREDECESSOR' ? issue.chain : 'POSITIONS';
 }
 
-/**
- * Publishes [start, end] for the job's chains all at once (§10.4): the precomputed results of
- * each day, the range's Pendências of those chains replaced by the current ones, and the
- * chains' dirty markers inside the range moved to end + 1 (OQ-12). A stale predecessor, or
- * an unprocessed one for positions, still publishes, and that chain gets a STALE_PREDECESSOR
- * Pendência (OQ-11, OQ-22).
- */
-function publish(job: ProcessingRequest): void {
-  const start = job.requested_start_date;
-  const end = job.requested_end_date;
-  const chains = chainsOf(job.scope);
-  const publishedAt = now();
-  // Every day's results first, so nothing is applied if one is missing (all or nothing).
-  const days: [string, RecalculatedDay][] = [];
-  for (let date = start; date <= end; date = addDays(date, 1)) {
-    days.push([date, structuredClone(precomputedDay(date))]);
-  }
-  // A missing cash predecessor never gets here (OQ-22: refused at start); a missing
-  // positions predecessor still publishes, flagged stale (OQ-11).
-  const stalePredecessors = chains.filter((chain) => {
-    const state = predecessorState(start, chain);
-    return state === 'STALE' || state === 'NOT_PROCESSED';
-  });
+/** The date a run processes next: the day after its last commit, or its start. */
+const nextDate = (job: ProcessingRequest) =>
+  job.progress_date === null ? job.start_date : addDays(job.progress_date, 1);
 
-  db.issues = db.issues.filter((issue) => !replacedBy(chains, start, end, issue));
-  for (const [date, day] of days) {
-    if (chains.includes('CASH')) {
+/**
+ * Commits date D of a run, for each chain of its scope, in one step (OQ-23 item 4): publishes
+ * D's results, replaces that chain's issues for D (OQ-26 item 5), and sets D's status: FRESH,
+ * or FRESH_WITH_ISSUES with a missing price, when D−1 is FRESH, FRESH_WITH_ISSUES or the zero
+ * state; otherwise STALE with a STALE_PREDECESSOR issue. Throws for a date the fake cannot
+ * compute (its inputs changed since the seed).
+ */
+function commitDate(job: ProcessingRequest, date: string): void {
+  const chains = chainsOf(job.scope);
+  const changed = chains.find((chain) => {
+    const from = db.changedFrom[chain];
+    return from !== null && date >= from;
+  });
+  if (changed !== undefined) throw new MockCannotCompute(date);
+
+  const day = structuredClone(precomputedDay(date));
+  const publishedAt = now();
+  const statuses = db.written.get(job.id) ?? [];
+  for (const chain of chains) {
+    const before = predecessorState(date, chain);
+    const current = before === 'ZERO_STATE' || before === 'FRESH' || before === 'FRESH_WITH_ISSUES';
+    db.issues = db.issues.filter(
+      (issue) => !(issue.affected_date === date && chainOfIssue(issue) === chain),
+    );
+    const issue = (fields: Partial<(typeof db.issues)[number]>) =>
+      db.issues.push({
+        id: newId(),
+        issue_type: 'STALE_PREDECESSOR',
+        asset_id: null,
+        asset_code: null,
+        affected_date: date,
+        required_price_date: null,
+        chain: null,
+        request_id: job.id,
+        ...fields,
+      });
+    let missing = false;
+    if (chain === 'CASH') {
       db.published.cash.set(date, {
         balance: day.summary.cash_balance,
         trades_cash_flow: day.summary.trades_cash_flow,
@@ -117,190 +130,148 @@ function publish(job: ProcessingRequest): void {
         withdrawals: day.summary.withdrawals,
         published_at: publishedAt,
       });
-    }
-    if (chains.includes('POSITIONS')) {
+    } else {
       db.published.summaries.set(date, { ...day.summary, published_at: publishedAt });
       db.published.positions.set(date, { ...day.positions, published_at: publishedAt });
       db.published.pnl.set(date, day.pnl);
       for (const row of day.positions.items.filter((r) => r.valuation_status === 'MISSING')) {
-        db.issues.push({
-          id: newId(),
+        missing = true;
+        issue({
           issue_type: 'MISSING_REFERENCE_PRICE',
           asset_id: row.asset_id,
           asset_code: row.asset_code,
-          affected_date: date,
           required_price_date: date,
-          chain: null,
-          request_id: job.id,
         });
       }
     }
+    // OQ-11 also asks for null P&L on dates after a stale predecessor. The fake does not
+    // enforce it: in this scenario every such date (17/10 on) already has null P&L.
+    if (!current) issue({ chain });
+    const status: ChainStatus = !current ? 'STALE' : missing ? 'FRESH_WITH_ISSUES' : 'FRESH';
+    setStatus(date, chain, status);
+    statuses.push(status);
   }
-  // OQ-11 also asks for null P&L on days after a stale or missing predecessor. The fake does
-  // not enforce it: in this scenario every such day (17/10, 18/10) already has null P&L. A
-  // larger scenario would have to null those fields here.
-  for (const chain of stalePredecessors) {
-    db.issues.push({
-      id: newId(),
-      issue_type: 'STALE_PREDECESSOR',
-      asset_id: null,
-      asset_code: null,
-      affected_date: start,
-      required_price_date: null,
-      chain,
-      request_id: job.id,
-    });
-  }
-  const markers = [
-    ...(chains.includes('CASH') ? (['cash'] as const) : []),
-    ...(chains.includes('POSITIONS') ? (['accounting', 'valuation'] as const) : []),
-  ];
-  for (const kind of markers) {
-    const marker = db.dirty[kind];
-    if (marker !== null && marker >= start && marker <= end) db.dirty[kind] = addDays(end, 1);
-  }
-  // Published after a stale or unprocessed day, the chain's days read as stale (OQ-11) until
-  // an earlier range is processed: its marker starts at the range.
-  for (const chain of stalePredecessors) {
-    const kind = chain === 'CASH' ? 'cash' : 'accounting';
-    const marker = db.dirty[kind];
-    if (marker === null || marker > start) db.dirty[kind] = start;
+  db.written.set(job.id, statuses);
+  Object.assign(job, { progress_date: date, updated_at: now() });
+}
+
+/** The fake has no engine: a date whose inputs changed since the seed cannot be computed. */
+class MockCannotCompute extends Error {
+  constructor(readonly date: string) {
+    super(date);
   }
 }
 
-/** The chain each kind of issue belongs to (a missing price and an expired position are facts of positions). */
-function chainOf(issue: (typeof db.issues)[number]): ProcessingChain | null {
-  if (issue.issue_type === 'STALE_PREDECESSOR') return issue.chain;
-  return 'POSITIONS';
+/** Marks the next date of a run RUNNING for each chain of its scope (OQ-23 item 4). */
+function startDate(job: ProcessingRequest, date: string): void {
+  for (const chain of chainsOf(job.scope)) setStatus(date, chain, 'RUNNING');
 }
 
-/** Whether `issue` concerns a job of `chains` over [start, end]. */
-function concerns(
-  chains: ProcessingChain[],
-  start: string,
-  end: string,
-  issue: (typeof db.issues)[number],
-): boolean {
-  if (issue.affected_date < start || issue.affected_date > end) return false;
-  const chain = chainOf(issue);
-  return chain !== null && chains.includes(chain);
+function finish(job: ProcessingRequest, fields: Partial<ProcessingRequest>): void {
+  Object.assign(job, { finished_at: now(), updated_at: now(), ...fields });
 }
 
 /**
- * Advances the fake worker one step per poll, so the UI can show every status:
- * QUEUED → DISPATCHED → RUNNING (one day per poll) → COMPLETED / COMPLETED_WITH_ISSUES /
- * SUPERSEDED / FAILED, and CANCELLING → CANCELLED. Only one job is active at a time (§10.2).
+ * Advances the fake worker one step per read of the job list or a job, so the UI can show
+ * every status (one active run at a time, §10.2): QUEUED → DISPATCHED → RUNNING, then one date
+ * per step, each published as it commits (OQ-23). A cancel is checked between dates: the date
+ * being processed commits, later dates are untouched, and the run ends CANCELLED, or as it
+ * would have when that date was its last (OQ-26 item 9). A failure at a date sets it FAILED,
+ * keeps every earlier date published and ends the run FAILED (OQ-23 item 5).
  *
- * The fake cannot recalculate: a finished job publishes the scenario's precomputed results
- * for its scope. When a write since the seed touched a day one of its chains depends on (any
- * day up to the range's end), those results would be wrong, so the job fails and publishes
- * nothing; only the real backend can recalculate them.
+ * The fake cannot recalculate: a date publishes the scenario's precomputed results. A date on
+ * or after a write since the seed (in a chain of the run) would get wrong results, so it fails
+ * there; only the real backend can recalculate it.
  */
 function tick(): void {
   const active = db.requests.find((r) => ACTIVE.includes(r.status));
-  if (active?.status === 'CANCELLING') {
-    Object.assign(active, { status: 'CANCELLED', finished_at: now(), progress_date: null });
-    return;
-  }
   if (active?.status === 'DISPATCHED') {
-    // OQ-22: cash cannot be carried from a day that has no published cash (with entries
-    // before it). Checked when the job starts; queuing it was allowed.
-    const start = active.requested_start_date;
-    if (
+    // OQ-22: cash cannot be carried from a day that has no published cash (with entries on or
+    // before it). Checked when the run starts; queuing it was allowed.
+    const start = active.start_date;
+    const before = addDays(start, -1);
+    const refused =
       chainsOf(active.scope).includes('CASH') &&
-      predecessorState(start, 'CASH') === 'NOT_PROCESSED'
-    ) {
-      Object.assign(active, {
+      !inZeroState(before, 'CASH') &&
+      !isPublished(before, 'CASH');
+    if (refused) {
+      finish(active, {
         status: 'FAILED',
         started_at: now(),
-        finished_at: now(),
         error_code: 'CASH_PREDECESSOR_MISSING',
-        error_message: `O caixa de ${formatDateBr(addDays(start, -1))} não foi processado. Processe antes um intervalo que inclua esse dia. Nenhum dia foi publicado.`,
+        error_message: `O caixa de ${formatDateBr(before)} não foi processado. Processe antes um intervalo que inclua esse dia. Nenhuma data foi publicada.`,
       });
       return;
     }
-    Object.assign(active, {
-      status: 'RUNNING',
-      started_at: now(),
-      progress_date: active.requested_start_date,
-    });
-    db.startRevision.set(active.id, { ...db.revision });
+    if (active.cancel_requested_at !== null) {
+      finish(active, { status: 'CANCELLED' });
+      return;
+    }
+    Object.assign(active, { status: 'RUNNING', started_at: now(), updated_at: now() });
+    startDate(active, start);
     return;
   }
-  if (active?.status === 'RUNNING') {
-    active.processed_days += 1;
-    if (active.processed_days < active.total_days) {
-      active.progress_date = addDays(active.requested_start_date, active.processed_days);
-      return;
-    }
-    const finished = { finished_at: now(), progress_date: null };
-    const chains = chainsOf(active.scope);
-    const seen = db.startRevision.get(active.id);
-    // An input of one of its chains changed during the run: publishing would overwrite
-    // current data (§10.2). Writes that only change the other chain do not concern it.
-    if (chains.some((chain) => db.revision[chain] !== seen?.[chain])) {
-      Object.assign(active, { status: 'SUPERSEDED', ...finished });
-      return;
-    }
-    const start = active.requested_start_date;
-    const end = active.requested_end_date;
-    const changed = chains
-      .map((chain) => db.changedFrom[chain])
-      .filter((date): date is string => date !== null && date <= end)
-      .sort()
-      .at(0);
-    if (changed !== undefined) {
-      Object.assign(active, {
+  if (active?.status === 'RUNNING' || active?.status === 'CANCELLING') {
+    const date = nextDate(active);
+    try {
+      commitDate(active, date);
+    } catch (error) {
+      if (!(error instanceof MockCannotCompute)) throw error;
+      for (const chain of chainsOf(active.scope)) setStatus(date, chain, 'FAILED');
+      finish(active, {
         status: 'FAILED',
-        ...finished,
         error_code: 'MOCK_INPUTS_CHANGED',
-        error_message: `Backend simulado: os resultados a partir de ${formatDateBr(changed)} dependem de lançamentos ou preços alterados e só podem ser recalculados pelo backend real. Nenhum dia foi publicado.`,
+        error_message: `Backend simulado: ${formatDateBr(date)} depende de lançamentos ou preços alterados e só pode ser recalculado pelo backend real. As datas anteriores continuam publicadas.`,
       });
       return;
     }
-    publish(active);
-    const withIssues = db.issues.some((issue) => concerns(chains, start, end, issue));
-    Object.assign(active, {
-      status: withIssues ? 'COMPLETED_WITH_ISSUES' : 'COMPLETED',
-      ...finished,
-    });
+    if (date >= active.end_date) {
+      const issues = (db.written.get(active.id) ?? []).some((s) => WITH_ISSUES.includes(s));
+      finish(active, { status: issues ? 'COMPLETED_WITH_ISSUES' : 'COMPLETED' });
+      return;
+    }
+    if (active.status === 'CANCELLING') {
+      finish(active, { status: 'CANCELLED' });
+      return;
+    }
+    startDate(active, addDays(date, 1));
     return;
   }
   const next = db.requests
     .filter((r) => r.status === 'QUEUED')
     .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
     .at(0);
-  if (next) Object.assign(next, { status: 'DISPATCHED', dispatched_at: now() });
+  if (next) Object.assign(next, { status: 'DISPATCHED', dispatched_at: now(), updated_at: now() });
 }
 
 function enqueue(start: string, end: string, scope: ProcessingScope): ProcessingRequest {
+  const created = now();
   const request: ProcessingRequest = {
     id: newId(),
-    requested_start_date: start,
-    requested_end_date: end,
     scope,
+    start_date: start,
+    end_date: end,
     status: 'QUEUED',
-    created_at: now(),
+    progress_date: null,
+    error_code: null,
+    error_message: null,
+    created_at: created,
+    updated_at: created,
     dispatched_at: null,
     started_at: null,
     finished_at: null,
     cancel_requested_at: null,
-    processed_days: 0,
-    total_days: daysInclusive(start, end),
-    progress_date: null,
-    error_code: null,
-    error_message: null,
   };
   db.requests.push(request);
   return request;
 }
 
-/** Cancels a job: a queued one at once, a running one cooperatively (§10.2). */
+/** Cancels a run: a queued one at once, a started one cooperatively, between dates (§10.2). */
 function cancel(request: ProcessingRequest): ProcessingRequest {
-  request.cancel_requested_at = now();
+  Object.assign(request, { cancel_requested_at: now(), updated_at: now() });
   if (request.status === 'QUEUED') {
     Object.assign(request, { status: 'CANCELLED', finished_at: now() });
-  } else {
+  } else if (request.status === 'RUNNING') {
     request.status = 'CANCELLING';
   }
   return request;

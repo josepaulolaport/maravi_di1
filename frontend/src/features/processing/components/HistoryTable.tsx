@@ -22,7 +22,7 @@ import { SCOPE_LABELS } from '@/shared/processing/scope';
 
 import { formatPeriod, formatProgress, shortId } from '../format';
 import type { useProcessingRequests } from '../hooks/useProcessing';
-import { canCancel, canRequestAgain, jobStatusBadge } from '../jobStatus';
+import { canCancel, canRequestAgain, jobStatusBadge, progressOf } from '../jobStatus';
 
 /** What the user can do with a job, from its row menu or its details modal (OQ-20). */
 export interface JobActions {
@@ -37,7 +37,7 @@ function matchesSearch(job: ProcessingRequest, search: string): boolean {
   if (!needle) return true;
   return [
     shortId(job.id),
-    formatPeriod(job.requested_start_date, job.requested_end_date),
+    formatPeriod(job.start_date, job.end_date),
     SCOPE_LABELS[job.scope],
     jobStatusBadge(job.status).label,
   ].some((value) => value.toLocaleLowerCase('pt-BR').includes(needle));
@@ -145,9 +145,9 @@ function JobRow({ job, actions }: { job: ProcessingRequest; actions: JobActions 
   return (
     <Table.Tr>
       <Table.Td ff="monospace">{id}</Table.Td>
-      <Table.Td>{formatPeriod(job.requested_start_date, job.requested_end_date)}</Table.Td>
+      <Table.Td>{formatPeriod(job.start_date, job.end_date)}</Table.Td>
       <Table.Td>{SCOPE_LABELS[job.scope]}</Table.Td>
-      <Table.Td>{formatProgress(job.processed_days, job.total_days)}</Table.Td>
+      <Table.Td>{formatProgress(progressOf(job).done, progressOf(job).total)}</Table.Td>
       <Table.Td>
         <StatusBadge label={badge.label} color={badge.color} />
       </Table.Td>

@@ -37,6 +37,16 @@ describe('toChartData (§11.4, OQ-16)', () => {
     ]);
   });
 
+  it('OQ-23 draws a complete day whose positions read Atualizado com pendências', () => {
+    const points = toChartData(
+      [point('2026-10-14', '0', { status: 'FRESH_WITH_ISSUES' })],
+      '2026-10-14',
+      '2026-10-14',
+    );
+
+    expect(points.map((p) => p.cumulative)).toEqual([0]);
+  });
+
   it('reports when there is no complete history to draw', () => {
     expect(hasHistory(toChartData([point('2026-10-16', null)], '2026-10-16', '2026-10-16'))).toBe(
       false,

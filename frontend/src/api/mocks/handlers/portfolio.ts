@@ -8,27 +8,33 @@ import type {
   PortfolioSummary,
   ProcessingChain,
 } from '../../contract';
-import { db, isPublished, isStale } from '../db';
+import { db, statusOf } from '../db';
 import { dateErrors, latency, problem, rangeErrors, url } from './support';
 
 // Published results start as the fixtures; a finished job replaces the days of its scope with
 // the precomputed results of the scenario (handlers/processing.ts). Cash and positions are
-// served apart, each with its own freshness (OQ-21 draft); AUM joins them.
+// served apart, each with its date status (OQ-21, OQ-23); AUM joins them.
 
 function dateParam(request: Request) {
   const date = new URL(request.url).searchParams.get('date');
   return { date, errors: dateErrors(date, 'date') };
 }
 
-function freshness(date: string, chain: ProcessingChain): Freshness {
-  if (!isPublished(date, chain)) return 'NOT_PROCESSED';
-  return isStale(date, chain) ? 'STALE' : 'FRESH';
-}
+const freshness = (date: string, chain: ProcessingChain): Freshness => statusOf(date, chain);
 
-/** AUM is as current as its least current side, and unavailable when either side is. */
+/** From the least current to the most (OQ-26 item 8: AUM takes the less current side). */
+const CURRENCY: readonly Freshness[] = [
+  'NOT_PROCESSED',
+  'FAILED',
+  'STALE',
+  'RUNNING',
+  'FRESH_WITH_ISSUES',
+  'FRESH',
+];
+
+/** AUM is as current as its less current side, and unavailable when either side is. */
 function aumFreshness(cash: Freshness, positions: Freshness): Freshness {
-  if (cash === 'NOT_PROCESSED' || positions === 'NOT_PROCESSED') return 'NOT_PROCESSED';
-  return cash === 'STALE' || positions === 'STALE' ? 'STALE' : 'FRESH';
+  return CURRENCY.indexOf(cash) <= CURRENCY.indexOf(positions) ? cash : positions;
 }
 
 export function summaryOf(date: string): PortfolioSummary {
@@ -101,11 +107,3 @@ export const portfolioHandlers = [
     return HttpResponse.json<ListResponse<PnlPoint>>({ items });
   }),
 ];
-
-/** The earliest date with any ledger entry (the day before it is the zero state). */
-export function firstEntryDate(): string | undefined {
-  return db.entries
-    .map((e) => e.date)
-    .sort()
-    .at(0);
-}

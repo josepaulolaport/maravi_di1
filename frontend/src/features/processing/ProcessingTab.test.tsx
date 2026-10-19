@@ -17,9 +17,11 @@ import { renderApp } from '@/test/render';
 import { isFinal } from './jobStatus';
 
 // Expected values come from the fixture scenario (src/api/mocks/fixtures.ts): five finished
-// jobs (FAILED 01–05/10, CANCELLED 10–12/10, COMPLETED 14–15/10, SUPERSEDED and
-// COMPLETED_WITH_ISSUES 14–16/10); entries start on 14/10; 14/10 and 15/10 are published and
-// valid, 16/10 is published but stale, 17/10 and 18/10 are not processed.
+// runs (FAILED 01–05/10 on its first date, CANCELLED 10–12/10 before its first date, COMPLETED
+// 14–15/10, CANCELLED 14–16/10 after committing 14 and 15/10, COMPLETED_WITH_ISSUES 14–16/10);
+// entries start on 14/10; 14/10 and 15/10 are current for both chains; on 16/10 cash is current
+// and positions stale; 17/10 and 18/10 are not processed. Each run publishes date by date
+// (OQ-23).
 
 const PAGE = '/central-de-controle?tab=processamentos';
 
@@ -86,20 +88,19 @@ const SEEDED_ID = 'aa000000-0000-4000-8000-000000000001';
 function seedJob(changes: Partial<ProcessingRequest>): ProcessingRequest {
   const job: ProcessingRequest = {
     id: SEEDED_ID,
-    requested_start_date: '2026-10-17',
-    requested_end_date: '2026-10-18',
     scope: 'ALL',
+    start_date: '2026-10-17',
+    end_date: '2026-10-18',
     status: 'QUEUED',
+    progress_date: null,
+    error_code: null,
+    error_message: null,
     created_at: '2026-10-18T10:00:00-03:00',
+    updated_at: '2026-10-18T10:00:00-03:00',
     dispatched_at: null,
     started_at: null,
     finished_at: null,
     cancel_requested_at: null,
-    processed_days: 0,
-    total_days: 2,
-    progress_date: null,
-    error_code: null,
-    error_message: null,
     ...changes,
   };
   db.requests.push(job);
@@ -110,8 +111,8 @@ const RUNNING = {
   status: 'RUNNING',
   dispatched_at: '2026-10-18T10:00:01-03:00',
   started_at: '2026-10-18T10:00:02-03:00',
-  processed_days: 1,
-  progress_date: '2026-10-18',
+  // 17/10 committed; 18/10 is being processed (OQ-23).
+  progress_date: '2026-10-17',
 } as const;
 
 function field(scope: BoundFunctions<typeof queries>, label: string) {
@@ -229,7 +230,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     expect(modal.queryByText(/período efetivo/i)).not.toBeInTheDocument();
   });
 
-  it('OQ-11 previews a range after a valid day as valid on that day', async () => {
+  it("OQ-11 OQ-26 previews a range after a current day with that day's status", async () => {
     const { user } = renderApp(`${PAGE}&inicio=2026-10-15&fim=2026-10-16`);
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
@@ -237,10 +238,10 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
     await modal.findByText('15/10/2026 a 16/10/2026');
     expect(
-      field(modal, 'Estado anterior do caixa').getByText('Válido em 14/10'),
+      field(modal, 'Estado anterior do caixa').getByText('Atualizado em 14/10'),
     ).toBeInTheDocument();
     expect(
-      field(modal, 'Estado anterior das posições').getByText('Válido em 14/10'),
+      field(modal, 'Estado anterior das posições').getByText('Atualizado em 14/10'),
     ).toBeInTheDocument();
     expect(modal.getByText('2')).toBeInTheDocument();
     expect(modal.queryByRole('alert')).not.toBeInTheDocument();
@@ -255,7 +256,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     // OQ-21: only the positions of 16/10 are stale (a corrected price); its cash is current.
     const warning = await modal.findByRole('alert');
     expect(
-      field(modal, 'Estado anterior do caixa').getByText('Válido em 16/10'),
+      field(modal, 'Estado anterior do caixa').getByText('Atualizado em 16/10'),
     ).toBeInTheDocument();
     expect(warning).toHaveTextContent(
       'O fechamento das posições de 16/10/2026 está desatualizado.',
@@ -293,7 +294,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     await user.click(screen.getByRole('button', { name: 'Solicitar processamento' }));
 
     const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
-    expect(await modal.findByText('Válido em 16/10')).toBeInTheDocument();
+    expect(await modal.findByText('Atualizado em 16/10')).toBeInTheDocument();
     expect(field(modal, 'Escopo').getByText('Caixa')).toBeInTheDocument();
     expect(modal.queryByRole('group', { name: 'Estado anterior das posições' })).toBeNull();
     expect(modal.queryByRole('alert')).not.toBeInTheDocument();
@@ -467,10 +468,12 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
       'Progresso',
       'Status',
     ]);
-    expect(jobRow('01/10/2026 a 05/10/2026', 'Falhou').getByText('2 / 5 dias')).toBeVisible();
-    expect(jobRow('10/10/2026 a 12/10/2026', 'Cancelado').getByText('1 / 3 dias')).toBeVisible();
+    // Days committed, from the range and progress_date (OQ-23).
+    expect(jobRow('01/10/2026 a 05/10/2026', 'Falhou').getByText('0 / 5 dias')).toBeVisible();
+    expect(jobRow('10/10/2026 a 12/10/2026', 'Cancelado').getByText('0 / 3 dias')).toBeVisible();
     expect(jobRow('14/10/2026 a 15/10/2026', 'Concluído').getByText('2 / 2 dias')).toBeVisible();
-    expect(jobRow('14/10/2026 a 16/10/2026', 'Obsoleto').getByText('3 / 3 dias')).toBeVisible();
+    expect(jobRow('14/10/2026 a 16/10/2026', 'Cancelado').getByText('2 / 3 dias')).toBeVisible();
+    expect(history().queryByText('Obsoleto')).not.toBeInTheDocument();
     expect(
       jobRow('14/10/2026 a 16/10/2026', 'Concluído com pendências').getByText('7f3c9a02'),
     ).toBeVisible();
@@ -536,7 +539,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     seedJob({
       ...RUNNING,
       id: 'aa000000-0000-4000-8000-000000000002',
-      requested_start_date: '2026-10-15',
+      start_date: '2026-10-15',
       status: 'CANCELLING',
       created_at: '2026-10-18T09:00:00-03:00',
       cancel_requested_at: '2026-10-18T10:05:00-03:00',
@@ -560,14 +563,26 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     expect(menu.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Ver detalhes']);
     await closeMenu(user);
 
-    menu = within(await openMenu(user, '14/10/2026 a 16/10/2026', 'Obsoleto'));
+    menu = within(await openMenu(user, '14/10/2026 a 16/10/2026', 'Cancelado'));
     expect(menu.getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
       'Ver detalhes',
       'Solicitar novo processamento',
     ]);
   });
 
-  it('OQ-20 OQ-21 prefills a new request with the full original range and scope of a failed job', async () => {
+  it('OQ-23 a new request for a cancelled run starts at the first date it did not reach', async () => {
+    const { user, router } = renderApp(PAGE);
+
+    // Cancelled after committing 14/10 and 15/10: what is left is 16/10.
+    const menu = within(await openMenu(user, '14/10/2026 a 16/10/2026', 'Cancelado'));
+    await user.click(menu.getByRole('menuitem', { name: 'Solicitar novo processamento' }));
+
+    expect(router.state.location.search).toBe(
+      '?tab=processamentos&inicio=2026-10-16&fim=2026-10-16&escopo=tudo',
+    );
+  });
+
+  it('OQ-20 OQ-21 OQ-23 prefills a new request from the failed date, with the scope of the run', async () => {
     const failed = db.requests.find((job) => job.status === 'FAILED');
     if (failed) failed.scope = 'CASH';
     const { user, router } = renderApp(PAGE);
@@ -660,12 +675,11 @@ describe('Processamentos: a job that finished between two reads (§10.4)', () =>
     // Queued and finished elsewhere between two polls.
     seedJob({
       id: 'bb000000-0000-4000-8000-000000000001',
-      requested_start_date: '2026-10-15',
-      requested_end_date: '2026-10-15',
+      start_date: '2026-10-15',
+      end_date: '2026-10-15',
       status: 'COMPLETED',
       created_at: '2026-10-18T11:00:00-03:00',
-      processed_days: 1,
-      total_days: 1,
+      progress_date: '2026-10-15',
     });
     await act(() => vi.advanceTimersByTimeAsync(2_000));
 
@@ -692,7 +706,7 @@ describe('Processamentos: cancel (§10.2)', () => {
     expect(dialog.getByText('Na fila')).toBeInTheDocument();
     expect(
       dialog.getByText(
-        'O processamento será interrompido assim que o sistema puder fazê-lo com segurança. Os resultados já válidos não serão apagados.',
+        'O processamento será interrompido ao fim da data em andamento. As datas já processadas continuam publicadas; as seguintes não serão processadas.',
       ),
     ).toBeInTheDocument();
     await user.click(dialog.getByRole('button', { name: 'Confirmar cancelamento' }));
@@ -716,8 +730,10 @@ describe('Processamentos: cancel (§10.2)', () => {
     expect(db.requests.find((r) => r.id === SEEDED_ID)?.status).toBe('QUEUED');
   });
 
-  it('§10.2 cancels a running job cooperatively: Cancelando, then Cancelado', async () => {
-    seedJob(RUNNING);
+  it('§10.2 OQ-23 cancels a running job cooperatively: Cancelando, then Cancelado', async () => {
+    // On 17/10 of 17–18/10: the current date commits, 18/10 is not processed. (A cancel during
+    // the last date would let the run complete, OQ-26 item 9.)
+    seedJob({ ...RUNNING, progress_date: null });
     const worker = holdWorker();
     const { user } = renderApp(PAGE);
 
@@ -922,7 +938,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     });
   });
 
-  it('§11.1 shows a failed job: times in Brasília, days, its error and that nothing was published', async () => {
+  it('§11.1 OQ-23 shows a failed run: times in Brasília, days, the date it failed on, its error', async () => {
     const { user, router } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '01/10/2026 a 05/10/2026', 'Falhou'));
@@ -937,14 +953,15 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     expect(field('Início').getByText('14/10/2026 08:00')).toBeInTheDocument();
     expect(field('Finalização').getByText('14/10/2026 08:00')).toBeInTheDocument();
     expect(field('Total de dias').getByText('5')).toBeInTheDocument();
-    expect(field('Dias concluídos').getByText('2')).toBeInTheDocument();
-    expect(field('Dias restantes').getByText('3')).toBeInTheDocument();
+    expect(field('Dias concluídos').getByText('0')).toBeInTheDocument();
+    expect(field('Dias restantes').getByText('5')).toBeInTheDocument();
+    expect(field('Data com erro').getByText('01/10/2026')).toBeInTheDocument();
     expect(modal.getByRole('alert')).toHaveTextContent(
-      'Falha inesperada ao gravar os resultados. Nenhum dia foi publicado; tente novamente.',
+      'Falha inesperada ao gravar os resultados de 01/10/2026. Tente novamente.',
     );
     expect(
       modal.getByText(
-        'Nenhum dia deste processamento foi publicado; os resultados anteriores permanecem inalterados.',
+        'Nenhuma data deste processamento foi publicada; os resultados anteriores permanecem inalterados.',
       ),
     ).toBeInTheDocument();
     expect(modal.queryByRole('progressbar')).not.toBeInTheDocument();
@@ -955,7 +972,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     );
   });
 
-  it('§10.4 says a cancelled job published nothing', async () => {
+  it('OQ-23 says a run cancelled before its first date published nothing', async () => {
     const { user } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '10/10/2026 a 12/10/2026', 'Cancelado'));
@@ -964,24 +981,25 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
     expect(
       modal.getByText(
-        'Nenhum dia deste processamento foi publicado; os resultados anteriores permanecem inalterados.',
+        'Nenhuma data deste processamento foi publicada; os resultados anteriores permanecem inalterados.',
       ),
     ).toBeInTheDocument();
     expect(modal.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('§10.4 says a superseded job published nothing, and offers a new request', async () => {
+  it('OQ-23 says which dates a run cancelled midway kept, and offers a new request', async () => {
     const { user } = renderApp(PAGE);
 
-    const menu = within(await openMenu(user, '14/10/2026 a 16/10/2026', 'Obsoleto'));
+    const menu = within(await openMenu(user, '14/10/2026 a 16/10/2026', 'Cancelado'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
 
     const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
-    expect(modal.getByRole('status')).toHaveTextContent('Obsoleto');
+    expect(modal.getByRole('status')).toHaveTextContent('Cancelado');
     expect(field(modal, 'Finalização').getByText('16/10/2026 17:31')).toBeInTheDocument();
+    expect(field(modal, 'Dias concluídos').getByText('2')).toBeInTheDocument();
     expect(
       modal.getByText(
-        'Nenhum dia deste processamento foi publicado; os resultados anteriores permanecem inalterados.',
+        'As datas de 14/10/2026 a 15/10/2026 foram publicadas; as seguintes não foram processadas.',
       ),
     ).toBeInTheDocument();
     expect(modal.getByRole('button', { name: 'Solicitar novo processamento' })).toBeInTheDocument();

@@ -186,6 +186,20 @@ describe('Carteira (§11.4)', () => {
     expectNoKpiBadge();
   });
 
+  it.each([
+    ['RUNNING', 'FAILED', ['Caixa: Processando', 'Posições: Erro']],
+    ['FRESH', 'FRESH_WITH_ISSUES', ['Caixa: Atualizado', 'Posições: Atualizado com pendências']],
+  ] as const)(
+    "OQ-23 each badge shows the date's chain status (cash %s, positions %s)",
+    async (cash, positions, badges) => {
+      override15({ cash: { status: cash }, positions: { status: positions } });
+      await openCarteira('2026-10-15');
+
+      expect(dataStatus()).toEqual(badges);
+      expectNoKpiBadge();
+    },
+  );
+
   it('§11.4 OQ-21 both chains stale: both badges say so, no card', async () => {
     override15({
       cash: { status: 'STALE' },

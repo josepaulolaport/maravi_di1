@@ -4,13 +4,13 @@ import { ApiError } from '../http';
 import { db } from './db';
 import { IDS } from './fixtures';
 
-// OQ-21 (draft, being recorded by lane X): cash and positions are two separately processed
+// OQ-21 (recorded): cash and positions are two separately processed
 // chains that read the same ledger facts and meet only in AUM. Every processing request has a
 // scope (CASH, POSITIONS or ALL); a write marks stale only the chain(s) it changes. Expected
 // values come from the fixture scenario (src/api/mocks/fixtures.ts): 14–16/10 published for
 // both chains, the 16/10 price corrected after publication (positions stale from 16/10).
 
-const FINAL = ['COMPLETED', 'COMPLETED_WITH_ISSUES', 'CANCELLED', 'FAILED', 'SUPERSEDED'];
+const FINAL = ['COMPLETED', 'COMPLETED_WITH_ISSUES', 'CANCELLED', 'FAILED'];
 
 async function run(start: string, end: string, scope: ProcessingScope): Promise<ProcessingRequest> {
   const job = await processingApi.enqueue({ start_date: start, end_date: end, scope });
@@ -163,7 +163,7 @@ describe('OQ-21 a job publishes only its scope', () => {
     expect((await portfolioApi.getPositions('2026-10-18')).status).toBe('NOT_PROCESSED');
   });
 
-  it('§10.4 POSITIONS republishes positions and clears their marker; cash is untouched', async () => {
+  it('§10.4 POSITIONS republishes positions, now current with a missing price; cash is untouched', async () => {
     const cashBefore = (await portfolioApi.getSummary('2026-10-16')).cash;
 
     expect((await run('2026-10-16', '2026-10-16', 'POSITIONS')).status).toBe(
@@ -171,20 +171,25 @@ describe('OQ-21 a job publishes only its scope', () => {
     );
 
     const summary = await portfolioApi.getSummary('2026-10-16');
-    expect(summary.positions).toMatchObject({ status: 'FRESH', trades_pnl: '-592.3681943852' });
+    // OQ-23: 15/10 is current and DI1F29 has no price on 16/10: Atualizado com pendências.
+    expect(summary.positions).toMatchObject({
+      status: 'FRESH_WITH_ISSUES',
+      trades_pnl: '-592.3681943852',
+    });
     expect(summary.cash).toEqual(cashBefore);
   });
 
   it('§10.4 ALL publishes both chains', async () => {
     await run('2026-10-16', '2026-10-18', 'ALL');
 
+    // 17/10 and 18/10 have no prices at all (OQ-23: Atualizado com pendências for positions).
     const summary = await portfolioApi.getSummary('2026-10-18');
     expect(summary.cash.status).toBe('FRESH');
-    expect(summary.positions.status).toBe('FRESH');
-    expect(summary.aum).toEqual({ status: 'FRESH', value: null });
+    expect(summary.positions.status).toBe('FRESH_WITH_ISSUES');
+    expect(summary.aum).toEqual({ status: 'FRESH_WITH_ISSUES', value: null });
   });
 
-  it('OQ-12 a CASH job moves only the cash marker: positions stay stale', async () => {
+  it('OQ-23 a CASH run writes only the cash status: positions stay stale', async () => {
     await run('2026-10-16', '2026-10-18', 'CASH');
 
     const summary = await portfolioApi.getSummary('2026-10-16');
@@ -203,7 +208,7 @@ describe('OQ-21 a job publishes only its scope', () => {
   });
 
   it.each([
-    ['a trade', () => trade('2026-10-18'), 'SUPERSEDED'],
+    ['a trade', () => trade('2026-10-18'), 'COMPLETED'],
     [
       'a price',
       () =>
@@ -215,22 +220,25 @@ describe('OQ-21 a job publishes only its scope', () => {
         }),
       'COMPLETED',
     ],
-  ])('§10.2 %s during a CASH run ends it %s', async (_write, write, status) => {
-    const job = await processingApi.enqueue({
-      start_date: '2026-10-14',
-      end_date: '2026-10-15',
-      scope: 'CASH',
-    });
-    await processingApi.getRequest(job.id); // DISPATCHED
-    await processingApi.getRequest(job.id); // RUNNING
-    await write();
+  ])(
+    'OQ-23 %s dated after its range never stops a CASH run (%s)',
+    async (_write, write, status) => {
+      const job = await processingApi.enqueue({
+        start_date: '2026-10-14',
+        end_date: '2026-10-15',
+        scope: 'CASH',
+      });
+      await processingApi.getRequest(job.id); // DISPATCHED
+      await processingApi.getRequest(job.id); // RUNNING
+      await write();
 
-    let current = job;
-    for (let i = 0; i < 10 && !FINAL.includes(current.status); i += 1) {
-      current = await processingApi.getRequest(job.id);
-    }
-    expect(current.status).toBe(status);
-  });
+      let current = job;
+      for (let i = 0; i < 10 && !FINAL.includes(current.status); i += 1) {
+        current = await processingApi.getRequest(job.id);
+      }
+      expect(current.status).toBe(status);
+    },
+  );
 
   it('§10.3 an expired open position does not concern a CASH job', async () => {
     db.issues.push({
@@ -247,7 +255,7 @@ describe('OQ-21 a job publishes only its scope', () => {
     expect((await run('2026-10-14', '2026-10-15', 'CASH')).status).toBe('COMPLETED');
   });
 
-  it('§10.2 a cash write during a POSITIONS run does not supersede it', async () => {
+  it('OQ-23 a cash write during a POSITIONS run does not stop it', async () => {
     const job = await processingApi.enqueue({
       start_date: '2026-10-14',
       end_date: '2026-10-15',
@@ -293,7 +301,7 @@ describe('OQ-21 scope on requests, preview and Pendências', () => {
     expect(preview).toMatchObject({
       scope: 'ALL',
       predecessor_date: '2026-10-16',
-      predecessor: { cash: 'VALID', positions: 'STALE' },
+      predecessor: { cash: 'FRESH', positions: 'STALE' },
     });
   });
 

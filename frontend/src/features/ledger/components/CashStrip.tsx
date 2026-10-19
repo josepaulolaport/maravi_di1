@@ -3,6 +3,7 @@ import { IconPlayerPlay } from '@tabler/icons-react';
 
 import type { IsoDate } from '@/api/contract';
 import { addDays, formatDate, formatMoney, UNAVAILABLE } from '@/shared/format';
+import { DATE_STATUS, isBehind } from '@/shared/ui/dateStatus';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { useCashSummary } from '../hooks/useLedger';
@@ -11,10 +12,10 @@ import { useCashSummary } from '../hooks/useLedger';
 // date, Caixa D−1 the one on the day before, each read from the cash chain of the portfolio
 // summary with its own freshness, apart from positions. Nothing is computed from the rows.
 
-/** A day's cash is behind when it is stale or was never processed. */
+/** A day's cash is behind when it is stale, failed or was never processed (OQ-23). */
 function useCashBehind(date: IsoDate): boolean {
   const status = useCashSummary(date).data?.cash.status;
-  return status === 'STALE' || status === 'NOT_PROCESSED';
+  return status !== undefined && isBehind(status);
 }
 
 function CashCard({ label, date }: { label: string; date: IsoDate }) {
@@ -31,13 +32,18 @@ function CashCard({ label, date }: { label: string; date: IsoDate }) {
   } else if (summary.isError) {
     value = <span title="Indisponível">{UNAVAILABLE}</span>;
     marker = <StatusBadge label="Erro ao carregar" color="red" />;
-  } else if (summary.data.cash.status === 'NOT_PROCESSED') {
-    value = <span title="Indisponível">{UNAVAILABLE}</span>;
-    marker = <StatusBadge label="Não processado" color="gray" />;
   } else {
-    value = formatMoney(summary.data.cash.balance);
-    if (summary.data.cash.status === 'STALE') {
-      marker = <StatusBadge label="Desatualizado" color="yellow" />;
+    // The published cash, if any (a failed date keeps what it had); every status but
+    // Atualizado is marked.
+    const status = summary.data.cash.status;
+    value =
+      status === 'NOT_PROCESSED' ? (
+        <span title="Indisponível">{UNAVAILABLE}</span>
+      ) : (
+        formatMoney(summary.data.cash.balance)
+      );
+    if (status !== 'FRESH') {
+      marker = <StatusBadge label={DATE_STATUS[status].label} color={DATE_STATUS[status].color} />;
     }
   }
 
