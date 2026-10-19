@@ -199,9 +199,23 @@ describe('Lançamentos (§11.3)', () => {
         'Qtd.',
         'PU',
         'Taxa',
-        'Valor financeiro',
+        'Financeiro',
         'Ações',
       ]);
+    });
+
+    it('§11.3 explains the Financeiro column as the cash effect in a keyboard-reachable tooltip', async () => {
+      const { user } = await openLedger();
+
+      const trigger = within(table()).getByText('Financeiro');
+      await user.tab();
+      while (document.activeElement !== trigger && document.activeElement !== document.body) {
+        await user.tab();
+      }
+      expect(trigger).toHaveFocus();
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(
+        'Efeito no caixa: compra negativa, venda positiva; aporte positivo, retirada negativa.',
+      );
     });
 
     it('§11.3 lists trades and cash entries in one order, newest first, in pt-BR formats', async () => {
