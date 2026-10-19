@@ -26,17 +26,27 @@ messages of `origin/main..HEAD`.
 ## Run the application
 
 ```bash
-docker compose up --build -d   # PostgreSQL 16, RabbitMQ, migrations, API, outbox relay, worker
+docker compose up --build -d   # PostgreSQL 16, RabbitMQ, migrations, API, outbox relay, worker, web
 make seed                      # catalogue roots: instrument type FUTURE, asset class INTEREST_RATE_FUTURE
+```
+
+Then open http://localhost:8080: the `web` service serves the built UI (nginx) and forwards `/api/`
+and `/health` to the API, so the UI runs on the real backend (no MSW mocks in the build). The API
+also answers directly on http://127.0.0.1:8000 (`/health`, `/api/...`), and the RabbitMQ
+management UI on http://127.0.0.1:15672 (user `di1`, password `di1`). Ports are set with
+`DI1_WEB_PORT`, `DI1_API_PORT` and `DI1_RABBITMQ_MANAGEMENT_PORT`.
+`docker compose down -v` removes the stack and its data.
+
+For frontend development, run the Vite dev server against the same stack:
+
+```bash
 cd frontend && VITE_API_MOCKS=false npm run dev   # UI on http://localhost:5173 against the API
 ```
 
-The API answers on http://127.0.0.1:8000 (`/health`, `/api/...`), and the RabbitMQ management UI
-on http://127.0.0.1:15672 (user `di1`, password `di1`). The Vite dev server proxies `/api` and
-`/health` to the API; when the API runs on another port (`DI1_API_PORT`), add
-`API_PROXY_TARGET=http://127.0.0.1:<port>` to the `npm run dev` command. Without
-`VITE_API_MOCKS=false` the UI runs against its built-in MSW mocks, with no backend at all.
-`docker compose down -v` removes the stack and its data.
+The dev server proxies `/api` and `/health` to the API; when the API runs on another port
+(`DI1_API_PORT`), add `API_PROXY_TARGET=http://127.0.0.1:<port>` to the `npm run dev` command.
+Without `VITE_API_MOCKS=false` the dev UI runs against its built-in MSW mocks, with no backend at
+all.
 
 ### Processing: why RabbitMQ
 
