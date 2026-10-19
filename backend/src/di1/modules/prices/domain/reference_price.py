@@ -47,10 +47,8 @@ def validate_reference_price(
         errors += _typed_errors(pu, rate, typed="pu", other="rate")
         value = pu
     elif maturity_date is not None and reference_date == maturity_date:
-        # No rate is typed on the maturity date, so its value is not checked: a "missing" or
-        # "invalid" rate next to "informe o PU" would contradict it. A PU sent too still is.
-        if pu is not None:
-            errors.append(_invalid(_ONLY["rate"], "pu"))
+        # No rate is typed on the maturity date: one message says so. A "missing" or "invalid"
+        # rate, or "informe apenas a taxa" for a PU sent too, would contradict it.
         errors.append(_invalid("Na data de vencimento informe o PU.", "rate"))
         value = rate
     else:

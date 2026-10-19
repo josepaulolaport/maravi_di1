@@ -137,7 +137,10 @@ class TestRejectedDates:
             ErrorDetail(ErrorCode.VALIDATION_ERROR, "Na data de vencimento informe o PU.", "rate"),
         )
 
-    def test_on_the_maturity_date_a_rate_request_with_a_pu_still_flags_the_pu(self) -> None:
+    def test_on_the_maturity_date_a_rate_request_with_a_pu_gets_only_the_maturity_message(
+        self,
+    ) -> None:
+        # "Informe apenas a taxa, sem o PU." would tell the user the opposite of "informe o PU".
         with pytest.raises(DomainError) as excinfo:
             _validate(
                 reference_date=MATURED_ON,
@@ -148,7 +151,6 @@ class TestRejectedDates:
             )
 
         assert _errors(excinfo) == (
-            ErrorDetail(ErrorCode.VALIDATION_ERROR, "Informe apenas a taxa, sem o PU.", "pu"),
             ErrorDetail(ErrorCode.VALIDATION_ERROR, "Na data de vencimento informe o PU.", "rate"),
         )
 
