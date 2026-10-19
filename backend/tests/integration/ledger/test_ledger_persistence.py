@@ -17,6 +17,7 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from di1.modules.ledger.application.services.ledger_service import LedgerService
@@ -267,6 +268,33 @@ async def test_an_overlapping_deletion_waits_then_deletes_nothing(
     assert error.value.code is ErrorCode.NOT_FOUND  # b is gone: all or nothing, c stays
     rows = await fetch(session_factory, "SELECT id FROM ledger.entries")
     assert [row.id for row in rows] == [c]
+
+
+async def test_a_write_only_saves_the_fact(
+    service: LedgerService, session_factory: Sessions
+) -> None:
+    # Spec §13 items 9 and 16, OQ-31: creating or deleting entries leaves processed dates as
+    # they are (no staleness) and never enqueues a run.
+    async with session_factory() as session, session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO processing.date_status"
+                " (date, portfolio, cash, portfolio_processed_at, cash_processed_at, updated_at)"
+                " VALUES (:day, 'PROCESSED', 'PROCESSED_WITH_ISSUES',"
+                " '2026-10-17 18:00-03', '2026-10-17 18:01-03', '2026-10-17 18:02-03')"
+            ),
+            {"day": date(2026, 10, 16)},
+        )
+    statuses = "SELECT * FROM processing.date_status ORDER BY date"
+    before = await fetch(session_factory, statuses)
+    assert len(before) == 1 and before[0].cash_processed_at is not None
+
+    deposit = await create(service, session_factory, cash(date(2026, 10, 14)))
+    sell = await create(service, session_factory, trade(date(2026, 10, 16), quantity=-4))
+    await delete(service, session_factory, deposit, sell)
+
+    assert await fetch(session_factory, statuses) == before
+    assert await fetch(session_factory, "SELECT id FROM processing.requests") == []
 
 
 async def test_an_execution_price_never_becomes_a_reference_price(
