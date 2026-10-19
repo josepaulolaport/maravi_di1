@@ -10,7 +10,7 @@ These rules add to the root CLAUDE.md. The authorities are:
 ```text
 backend/
   pyproject.toml  uv.lock  alembic.ini
-  migrations/{env.py, versions/, sql/}  # integrator (X) only; sql/ holds each revision's reviewed SQL; 0001 + 0002 = docs/schema.sql
+  migrations/{env.py, versions/, sql/}  # integrator (X) only; sql/ holds each revision's reviewed SQL; 0001 + 0002 + 0003 = docs/schema.sql
   src/di1/
     main.py                              # integrator
     composition/{routers,dependencies,consumers}.py   # integrator

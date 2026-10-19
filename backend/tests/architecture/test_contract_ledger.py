@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from di1.modules.ledger.public import CashMovementRecord, CashMovementType, TradeRecord
+from di1.modules.ledger.public import CashMovementRecord, TradeRecord
 from di1.shared.clock import SAO_PAULO
 from di1.shared.input_kind import InputKind
 
@@ -28,13 +28,18 @@ def _trade(trade_date: date, trade_time: time, seq: int) -> TradeRecord:
         execution_rate=Decimal("0.135000000000"),
         input_kind=InputKind.RATE,
         created_at=CREATED,
-        deleted_at=None,
-        delete_reason=None,
     )
 
 
-def test_cash_movement_type_matches_the_schema_check() -> None:
-    assert {kind.value for kind in CashMovementType} == {"DEPOSIT", "WITHDRAWAL"}
+def _cash(movement_date: date, movement_time: time, seq: int) -> CashMovementRecord:
+    return CashMovementRecord(
+        id=uuid4(),
+        movement_date=movement_date,
+        movement_time=movement_time,
+        seq=seq,
+        amount=Decimal("-2500.50"),
+        created_at=CREATED,
+    )
 
 
 def test_trades_order_by_date_then_time_then_seq() -> None:
@@ -51,18 +56,20 @@ def test_trades_order_by_date_then_time_then_seq() -> None:
     assert ordered == [previous_day, same_time_lower_seq, late_seq_first_time, early_seq_later_time]
 
 
+def test_trades_and_cash_share_one_order() -> None:
+    trade = _trade(date(2026, 10, 1), time(10, 0), 7)
+    withdrawal = _cash(date(2026, 10, 1), time(10, 0), 6)
+    deposit = _cash(date(2026, 10, 1), time(9, 0), 8)
+
+    entries: list[TradeRecord | CashMovementRecord] = [trade, withdrawal, deposit]
+    ordered = sorted(entries, key=lambda entry: entry.order_key)
+
+    assert ordered == [deposit, withdrawal, trade]
+
+
 def test_records_are_frozen() -> None:
     trade = _trade(date(2026, 10, 1), time(9, 0), 1)
-    movement = CashMovementRecord(
-        id=uuid4(),
-        movement_date=date(2026, 10, 1),
-        movement_type=CashMovementType.DEPOSIT,
-        amount=Decimal("1000000.00"),
-        description=None,
-        created_at=CREATED,
-        deleted_at=None,
-        delete_reason=None,
-    )
+    movement = _cash(date(2026, 10, 1), time(9, 0), 2)
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         trade.signed_quantity = 5  # type: ignore[misc]

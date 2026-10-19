@@ -2,10 +2,10 @@ import { Alert, Button, Drawer, Group, Progress, SimpleGrid, Stack, Text } from 
 import { IconAlertTriangle } from '@tabler/icons-react';
 
 import type { ProcessingRequest } from '@/api/contract';
-import { formatDate } from '@/shared/format';
+import { formatDate, formatDateTime } from '@/shared/format';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
-import { formatDateTime, formatDays, formatPeriod, shortId } from '../format';
+import { formatDays, formatPeriod, shortId } from '../format';
 import { canCancel, canRequestAgain, jobStatusBadge, publishedNothing } from '../jobStatus';
 import { Field } from './Field';
 import type { JobActions } from './HistoryTable';

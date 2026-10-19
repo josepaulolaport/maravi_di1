@@ -563,12 +563,13 @@ export function zeroStateDay(date: string): RecalculatedDay {
   };
 }
 
+// Distinct first blocks: the history shows a job by the first 8 characters of its id.
 const REQUEST_IDS = {
-  completed: '7f000000-0000-4000-8000-000000000001',
-  withIssues: '7f000000-0000-4000-8000-000000000002',
-  cancelled: '7f000000-0000-4000-8000-000000000003',
-  failed: '7f000000-0000-4000-8000-000000000004',
-  superseded: '7f000000-0000-4000-8000-000000000005',
+  completed: '3c1e8a20-0000-4000-8000-000000000001',
+  withIssues: '5b7d2f41-0000-4000-8000-000000000002',
+  cancelled: '8e2a6c93-0000-4000-8000-000000000003',
+  failed: 'a4f09d15-0000-4000-8000-000000000004',
+  superseded: 'd61b37e8-0000-4000-8000-000000000005',
 } as const;
 
 function job(
