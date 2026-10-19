@@ -4,8 +4,8 @@ the dates back to run after the acknowledgement (interfaces.md "Transaction boun
 The claim is the durable state change: it commits in the consumer's Unit of Work with the inbox
 record, the delivery is then acknowledged, and only then does the returned callable process the
 dates, each in its own Unit of Work. A long range therefore never holds a delivery; a run
-interrupted by a crash is resumed when the worker starts again (``recover_interrupted``), not by
-redelivery.
+interrupted by a crash is resumed when the worker starts again (``recover_at_startup``, OQ-45),
+not by redelivery.
 """
 
 from __future__ import annotations

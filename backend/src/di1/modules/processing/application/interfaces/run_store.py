@@ -23,16 +23,6 @@ from di1.platform.database.unit_of_work import UnitOfWork
 
 
 @dataclass(frozen=True, slots=True)
-class RunRecord:
-    """A run as the worker sees it: the public request plus the number of times it was claimed,
-    which stays inside Processing (the recovery cap counts it). There is one worker, so no claim
-    token or lease (user decision, 2026-10-19)."""
-
-    request: ProcessingRequest
-    attempt_count: int
-
-
-@dataclass(frozen=True, slots=True)
 class DateStatusRow:
     """One ``processing.date_status`` row with the ``*_previous`` columns (OQ-26): a chain's
     status before it went RUNNING, put back if the run ends without committing the date."""
@@ -111,16 +101,21 @@ class RunStore(Protocol):
         self, request_id: UUID | None, now: datetime, *, uow: UnitOfWork
     ) -> None: ...
 
-    async def lock_oldest_queued(self, *, uow: UnitOfWork) -> RunRecord | None:
+    async def lock_oldest_queued(self, *, uow: UnitOfWork) -> ProcessingRequest | None:
         """The oldest QUEUED run by ``(created_at, id)``, row-locked (OQ-5 item 4)."""
+        ...
+
+    async def lock_active_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
+        """The runs DISPATCHED, RUNNING or CANCELLING, oldest first, row-locked: at the worker's
+        start, the run it was processing (there is one worker, OQ-45)."""
         ...
 
     async def get_run(
         self, request_id: UUID, *, uow: UnitOfWork, for_update: bool = False
-    ) -> RunRecord | None: ...
+    ) -> ProcessingRequest | None: ...
 
-    async def save_run(self, run: RunRecord, *, uow: UnitOfWork) -> None:
-        """Stores every mutable column of the run, its failure and attempt count included."""
+    async def save_run(self, run: ProcessingRequest, *, uow: UnitOfWork) -> None:
+        """Stores every mutable column of the run, its failure included."""
         ...
 
     async def lock_date_statuses(

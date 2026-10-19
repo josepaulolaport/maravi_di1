@@ -14,7 +14,6 @@ from sqlalchemy import Row
 from di1.modules.processing.application.interfaces.run_store import (
     DateStatusRow,
     NewIssue,
-    RunRecord,
 )
 from di1.modules.processing.infrastructure.persistence.queries import runs as sql
 from di1.modules.processing.public import (
@@ -31,27 +30,24 @@ def _status(value: str | None) -> ChainStatus | None:
     return None if value is None else ChainStatus(value)
 
 
-def _to_run(row: Row[Any]) -> RunRecord:
-    return RunRecord(
-        request=ProcessingRequest(
-            id=row.id,
-            scope=ProcessingScope(row.scope),
-            start_date=row.start_date,
-            end_date=row.end_date,
-            status=ProcessingStatus(row.status),
-            created_at=row.created_at,
-            dispatched_at=row.dispatched_at,
-            started_at=row.started_at,
-            finished_at=row.finished_at,
-            cancel_requested_at=row.cancel_requested_at,
-            progress_date=row.progress_date,
-            error_code=row.error_code,
-            error_message=row.error_message,
-            updated_at=row.updated_at,
-            failed_date=row.failed_date,
-            failed_chain=None if row.failed_chain is None else ProcessingScope(row.failed_chain),
-        ),
-        attempt_count=row.attempt_count,
+def _to_run(row: Row[Any]) -> ProcessingRequest:
+    return ProcessingRequest(
+        id=row.id,
+        scope=ProcessingScope(row.scope),
+        start_date=row.start_date,
+        end_date=row.end_date,
+        status=ProcessingStatus(row.status),
+        created_at=row.created_at,
+        dispatched_at=row.dispatched_at,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        cancel_requested_at=row.cancel_requested_at,
+        progress_date=row.progress_date,
+        error_code=row.error_code,
+        error_message=row.error_message,
+        updated_at=row.updated_at,
+        failed_date=row.failed_date,
+        failed_chain=None if row.failed_chain is None else ProcessingScope(row.failed_chain),
     )
 
 
@@ -87,21 +83,23 @@ class SqlRunStore:
     ) -> None:
         await uow.session.execute(sql.SET_ACTIVE_REQUEST, {"request_id": request_id, "now": now})
 
-    async def lock_oldest_queued(self, *, uow: UnitOfWork) -> RunRecord | None:
+    async def lock_active_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
+        return [_to_run(row) for row in await uow.session.execute(sql.LOCK_ACTIVE_RUNS)]
+
+    async def lock_oldest_queued(self, *, uow: UnitOfWork) -> ProcessingRequest | None:
         row = (await uow.session.execute(sql.LOCK_OLDEST_QUEUED)).one_or_none()
         return None if row is None else _to_run(row)
 
     async def get_run(
         self, request_id: UUID, *, uow: UnitOfWork, for_update: bool = False
-    ) -> RunRecord | None:
+    ) -> ProcessingRequest | None:
         result = await uow.session.execute(
             sql.select_run(for_update=for_update), {"id": request_id}
         )
         row = result.one_or_none()
         return None if row is None else _to_run(row)
 
-    async def save_run(self, run: RunRecord, *, uow: UnitOfWork) -> None:
-        request = run.request
+    async def save_run(self, request: ProcessingRequest, *, uow: UnitOfWork) -> None:
         await uow.session.execute(
             sql.UPDATE_RUN,
             {
@@ -119,7 +117,6 @@ class SqlRunStore:
                 "failed_chain": None
                 if request.failed_chain is None
                 else request.failed_chain.value,
-                "attempt_count": run.attempt_count,
             },
         )
 

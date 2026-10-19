@@ -164,15 +164,9 @@ class Worker:
         await self.processor.run(claim.request_id)
         return request_id
 
-    async def restart_and_run(self) -> UUID:
-        """The worker starts again: the interrupted run's command is sent again, claimed and run
-        to its end."""
-        request_id = await self.dispatcher.recover_interrupted()
-        assert request_id is not None
-        claim = await self.claim(request_id)
-        assert claim is not None
-        await self.processor.run(claim.request_id)
-        return request_id
+    async def restart(self) -> None:
+        """The worker starts again: it recovers the interrupted run before consuming (OQ-45)."""
+        await self.processor.recover_at_startup()
 
     async def run_row(self, request_id: UUID) -> dict[str, Any]:
         async with self.engine.connect() as connection:

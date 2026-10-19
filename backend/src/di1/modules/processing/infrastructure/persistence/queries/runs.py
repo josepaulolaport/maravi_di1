@@ -10,7 +10,7 @@ from sqlalchemy import TextClause, text
 RUN_COLUMNS = (
     "id, scope, start_date, end_date, status, created_at, dispatched_at, started_at,"
     " finished_at, cancel_requested_at, progress_date, error_code, error_message, updated_at,"
-    " failed_date, failed_chain, attempt_count"
+    " failed_date, failed_chain"
 )
 
 LOCK_CALCULATION_STATE = text(
@@ -27,6 +27,11 @@ LOCK_OLDEST_QUEUED = text(
     " ORDER BY created_at, id LIMIT 1 FOR UPDATE"
 )
 
+LOCK_ACTIVE_RUNS = text(
+    f"SELECT {RUN_COLUMNS} FROM processing.requests"
+    " WHERE status IN ('DISPATCHED', 'RUNNING', 'CANCELLING') ORDER BY created_at, id FOR UPDATE"
+)
+
 
 def select_run(*, for_update: bool) -> TextClause:
     lock = " FOR UPDATE" if for_update else ""
@@ -38,8 +43,7 @@ UPDATE_RUN = text(
     " started_at = :started_at, finished_at = :finished_at,"
     " cancel_requested_at = :cancel_requested_at, progress_date = :progress_date,"
     " error_code = :error_code, error_message = :error_message, updated_at = :updated_at,"
-    " failed_date = :failed_date, failed_chain = :failed_chain, attempt_count = :attempt_count"
-    " WHERE id = :id"
+    " failed_date = :failed_date, failed_chain = :failed_chain WHERE id = :id"
 )
 
 DATE_STATUS_COLUMNS = (
