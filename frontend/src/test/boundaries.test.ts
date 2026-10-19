@@ -26,6 +26,14 @@ async function boundaryErrors(filePath: string, source: string): Promise<string[
 }
 
 describe('import boundaries', { timeout: 30_000 }, () => {
+  // The first lint builds typescript-eslint's program (and, for FEATURE_DEEP, its default
+  // project), which alone can take most of the 30 s on a loaded machine. Pay that cold start
+  // once here, with its own budget, so no case is charged for it.
+  beforeAll(async () => {
+    await boundaryErrors(FEATURE_ROOT, '');
+    await boundaryErrors(FEATURE_DEEP, '');
+  }, 120_000);
+
   it.each([
     [FEATURE_ROOT, "import '@/features/ledger/LedgerPage';"],
     [FEATURE_ROOT, "import '../ledger/LedgerPage';"],
