@@ -98,7 +98,7 @@ frontend/src/
 - **Decimals are strings end to end.** Format them with `Intl.NumberFormat('pt-BR', …)` from the string. Never use `parseFloat` or `Math.round` on money.
 - **`null` means unavailable.** Show it as unavailable ("—"), never as `0`.
 - **Distinguish the states:** each date has one status per chain (OQ-23, OQ-31): Processado, Processado com pendências, Processando, Erro, Não processado, with "Processado em dd/mm/aaaa hh:mm" when processed; there is no Desatualizado; missing values are `null`, never zero.
-- **Job statuses** are shown in Portuguese (spec §10.3, OQ-20): QUEUED Na fila, DISPATCHED Enviado, RUNNING Processando, CANCELLING Cancelando, CANCELLED Cancelado, COMPLETED Concluído, COMPLETED_WITH_ISSUES Concluído com pendências, FAILED Falhou. There is no "Bloqueado" and, since OQ-23, no Obsoleto (SUPERSEDED).
+- **Job statuses** are shown in Portuguese (spec §10.3, OQ-20): QUEUED Na fila, DISPATCHED Enviado, RUNNING Processando, CANCELLING Cancelando, CANCELLED Cancelado, COMPLETED Concluído, COMPLETED_WITH_ISSUES Concluído com pendências, FAILED Falhou. There is no "Bloqueado" and, since OQ-23, no Obsoleto (SUPERSEDED). Since OQ-46 the backend never sets DISPATCHED or CANCELLING, so Enviado and Cancelando are never shown; the labels stay in the map and nothing changes in the frontend.
 - **Polling:** status is polled only while a job is queued or running.
 - **All visible text is pt-BR**, with Brazilian number and date formats. Identifiers are English.
 - **Mocks:** MSW handlers follow the API contracts in `docs/interfaces.md`. When a contract is wrong, raise it to the integrator; do not freeze a wrong API to keep the mocks (spec §12).
