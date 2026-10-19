@@ -13,8 +13,9 @@ interfaces.md "Transaction boundaries" 7. For each delivery:
 4. a handler may return work to run after the ack (`AfterAck`): the processing run, whose
    claim is the durable state change of step 2 and which then commits date by date in Units of
    Work of its own (plan §7). The ack does not wait for a range that may take longer than the
-   broker's consumer timeout; recovery after a crash comes from the claim's lease, not from a
-   redelivery. A failure there is logged: the message is already acknowledged.
+   broker's consumer timeout; after a crash or a stop, the run resumes at the (one) worker's
+   next start, through its startup hook (`di1.workers.main`), not through a redelivery. A
+   failure there is logged: the message is already acknowledged.
 
 The work after the ack runs in an `AfterAckRunner`, one at a time, in a task the process owns,
 not in the broker's delivery task: a channel that closes (a broker restart, a missed heartbeat)
@@ -23,7 +24,7 @@ a command that arrives meanwhile (a duplicate the relay resent, a re-dispatch) i
 acknowledged at once, and its run, if any, waits its turn in the runner. One active job at a
 time is the database's guarantee (the claim), not the consumer's. If the ack itself fails after
 the commit, the work still runs: the redelivery is an inbox duplicate with no run of its own,
-and the claim token fences the work.
+and the claim makes the work its own.
 
 Failures: a `PermanentMessageError` from the handler dead-letters the delivery at once; any
 other exception rolls back and, after a pause, returns it to the queue, where the broker
@@ -68,13 +69,12 @@ class PermanentMessageError(Exception):
 type AfterAck = Callable[[], Awaitable[None]]
 """Work a handler hands back to run once its delivery is acknowledged.
 
-What such work must guarantee, since the consumer cannot (interfaces.md "Transaction
-boundaries" 4 and 6):
+What such work must guarantee, since the consumer cannot:
 
-- it may start long after its claim committed, behind another run: it re-checks its claim and
-  lease when it starts, and renews them or ends without writing;
-- it bounds every wait (statement and lock timeouts) and stops at the first failed fencing
-  check: a run that hangs holds every later run of the process behind it.
+- it may start long after its claim committed, behind another run: it re-reads its run's
+  state when it starts, and ends without writing if the run is no longer its to do;
+- it bounds every wait (statement and lock timeouts): a run that hangs holds every later run
+  of the process behind it.
 """
 
 
@@ -87,7 +87,7 @@ class AfterAckRunner:
 
     A process shares one runner among its consumers, so it runs one job at a time. `stop`
     cancels the work in progress and drops the waiting work, and any submitted after it: each
-    was claimed, and its lease recovers it."""
+    was claimed, and resumes at the worker's next start."""
 
     def __init__(self) -> None:
         self._waiting: asyncio.Queue[tuple[AfterAck, str]] = asyncio.Queue()
@@ -97,7 +97,9 @@ class AfterAckRunner:
     def submit(self, work: AfterAck, description: str) -> None:
         """Queue ``work``; a failure is logged with ``description``."""
         if self._stopped:
-            logger.warning("%s dropped: the worker is stopping; its lease recovers it", description)
+            logger.warning(
+                "%s dropped: the worker is stopping; it resumes at the next start", description
+            )
             return
         self._waiting.put_nowait((work, description))
         if self._running is None or self._running.done():
@@ -124,7 +126,7 @@ class AfterAckRunner:
         while not self._waiting.empty():
             self._waiting.get_nowait()
         if dropped:
-            logger.warning("%d waiting runs dropped; their leases recover them", dropped)
+            logger.warning("%d waiting runs dropped; they resume at the next start", dropped)
         running, self._running = self._running, None
         if running is None or running.done():
             return
