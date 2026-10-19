@@ -67,6 +67,15 @@ export interface RetryRequest {
 }
 
 /**
+ * Where the plain retry starts (OQ-23 item 10): a failed run from its failed date, which on a
+ * Tudo run whose chains failed on different dates is the first failure, before the chain that
+ * failed later stopped; a cancelled run, or a failure with no date, from the first date not
+ * reached.
+ */
+const retryStart = (job: ProcessingRequest): IsoDate =>
+  job.status === 'FAILED' ? (job.failed_date ?? nextDate(job)) : nextDate(job);
+
+/**
  * The new requests a finished run offers (OQ-20 item 4, OQ-23 item 10, OQ-40 items 3 and 6):
  * a cancelled or failed run, from where it stopped to its original end, in its scope; and a Tudo
  * run where one chain failed (Concluído com pendências or Cancelado), that chain alone from
@@ -77,7 +86,7 @@ export function retryRequests(job: ProcessingRequest): RetryRequest[] {
   if (UNFINISHED.includes(job.status)) {
     requests.push({
       label: 'Solicitar novo processamento',
-      start: nextDate(job),
+      start: retryStart(job),
       end: job.end_date,
       scope: job.scope,
     });

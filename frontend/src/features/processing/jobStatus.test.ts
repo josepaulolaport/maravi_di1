@@ -121,22 +121,30 @@ describe('job status (§10.3, OQ-20)', () => {
     ]);
   });
 
-  it('OQ-40 a Falhou run keeps the plain prefill, whatever its failed chain', () => {
+  it('OQ-23 OQ-40 a Falhou run is asked again from its failed date, in its scope only', () => {
+    // Cash failed on 12/10 and positions on 15/10: the run committed up to 14/10.
     const job = run({
       status: 'FAILED',
-      progress_date: '2026-10-16',
-      failed_date: '2026-10-15',
+      start_date: '2026-10-10',
+      progress_date: '2026-10-14',
+      failed_date: '2026-10-12',
       failed_chain: 'CASH',
     });
 
     expect(retryRequests(job)).toEqual([
       {
         label: 'Solicitar novo processamento',
-        start: '2026-10-17',
+        start: '2026-10-12',
         end: '2026-10-18',
         scope: 'ALL',
       },
     ]);
+  });
+
+  it('OQ-23 a Falhou run without a failed date falls back to the day after its last commit', () => {
+    const job = run({ status: 'FAILED', progress_date: '2026-10-15', failed_date: null });
+
+    expect(retryRequests(job).map((r) => r.start)).toEqual(['2026-10-16']);
   });
 
   it('OQ-23 derives the days done and the next date from the range and progress_date', () => {
