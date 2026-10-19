@@ -1,13 +1,16 @@
 """`ProcessingDispatcher`: hands the next run to the worker, one active run globally
 (interfaces.md "Transaction boundaries" 3; plan §7; OQ-5, OQ-45).
 
-`dispatch_next` is the dispatcher process's tick, one transaction under a row lock on the
-singleton ``calculation_state``, always taken before a run's row (the worker never takes it, so
-the two never deadlock):
+`dispatch_next` is the dispatcher process's tick, one transaction. Lock order: it locks the
+singleton ``calculation_state``, reads the active run **without** locking it, then locks only QUEUED
+rows. A run's end takes the run's row, then its dates, then ``calculation_state`` (it frees the
+slot with its end status, OQ-45); since the dispatcher never waits on a run's row while holding
+``calculation_state``, the two never form a lock cycle:
 
 - while the active run is DISPATCHED, RUNNING or CANCELLING, nothing is dispatched (there is one
   worker; a run it was processing when it stopped is resumed at its next start, not here);
-- otherwise the slot of an ended run is freed and the oldest QUEUED run by ``(created_at, id)``
+- otherwise (a run's end has freed the slot; a slot still left on an ended run, from data older
+  than that rule, is freed here) the oldest QUEUED run by ``(created_at, id)``
   becomes DISPATCHED and active, with its command written to the outbox in the same transaction
   (the relay publishes it).
 """
@@ -54,10 +57,12 @@ class ProcessingDispatcher:
             now = self._clock.now()
             active_id = await self._store.lock_active_request_id(uow=uow)
             if active_id is not None:
-                active = await self._store.get_run(active_id, uow=uow, for_update=True)
+                # A plain read: locking the run's row here would wait on a run's end, which
+                # holds that row and waits for calculation_state (a deadlock).
+                active = await self._store.get_run(active_id, uow=uow)
                 if active is not None and active.status in ACTIVE:
                     return None
-                # The active run has ended (the worker leaves the slot to us): free it.
+                # A run's end frees the slot itself; this frees one still left on an ended run.
                 await self._store.set_active_request_id(None, now, uow=uow)
 
             queued = await self._store.lock_oldest_queued(uow=uow)

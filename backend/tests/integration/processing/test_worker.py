@@ -11,6 +11,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.ledger.public import EntryType
@@ -886,3 +887,19 @@ async def test_recovery_at_the_worker_start_is_idempotent(worker: Worker) -> Non
         await worker.writes(),
         await worker.active_request_id(),
     ) == after_first
+
+
+async def test_the_dispatcher_never_waits_on_the_active_run_row(worker: Worker) -> None:
+    """A run's end holds the run's row, then waits for calculation_state; a tick that held
+    calculation_state and waited for that row would deadlock with it."""
+    request_id = await worker.enqueue("CASH", D1, D1)
+    await worker.dispatcher.dispatch_next()
+    assert await worker.claim(request_id) is not None
+
+    async with worker.engine.connect() as connection, connection.begin():
+        await connection.execute(  # as a run's end does first
+            text("SELECT id FROM processing.requests WHERE id = :id FOR UPDATE"),
+            {"id": request_id},
+        )
+        async with asyncio.timeout(5):
+            assert await worker.dispatcher.dispatch_next() is None
