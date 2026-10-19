@@ -14,7 +14,7 @@ Adapted for this project from the "systematic-debugging" skill of obra/superpowe
 - **Read the whole error:** the full traceback, the assertion diff, the HTTP error body. Do not skim.
 - **Reproduce it reliably**, with the smallest command: one pytest node id or one vitest test. If you cannot reproduce it, you do not understand it yet.
 - **Check what changed:** `git log --oneline origin/main..HEAD`, `git diff origin/main...HEAD -- <area>`. Did a contract change, or a rebase on a merged lane?
-- **Across layers** (router → service → domain → repository → database; or dispatcher → outbox → relay → broker → worker), log or inspect the value at each boundary. Find the first layer where it is wrong.
+- **Across layers** (router → service → domain → repository → database; or outbox → relay → broker → worker), log or inspect the value at each boundary. Find the first layer where it is wrong.
 - **For a wrong number, trace it back to its inputs.** Recompute it independently with Python `decimal` from the formula in the business spec (§4, §7, §8).
 
 ## 2. Compare with what works
