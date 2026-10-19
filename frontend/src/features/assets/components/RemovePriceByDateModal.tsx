@@ -2,9 +2,11 @@ import { Button, Group, Modal, Stack, TextInput } from '@mantine/core';
 import { IconCalendar } from '@tabler/icons-react';
 import { useState } from 'react';
 
-import type { Instrument, IsoDate } from '@/api/contract';
+import type { Instrument, IsoDate, ReferencePriceDay } from '@/api/contract';
 import { todayInSaoPaulo } from '@/shared/format';
+import { MessageAlert } from '@/shared/ui/MessageAlert';
 import { PastDateInput } from '@/shared/ui/PastDateInput';
+import { problemMessages } from '@/shared/ui/problemMessages';
 
 import { useReferencePriceDays } from '../hooks/usePrices';
 import { RemovePriceModal } from './RemovePriceModal';
@@ -34,17 +36,22 @@ function DatePicker({ instrument, onClose }: { instrument: Instrument; onClose: 
   // The date whose prices are read, once "Continuar" is pressed.
   const [lookup, setLookup] = useState<IsoDate | null>(null);
   const days = useReferencePriceDays(instrument.id, lookup ?? '', lookup ?? '', lookup !== null);
-  const day =
-    lookup !== null ? (days.data?.items.find((d) => d.reference_date === lookup) ?? null) : null;
-  const none = lookup !== null && days.isSuccess && day === null;
+  // Only an answer read for this lookup counts: a cached one may be from before a write.
+  const fresh = lookup !== null && days.isSuccess && !days.isFetching;
+  const live = fresh ? (days.data.items.find((d) => d.reference_date === lookup) ?? null) : null;
+  // Once found, the day stays on screen while the removal runs: when its last price goes, the
+  // refetch finds nothing, and the removal modal must still finish (its confirmation, closing).
+  const [found, setFound] = useState<ReferencePriceDay | null>(null);
+  if (live !== null && live !== found) setFound(live);
+  const day = live ?? found;
 
-  // The date's prices are listed by the same modal as on the contract page.
   if (day) return <RemovePriceModal day={day} onClose={onClose} />;
 
   // Nothing after today (OQ-14), nor after the contract's maturity (OQ-1).
   const today = todayInSaoPaulo();
   const maturity = instrument.maturity_date;
   const maxDate = maturity !== null && maturity < today ? maturity : today;
+  const none = fresh && live === null;
   const error = missing ? 'Informe a data.' : none ? NO_PRICE : undefined;
 
   return (
@@ -71,6 +78,9 @@ function DatePicker({ instrument, onClose }: { instrument: Instrument; onClose: 
             setLookup(null);
           }}
         />
+        {lookup !== null && days.isError && !days.isFetching && (
+          <MessageAlert messages={problemMessages(days.error)} />
+        )}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={onClose}>
             Cancelar
@@ -79,6 +89,8 @@ function DatePicker({ instrument, onClose }: { instrument: Instrument; onClose: 
             loading={lookup !== null && days.isFetching}
             onClick={() => {
               if (date === null) setMissing(true);
+              // The same date again: read it again (after a failure, or a write elsewhere).
+              else if (date === lookup) void days.refetch();
               else setLookup(date);
             }}
           >

@@ -1,4 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
+import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
 import type { Instrument, LastReference } from '@/api/contract';
@@ -241,6 +242,7 @@ const priceDialog = async () =>
 
 describe('Ativos: preços na lista de contratos (§11.2, §5; user, 2026-10-19)', () => {
   beforeEach(() => {
+    notifications.clean();
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-18T12:00:00-03:00'));
   });
@@ -354,6 +356,139 @@ describe('Ativos: preços na lista de contratos (§11.2, §5; user, 2026-10-19)'
     await waitFor(() => {
       expect(deleted).toEqual([PRICES.f28_1016_manual.id]);
     });
+  });
+
+  it("§5 removing a date's last price closes the form and confirms it", async () => {
+    // From the delete on, the API lists no price on 16/10 for DI1F28.
+    let removed = false;
+    server.use(
+      http.delete(url('/reference-prices/:id'), () => {
+        removed = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.get(url('/reference-prices'), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        const day = {
+          reference_date: '2026-10-16',
+          preferred: PRICES.f28_1016_manual,
+          sources: [PRICES.f28_1016_manual],
+        };
+        return HttpResponse.json({
+          items: !removed && params.get('start_date') === '2026-10-16' ? [day] : [],
+        });
+      }),
+    );
+    const { user } = await openProduct();
+
+    await rowMenu(user, 'DI1F28', 'Remover preço');
+    const pick = within(await screen.findByRole('dialog', { name: 'Remover preço de referência' }));
+    await user.type(pick.getByRole('textbox', { name: 'Data de referência' }), '16/10/2026');
+    await user.click(pick.getByRole('button', { name: 'Continuar' }));
+    const remove = within(
+      await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
+    );
+    await remove.findByText('Preços de 16/10/2026:');
+    await user.click(remove.getByRole('button', { name: 'Remover' }));
+
+    expect(await screen.findAllByText('Preço de referência removido.')).toHaveLength(1);
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: 'Remover preço de referência' }),
+      ).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText('Nenhum preço registrado nesta data.')).not.toBeInTheDocument();
+  });
+
+  it('§12 a failed price lookup shows the API message, and "Continuar" tries again', async () => {
+    let calls = 0;
+    server.use(
+      http.get(url('/reference-prices'), () => {
+        calls += 1;
+        return calls === 1
+          ? HttpResponse.json(
+              {
+                type: 'about:blank',
+                title: 'Serviço indisponível. Tente novamente.',
+                status: 503,
+                detail: 'Serviço indisponível. Tente novamente.',
+              },
+              { status: 503, headers: { 'Content-Type': 'application/problem+json' } },
+            )
+          : HttpResponse.json({ items: [] });
+      }),
+    );
+    const { user } = await openProduct();
+
+    await rowMenu(user, 'DI1F28', 'Remover preço');
+    const pick = within(await screen.findByRole('dialog', { name: 'Remover preço de referência' }));
+    await user.type(pick.getByRole('textbox', { name: 'Data de referência' }), '17/10/2026');
+    await user.click(pick.getByRole('button', { name: 'Continuar' }));
+    expect(await pick.findByText('Serviço indisponível. Tente novamente.')).toBeInTheDocument();
+
+    await user.click(pick.getByRole('button', { name: 'Continuar' }));
+    expect(await pick.findByText('Nenhum preço registrado nesta data.')).toBeInTheDocument();
+    expect(calls).toBe(2);
+  });
+
+  it('OQ-1 a matured contract opens the form on its maturity date, not after it', async () => {
+    server.use(
+      http.get(url('/instruments'), () =>
+        HttpResponse.json({
+          items: instruments.map((i) =>
+            i.code === 'DI1F27' ? { ...i, maturity_date: '2026-10-01' } : i,
+          ),
+        }),
+      ),
+    );
+    const { user } = await openProduct();
+
+    await rowMenu(user, 'DI1F27', 'Registrar preço');
+    const modal = await priceDialog();
+
+    expect(modal.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('01/10/2026');
+  });
+
+  it('OQ-1 choosing a matured contract drops a date after its maturity, and says why', async () => {
+    server.use(
+      http.get(url('/instruments'), () =>
+        HttpResponse.json({
+          items: instruments.map((i) =>
+            i.code === 'DI1F27' ? { ...i, maturity_date: '2026-10-01' } : i,
+          ),
+        }),
+      ),
+    );
+    const { user } = await openProduct();
+
+    await user.click(screen.getByRole('button', { name: 'Registrar preço' }));
+    const modal = await priceDialog();
+    await user.click(modal.getByRole('combobox', { name: 'Contrato' }));
+    await user.click(await screen.findByRole('option', { name: 'DI1F27', hidden: true }));
+
+    expect(modal.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('');
+    expect(modal.getByText('O contrato já venceu nesta data.')).toBeInTheDocument();
+  });
+
+  it('OQ-15 an API error of one contract goes away when another contract is chosen', async () => {
+    server.use(
+      http.post(url('/reference-prices'), () =>
+        problem(422, [
+          fieldError('CONTRACT_MATURED', 'O contrato já venceu nesta data.', 'reference_date'),
+        ]),
+      ),
+    );
+    const { user } = await openProduct();
+
+    await rowMenu(user, 'DI1F27', 'Registrar preço');
+    const modal = await priceDialog();
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '99.000,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
+    await modal.findByText('O contrato já venceu nesta data.');
+
+    await user.click(modal.getByRole('combobox', { name: 'Contrato' }));
+    await user.click(await screen.findByRole('option', { name: 'DI1F29', hidden: true }));
+
+    expect(modal.queryByText('O contrato já venceu nesta data.')).not.toBeInTheDocument();
   });
 
   it('§5 "Remover preço" on a date without a price says so', async () => {

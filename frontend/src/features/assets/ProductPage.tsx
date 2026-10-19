@@ -5,7 +5,7 @@ import { useParams } from 'react-router';
 
 import { SearchInput } from '@/shared/ui/SearchInput';
 import { Loading } from '@/shared/ui/Loading';
-import type { Instrument, Product } from '@/api/contract';
+import type { Instrument, IsoDate, Product } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
@@ -13,6 +13,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { ContractsTable } from './components/ContractsTable';
 import { countLabel, todayInSaoPaulo } from '@/shared/format';
 import { NewContractModal } from './components/NewContractModal';
+import { lastDay } from './components/calendarData';
 import { PageHeader } from './components/PageHeader';
 import { PriceModal } from './components/PriceModal';
 import { RemovePriceByDateModal } from './components/RemovePriceByDateModal';
@@ -45,15 +46,13 @@ function ProductBody({ product }: { product: Product }) {
   const allInstruments = useInstruments(product.id, '');
   const [price, setPrice] = useState<{
     instrument: Instrument | null;
-    open: boolean;
+    date: IsoDate | null;
     session: number;
-  }>({
-    instrument: null,
-    open: false,
-    session: 0,
-  });
+  }>({ instrument: null, date: null, session: 0 });
+  // The form opens on today, or on a matured contract's last day (OQ-1).
   const openPrice = (instrument: Instrument | null) => {
-    setPrice((current) => ({ instrument, open: true, session: current.session + 1 }));
+    const date = lastDay(instrument, todayInSaoPaulo());
+    setPrice((current) => ({ instrument, date, session: current.session + 1 }));
   };
   const [removing, setRemoving] = useState<Instrument | null>(null);
 
@@ -124,10 +123,11 @@ function ProductBody({ product }: { product: Product }) {
       <PriceModal
         instrument={price.instrument}
         contracts={allInstruments.data?.items ?? (price.instrument ? [price.instrument] : [])}
-        date={price.open ? todayInSaoPaulo() : null}
+        contractsStatus={allInstruments.status}
+        date={price.date}
         session={price.session}
         onClose={() => {
-          setPrice((current) => ({ ...current, open: false }));
+          setPrice((current) => ({ ...current, date: null }));
         }}
       />
       <RemovePriceByDateModal
