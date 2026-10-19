@@ -11,6 +11,7 @@ import type {
   InstrumentType,
   IsoDate,
   Issue,
+  OutdatedRange,
   ListResponse,
   PnlPoint,
   PortfolioPositions,
@@ -95,4 +96,7 @@ export const processingApi = {
       body,
     ),
   listIssues: () => http.get<ListResponse<Issue>>('/processing/issues'),
+  /** Per chain, the first stale or unprocessed day of a range (P19, OQ-21 draft). */
+  outdated: (query: { start_date: IsoDate; end_date: IsoDate }) =>
+    http.get<OutdatedRange>('/processing/outdated', { query }),
 };

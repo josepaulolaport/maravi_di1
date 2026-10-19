@@ -5,6 +5,7 @@ import type {
   FieldError,
   JobStatus,
   ListResponse,
+  OutdatedRange,
   PredecessorState,
   ProcessingChain,
   ProcessingPreview,
@@ -308,6 +309,19 @@ function requestErrors(start: unknown, end: unknown, scope: unknown): FieldError
   return errors;
 }
 
+/**
+ * The first day of [start, end] whose chain is stale or was never processed. Days before the
+ * first ledger entry are the valid zero state (OQ-11), never outdated, as in the preview.
+ */
+function firstOutdated(start: string, end: string, chain: ProcessingChain): string | null {
+  const first = firstEntryDate();
+  for (let date = start; date <= end; date = addDays(date, 1)) {
+    if (first === undefined || date < first) continue;
+    if (!isPublished(date, chain) || isStale(date, chain)) return date;
+  }
+  return null;
+}
+
 export const processingHandlers = [
   http.get(url('/processing/requests'), async () => {
     await latency();
@@ -342,6 +356,21 @@ export const processingHandlers = [
         cash: predecessorState(start, 'CASH'),
         positions: predecessorState(start, 'POSITIONS'),
       },
+    });
+  }),
+
+  http.get(url('/processing/outdated'), async ({ request }) => {
+    await latency();
+    const params = new URL(request.url).searchParams;
+    const start = params.get('start_date');
+    const end = params.get('end_date');
+    const errors = rangeErrors(start, end);
+    if (errors.length > 0 || !start || !end) return problem(422, errors);
+    return HttpResponse.json<OutdatedRange>({
+      start_date: start,
+      end_date: end,
+      cash_from: firstOutdated(start, end, 'CASH'),
+      positions_from: firstOutdated(start, end, 'POSITIONS'),
     });
   }),
 

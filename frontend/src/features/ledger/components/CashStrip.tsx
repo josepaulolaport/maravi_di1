@@ -1,4 +1,5 @@
-import { Group, Paper, SimpleGrid, Skeleton, Text } from '@mantine/core';
+import { Button, Group, Paper, SimpleGrid, Skeleton, Stack, Text } from '@mantine/core';
+import { IconPlayerPlay } from '@tabler/icons-react';
 
 import type { IsoDate } from '@/api/contract';
 import { addDays, formatDate, formatMoney, UNAVAILABLE } from '@/shared/format';
@@ -54,11 +55,31 @@ function CashCard({ label, date }: { label: string; date: IsoDate }) {
   );
 }
 
-export function CashStrip({ end }: { end: IsoDate }) {
+interface CashStripProps {
+  end: IsoDate;
+  /** Set when the period's cash is stale or unprocessed: offers "Processar caixa". */
+  onProcessCash?: (() => void) | undefined;
+}
+
+export function CashStrip({ end, onProcessCash }: CashStripProps) {
   return (
-    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-      <CashCard label="Caixa D−1" date={addDays(end, -1)} />
-      <CashCard label="Caixa D0" date={end} />
-    </SimpleGrid>
+    <Stack gap="xs">
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+        <CashCard label="Caixa D−1" date={addDays(end, -1)} />
+        <CashCard label="Caixa D0" date={end} />
+      </SimpleGrid>
+      {onProcessCash && (
+        <Group justify="flex-end">
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<IconPlayerPlay size={14} stroke={1.5} />}
+            onClick={onProcessCash}
+          >
+            Processar caixa
+          </Button>
+        </Group>
+      )}
+    </Stack>
   );
 }

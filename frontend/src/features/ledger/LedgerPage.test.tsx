@@ -343,18 +343,25 @@ describe('Lançamentos (§11.3)', () => {
       // The 16/10 price correction makes positions stale, never the cash (OQ-21).
       expect(before.queryByText('Desatualizado')).not.toBeInTheDocument();
       expect(end.queryByText('Desatualizado')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Processar caixa' })).not.toBeInTheDocument();
     });
 
-    it('OQ-21 a deposit marks only the cash stale: Caixa D0 shows it', async () => {
+    it('OQ-21 a deposit marks the cash stale and offers "Processar caixa" from that day, scope Caixa', async () => {
       await ledgerApi.createCashMovement({
         movement_date: '2026-10-15',
         movement_type: 'DEPOSIT',
         amount: '1000.00',
       });
-      await openLedger();
+      const { user } = await openLedger();
 
       const end = within(screen.getByRole('group', { name: 'Caixa D0' }));
       expect(await end.findByText('Desatualizado')).toBeInTheDocument();
+      await user.click(await screen.findByRole('button', { name: 'Processar caixa' }));
+
+      const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
+      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('15/10/2026');
+      expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('16/10/2026');
+      expect(modal.getByRole('radio', { name: 'Caixa' })).toBeChecked();
     });
 
     it('§11.3 shows unprocessed dates as unavailable, never as zero', async () => {
@@ -803,6 +810,95 @@ describe('Lançamentos (§11.3)', () => {
       );
 
       expect(modal.getByRole('combobox', { name: 'Contrato' })).toHaveValue('DI1F28');
+    });
+  });
+
+  describe('Processar (OQ-21 draft, user 2026-10-18)', () => {
+    async function openProcessar(user: ReturnType<typeof renderApp>['user']) {
+      const button = screen.getByRole('button', { name: 'Processar' });
+      await waitFor(() => {
+        expect(button).toBeEnabled();
+      });
+      await user.click(button);
+      return within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
+    }
+
+    it('§10.1 after a trade, prefills Tudo from the first day either chain is behind', async () => {
+      await ledgerApi.createTrade({
+        asset_id: IDS.di1f28,
+        trade_date: '2026-10-15',
+        trade_time: '10:00:00',
+        signed_quantity: 1,
+        input_kind: 'PU',
+        execution_pu: '89000.00',
+      });
+      const { user } = await openLedger();
+
+      const modal = await openProcessar(user);
+
+      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('15/10/2026');
+      expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('16/10/2026');
+      expect(modal.getByRole('radio', { name: 'Tudo' })).toBeChecked();
+    });
+
+    it('OQ-11 a period starting before the first entry counts those days as current', async () => {
+      const { user } = await openLedger('/lancamentos?inicio=2026-10-01&fim=2026-10-15');
+
+      expect(screen.queryByRole('button', { name: 'Processar caixa' })).not.toBeInTheDocument();
+      const modal = await openProcessar(user);
+      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('01/10/2026');
+      expect(modal.getByRole('radio', { name: 'Tudo' })).toBeChecked();
+    });
+
+    it('§12 when the days to process cannot be checked, says so and does not guess', async () => {
+      server.use(
+        http.get(url('/processing/outdated'), () =>
+          problem(422, [fieldError('INVALID_RANGE', 'Período inválido.', 'start_date')]),
+        ),
+      );
+      await openLedger();
+
+      expect(
+        await screen.findByText('Não foi possível verificar os dias a processar.'),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Processar' })).toBeDisabled();
+    });
+
+    it('§10.1 with nothing behind, prefills the whole period with Tudo', async () => {
+      const { user } = await openLedger('/lancamentos?inicio=2026-10-14&fim=2026-10-15');
+
+      const modal = await openProcessar(user);
+
+      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('14/10/2026');
+      expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('15/10/2026');
+      expect(modal.getByRole('radio', { name: 'Tudo' })).toBeChecked();
+    });
+
+    it('§10.1 previews and queues the job without leaving Lançamentos', async () => {
+      const bodies: unknown[] = [];
+      server.use(
+        http.post(url('/processing/requests'), async ({ request }) => {
+          bodies.push(await request.clone().json());
+          return undefined;
+        }),
+      );
+      const { user, router } = await openLedger('/lancamentos?inicio=2026-10-14&fim=2026-10-15');
+      const modal = await openProcessar(user);
+      await user.click(modal.getByRole('radio', { name: 'Caixa' }));
+
+      expect(
+        await modal.findByRole('group', { name: 'Estado anterior do caixa' }),
+      ).toHaveTextContent('Estado inicial (sem lançamentos anteriores)');
+      expect(modal.queryByRole('group', { name: 'Estado anterior das posições' })).toBeNull();
+      await user.click(modal.getByRole('button', { name: 'Confirmar processamento' }));
+
+      expect(
+        await screen.findByText(
+          'Processamento colocado na fila. Acompanhe em Central de Controle.',
+        ),
+      ).toBeInTheDocument();
+      expect(bodies).toEqual([{ start_date: '2026-10-14', end_date: '2026-10-15', scope: 'CASH' }]);
+      expect(router.state.location.pathname).toBe('/lancamentos');
     });
   });
 

@@ -2,10 +2,15 @@ import { Button, Group, List, Paper, Skeleton, Stack, Text, TextInput } from '@m
 import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconCalendar, IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
+import { IconCalendar, IconPlayerPlay, IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import type { IsoDate } from '@/api/contract';
+import { useOutdated } from '@/shared/processing/hooks';
+import {
+  type ProcessingDraft,
+  ProcessingRequestModal,
+} from '@/shared/processing/ProcessingRequestModal';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
@@ -21,6 +26,7 @@ import {
   useIsSavingEntry,
   useLedgerFilters,
 } from './hooks/useLedger';
+import { processCashDraft, processDraft } from './processingDraft';
 
 type DeleteTarget = { mode: 'one'; entry: LedgerEntry } | { mode: 'many'; entries: LedgerEntry[] };
 
@@ -45,6 +51,9 @@ export function LedgerPage() {
   const saving = useIsSavingEntry();
 
   const [creating, setCreating] = useState(false);
+  // Which days are behind, per chain, prefills the "Processar" requests (OQ-21 draft).
+  const outdated = useOutdated(start, end);
+  const [processing, setProcessing] = useState<ProcessingDraft | null>(null);
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
 
   // A selection belongs to one range and search: a new filter starts with nothing selected,
@@ -118,6 +127,17 @@ export function LedgerPage() {
             </Button>
           )}
           <Button
+            variant="default"
+            leftSection={<IconPlayerPlay size={16} stroke={1.5} />}
+            disabled={outdated.isPending || outdated.isError}
+            {...(outdated.isError ? { 'aria-describedby': 'outdated-error' } : {})}
+            onClick={() => {
+              setProcessing(processDraft(outdated.data, start, end));
+            }}
+          >
+            Processar
+          </Button>
+          <Button
             leftSection={<IconPlus size={16} stroke={1.5} />}
             onClick={() => {
               setCreating(true);
@@ -128,7 +148,22 @@ export function LedgerPage() {
         </Group>
       </Group>
 
-      <CashStrip end={end} />
+      {outdated.isError && (
+        <Text id="outdated-error" size="sm" c="red.7" role="alert">
+          Não foi possível verificar os dias a processar.
+        </Text>
+      )}
+
+      <CashStrip
+        end={end}
+        onProcessCash={
+          outdated.data?.cash_from
+            ? () => {
+                setProcessing(processCashDraft(outdated.data, start, end));
+              }
+            : undefined
+        }
+      />
 
       {list.isError ? (
         <ErrorState
@@ -177,6 +212,14 @@ export function LedgerPage() {
         }}
         today={today}
         saving={saving}
+      />
+
+      <ProcessingRequestModal
+        draft={processing}
+        onClose={() => {
+          setProcessing(null);
+        }}
+        today={today}
       />
 
       <DeleteDialog
