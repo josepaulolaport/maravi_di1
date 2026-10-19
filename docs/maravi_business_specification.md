@@ -1,6 +1,6 @@
 # Maravi DI1 Backoffice — Especificação funcional e decisões de negócio
 
-**Status:** documento de referência das decisões acordadas até 18/10/2026.  
+**Status:** documento de referência das decisões acordadas até 19/10/2026 (OQ-1 a OQ-46; nenhuma em aberto).  
 **Público-alvo:** desenvolvimento, revisão de regras financeiras, frontend, testes e agentes de IA.  
 **Propósito:** descrever **o que a aplicação faz**, **como deve se comportar** e **quais decisões estão fechadas**, independentemente da organização interna do código.
 

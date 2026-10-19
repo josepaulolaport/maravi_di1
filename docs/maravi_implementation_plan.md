@@ -1,6 +1,6 @@
 # Maravi DI1 — Module-based parallel implementation plan
 
-**Status:** implementation blueprint, 2026-10-18; progress and remaining work as of 2026-10-19 in §12. **Sources of truth:** `docs/maravi_business_specification.md`, `docs/schema.md`, `docs/schema.sql`, `docs/interfaces.md`, and the decisions confirmed in conversation (open ones in `docs/open-questions.md`). If these disagree, flag the discrepancy before implementation; do not silently alter domain rules.
+**Status:** implementation blueprint, 2026-10-18; implemented on `main`; progress and remaining work as of 2026-10-19 in §12. **Sources of truth:** `docs/maravi_business_specification.md`, `docs/schema.md`, `docs/schema.sql`, `docs/interfaces.md`, and the decisions confirmed in conversation (open ones in `docs/open-questions.md`). If these disagree, flag the discrepancy before implementation; do not silently alter domain rules.
 
 ## 0. Non-negotiable architecture
 
@@ -62,7 +62,6 @@ backend/
     integration/
     architecture/
     acceptance/      # spec §13 phase 1: pure Portfolio + PnL compositions, no I/O
-    e2e/
 frontend/
   src/
     features/
@@ -74,6 +73,7 @@ frontend/
     api/
     shared/
 compose.yaml
+scripts/e2e.sh                 # make e2e: the challenge example on a throwaway Compose stack
 ```
 
 Each active module normally implements `public.py`, `dependencies.py` if needed, `domain/`, `application/services/`, `application/interfaces/` when meaningful, `infrastructure/persistence/{models.py,repositories.py,queries/}`, `presentation/http/{router.py,schemas.py}`. `infrastructure/` holds `persistence/` and, when needed, other outbound adapters. Inbound RabbitMQ consumers and handlers live in the module's `presentation/messaging/` (initially only Processing has one); shared RabbitMQ infrastructure (connection, publisher, consumer base, envelope, outbox, inbox, topology) lives in `platform/messaging/`; business processing logic stays in `application/`. Domain code is deterministic and free of I/O and side effects: no filesystem, network, database, messaging, environment or system-clock access, while pure standard-library utilities (`datetime` arithmetic, `Decimal`, `Enum`, `dataclasses`) are allowed. Domain code does not log (logging belongs in the application, infrastructure or presentation layers) and communicates failures through exceptions and explicit results. It never generates randomness internally: a calculation that needs randomness (e.g. Monte Carlo) receives an explicit seed or an injected random-number generator, for reproducibility and testability. SQL queries belong in Infrastructure. FastAPI `Depends` belongs in HTTP adapters or dependency providers, **never** the application/domain or repositories. Worker constructors use plain Python factories, not FastAPI dependency injection.
@@ -202,7 +202,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 - On a chain failure at D, on every scope: roll the chain back to its SAVEPOINT inside D's transaction and, in that transaction, set it `FAILED` on D and store the run's `error_code`/`error_message` (`PROCESSING_ERROR`, "Erro técnico ao processar a data.", for a technical error, OQ-44); a single-chain run ends `FAILED`, later dates untouched (OQ-23; integrator choice). A non-chain failure, or an error that breaks the connection and cannot use a savepoint, rolls back all of D, and a short transaction sets D `FAILED` for every chain still alive with `failed_chain` NULL and ends the run `FAILED` (integrator choice). On ALL, D runs in one transaction with a SAVEPOINT per chain, a chain failure rolls back only that chain to its savepoint and sets it `FAILED` in D's transaction while the other chain commits (OQ-40), and the run ends `COMPLETED_WITH_ISSUES` when one chain fails, `FAILED` only when both fail (OQ-36).
 - A write while running only saves its fact and marks nothing; the run never stops for it (no `SUPERSEDED`, OQ-31). On missing prices: preserve accounting, record `issues`, the date is `PROCESSED_WITH_ISSUES` with null dependent metrics and the run ends `COMPLETED_WITH_ISSUES`; do not retry domain-data gaps.
 - Ack and recovery (integrator recording of lane G's reviewed Wave 4 plan, simplified by OQ-45 and OQ-46): exactly one `worker` service, handling one message at a time (prefetch 1); the doorbell carries no data, so the worker may ACK it on receipt (integrator reading), and a worker crash or SIGTERM gets no broker redelivery. Recovery happens only at worker start, before consuming: the run left `RUNNING` (the single such row) first has its `RUNNING` dates restored from `*_previous` (or the row deleted when there was no previous status, OQ-26; integrator reading), then resumes after `requests.progress_date`, or ends `CANCELLED` when `cancel_requested_at` is set (OQ-45); then the worker drains the `QUEUED` requests (OQ-46). A duplicate or redelivered doorbell is harmless: the take finds the next `QUEUED` request or nothing.
-- No recovery cap (OQ-45 reverses OQ-43): `RECOVERY_EXHAUSTED` is retired; `requests.claim_token`, `lease_expires_at` and `attempt_count` stay in the schema unused (no migration). The worker code in #78 is simplified by the Wave 4 worker session.
+- No recovery cap (OQ-45 reverses OQ-43): `RECOVERY_EXHAUSTED` is retired; `requests.claim_token`, `lease_expires_at` and `attempt_count` stay in the schema unused (no migration). The worker code of #78 was simplified accordingly (#89; no dispatcher since #93/#96).
 - **Test adversarial sequences:** queue A, create backdated trade, queue B, cancel A, finish B; duplicate and lost doorbells (a later doorbell or a restart drains the queue, OQ-46); cancel of a `QUEUED` request racing the take (one wins, OQ-46); crash after outbox publish; crash mid-date (resume after `progress_date` at worker start, `RUNNING` dates restored first); worker restart with a `RUNNING` run that has `cancel_requested_at` set (ends `CANCELLED`, then the queue drains); cancellation mid-range (committed dates stay published); a write landing during a date changes no status; failure at a date (earlier dates published, later untouched); missing Saturday price; a run whose first date has an unprocessed or `FAILED` D−1 (and entries before it) sets that date `FAILED` and ends `CASH_PREDECESSOR_MISSING` or `POSITIONS_PREDECESSOR_MISSING` (OQ-31); a D−1 price corrected after D−1 was processed leaves D−1 and D processed (OQ-9, OQ-31); both chains and the AUM of an ALL date in one transaction; a deposit during a POSITIONS job changes no status; `aum = cash + market value` after CASH-only, POSITIONS-only and ALL publishes; no half-written date.
 
 **Gate 4:** Docker Compose e2e: new trade/price only saves the fact (OQ-31), user queues job, sees progress, cancels and queues a new request (OQ-30), published position table and AUM/PnL reflect the committed dates, each with its status and processing time from `date_status`.
@@ -235,43 +235,54 @@ Do not merge branches merely because code compiles. Require reviewer sign-off an
 
 ## 11. Open decisions requiring human sign-off before relevant code
 
-None. OQ-1 to OQ-31 are answered (`docs/open-questions.md`); a new gap goes through the `spec-gap` skill before any code depends on it.
+None. OQ-1 to OQ-46 are answered (`docs/open-questions.md`); a new gap goes through the `spec-gap` skill before any code depends on it.
 
 **Post-completion TODO:** asynchronous CSV reference-price import and optional B3 extraction feeding `PriceService` via RabbitMQ adapter, not part of initial implementation.
 
 ## 12. Progress and remaining work (2026-10-19)
 
-Verified on `main` at `81cbbb7`: `make lint-backend` clean; `make test-backend` 513 passed with PostgreSQL 16 and RabbitMQ 4.1 (0 skipped), migrations at head `0003`; frontend lint, typecheck, Prettier, 468 tests and `vite build` pass.
+Every lane's code is merged. Decisions OQ-1 to OQ-46 are answered and none is open.
 
-### Done
+### Verified on `main` at `dde3dd6`
 
-| Area | On `main` |
+Run locally on 2026-10-19 (GitHub Actions is down; the user decided merges go on local results):
+
+- `make lint-backend`: `uv lock --check` ok; ruff "All checks passed!", "340 files already formatted"; mypy "Success: no issues found in 336 source files".
+- `make test-backend` (throwaway PostgreSQL 16 and RabbitMQ 4.1): `alembic heads: 0006 (head)`, `alembic current after upgrade head: 0006 (head)`; "1325 passed in 195.83s", 0 skipped; coverage 99%.
+- `make lint-frontend`: eslint and `tsc --noEmit` clean, "All matched files use Prettier code style!".
+- `make test-frontend`: "Test Files 31 passed (31)", "Tests 537 passed (537)".
+- `npm run build`: "✓ built in 717ms".
+- `make e2e` (throwaway Compose stack: postgres, rabbitmq, migrate, api, outbox-relay, worker): the challenge example dated today, 11 checks ok (PU 90909.0909090909, run `COMPLETED`, cash and positions `PROCESSED`, cash 109090.9090909091, AUM 200000, one position), "E2E SMOKE PASSED".
+
+Since then `9f9c40d` merged #99 (the Compose `web` service); its reviewer reported the frontend at 540 tests passed. Not rerun here.
+
+### Done, by area
+
+| Area | On `main` (merged PRs) |
 |---|---|
-| Docs | OQ-1 to OQ-28 answered: cash and positions chains (OQ-21, OQ-22), per-date status with no staging (OQ-23), one ledger entry (OQ-24), prices without revisions (OQ-25), follow-ups and HTTP contract (OQ-26), chart start date (OQ-27), AUM without status (OQ-28) |
-| Schema | Alembic 0001 + 0002 + 0003 = `docs/schema.sql`, equivalence-tested |
-| Shared | decimals (OQ-3), clock, calendar, error catalogue (OQ-15), `InputKind` |
-| Platform (H) | config, system clock, async engine/session, Unit of Work; messaging: envelope, outbox, relay with confirms, inbox, publisher, consumer, topology |
-| Composition (X) | app factory `main.py`, `/health`, problem+json handlers, empty router and dependency wiring |
-| Contracts (`public.py`) | asset, ledger, prices, processing (invalidator, scope, statuses, request); fake invalidator in `tests/fakes/processing.py` (the invalidator and its fake are removed by OQ-31) |
-| Domain | pricing DI1 calculator (B); portfolio positions, average cost, cash, valuation, accounting (E); P&L position, trades, asset, portfolio (F), one file per metric |
-| CI | path-scoped backend and frontend jobs, `ci-ok`, CodeRabbit review |
-| Frontend (I) | Carteira, Lançamentos, Ativos, Central de Controle on MSW, against the OQ-26 contract |
+| Docs and decisions | spec, schema, interfaces, plan and challenge audit (#1–#3, #8); OQ-19/OQ-20 (#12); OQ-21/OQ-22 (#36); OQ-23–OQ-26 (#43); OQ-27 (#40); OQ-28 (#46); OQ-29–OQ-31 (#49); OQ-32–OQ-40 (#54); OQ-41 (#59); OQ-42 (#68); OQ-43/OQ-44 (#82); OQ-45 (#85, reverses OQ-43); OQ-46 (#91); commit freely, review at PR time (#67) |
+| Schema | Alembic 0001 to 0006, head `0006` = `docs/schema.sql`, equivalence-tested (#6, #36, #43, #50, #53, #58) |
+| Backend scaffold and shared | scaffold and import-boundary tests (#4, #5); decimals and clock (#7); error catalogue and problem+json (#26) |
+| Platform (H) | config, clock, async database, Unit of Work (#23); messaging: envelope, outbox, inbox, publisher, relay, consumer (#31); logging and relay process (#57); worker processes (#74) and startup recovery hook (#89); publish test fix (#80) |
+| Composition (X) | public contracts (#37, #49); app factory, `/health` (#45); routes under `/api` (#61, #62, #77); backend image, Compose and API logging (#75); worker and relay wired to Processing and run in Compose (#92); `make e2e` and README demo (#86); RabbitMQ in CI (#69) |
+| A Asset | catalogue, `AssetReader`, HTTP (#47) |
+| B Pricing | DI1 calculator (#24); `PricingService` over `AssetReader` (#52) |
+| C Ledger | `ledger.entries`, batch hard delete, keyset list, HTTP (#48, #63) |
+| D Prices | reference prices, `PriceReader`, `/reference-prices` (#65, #76) |
+| E Portfolio | positions, cash and valuation chains (#28); source tracing (#44); writer, queries and P&L series with every date (#73) |
+| F PnL | pure P&L calculators (#34); predecessor rule after OQ-31 (#70) |
+| G Processing | request API and `DateStatusReader` (#56); worker, one transaction per date (#78); first failure exposed (#79); OQ-46 doorbell and FIFO drain, no dispatcher (#93, #96, #97) |
+| Acceptance (spec §13) | phase 1, domain level, in the pre-commit hook (#64, #66); phase 2 over HTTP and PostgreSQL: catalogue, ledger, prices, errors, the challenge example (#81) |
+| I Frontend | shell, Carteira, Lançamentos, Ativos, Central de Controle on MSW (#13, #15, #16, #19, #20, #22, #25, #27, #29, #30, #32, #33); contract review and OQ-26–OQ-42 (#38, #41, #42, #51, #72); no dispatcher and `PROCESSING_ERROR` (#95); dev-server proxy to the real backend, `VITE_API_MOCKS=false` (#88); `web` service in Compose, nginx on 127.0.0.1:8080 proxying `/api` and `/health`, no MSW in the production build (#99) |
+| CI | path-scoped jobs, `ci-ok`, CodeRabbit review (#9–#11, #21) |
 
-Gates: G0 met except Compose; G1 waits on lane A (Asset).
+Gates: G0–G5 are met (Gate 4 by `make e2e` on Compose: challenge example, run `COMPLETED`, cash, AUM and position checked; G5 by #99: the UI runs on the real API from the Compose `web` service).
 
-### Remaining, by lane
+### Remaining
 
-| Lane | Next work | Depends on |
-|---|---|---|
-| X | `pricing/public.py`, `portfolio/public.py` (`PortfolioResultsWriter`, `PortfolioQueryService`), `pnl/public.py`; RabbitMQ service in CI (`TEST_RABBITMQ_URL`, `TEST_RABBITMQ_MANAGEMENT_URL`, `REQUIRE_BROKER_TESTS=1`); Compose with PostgreSQL, RabbitMQ, a migrate job and the api, plus the Dockerfile (workers later); wire each lane's router in `composition/`; README demo with the challenge example dated today (D4) | — |
-| A Asset | models and repository over `asset.*`, `AssetService`, `AssetReader` implementation, HTTP (`/instrument-types`, `/products`, `/instruments`) | — |
-| B Pricing | `PricingService.calculate(instrument_id, reference_date, quote)` over the calculator, reading the instrument through `AssetReader` | `pricing/public.py` |
-| C Ledger | `ledger.entries` persistence, `LedgerService` create and batch hard delete (OQ-32), `LedgerReader.get_trades`/`get_cash_movements`, `EntryType` and `LedgerReader.has_entries_on_or_before` for the zero-state check (OQ-37), no invalidation (OQ-31), HTTP `/ledger/entries` (paginated) and `/ledger/entries/deletions` | asset and pricing public contracts (fakes until they land) |
-| D Prices | one observation per asset, date and source; `PriceService` set, correct in place, remove; `PriceReader` exact-date preferred reads (MANUAL > B3); no invalidation (OQ-31); HTTP | asset and pricing public contracts |
-| G Processing | request API: preview, enqueue, paginated history, cancel (no cancel-and-replace, OQ-30), `processing.date_status` reads with the processing times (no invalidator, OQ-31), issues. Then Wave 4: single worker that takes the oldest `QUEUED` request on each doorbell, no dispatcher (OQ-46), with recovery at start (OQ-45), one transaction per date with the per-day predecessor rule (OQ-31), `RUNNING` restore, recovery from `progress_date` | request API: none; worker: E's writer, H's workers |
-| E Portfolio | Wave 3: `PortfolioResultsWriter.write_positions_day`/`write_cash_day` with the AUM recomputation, `PortfolioQueryService` (summary, positions, P&L series), mapping `ledger.public.TradeRecord` onto the domain trade | `portfolio/public.py` |
-| F PnL | free: spec §13 acceptance fixtures across portfolio and P&L, or pair with G on the worker | — |
-| H Platform | H3 logging and `workers/outbox_relay.py` bootstrap; worker entry points for G; Compose infra with X | — |
-| I Frontend | mark `frontend/src/api/README.md` as the adopted contract (OQ-26) instead of "not yet named in interfaces.md"; then Wave 5: swap MSW for the real API endpoint by endpoint, OpenAPI-generated types | backend endpoints |
-
-Waves 3–5 and gates G2–G5 are unchanged (§5–§9); they now use the per-date publication of OQ-23.
+| Item | State |
+|---|---|
+| Acceptance phase 2 processing scenarios (spec §13: the challenge example through a run, missing price, predecessor rule, P&L chart, the second halves of cases 9, 16 and 17) | in flight (acceptance follow-ups session); phase 2 today covers catalogue, ledger, prices, errors and the challenge example without a run |
+| QA against the real API | in flight (read-only QA session); its findings are not triaged yet |
+| `POST /pricing/calculate` | deliberately not built: OQ-19 keeps it "if needed", and the backend computes the complementary PU or rate when an entry is saved (OQ-19 item 7) |
+| CSV and B3 reference-price import | post-delivery TODO (§11, spec §14) |
