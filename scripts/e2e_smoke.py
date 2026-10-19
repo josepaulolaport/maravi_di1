@@ -66,7 +66,7 @@ def wait_until_finished(api: str, request_id: str, timeout: float) -> dict[str, 
         if time.monotonic() > deadline:
             raise SmokeError(
                 f"run {request_id} still {run['status']} after {timeout:.0f}s:"
-                " is the worker (and dispatcher) running?"
+                " is the worker running?"
             )
         time.sleep(1)
 
