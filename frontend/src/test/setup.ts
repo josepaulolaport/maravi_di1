@@ -39,7 +39,46 @@ window.scrollTo = () => undefined;
 // Every request in a test must be mocked explicitly.
 beforeAll(() => {
   server.listen({ onUnhandledFrame: 'error' });
+  recordMswEvents();
 });
+
+// Diagnosis for a read that reaches the real network on the CI runner only: MSW's events for
+// each request of the file, printed at its end for every request MSW finished resolving
+// without a mocked response (a passthrough). Requests still pending when a test ends are not
+// reported.
+const trails = new Map<string, { url: string; test: string | undefined; events: string[] }>();
+const MSW_EVENTS = [
+  'request:start',
+  'request:match',
+  'request:unhandled',
+  'request:end',
+  'response:mocked',
+  'response:bypass',
+  'unhandledException',
+] as const;
+function recordMswEvents() {
+  for (const type of MSW_EVENTS) {
+    server.events.on(type, ({ requestId, request }) => {
+      const trail = trails.get(requestId) ?? {
+        url: `${request.method} ${request.url}`,
+        test: expect.getState().currentTestName,
+        events: [],
+      };
+      trail.events.push(`${type} @${performance.now().toFixed(0)}ms`);
+      trails.set(requestId, trail);
+    });
+  }
+}
+
+function reportUnmocked() {
+  for (const trail of trails.values()) {
+    const has = (type: string) => trail.events.some((event) => event.startsWith(type));
+    if (has('request:end') && !has('response:mocked')) {
+      console.error('MSW did not mock', trail.url, 'in', trail.test, trail.events);
+    }
+  }
+  trails.clear();
+}
 // Tests run on the fixture scenario's day, whatever the real date: the app and the fake
 // backend both read "today" from this clock (only Date is faked; timers stay real).
 beforeEach(() => {
@@ -54,5 +93,6 @@ afterEach(() => {
   window.localStorage.clear();
 });
 afterAll(() => {
+  reportUnmocked();
   server.close();
 });
