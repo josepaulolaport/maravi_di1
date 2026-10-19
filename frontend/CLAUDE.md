@@ -85,7 +85,7 @@ frontend/src/
 - **Carteira:**
   - One date, showing published data only.
   - KPIs: Saldo em caixa, AUM/Patrimônio, P&L diário, P&L de posições, P&L de operações.
-  - A compact cumulative P&L chart, shown only where the history is complete.
+  - A compact cumulative P&L chart, shown only where the history is complete. It always ends on the selected date; the user picks only its start, which must be before that date (default: the 30 days ending on the date), kept in the URL as `?pnl_start=` and ignored when invalid (OQ-23).
   - The positions table, with the columns of spec §11.4.
   - Stale and incomplete markers, with links to Pendências and Processamentos.
   - Cash is not a position row. No realized or unrealized P&L.
