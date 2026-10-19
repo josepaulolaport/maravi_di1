@@ -86,6 +86,21 @@ def get_broker_settings() -> BrokerSettings:
     return BrokerSettings()
 
 
+class DispatcherSettings(BaseSettings):
+    """The dispatcher process's settings (``di1.workers.dispatcher``)."""
+
+    model_config = SettingsConfigDict(frozen=True, extra="ignore")
+
+    dispatcher_poll_interval_seconds: float = Field(default=1.0, gt=0)
+    """Pause after a tick that dispatched nothing (or failed); a tick that dispatched a job is
+    followed by the next one at once."""
+
+
+def get_dispatcher_settings() -> DispatcherSettings:
+    """Read the dispatcher settings from the environment now (never at import time)."""
+    return DispatcherSettings()
+
+
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 

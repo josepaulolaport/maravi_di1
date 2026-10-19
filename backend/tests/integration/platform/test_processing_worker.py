@@ -1,0 +1,560 @@
+"""The processing worker process: consumes its registered queues through the consumer base,
+runs the work after the ack, and shuts down cleanly on SIGTERM, during startup and during work.
+
+interfaces.md "Transaction boundaries" 6 and 7 (at-least-once; ACK only after the durable
+state change; recovery from the lease after a crash) and "DI composition" (plain factories);
+plan §7. The handler here is a fake: the real one is Processing's.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import re
+import signal
+import sys
+from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass, field
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+import pytest
+from aio_pika.abc import AbstractRobustConnection
+from pydantic import SecretStr
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from di1.platform.config import BrokerSettings, Settings
+from di1.platform.database.unit_of_work import UnitOfWork
+from di1.platform.messaging.connection import connect
+from di1.platform.messaging.consumer import AfterAck
+from di1.platform.messaging.envelope import Envelope
+from di1.platform.messaging.publisher import MessagePublisher
+from di1.platform.messaging.topology import QueueSpec, Topology
+from di1.platform.messaging.worker import (
+    ConsumerFactory,
+    ConsumerRegistration,
+    WorkerResources,
+)
+from di1.shared.clock import FixedClock
+from di1.workers import main as worker
+from di1.workers.main import run_worker
+from tests.integration.platform.conftest import queue_spec
+from tests.integration.platform.support import (
+    EFFECT,
+    close_connections,
+    effects,
+    eventually,
+    has_effects,
+    make_envelope,
+)
+
+BACKEND = Path(__file__).resolve().parents[3]
+
+
+@dataclass
+class _Run:
+    """The fake processing handler: the claim is the effect row; ``hold_before_ack`` blocks
+    before the claim commits, ``hold_after_ack`` blocks the run after the ack."""
+
+    hold_before_ack: bool = False
+    hold_after_ack: bool = False
+    claimed: list[Envelope] = field(default_factory=list)
+    ran: list[Envelope] = field(default_factory=list)
+    entered: asyncio.Event = field(default_factory=asyncio.Event)
+    cancelled: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def __call__(self, envelope: Envelope, *, uow: UnitOfWork) -> AfterAck:
+        self.claimed.append(envelope)
+        await uow.session.execute(EFFECT, {"m": envelope.message_id})
+        if self.hold_before_ack:
+            await self._hold()
+
+        async def run() -> None:
+            if self.hold_after_ack and not self.ran:
+                await self._hold()
+            self.ran.append(envelope)
+
+        return run
+
+    async def _hold(self) -> None:
+        self.entered.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+
+
+def _consumers(
+    spec: QueueSpec, handler: _Run, given: list[WorkerResources] | None = None
+) -> ConsumerFactory:
+    def factory(resources: WorkerResources) -> Sequence[ConsumerRegistration]:
+        if given is not None:
+            given.append(resources)
+        return [ConsumerRegistration(queue=spec, consumer_name="worker", handler=handler)]
+
+    return factory
+
+
+async def _ready_messages(broker: AbstractRobustConnection, queue_name: str) -> int:
+    channel = await broker.channel()
+    try:
+        queue = await channel.declare_queue(queue_name, passive=True)
+        return queue.declaration_result.message_count or 0
+    finally:
+        await channel.close()
+
+
+@pytest.fixture
+async def publisher(
+    broker: AbstractRobustConnection, broker_settings: BrokerSettings, topology: Topology
+) -> MessagePublisher:
+    return await MessagePublisher.create(broker, topology, settings=broker_settings)
+
+
+async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
+    settings: Settings,
+    engine: AsyncEngine,
+    broker: AbstractRobustConnection,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    publisher: MessagePublisher,
+) -> None:
+    """The worker declares its own queue, so it consumes a command published after it started;
+    the factory receives the process's clock."""
+    spec = queue_spec(topology, "test.command")
+    handler = _Run()
+    given: list[WorkerResources] = []
+    clock = FixedClock(date(2026, 10, 19))
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings,
+            consumers=_consumers(spec, handler, given),
+            stop=stop,
+            topology=topology,
+            clock=clock,
+        )
+    )
+    envelope = make_envelope()
+    await eventually(lambda: _is_consumed(broker, spec.name))
+
+    await publisher.publish(envelope)
+
+    await eventually(lambda: handler.ran == [envelope])
+    stop.set()
+    await asyncio.wait_for(running, timeout=10)
+    assert await effects(engine) == [envelope.message_id]
+    assert await _ready_messages(broker, spec.name) == 0
+    [resources] = given
+    assert resources.clock is clock
+
+
+async def _is_consumed(broker: AbstractRobustConnection, name: str) -> bool:
+    """Whether the worker consumes the queue. A queue that merely exists is not enough: the
+    worker declares it, then binds it to its message types, then consumes it, and a publish
+    between the declaration and the binding is refused (NO_ROUTE). Once the queue has a
+    consumer, its bindings are in place."""
+    channel = await broker.channel()
+    try:
+        queue = await channel.declare_queue(name, passive=True)
+        return (queue.declaration_result.consumer_count or 0) > 0
+    except Exception:
+        return False
+    finally:
+        if not channel.is_closed:
+            await channel.close()
+
+
+async def test_a_stop_during_the_run_after_the_ack_cancels_it_and_the_message_stays_acked(
+    settings: Settings,
+    engine: AsyncEngine,
+    broker: AbstractRobustConnection,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    publisher: MessagePublisher,
+) -> None:
+    """SIGTERM mid-range: the run is cancelled (its open date transaction rolls back), the claim
+    stays committed and the message is not redelivered: the lease recovers the run."""
+    spec = queue_spec(topology, "test.command")
+    handler = _Run(hold_after_ack=True)
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings,
+            consumers=_consumers(spec, handler),
+            stop=stop,
+            topology=topology,
+        )
+    )
+    envelope = make_envelope()
+    await eventually(lambda: _is_consumed(broker, spec.name))
+    await publisher.publish(envelope)
+    await asyncio.wait_for(handler.entered.wait(), timeout=10)
+
+    stop.set()
+
+    await asyncio.wait_for(running, timeout=10)
+    assert handler.cancelled.is_set()
+    assert handler.ran == []
+    assert await effects(engine) == [envelope.message_id]
+    assert await _ready_messages(broker, spec.name) == 0
+
+
+async def test_a_stop_before_the_ack_rolls_back_and_returns_the_message(
+    settings: Settings,
+    engine: AsyncEngine,
+    broker: AbstractRobustConnection,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    publisher: MessagePublisher,
+) -> None:
+    """SIGTERM while the claim is still open: nothing is committed and the broker keeps the
+    command for the next worker (ACK only after the durable state change)."""
+    spec = queue_spec(topology, "test.command")
+    handler = _Run(hold_before_ack=True)
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings,
+            consumers=_consumers(spec, handler),
+            stop=stop,
+            topology=topology,
+        )
+    )
+    envelope = make_envelope()
+    await eventually(lambda: _is_consumed(broker, spec.name))
+    await publisher.publish(envelope)
+    await asyncio.wait_for(handler.entered.wait(), timeout=10)
+
+    stop.set()
+
+    await asyncio.wait_for(running, timeout=10)
+    assert handler.cancelled.is_set()
+    assert await effects(engine) == []
+    await eventually(lambda: _has_ready(broker, spec.name, 1))
+
+
+async def _has_ready(broker: AbstractRobustConnection, name: str, count: int) -> bool:
+    return await _ready_messages(broker, name) == count
+
+
+async def test_a_dropped_broker_connection_does_not_cancel_the_run(
+    settings: Settings,
+    engine: AsyncEngine,
+    broker: AbstractRobustConnection,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    publisher: MessagePublisher,
+    management_url: str,
+) -> None:
+    """The run no longer depends on the broker once its claim is acked: a broker restart or a
+    missed heartbeat closes the channel, and the run goes on to its end."""
+    spec = queue_spec(topology, "test.command")
+    handler = _Run(hold_after_ack=True)
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings,
+            consumers=_consumers(spec, handler),
+            stop=stop,
+            topology=topology,
+        )
+    )
+    envelope = make_envelope()
+    await eventually(lambda: _is_consumed(broker, spec.name))
+    await publisher.publish(envelope)
+    await asyncio.wait_for(handler.entered.wait(), timeout=10)
+
+    assert await close_connections(management_url, worker.CONNECTION_NAME) >= 1
+    await asyncio.sleep(0.5)
+    assert not handler.cancelled.is_set()
+    handler.release.set()
+
+    await eventually(lambda: handler.ran == [envelope])
+    stop.set()
+    await asyncio.wait_for(running, timeout=10)
+    assert handler.claimed == [envelope]
+
+
+async def test_a_command_arriving_during_a_run_is_claimed_and_acked_at_once(
+    settings: Settings,
+    engine: AsyncEngine,
+    broker: AbstractRobustConnection,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    publisher: MessagePublisher,
+) -> None:
+    """With a prefetch of 2, the second command is not left unacked behind the first run
+    (RabbitMQ's consumer timeout); the runs still go one after the other."""
+    spec = queue_spec(topology, "test.command")
+    handler = _Run(hold_after_ack=True)
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings.model_copy(update={"rabbitmq_prefetch_count": 2}),
+            consumers=_consumers(spec, handler),
+            stop=stop,
+            topology=topology,
+        )
+    )
+    first, second = make_envelope(), make_envelope()
+    await eventually(lambda: _is_consumed(broker, spec.name))
+    await publisher.publish(first)
+    await asyncio.wait_for(handler.entered.wait(), timeout=10)
+
+    await publisher.publish(second)
+
+    await eventually(lambda: has_effects(engine, [first.message_id, second.message_id]))
+    assert handler.ran == []
+    handler.release.set()
+    await eventually(lambda: handler.ran == [first, second])
+    stop.set()
+    await asyncio.wait_for(running, timeout=10)
+    assert await _ready_messages(broker, spec.name) == 0
+
+
+@pytest.fixture
+async def hanging_database_settings() -> AsyncIterator[Settings]:
+    """A TCP server that accepts connections and never answers: a database that hangs."""
+
+    async def hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.read()
+        writer.close()
+
+    server = await asyncio.start_server(hold, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        yield Settings(
+            database_url=SecretStr(f"postgresql+psycopg://u:s3cret-pw@127.0.0.1:{port}/db")
+        )
+    finally:
+        server.close()
+
+
+async def test_a_stop_while_the_database_hangs_at_startup_ends_the_worker(
+    hanging_database_settings: Settings, broker_settings: BrokerSettings
+) -> None:
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            hanging_database_settings,
+            broker_settings,
+            consumers=lambda resources: (),
+            stop=stop,
+        )
+    )
+    await asyncio.sleep(0.3)
+    assert not running.done()
+
+    stop.set()
+
+    await asyncio.wait_for(running, timeout=2)
+
+
+async def test_an_unreachable_database_ends_the_worker_before_it_consumes(
+    broker_settings: BrokerSettings,
+) -> None:
+    """Otherwise every command would fail, be retried and be dead-lettered."""
+    unreachable = Settings(
+        database_url=SecretStr("postgresql+psycopg://u:s3cret-pw@127.0.0.1:1/db")
+    )
+
+    with pytest.raises(OperationalError, match="port 1 failed"):
+        await asyncio.wait_for(
+            run_worker(
+                unreachable,
+                broker_settings,
+                consumers=lambda resources: (),
+                stop=asyncio.Event(),
+            ),
+            timeout=10,
+        )
+
+
+async def _silent_server() -> AsyncIterator[str]:
+    """A TCP server that accepts connections and never answers: a broker that hangs."""
+
+    async def hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.read()
+        writer.close()
+
+    server = await asyncio.start_server(hold, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        yield f"amqp://guest:s3cret-pw@127.0.0.1:{port}/"
+    finally:
+        server.close()
+
+
+@pytest.fixture
+async def hanging_broker_url() -> AsyncIterator[str]:
+    async for url in _silent_server():
+        yield url
+
+
+async def test_a_stop_while_connecting_to_the_broker_ends_the_worker(
+    settings: Settings, hanging_broker_url: str
+) -> None:
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            BrokerSettings(rabbitmq_url=SecretStr(hanging_broker_url)),
+            consumers=lambda resources: (),
+            stop=stop,
+        )
+    )
+    await asyncio.sleep(0.3)
+    assert not running.done()
+
+    stop.set()
+
+    await asyncio.wait_for(running, timeout=2)
+
+
+async def _hang(*args: object, **kwargs: object) -> None:
+    await asyncio.Event().wait()
+
+
+async def test_a_stop_while_the_broker_stalls_after_connecting_ends_the_worker(
+    settings: Settings,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The broker accepted the connection but never answers the queue declaration: aio-pika
+    waits without a timeout, so the startup must observe the stop as well."""
+    stalled = asyncio.Event()
+
+    async def stall(*args: object, **kwargs: object) -> None:
+        stalled.set()
+        await _hang()
+
+    monkeypatch.setattr(worker, "declare_queue", stall)
+    connections: list[AbstractRobustConnection] = []
+
+    async def recording_connect(*args: Any, **kwargs: Any) -> AbstractRobustConnection:
+        connection = await connect(*args, **kwargs)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(worker, "connect", recording_connect)
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings,
+            consumers=_consumers(queue_spec(topology, "test.command"), _Run()),
+            stop=stop,
+            topology=topology,
+        )
+    )
+    await asyncio.wait_for(stalled.wait(), timeout=10)
+
+    stop.set()
+
+    await asyncio.wait_for(running, timeout=2)
+    [connection] = connections
+    assert connection.is_closed
+
+
+async def test_a_connection_made_as_the_worker_is_cancelled_is_closed(
+    settings: Settings, broker_settings: BrokerSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connections: list[AbstractRobustConnection] = []
+    running: asyncio.Task[None] | None = None
+
+    async def connect_then_cancel(*args: Any, **kwargs: Any) -> AbstractRobustConnection:
+        connection = await connect(*args, **kwargs)
+        connections.append(connection)
+        assert running is not None
+        running.cancel()
+        return connection
+
+    monkeypatch.setattr(worker, "connect", connect_then_cancel)
+    running = asyncio.create_task(
+        run_worker(settings, broker_settings, consumers=lambda resources: (), stop=asyncio.Event())
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(running, timeout=10)
+
+    [connection] = connections
+    assert connection.is_closed
+
+
+async def test_the_worker_process_stops_cleanly_on_sigterm(
+    settings: Settings, broker_settings: BrokerSettings
+) -> None:
+    """The process registers no consumer until Processing is wired, so it declares nothing."""
+    environment = os.environ | {
+        "DATABASE_URL": settings.database_url.get_secret_value(),
+        "RABBITMQ_URL": broker_settings.rabbitmq_url.get_secret_value(),
+        "LOG_LEVEL": "INFO",
+    }
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "di1.workers.main",
+        cwd=BACKEND,
+        env=environment,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    assert process.stderr is not None
+    try:
+        async with asyncio.timeout(30):
+            started = b""
+            while b"worker started" not in started:
+                line = await process.stderr.readline()
+                assert line, f"the worker exited early: {started.decode()}"
+                started += line
+        process.send_signal(signal.SIGTERM)
+        async with asyncio.timeout(15):
+            rest = await process.stderr.read()
+            code = await process.wait()
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
+    output = (started + rest).decode()
+    assert code == 0, output
+    assert "no consumer is configured" in output
+    assert "worker stopped" in output
+    assert broker_settings.rabbitmq_url.get_secret_value() not in output
+    assert settings.database_url.get_secret_value() not in output
+
+
+async def test_a_worker_startup_failure_is_logged_and_exits_with_status_1(
+    settings: Settings,
+) -> None:
+    environment = os.environ | {
+        "DATABASE_URL": settings.database_url.get_secret_value(),
+        "RABBITMQ_URL": "amqp://guest:s3cret-pw@127.0.0.1:1/",
+        "LOG_LEVEL": "INFO",
+    }
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "di1.workers.main",
+        cwd=BACKEND,
+        env=environment,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    async with asyncio.timeout(30):
+        _, error_output = await process.communicate()
+
+    output = error_output.decode()
+    assert process.returncode == 1, output
+    # Run with ``-m``, the module's logger is ``__main__``.
+    assert re.search(r"Z ERROR __main__ processing worker failed\n", output), output
+    assert "s3cret-pw" not in output
