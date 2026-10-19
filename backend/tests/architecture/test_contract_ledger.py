@@ -1,0 +1,70 @@
+"""Ledger's frozen public contract (plan §3, W0.3b; interfaces.md "Ledger")."""
+
+from __future__ import annotations
+
+import dataclasses
+from datetime import date, datetime, time
+from decimal import Decimal
+from uuid import uuid4
+
+import pytest
+
+from di1.modules.ledger.public import CashMovementRecord, CashMovementType, TradeRecord
+from di1.shared.clock import SAO_PAULO
+from di1.shared.input_kind import InputKind
+
+CREATED = datetime(2026, 10, 16, 18, 0, tzinfo=SAO_PAULO)
+
+
+def _trade(trade_date: date, trade_time: time, seq: int) -> TradeRecord:
+    return TradeRecord(
+        id=uuid4(),
+        asset_id=uuid4(),
+        trade_date=trade_date,
+        trade_time=trade_time,
+        seq=seq,
+        signed_quantity=-10,
+        execution_pu=Decimal("98765.4321000000"),
+        execution_rate=Decimal("0.135000000000"),
+        input_kind=InputKind.RATE,
+        created_at=CREATED,
+        deleted_at=None,
+        delete_reason=None,
+    )
+
+
+def test_cash_movement_type_matches_the_schema_check() -> None:
+    assert {kind.value for kind in CashMovementType} == {"DEPOSIT", "WITHDRAWAL"}
+
+
+def test_trades_order_by_date_then_time_then_seq() -> None:
+    late_seq_first_time = _trade(date(2026, 10, 1), time(9, 0), 7)
+    early_seq_later_time = _trade(date(2026, 10, 1), time(10, 0), 3)
+    same_time_lower_seq = _trade(date(2026, 10, 1), time(9, 0), 5)
+    previous_day = _trade(date(2026, 9, 30), time(17, 0), 9)
+
+    ordered = sorted(
+        [late_seq_first_time, early_seq_later_time, same_time_lower_seq, previous_day],
+        key=lambda trade: trade.order_key,
+    )
+
+    assert ordered == [previous_day, same_time_lower_seq, late_seq_first_time, early_seq_later_time]
+
+
+def test_records_are_frozen() -> None:
+    trade = _trade(date(2026, 10, 1), time(9, 0), 1)
+    movement = CashMovementRecord(
+        id=uuid4(),
+        movement_date=date(2026, 10, 1),
+        movement_type=CashMovementType.DEPOSIT,
+        amount=Decimal("1000000.00"),
+        description=None,
+        created_at=CREATED,
+        deleted_at=None,
+        delete_reason=None,
+    )
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        trade.signed_quantity = 5  # type: ignore[misc]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        movement.amount = Decimal("1")  # type: ignore[misc]
