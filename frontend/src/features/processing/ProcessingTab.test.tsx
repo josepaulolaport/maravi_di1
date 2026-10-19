@@ -740,6 +740,42 @@ describe('Processamentos: a job that finished between two reads (§10.4)', () =>
   });
 });
 
+describe('Processamentos: UTC timestamps (OQ-46, #93)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('§10.4 compares creation times as instants: an older job in UTC is not news', async () => {
+    seedJob({ created_at: '2026-10-18T22:00:00-03:00' }); // 19/10 01:00 UTC
+    holdWorker();
+    const issueReads = countIssueReads();
+    renderApp(PAGE);
+    await findJobRow('17/10/2026 a 18/10/2026', 'Na fila');
+    await waitFor(() => {
+      expect(issueReads.count).toBeGreaterThan(0);
+    });
+    const before = issueReads.count;
+
+    // Finished, but created before the newest job seen: its string sorts later, its instant not.
+    seedJob({
+      id: 'bb000000-0000-4000-8000-000000000001',
+      start_date: '2026-10-15',
+      end_date: '2026-10-15',
+      status: 'COMPLETED',
+      created_at: '2026-10-19T00:59:00Z',
+      progress_date: '2026-10-15',
+    });
+    await act(() => vi.advanceTimersByTimeAsync(2_000));
+
+    await findJobRow('15/10/2026 a 15/10/2026', 'Concluído');
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(issueReads.count).toBe(before);
+  });
+});
+
 describe('Processamentos: cancel (§10.2)', () => {
   it('§10.2 cancels a queued job at once, after confirmation', async () => {
     seedJob({});
