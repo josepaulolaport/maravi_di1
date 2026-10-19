@@ -92,8 +92,8 @@ describe('Ativos: contrato (§11.2)', () => {
     expect(
       dayRow('17/10/2026').getByRole('button', { name: 'Registrar preço em 17/10/2026' }),
     ).toBeInTheDocument();
-    expect(cells('16/10/2026')).toEqual(['16/10/2026', '89.250,31', '9,80%', 'Manual']);
-    expect(cells('15/10/2026')).toEqual(['15/10/2026', '89.128,48', '9,90%', 'B3']);
+    expect(cells('16/10/2026')).toEqual(['16/10/2026', '89.250,31', '9,8000%', 'Manual']);
+    expect(cells('15/10/2026')).toEqual(['15/10/2026', '89.128,48', '9,9000%', 'B3']);
   });
 
   it('§5 prefers MANUAL over B3 on the same date (16/10)', async () => {
@@ -141,7 +141,7 @@ describe('Ativos: contrato (§11.2)', () => {
     await user.click(priceModal.getByRole('button', { name: 'Salvar' }));
 
     await waitFor(() => {
-      expect(cells('16/10/2026')[2]).toBe('9,75%');
+      expect(cells('16/10/2026')[2]).toBe('9,7500%');
     });
     await waitFor(() => {
       expect(
@@ -158,14 +158,14 @@ describe('Ativos: contrato (§11.2)', () => {
     const modal = within(
       await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
     );
-    const manual = modal.getByRole('checkbox', { name: 'Manual: PU 89.250,31, taxa 9,80%' });
-    const b3 = modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,81%' });
+    const manual = modal.getByRole('checkbox', { name: 'Manual: PU 89.250,31, taxa 9,8000%' });
+    const b3 = modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,8100%' });
     expect(manual).toBeChecked();
     expect(b3).not.toBeChecked();
     await user.click(modal.getByRole('button', { name: 'Remover' }));
 
     await waitFor(() => {
-      expect(cells('16/10/2026')).toEqual(['16/10/2026', '89.240,43', '9,81%', 'B3']);
+      expect(cells('16/10/2026')).toEqual(['16/10/2026', '89.240,43', '9,8100%', 'B3']);
     });
   });
 
@@ -176,7 +176,7 @@ describe('Ativos: contrato (§11.2)', () => {
     const modal = within(
       await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
     );
-    await user.click(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,81%' }));
+    await user.click(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,8100%' }));
     await user.click(modal.getByRole('button', { name: 'Remover' }));
 
     await waitFor(() => {
@@ -192,7 +192,7 @@ describe('Ativos: contrato (§11.2)', () => {
     const modal = within(
       await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
     );
-    expect(modal.getByRole('checkbox', { name: 'B3: PU 89.128,48, taxa 9,90%' })).toBeChecked();
+    expect(modal.getByRole('checkbox', { name: 'B3: PU 89.128,48, taxa 9,9000%' })).toBeChecked();
     await user.click(modal.getByRole('button', { name: 'Remover' }));
 
     await waitFor(() => {
@@ -217,17 +217,17 @@ describe('Ativos: contrato (§11.2)', () => {
     const modal = within(
       await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
     );
-    await user.click(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,81%' }));
+    await user.click(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,8100%' }));
     await user.click(modal.getByRole('button', { name: 'Remover' }));
 
     expect(await modal.findByText('Falha ao remover.')).toBeInTheDocument();
     await waitFor(() => {
       expect(
-        modal.queryByRole('checkbox', { name: 'Manual: PU 89.250,31, taxa 9,80%' }),
+        modal.queryByRole('checkbox', { name: 'Manual: PU 89.250,31, taxa 9,8000%' }),
       ).not.toBeInTheDocument();
     });
     expect(cells('16/10/2026')[3]).toBe('B3');
-    expect(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,81%' })).toBeChecked();
+    expect(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,8100%' })).toBeChecked();
 
     await user.click(modal.getByRole('button', { name: 'Remover' }));
     await waitFor(() => {
@@ -242,7 +242,7 @@ describe('Ativos: contrato (§11.2)', () => {
     const modal = within(
       await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
     );
-    const b3 = modal.getByRole('checkbox', { name: 'B3: PU 89.128,48, taxa 9,90%' });
+    const b3 = modal.getByRole('checkbox', { name: 'B3: PU 89.128,48, taxa 9,9000%' });
     await user.click(b3);
 
     expect(await modal.findByText('Selecione ao menos uma observação.')).toBeInTheDocument();
@@ -299,6 +299,23 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
     expect(cells('17/10/2026')[3]).toBe('Manual');
     expect(screen.getByText('30 dias · 9 referências registradas')).toBeInTheDocument();
     expect(router.state.location.search).not.toContain('registrar');
+  });
+
+  it('§11.1 after "Definir preço" the period still shows the days after the date (the next pendência)', async () => {
+    const { user, router } = await openContract(`${F28}?registrar=2026-10-17`);
+
+    const modal = within(
+      await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
+    );
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '89.300,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() => {
+      expect(router.state.location.search).not.toContain('registrar');
+    });
+    // Today (18/10) has no price yet: it stays in the calendar.
+    expect(router.state.location.search).toContain('fim=2026-10-18');
+    expect(cells('18/10/2026')).toEqual(['18/10/2026', '—', '—', '—']);
   });
 
   it('§4.1 rejects a value that is not a pt-BR number, without a request', async () => {
@@ -367,6 +384,32 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
     expect(modal.queryByText('A data não pode ser posterior a hoje.')).not.toBeInTheDocument();
   });
 
+  it('OQ-14 refuses a typed future date on the date field', async () => {
+    const bodies: unknown[] = [];
+    server.use(
+      http.post(url('/reference-prices'), async ({ request }) => {
+        bodies.push(await request.clone().json());
+        return undefined;
+      }),
+    );
+    const { user } = await openContract(`${F28}?registrar=2026-10-17`);
+
+    const modal = within(
+      await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
+    );
+    const dateInput = modal.getByRole('textbox', { name: 'Data de referência' });
+    await user.clear(dateInput);
+    await user.type(dateInput, '19/10/2026');
+    await user.tab();
+
+    expect(await modal.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+    expect(dateInput).toHaveAttribute('aria-invalid', 'true');
+    expect(dateInput).not.toHaveValue('17/10/2026');
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '89.300,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
+    expect(bodies).toEqual([]);
+  });
+
   it('OQ-1 shows CONTRACT_MATURED on the date field', async () => {
     server.use(
       http.post(url('/reference-prices'), () =>
@@ -433,8 +476,9 @@ describe('Ativos: período do calendário (§11.2)', () => {
     await waitFor(() => {
       expect(router.state.location.search).not.toContain('registrar');
     });
-    expect(router.state.location.search).toContain('inicio=2026-07-22');
-    expect(router.state.location.search).toContain('fim=2026-08-20');
+    // The window starts on the date, so the days after it (the next pendências) stay in view.
+    expect(router.state.location.search).toContain('inicio=2026-08-20');
+    expect(router.state.location.search).toContain('fim=2026-09-18');
     await waitFor(() => {
       expect(cells('20/08/2026').slice(0, 2)).toEqual(['20/08/2026', '88.000,00']);
     });
@@ -451,7 +495,7 @@ describe('Ativos: período do calendário (§11.2)', () => {
     await waitFor(() => {
       expect(router.state.location.search).not.toContain('registrar');
     });
-    expect(router.state.location.search).toContain('fim=2026-08-20');
+    expect(router.state.location.search).toContain('inicio=2026-08-20');
     expect(screen.getByText('20/08/2026', { selector: 'td' })).toBeInTheDocument();
   });
 

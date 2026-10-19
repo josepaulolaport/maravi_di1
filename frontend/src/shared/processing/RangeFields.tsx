@@ -1,11 +1,10 @@
 import { Group } from '@mantine/core';
-import { DateInput } from '@mantine/dates';
 import { IconCalendar } from '@tabler/icons-react';
 import { useState } from 'react';
 
 import type { IsoDate } from '@/api/contract';
 
-import { parsePtBrDate } from '@/shared/format';
+import { PastDateInput } from '@/shared/ui/PastDateInput';
 
 const INVALID_RANGE_MESSAGE = 'A data inicial deve ser anterior ou igual à data final.';
 
@@ -76,7 +75,8 @@ function DateField({ label, value, onChange, maxDate, error }: DateFieldProps) {
     setSync({ value, own: value, key: value === sync.own ? sync.key : sync.key + 1 });
   }
   return (
-    <DateInput
+    <PastDateInput
+      today={maxDate}
       key={sync.key}
       label={label}
       error={error}
@@ -87,7 +87,6 @@ function DateField({ label, value, onChange, maxDate, error }: DateFieldProps) {
         onChange(next);
       }}
       valueFormat="DD/MM/YYYY"
-      dateParser={parsePtBrDate}
       maxDate={maxDate}
       allowDeselect
       fixOnBlur

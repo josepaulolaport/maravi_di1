@@ -10,6 +10,7 @@ import type { CreateLedgerEntryRequest, IsoDate, LedgerOrder } from '@/api/contr
 import { ledgerApi } from '@/api/endpoints';
 import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
 import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
+import { useFutureDateNotice } from '@/shared/ui/futureDate';
 
 import type { LedgerEntry } from '../entries';
 
@@ -40,7 +41,8 @@ interface LedgerFilters {
 
 /**
  * The inclusive range, the search and the order live in the URL (`?inicio=&fim=&busca=&ordem=`,
- * `ledgerLinks`), so a filtered view can be linked. A missing, invalid or future end is today; a missing or
+ * `ledgerLinks`), so a filtered view can be linked. A missing, invalid or future end is today (a
+ * future one is reported, OQ-14); a missing or
  * invalid start, or one after the end, is the end's 30-day window.
  */
 export function useLedgerFilters(): LedgerFilters {
@@ -48,6 +50,7 @@ export function useLedgerFilters(): LedgerFilters {
   const today = todayInSaoPaulo();
   const requestedEnd = params.get('fim');
   const requestedStart = params.get('inicio');
+  useFutureDateNotice([requestedStart, requestedEnd], today);
   const end = isIsoDate(requestedEnd) && requestedEnd <= today ? requestedEnd : today;
   const start =
     isIsoDate(requestedStart) && requestedStart <= end

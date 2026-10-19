@@ -19,10 +19,12 @@ const pu: Formatter = new Intl.NumberFormat('pt-BR', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+// 4 decimals (user decision, 2026-10-19): DI1 rates are quoted that way, and with 2 a rate of
+// -99,9998% would read as the forbidden -100,00%.
 const rate: Formatter = new Intl.NumberFormat('pt-BR', {
   style: 'percent',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
+  minimumFractionDigits: 4,
+  maximumFractionDigits: 4,
 });
 const quantity: Formatter = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
 const signedQuantity: Formatter = new Intl.NumberFormat('pt-BR', {
@@ -44,7 +46,7 @@ export const formatSignedMoney = (value: Decimal | null | undefined) => format(s
 /** 89.006,46: a PU with 2 decimals, as in the design. */
 export const formatPu = (value: Decimal | null | undefined) => format(pu, value);
 
-/** 10,00%: an annual rate stored as a fraction (0.10). */
+/** 10,0000%: an annual rate stored as a fraction (0.10). */
 export const formatRate = (value: Decimal | null | undefined) => format(rate, value);
 
 /** 10 / -5 */

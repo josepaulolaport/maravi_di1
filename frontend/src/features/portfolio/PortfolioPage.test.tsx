@@ -1,4 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
+import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
 import type { PortfolioPositions, PortfolioSummary } from '@/api/contract';
@@ -18,6 +19,11 @@ const INCOMPLETE_NOTE =
 // Expected figures are the fixture scenario's published values (src/api/mocks/fixtures.ts),
 // formatted in pt-BR. Intl puts a no-break space after "R$"; Testing Library's default
 // normalizer turns it into a plain space, so expectations use a plain space.
+
+// The notifications store is module-global: a notice of one test must not stay for the next.
+afterEach(() => {
+  notifications.clean();
+});
 
 function kpi(label: string) {
   return within(screen.getByRole('group', { name: label }));
@@ -159,9 +165,9 @@ describe('Carteira (§11.4)', () => {
       '03/01/2028',
       '10',
       '89.006,46',
-      '10,00%',
+      '10,0000%',
       '89.128,48',
-      '9,90%',
+      '9,9000%',
       'R$ 891.284,82',
       '+R$ 1.220,20',
       'R$ 0,00',
@@ -223,7 +229,7 @@ describe('Carteira (§11.4)', () => {
 
     const row = rowOf('DI1F28');
     expect(row.getByText('89.250,31')).toBeInTheDocument();
-    expect(row.getByText('9,80%')).toBeInTheDocument();
+    expect(row.getByText('9,8000%')).toBeInTheDocument();
     // The market value is the processed one (89.200,90 × 6).
     expect(row.getByText('R$ 535.205,41')).toBeInTheDocument();
   });
@@ -358,6 +364,17 @@ describe('Carteira (§11.4)', () => {
     expect(movement.getByText('Operações').nextSibling).toHaveTextContent('+R$ 356.408,89');
     expect(movement.getByText('Aportes').nextSibling).toHaveTextContent('R$ 0,00');
     expect(movement.getByText('Retiradas').nextSibling).toHaveTextContent('R$ 50.000,00');
+  });
+
+  it('§11.4 never breaks a KPI figure, so a minus sign cannot wrap alone (QA 2026-10-19 #2)', async () => {
+    await openCarteira('2026-10-16');
+
+    const figures = KPIS.flatMap((label) => kpi(label).queryAllByText(/R\$/));
+    // At least Saldo em caixa and its three movement lines.
+    expect(figures.length).toBeGreaterThanOrEqual(4);
+    for (const figure of figures) {
+      expect(figure).toHaveStyle({ whiteSpace: 'nowrap' });
+    }
   });
 
   it('§11.4 a badge with issues leads to Pendências', async () => {
@@ -660,6 +677,10 @@ describe('Carteira (§11.4)', () => {
       );
     });
     expect(router.state.location.search).toBe(`?date=${todayInSaoPaulo()}`);
+    // Not silently: the user is told why the date changed.
+    expect(
+      await screen.findByText('A data 01/01/2999 não pode ser posterior a hoje e foi ignorada.'),
+    ).toBeInTheDocument();
   });
 
   it('§8.3 P&L missing: no card, the asset is marked', async () => {

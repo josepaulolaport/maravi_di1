@@ -212,6 +212,23 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
     expect(await screen.findByRole('textbox', { name: 'Data inicial' })).toHaveValue('16/10/2026');
     expect(screen.getByRole('textbox', { name: 'Data final' })).toHaveValue('');
+    expect(
+      await screen.findByText('A data 01/01/2099 não pode ser posterior a hoje e foi ignorada.'),
+    ).toBeInTheDocument();
+  });
+
+  it('OQ-14 OQ-29 refuses a typed future end date on its field', async () => {
+    const { user } = renderApp(`${PAGE}&inicio=2026-10-16&fim=2026-10-17`);
+
+    const end = await screen.findByRole('textbox', { name: 'Data final' });
+    await user.clear(end);
+    await user.type(end, '19/10/2026');
+    await user.tab();
+
+    expect(await screen.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+    expect(end).toHaveAttribute('aria-invalid', 'true');
+    expect(end).not.toHaveValue('17/10/2026');
+    expect(screen.getByRole('button', { name: 'Solicitar processamento' })).toBeDisabled();
   });
 
   it('OQ-11 previews a range starting on the first entry as starting from the zero state', async () => {
@@ -790,11 +807,13 @@ describe('Processamentos: cancel (§10.2)', () => {
     expect(dialog.getByText('17/10/2026 a 18/10/2026')).toBeInTheDocument();
     expect(dialog.getByText('0 / 2 dias')).toBeInTheDocument();
     expect(dialog.getByText('Na fila')).toBeInTheDocument();
+    // A queued run is cancelled at once (interfaces "Processing"): no date is in progress.
     expect(
       dialog.getByText(
-        'O processamento será interrompido ao fim da data em andamento. As datas já processadas continuam publicadas; as seguintes não serão processadas.',
+        'O processamento ainda não começou e será cancelado imediatamente. Nenhuma data será processada.',
       ),
     ).toBeInTheDocument();
+    expect(dialog.queryByText(/ao fim da data em andamento/)).toBeNull();
     await user.click(dialog.getByRole('button', { name: 'Confirmar cancelamento' }));
 
     await findJobRow('17/10/2026 a 18/10/2026', 'Cancelado');
@@ -826,6 +845,12 @@ describe('Processamentos: cancel (§10.2)', () => {
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));
     await user.click(menu.getByRole('menuitem', { name: 'Cancelar processamento' }));
     const dialog = within(await screen.findByRole('dialog', { name: 'Cancelar processamento?' }));
+    expect(
+      dialog.getByText(
+        'O processamento será interrompido ao fim da data em andamento. As datas já processadas continuam publicadas; as seguintes não serão processadas.',
+      ),
+    ).toBeInTheDocument();
+    expect(dialog.queryByText(/cancelado imediatamente/)).toBeNull();
     await user.click(dialog.getByRole('button', { name: 'Confirmar cancelamento' }));
 
     // The API status stays RUNNING with cancel_requested_at set (OQ-46).

@@ -17,7 +17,7 @@ interface CancelDialogProps {
 
 /**
  * "Cancelar processamento?" (§10.2): a queued job is cancelled at once, a running one
- * cooperatively. A job that already finished, or whose cancel was already asked (OQ-46), answers
+ * cooperatively, and the text says which. A job that already finished, or whose cancel was already asked (OQ-46), answers
  * 409 JOB_NOT_CANCELLABLE; its message is shown here.
  */
 export function CancelDialog({ job, onClose }: CancelDialogProps) {
@@ -49,8 +49,9 @@ export function CancelDialog({ job, onClose }: CancelDialogProps) {
             <StatusBadge {...runBadge(job)} />
           </Field>
           <Text size="sm">
-            O processamento será interrompido ao fim da data em andamento. As datas já processadas
-            continuam publicadas; as seguintes não serão processadas.
+            {job.status === 'QUEUED'
+              ? 'O processamento ainda não começou e será cancelado imediatamente. Nenhuma data será processada.'
+              : 'O processamento será interrompido ao fim da data em andamento. As datas já processadas continuam publicadas; as seguintes não serão processadas.'}
           </Text>
         </Stack>
       )}

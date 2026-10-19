@@ -11,7 +11,7 @@ import { http, HttpResponse } from 'msw';
 
 import { cashEntries, IDS, instruments, products, tradeEntries } from '@/api/mocks/fixtures';
 import { ledgerApi } from '@/api/endpoints';
-import { setStatus } from '@/api/mocks/db';
+import { db, setStatus } from '@/api/mocks/db';
 import { fieldError, problem, url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { addDays, formatDate, todayInSaoPaulo } from '@/shared/format';
@@ -153,7 +153,7 @@ describe('Lançamentos (§11.3)', () => {
           'DI1F28',
           '-4',
           '89.102,22',
-          '9,95%',
+          '9,9500%',
           '+R$ 356.408,89',
           '',
         ],
@@ -165,7 +165,7 @@ describe('Lançamentos (§11.3)', () => {
           'DI1F29',
           '+5',
           '82.057,00',
-          '9,32%',
+          '9,3203%',
           '-R$ 410.285,00',
           '',
         ],
@@ -177,7 +177,7 @@ describe('Lançamentos (§11.3)', () => {
           'DI1F28',
           '+10',
           '89.006,46',
-          '10,00%',
+          '10,0000%',
           '-R$ 890.064,63',
           '',
         ],
@@ -352,6 +352,16 @@ describe('Lançamentos (§11.3)', () => {
       expect(screen.getByRole('textbox', { name: 'Buscar' })).toHaveValue('');
       await new Promise((resolve) => setTimeout(resolve, 400));
       expect(router.state.location.search).not.toContain('busca');
+    });
+  });
+
+  describe('future dates in the link (OQ-14)', () => {
+    it('OQ-14 says a future end date in the link was ignored', async () => {
+      await openLedger('/lancamentos?inicio=2026-10-14&fim=2099-01-01');
+
+      expect(
+        await screen.findByText('A data 01/01/2099 não pode ser posterior a hoje e foi ignorada.'),
+      ).toBeInTheDocument();
     });
   });
 
@@ -617,6 +627,28 @@ describe('Lançamentos (§11.3)', () => {
         'true',
       );
     });
+
+    it.each(['Compra', 'Aporte'] as const)(
+      'OQ-14 refuses a typed future date in %s on the Data field, never replacing it silently',
+      async (kind) => {
+        const bodies = captureBodies('post', '/ledger/entries');
+        const { user } = await openLedger();
+        const modal = await openNew(user, kind);
+
+        const date = modal.getByRole('textbox', { name: 'Data' });
+        await typeDate(user, date, '19/10/2026');
+
+        expect(await modal.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+        expect(date).toHaveAttribute('aria-invalid', 'true');
+        // The refused date is not kept as some other date that could be saved unnoticed.
+        expect(date).not.toHaveValue('18/10/2026');
+        await user.click(modal.getByRole('button', { name: /^Registrar/ }));
+        expect(bodies).toEqual([]);
+
+        await typeDate(user, date, '17/10/2026');
+        expect(modal.queryByText('A data não pode ser posterior a hoje.')).not.toBeInTheDocument();
+      },
+    );
 
     it.each([
       ['FUTURE_DATE', 'A data não pode ser posterior a hoje.'],
@@ -1205,6 +1237,72 @@ describe('Lançamentos (§11.3)', () => {
 
       expect(await dialog.findByText('Lançamento não encontrado.')).toBeInTheDocument();
       expect(screen.getByText('5 lançamentos encontrados')).toBeInTheDocument();
+    });
+
+    /** Another tab or user deletes the entry after this screen listed it (QA 2026-10-19 #1). */
+    const deleteElsewhere = (id: string | undefined) => {
+      db.entries = db.entries.filter((e) => e.id !== id);
+    };
+
+    it('OQ-32 a 404 on a multiple delete refreshes the list and a retry deletes what is left', async () => {
+      const bodies = captureBodies('post', '/ledger/entries/deletions');
+      const { user } = await openLedger();
+
+      await user.click(screen.getByRole('checkbox', { name: `Selecionar ${sale}` }));
+      await user.click(screen.getByRole('checkbox', { name: `Selecionar ${withdrawal}` }));
+      await user.click(screen.getByRole('button', { name: 'Excluir selecionados' }));
+      const dialog = within(await screen.findByRole('dialog', { name: 'Excluir lançamentos' }));
+      deleteElsewhere(tradeEntries[2]?.id);
+      await user.click(dialog.getByRole('button', { name: 'Excluir' }));
+
+      // Nothing was deleted (all or nothing); the list now omits the vanished entry, and so do
+      // the selection and the dialog.
+      expect(await dialog.findByText('Lançamento não encontrado.')).toBeInTheDocument();
+      expect(await screen.findByText('4 lançamentos encontrados')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(dialog.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+          withdrawal,
+        ]);
+      });
+      expect(dialog.getByText(/1 lançamento selecionado/)).toBeInTheDocument();
+      // The user is told which entry left the dialog, since the 404 does not name it.
+      expect(
+        screen.getByText(`Retirado da exclusão por já não existir: ${sale}.`),
+      ).toBeInTheDocument();
+
+      await user.click(dialog.getByRole('button', { name: 'Excluir' }));
+      expect(await screen.findByText('Lançamento excluído.')).toBeInTheDocument();
+      expect(bodies).toEqual([
+        { ids: [cashEntries[1]?.id, tradeEntries[2]?.id] },
+        { ids: [cashEntries[1]?.id] },
+      ]);
+      expect(await screen.findByText('3 lançamentos encontrados')).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Excluir selecionados' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('OQ-32 a 404 for an entry already deleted elsewhere closes the dialog and refreshes the list', async () => {
+      const { user } = await openLedger();
+
+      await user.click(rowNamed(sale).getByRole('button', { name: `Ações de ${sale}` }));
+      await user.click(await screen.findByRole('menuitem', { name: 'Excluir' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Excluir lançamento' });
+      deleteElsewhere(tradeEntries[2]?.id);
+      await user.click(within(dialog).getByRole('button', { name: 'Excluir' }));
+
+      expect(
+        await screen.findByText(
+          'Lançamento não encontrado. Ele já havia sido excluído; a lista foi atualizada.',
+        ),
+      ).toBeInTheDocument();
+      expect(await screen.findByText('4 lançamentos encontrados')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: 'Excluir lançamento' })).toBeNull();
+      });
+      expect(
+        screen.queryByRole('checkbox', { name: `Selecionar ${sale}` }),
+      ).not.toBeInTheDocument();
     });
   });
 });

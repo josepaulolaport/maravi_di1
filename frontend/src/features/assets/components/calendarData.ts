@@ -18,8 +18,8 @@ export function calendarWindow(
 
 /**
  * The calendar's period (§11.2): the inclusive range from the URL (`?inicio=&fim=`), its end
- * clamped to min(today, maturity); otherwise the last 30 days, ending on the "registrar" date
- * when one is given (a Pendência for an older date opens the calendar on it).
+ * clamped to min(today, maturity); otherwise the last 30 days, or, for an older "registrar"
+ * date (a Pendência), the 30 days starting on it.
  */
 export function resolveRange(
   requested: { start?: string | null; end?: string | null; register?: string | null },
@@ -32,8 +32,11 @@ export function resolveRange(
     const clampedEnd = end < fallback.end ? end : fallback.end;
     return { start: start < clampedEnd ? start : clampedEnd, end: clampedEnd };
   }
-  if (isIsoDate(register) && register < fallback.end) {
-    return calendarWindow(register, maturity);
+  // A "registrar" date before the default window starts a 30-day window on it; inside the
+  // window it keeps it. Either way the days after it, often the next missing prices, stay in
+  // view after the save.
+  if (isIsoDate(register) && register < fallback.start) {
+    return { start: register, end: addDays(register, CALENDAR_DAYS - 1) };
   }
   return fallback;
 }

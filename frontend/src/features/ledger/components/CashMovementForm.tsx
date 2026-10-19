@@ -1,15 +1,16 @@
 import { Button, Group, Stack, TextInput } from '@mantine/core';
-import { DateInput, TimeInput } from '@mantine/dates';
+import { TimeInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 
 import { MessageAlert } from '@/shared/ui/MessageAlert';
 import type { IsoDate } from '@/api/contract';
-import { formatDate, parsePtBrDate, parsePtBrDecimal } from '@/shared/format';
+import { formatDate, parsePtBrDecimal } from '@/shared/format';
 
 import { useCreateEntry } from '../hooks/useLedger';
 import { splitProblem } from '@/shared/ui/problemMessages';
+import { PastDateInput } from '@/shared/ui/PastDateInput';
 
 import { nowInSaoPaulo, toIsoTime } from './formSupport';
 
@@ -101,11 +102,11 @@ export function CashMovementForm({
       <Stack gap="md">
         <MessageAlert messages={pageErrors} />
         <Group grow align="flex-start">
-          <DateInput
+          <PastDateInput
+            today={today}
             label="Data"
             withAsterisk
             valueFormat="DD/MM/YYYY"
-            dateParser={parsePtBrDate}
             maxDate={today}
             placeholder="DD/MM/AAAA"
             {...form.getInputProps('date')}

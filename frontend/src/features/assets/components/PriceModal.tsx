@@ -1,16 +1,16 @@
 import { Alert, Button, Group, Modal, Stack, Text, TextInput } from '@mantine/core';
-import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
 import { IconCalendar, IconInfoCircle } from '@tabler/icons-react';
 import { useForm } from '@mantine/form';
 
 import { MessageAlert } from '@/shared/ui/MessageAlert';
 import type { InputKind, Instrument, IsoDate } from '@/api/contract';
-import { parsePtBrDate, todayInSaoPaulo } from '@/shared/format';
+import { todayInSaoPaulo } from '@/shared/format';
 import { PriceInput, typedPrice } from '@/shared/ui/PriceInput';
 
 import { useSetReferencePrice } from '../hooks/usePrices';
 import { splitProblem } from '@/shared/ui/problemMessages';
+import { PastDateInput } from '@/shared/ui/PastDateInput';
 
 interface PriceModalProps {
   instrument: Instrument;
@@ -123,12 +123,13 @@ function PriceForm({ instrument, initialDate, save, onDone }: PriceFormProps) {
     <form onSubmit={submit} noValidate>
       <Stack gap="md">
         <TextInput label="Contrato" value={instrument.code} readOnly />
-        <DateInput
+        <PastDateInput
+          today={today}
           label="Data de referência"
           placeholder="DD/MM/AAAA"
           valueFormat="DD/MM/YYYY"
-          dateParser={parsePtBrDate}
           maxDate={maxDate}
+          limitMessage="O contrato já venceu nesta data."
           leftSection={<IconCalendar size={16} stroke={1.5} />}
           {...form.getInputProps('date')}
         />
