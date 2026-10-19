@@ -381,12 +381,13 @@ Devem existir testes de unidade para calculadoras e testes de integração para 
 17. Preços sem revisões (OQ-25): corrigir altera a observação no lugar; remover o MANUAL faz o B3 prevalecer; corrigir ou remover um preço já usado é permitido e não marca nada (OQ-31). Desde OQ-30, a Carteira mostra o PU, a taxa e a fonte atuais da tabela de preços ao lado dos valores antigos, e a data mantém o seu status de processamento até o reprocessamento (OQ-31).
 18. AUM após falha parcial (OQ-36, OQ-38): um job Tudo em que uma cadeia falha em D deixa `aum` `null` em D e nas datas seguintes do intervalo, embora a outra cadeia seja gravada.
 19. Caixa sobre posições com Erro (OQ-38): um job Caixa sobre uma data cujas posições estão com **Erro** grava o caixa e deixa `aum` `null`.
-20. Buraco na cadeia (OQ-37 item 4): D−1 sem status enquanto uma data anterior da cadeia está processada deixa D com **Erro** (`CASH_PREDECESSOR_MISSING` ou `POSITIONS_PREDECESSOR_MISSING`) sem consultar o Lançamentos.
+20. Buraco na cadeia (OQ-37 item 4): D−1 sem status enquanto uma data anterior da cadeia tem status (inclusive Erro) deixa D com **Erro** (`CASH_PREDECESSOR_MISSING` ou `POSITIONS_PREDECESSOR_MISSING`) sem consultar o Lançamentos.
 21. Deduplicação de Pendências (OQ-37): preço de referência faltante aparece uma vez por (ativo, data do preço necessário), de modo que "Definir preço DI1F29 em 16/10" aparece uma vez; contrato vencido com posição aberta aparece uma vez por ativo.
 22. Limite de página (OQ-37): `limit=0` e `limit=201` respondem 422 `VALIDATION_ERROR` no campo `limit`.
 23. Leituras da Carteira após hoje (OQ-35): resumo e posições com `date` após hoje, e série de P&L com `end_date` após hoje, respondem 422 `FUTURE_DATE`.
 24. Erro técnico de uma cadeia em Tudo (OQ-40): um erro técnico numa cadeia em D desfaz só essa cadeia até o seu savepoint e a deixa com **Erro** em D; a outra cadeia é gravada em D, na mesma transação, e segue até o fim do intervalo; o pedido termina `COMPLETED_WITH_ISSUES` com `failed_date` = D e `failed_chain` = a cadeia que falhou.
 25. Falha fora de uma cadeia (OQ-40): uma falha que não pertence a nenhuma cadeia em D (fora do savepoint de todas as cadeias, por exemplo tempo de espera de bloqueio nas linhas de status da data) desfaz toda a data D; D fica com **Erro** em todas as cadeias ainda ativas no pedido (nas duas, se nenhuma tinha parado) e o pedido termina `FAILED`; uma cadeia que já tinha parado não é tocada em D.
+26. Estado zero com só Erro na cadeia (OQ-40 item 5): o único status do caixa é **Erro** em 01/10, sem lançamentos; um processamento de Caixa em 05/10 deixa 05/10 com **Erro** (`CASH_PREDECESSOR_MISSING`) sem consultar o Lançamentos, pois uma data anterior da cadeia tem status.
 
 ## 14. Decisões fechadas e itens ainda abertos
 
