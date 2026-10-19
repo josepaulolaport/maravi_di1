@@ -61,7 +61,7 @@ def test_upgrade_carries_existing_rows_over(database_url: str) -> None:
         " SELECT id, '2026-10-01', 0, 'COMPLETE', 'COMPLETE' FROM processing.requests;",
     )
 
-    command.upgrade(_alembic(database_url), "head")
+    command.upgrade(_alembic(database_url), "0002")
 
     requests = fetch(
         database_url,
@@ -86,7 +86,7 @@ def test_upgrade_carries_existing_rows_over(database_url: str) -> None:
 
 
 def test_upgrade_of_a_clean_database_leaves_no_marker(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "head")
+    command.upgrade(_alembic(database_url), "0002")
 
     state = fetch(
         database_url,
@@ -97,7 +97,7 @@ def test_upgrade_of_a_clean_database_leaves_no_marker(database_url: str) -> None
 
 
 def test_downgrade_folds_revisions_and_markers_back(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "head")
+    command.upgrade(_alembic(database_url), "0002")
     execute(
         database_url,
         A_REQUEST + f"UPDATE processing.requests SET trades_revision_at_start = 3,"
@@ -147,7 +147,7 @@ LOSSY = {
 
 @pytest.mark.parametrize("rows", LOSSY.values(), ids=LOSSY.keys())
 def test_downgrade_refuses_to_lose_rows(database_url: str, rows: str) -> None:
-    command.upgrade(_alembic(database_url), "head")
+    command.upgrade(_alembic(database_url), "0002")
     execute(database_url, rows)
 
     with pytest.raises(RuntimeError, match="allow_data_loss"):
@@ -162,7 +162,7 @@ def test_downgrade_refuses_to_lose_rows(database_url: str, rows: str) -> None:
 
 
 def test_an_all_job_records_one_stale_predecessor_per_chain(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "head")
+    command.upgrade(_alembic(database_url), "0002")
     execute(
         database_url,
         A_REQUEST + "INSERT INTO processing.issues (request_id, affected_date, issue_type, chain)"
@@ -198,23 +198,23 @@ CHECKS = {
 
 @pytest.mark.parametrize("statement", CHECKS.values(), ids=CHECKS.keys())
 def test_the_new_constraints_reject_invalid_rows(database_url: str, statement: str) -> None:
-    command.upgrade(_alembic(database_url), "head")
+    command.upgrade(_alembic(database_url), "0002")
 
     with pytest.raises(psycopg.errors.IntegrityError):
         execute(database_url, statement)
 
 
-@pytest.mark.parametrize("target", ["head", "0001"])
+@pytest.mark.parametrize("target", ["0002", "0001"])
 def test_neither_direction_runs_while_a_job_is_active(database_url: str, target: str) -> None:
-    command.upgrade(_alembic(database_url), "0001" if target == "head" else "head")
-    scope = "" if target == "head" else "scope, "
-    value = "" if target == "head" else "'ALL', "
+    command.upgrade(_alembic(database_url), "0001" if target == "0002" else "0002")
+    scope = "" if target == "0002" else "scope, "
+    value = "" if target == "0002" else "'ALL', "
     execute(
         database_url,
         f"INSERT INTO processing.requests ({scope}requested_start_date, requested_end_date,"
         f" status) VALUES ({value}'2026-10-01', '2026-10-02', 'RUNNING')",
     )
 
-    migrate = command.upgrade if target == "head" else command.downgrade
+    migrate = command.upgrade if target == "0002" else command.downgrade
     with pytest.raises(RuntimeError, match="job is active"):
         migrate(_alembic(database_url), target)
