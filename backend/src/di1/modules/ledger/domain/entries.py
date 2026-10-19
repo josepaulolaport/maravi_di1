@@ -137,7 +137,7 @@ def validate_trade(
     contract. Raises `DomainError` with every input error, then with the maturity error."""
     if draft.type is not EntryType.TRADE:
         raise ValueError(f"validate_trade expects a TRADE draft, got {draft.type}")
-    errors = _date_errors(draft.entry_date, today)
+    errors = _date_errors(draft.entry_date, today) + _time_errors(draft.entry_time)
     if draft.asset_id is None or instrument is None:
         errors.append(_invalid("Selecione um contrato.", "asset_id"))
     if (
@@ -179,7 +179,7 @@ def validate_cash_movement(draft: EntryDraft, *, today: date) -> NewCashMovement
     """The aporte or retirada a draft describes. Raises `DomainError` with every input error."""
     if draft.type is not EntryType.CASH:
         raise ValueError(f"validate_cash_movement expects a CASH draft, got {draft.type}")
-    errors = _date_errors(draft.entry_date, today)
+    errors = _date_errors(draft.entry_date, today) + _time_errors(draft.entry_time)
     not_cash = "Uma movimentação de caixa não tem este campo."
     for field, value in (
         ("asset_id", draft.asset_id),
@@ -258,6 +258,14 @@ def _typed_quote(draft: EntryDraft) -> tuple[Decimal | None, list[ErrorDetail]]:
 def _date_errors(entry_date: date, today: date) -> list[ErrorDetail]:
     if entry_date > today:
         return [ErrorDetail(ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", "date")]
+    return []
+
+
+def _time_errors(entry_time: time) -> list[ErrorDetail]:
+    # São Paulo wall time in whole seconds: the keyset cursor carries HH:MM:SS (OQ-26 item 1),
+    # so a stored fraction or offset would make pages skip or repeat entries.
+    if entry_time.microsecond or entry_time.tzinfo is not None:
+        return [_invalid("Informe a hora em horas, minutos e segundos.", "time")]
     return []
 
 

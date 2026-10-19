@@ -24,6 +24,7 @@ from di1.modules.ledger.domain.entries import (
     validate_cash_movement,
     validate_trade,
 )
+from di1.shared.clock import SAO_PAULO
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
 
@@ -241,6 +242,24 @@ def test_every_input_error_is_reported_at_once() -> None:
         (ErrorCode.VALIDATION_ERROR, "signed_quantity"),
         (ErrorCode.VALIDATION_ERROR, "input_kind"),
     }
+
+
+@pytest.mark.parametrize(
+    "entry_time",
+    [time(14, 10, 0, 500_000), time(14, 10, tzinfo=SAO_PAULO)],
+    ids=["fractions", "aware"],
+)
+def test_the_time_is_a_naive_whole_second(entry_time: time) -> None:
+    # The keyset cursor carries HH:MM:SS (OQ-26 item 1): a stored fraction or offset would make
+    # pages skip or repeat entries, whoever the writer is.
+    for draft in (_trade(entry_time=entry_time), _cash(entry_time=entry_time)):
+        with pytest.raises(DomainError) as error:
+            if draft.type is EntryType.TRADE:
+                validate_trade(draft, today=TODAY, instrument=DI1F28)
+            else:
+                validate_cash_movement(draft, today=TODAY)
+
+        assert _errors(error) == {(ErrorCode.VALIDATION_ERROR, "time")}
 
 
 # --- maturity (OQ-1) ----------------------------------------------------------------------------
