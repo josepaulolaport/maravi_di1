@@ -124,7 +124,7 @@ export function useEntries(start: IsoDate, end: IsoDate, search: string, order: 
   });
 }
 
-/** Every write marks published days stale (§10.4): refresh everything that depends on it. */
+/** Every write changes the facts behind later results (§10.4): refresh what depends on them. */
 function useLedgerWrite<TVariables, TResult>(
   write: (variables: TVariables) => Promise<TResult>,
   mutationKey?: readonly unknown[],

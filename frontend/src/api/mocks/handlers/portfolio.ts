@@ -1,12 +1,16 @@
 import { http, HttpResponse } from 'msw';
 
 import type { ListResponse, PnlPoint, PortfolioPositions, PortfolioSummary } from '../../contract';
+import { addDays } from '../dates';
 import { db, statusOf } from '../db';
+import { addDecimal } from '../decimal';
+import { preferredOf } from './prices';
 import { dateErrors, latency, problem, rangeErrors, url } from './support';
 
 // Published results start as the fixtures; a finished job replaces the days of its scope with
 // the precomputed results of the scenario (handlers/processing.ts). Cash and positions are
-// served apart, each with its date status (OQ-21, OQ-23); AUM joins them.
+// served apart, each with its date status and processing time (OQ-21, OQ-23, OQ-31); AUM
+// joins them.
 
 function dateParam(request: Request) {
   const date = new URL(request.url).searchParams.get('date');
@@ -44,6 +48,49 @@ export function summaryOf(date: string): PortfolioSummary {
   };
 }
 
+/**
+ * A position row's reference price is the date's current preferred price, read from the price
+ * table (OQ-30): MANUAL, else B3, exact date; after maturity the PU is 0.
+ */
+function referenceOf(
+  row: PortfolioPositions['items'][number],
+  date: string,
+): Pick<
+  PortfolioPositions['items'][number],
+  'reference_pu' | 'reference_rate' | 'reference_source'
+> {
+  if (row.maturity_date !== null && date > row.maturity_date) {
+    return { reference_pu: '0', reference_rate: null, reference_source: null };
+  }
+  const price = preferredOf(row.asset_id, date);
+  return price
+    ? { reference_pu: price.pu, reference_rate: price.rate, reference_source: price.source }
+    : { reference_pu: null, reference_rate: null, reference_source: null };
+}
+
+/**
+ * The published P&L series over [start, end] (OQ-16, OQ-31 item 8): one point per published
+ * positions day, with its status and processing time, and `range_cumulative_pnl`, the daily
+ * P&L summed from `start` (its own included). The sum is null from the first date in the range
+ * whose daily P&L is null or that has no published day.
+ */
+function pnlSeries(start: string, end: string): PnlPoint[] {
+  const items: PnlPoint[] = [];
+  let sum: string | null = '0';
+  for (let date = start; date <= end; date = addDays(date, 1)) {
+    const point = db.published.pnl.get(date);
+    sum = sum !== null && point?.daily_pnl != null ? addDecimal(sum, point.daily_pnl) : null;
+    if (!point) continue;
+    items.push({
+      ...point,
+      range_cumulative_pnl: sum,
+      status: statusOf(date, 'POSITIONS'),
+      published_at: db.published.summaries.get(date)?.published_at ?? null,
+    });
+  }
+  return items;
+}
+
 export const portfolioHandlers = [
   http.get(url('/portfolio/summary'), async ({ request }) => {
     await latency();
@@ -61,7 +108,7 @@ export const portfolioHandlers = [
       date,
       status: statusOf(date, 'POSITIONS'),
       published_at: published?.published_at ?? null,
-      items: published?.items ?? [],
+      items: (published?.items ?? []).map((row) => ({ ...row, ...referenceOf(row, date) })),
     };
     return HttpResponse.json(body);
   }),
@@ -73,10 +120,8 @@ export const portfolioHandlers = [
     const end = params.get('end_date');
     const errors = rangeErrors(start, end);
     if (errors.length > 0) return problem(422, errors);
-    const items = [...db.published.pnl.values()]
-      .filter((p) => p.date >= (start as string) && p.date <= (end as string))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map((p) => ({ ...p, status: statusOf(p.date, 'POSITIONS') }));
-    return HttpResponse.json<ListResponse<PnlPoint>>({ items });
+    return HttpResponse.json<ListResponse<PnlPoint>>({
+      items: pnlSeries(start as string, end as string),
+    });
   }),
 ];

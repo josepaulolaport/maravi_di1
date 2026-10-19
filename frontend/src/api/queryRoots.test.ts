@@ -31,7 +31,7 @@ describe('query roots and cross-feature invalidation', () => {
     expect(roots.sort()).toEqual(['assets', 'ledger', 'portfolio', 'prices', 'processing']);
   });
 
-  it('§10.4 a ledger or price write marks every dependent view stale', async () => {
+  it('§10.4 a ledger or price write refreshes every dependent view', async () => {
     const client = seededClient();
 
     await invalidateAfterWrite(client);

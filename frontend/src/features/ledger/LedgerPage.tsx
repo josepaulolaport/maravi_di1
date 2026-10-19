@@ -322,8 +322,8 @@ function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClos
           </>
         )}
         <Text inherit c="dimmed">
-          Lançamentos não são editados nem restaurados por esta tela. Os resultados publicados a
-          partir da data afetada ficam desatualizados até um novo processamento.
+          Lançamentos não são editados nem restaurados por esta tela. Os resultados já processados
+          não mudam até um novo processamento a partir da data afetada.
         </Text>
       </Stack>
     </ConfirmModal>

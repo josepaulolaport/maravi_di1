@@ -25,7 +25,7 @@ import type {
 //   16/10  Venda 4 DI1F28 a 9,95% a.a.; retirada 50.000,00
 //          A run started at 17:20 was cancelled after committing 14/10 and 15/10 (OQ-23).
 //          No DI1F29 price  → Pendência, P&L incomplete (null), job COMPLETED_WITH_ISSUES.
-//          DI1F28 price corrected after publication (replaced) → 16/10 is stale.
+//          DI1F28 price corrected after 16/10 was processed (OQ-31: nothing goes stale).
 //   17/10, 18/10  not processed (weekend; no prices).
 
 /** The day the fixtures' story is told from. The fake backend follows the real clock; tests pin it here. */
@@ -224,14 +224,8 @@ export const referencePrices: ReferencePrice[] = [
 /** First date with an input; the day before it is the valid zero state (OQ-11). */
 export const FIRST_ENTRY_DATE = '2026-10-14';
 
-/**
- * Per chain, the first seed date that reads stale (OQ-23): the 16/10 price was corrected after
- * publication, which affects positions, never cash.
- */
-export const seedStaleFrom: Record<'CASH' | 'POSITIONS', string | null> = {
-  CASH: null,
-  POSITIONS: '2026-10-16',
-};
+/** A published P&L point of the seed; the handlers add its status, time and range sum. */
+type SeedPnl = Omit<PnlPoint, 'status' | 'range_cumulative_pnl' | 'published_at'>;
 
 const PUBLISHED_AT = '2026-10-16T18:40:00-03:00';
 
@@ -386,7 +380,7 @@ export const positions: PublishedPositions[] = [
     published_at: PUBLISHED_AT,
     items: [
       {
-        // Published with the 16/10 price before its correction (89.200,90) → stale.
+        // Processed with the 16/10 price before its correction (89.200,90).
         asset_id: IDS.di1f28,
         asset_code: 'DI1F28',
         maturity_date: '2028-01-03',
@@ -426,7 +420,7 @@ export const positions: PublishedPositions[] = [
 ];
 
 /** The P&L series of the seed; each point's `status` comes from `db.dateStatus` (OQ-23). */
-export const pnlSeries: Omit<PnlPoint, 'status'>[] = [
+export const pnlSeries: SeedPnl[] = [
   {
     date: '2026-10-14',
     daily_pnl: '0.0000000000',
@@ -511,7 +505,7 @@ export function dayWithoutInputs(date: string): RecalculatedDay {
 export interface RecalculatedDay {
   summary: SeedSummary;
   positions: PublishedPositions;
-  pnl: Omit<PnlPoint, 'status'>;
+  pnl: SeedPnl;
 }
 
 /** Republished results that differ from the published fixtures (`published_at` is replaced). */
@@ -674,7 +668,6 @@ export const issues: Issue[] = [
     asset_code: 'DI1F29',
     affected_date: '2026-10-16',
     required_price_date: '2026-10-16',
-    chain: null,
     request_id: REQUEST_IDS.withIssues,
   },
 ];

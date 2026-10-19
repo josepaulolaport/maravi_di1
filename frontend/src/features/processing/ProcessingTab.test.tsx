@@ -19,9 +19,9 @@ import { isFinal } from './jobStatus';
 // Expected values come from the fixture scenario (src/api/mocks/fixtures.ts): five finished
 // runs (FAILED 01–05/10 on its first date, CANCELLED 10–12/10 before its first date, COMPLETED
 // 14–15/10, CANCELLED 14–16/10 after committing 14 and 15/10, COMPLETED_WITH_ISSUES 14–16/10);
-// entries start on 14/10; 14/10 and 15/10 are current for both chains; on 16/10 cash is current
-// and positions stale; 17/10 and 18/10 are not processed. Each run publishes date by date
-// (OQ-23).
+// entries start on 14/10; 14/10 and 15/10 are processed for both chains; on 16/10 cash is
+// processed and positions processed with issues; 17/10 and 18/10 are not processed. Each run
+// publishes date by date (OQ-23).
 
 const PAGE = '/central-de-controle?tab=processamentos';
 
@@ -238,35 +238,33 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
     await modal.findByText('15/10/2026 a 16/10/2026');
     expect(
-      field(modal, 'Estado anterior do caixa').getByText('Atualizado em 14/10'),
+      field(modal, 'Estado anterior do caixa').getByText('Processado (14/10)'),
     ).toBeInTheDocument();
     expect(
-      field(modal, 'Estado anterior das posições').getByText('Atualizado em 14/10'),
+      field(modal, 'Estado anterior das posições').getByText('Processado (14/10)'),
     ).toBeInTheDocument();
     expect(modal.getByText('2')).toBeInTheDocument();
     expect(modal.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('OQ-11 warns that a range after a stale day still runs, but reads as stale', async () => {
+  it('OQ-31 a day before processed with issues is enough: no warning', async () => {
     const { user } = renderApp(`${PAGE}&inicio=2026-10-17&fim=2026-10-18`);
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
     const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
-    // OQ-21: only the positions of 16/10 are stale (a corrected price); its cash is current.
-    const warning = await modal.findByRole('alert');
     expect(
-      field(modal, 'Estado anterior do caixa').getByText('Atualizado em 16/10'),
+      await field(modal, 'Estado anterior das posições').findByText(
+        'Processado com pendências (16/10)',
+      ),
     ).toBeInTheDocument();
-    expect(warning).toHaveTextContent(
-      'O fechamento das posições de 16/10/2026 está desatualizado.',
-    );
-    expect(warning).toHaveTextContent(
-      'O processamento será executado, mas os dias do intervalo aparecerão como desatualizados, sem P&L, e uma pendência pedirá o processamento de um intervalo anterior.',
-    );
+    expect(
+      field(modal, 'Estado anterior do caixa').getByText('Processado (16/10)'),
+    ).toBeInTheDocument();
+    expect(modal.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('OQ-11 OQ-22 after an unprocessed day: cash will be refused, positions still run but read as stale', async () => {
+  it('OQ-31 after an unprocessed day: warns per chain that the run will fail on its first day', async () => {
     const { user } = renderApp(`${PAGE}&inicio=2026-10-18&fim=2026-10-18`);
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
@@ -275,14 +273,12 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     // Neither chain has 17/10: one warning each.
     const warnings = await modal.findAllByRole('alert');
     expect(warnings.map((w) => w.textContent)).toEqual([
-      expect.stringContaining(
-        'O caixa de 17/10/2026 não foi processado: este processamento será recusado ao iniciar, sem publicar nenhum dia. Processe antes um intervalo que inclua esse dia.',
-      ),
-      expect.stringContaining(
-        'O dia 17/10/2026 ainda não foi processado para o cálculo das posições.',
-      ),
+      'O fechamento do caixa de 17/10/2026 não foi processado. Este processamento falhará no primeiro dia (dia anterior não processado), sem publicar nenhum dia. Processe antes um intervalo que inclua esse dia.',
+      'O fechamento das posições de 17/10/2026 não foi processado. Este processamento falhará no primeiro dia (dia anterior não processado), sem publicar nenhum dia. Processe antes um intervalo que inclua esse dia.',
     ]);
-    expect(warnings[1]).toHaveTextContent('O processamento será executado');
+    expect(
+      field(modal, 'Estado anterior do caixa').getByText('Não processado'),
+    ).toBeInTheDocument();
     expect(modal.getByText('1')).toBeInTheDocument();
   });
 
@@ -294,7 +290,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     await user.click(screen.getByRole('button', { name: 'Solicitar processamento' }));
 
     const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
-    expect(await modal.findByText('Atualizado em 16/10')).toBeInTheDocument();
+    expect(await modal.findByText('Processado (16/10)')).toBeInTheDocument();
     expect(field(modal, 'Escopo').getByText('Caixa')).toBeInTheDocument();
     expect(modal.queryByRole('group', { name: 'Estado anterior das posições' })).toBeNull();
     expect(modal.queryByRole('alert')).not.toBeInTheDocument();
@@ -572,7 +568,6 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     expect(menu.getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
       'Ver detalhes',
       'Cancelar processamento',
-      'Cancelar e criar novo processamento',
     ]);
     await closeMenu(user);
 
@@ -801,143 +796,6 @@ describe('Processamentos: cancel (§10.2)', () => {
       'Este processamento já foi encerrado e não pode ser cancelado.',
     );
   });
-
-  it('§10.2 OQ-21 cancels and replaces an active job with a new range, starting from its scope', async () => {
-    seedJob({ scope: 'POSITIONS' });
-    holdWorker();
-    const { user } = renderApp(PAGE);
-
-    const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
-    await user.click(menu.getByRole('menuitem', { name: 'Cancelar e criar novo processamento' }));
-
-    const dialogElement = await screen.findByRole('dialog', {
-      name: 'Cancelar e criar novo processamento',
-    });
-    const dialog = within(dialogElement);
-    expect(dialog.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('17/10/2026');
-    expect(dialog.getByRole('textbox', { name: 'Data final' })).toHaveValue('18/10/2026');
-    expect(dialog.getByRole('radio', { name: 'Posições' })).toBeChecked();
-    await typeRange(user, '16/10/2026', '18/10/2026', dialog);
-    await user.click(dialog.getByRole('button', { name: 'Cancelar e criar novo' }));
-
-    await findJobRow('17/10/2026 a 18/10/2026', 'Cancelado');
-    await findJobRow('16/10/2026 a 18/10/2026', 'Na fila');
-    expect(db.requests).toHaveLength(7);
-  });
-});
-
-describe('Processamentos: cancel and replace refused (§10.2, OQ-15)', () => {
-  it('OQ-15 shows the 409 message and queues nothing when the job already finished', async () => {
-    seedJob({});
-    holdWorker();
-    server.use(
-      http.post(url('/processing/requests/:id/cancel-and-replace'), () =>
-        problemResponse(
-          409,
-          'JOB_NOT_CANCELLABLE',
-          'Este processamento já foi encerrado e não pode ser cancelado.',
-        ),
-      ),
-    );
-    const { user } = renderApp(PAGE);
-
-    const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
-    await user.click(menu.getByRole('menuitem', { name: 'Cancelar e criar novo processamento' }));
-    const dialog = within(
-      await screen.findByRole('dialog', { name: 'Cancelar e criar novo processamento' }),
-    );
-    await user.click(dialog.getByRole('button', { name: 'Cancelar e criar novo' }));
-
-    expect(await dialog.findByRole('alert')).toHaveTextContent(
-      'Este processamento já foi encerrado e não pode ser cancelado.',
-    );
-    expect(db.requests).toHaveLength(6);
-  });
-});
-
-describe('Processamentos: cancel and replace with an invalid range (OQ-15)', () => {
-  it('OQ-15 shows a field-bound message on its date input', async () => {
-    seedJob({});
-    holdWorker();
-    server.use(
-      http.post(url('/processing/requests/:id/cancel-and-replace'), () =>
-        HttpResponse.json(
-          {
-            type: 'about:blank',
-            title: 'Dados inválidos',
-            status: 422,
-            errors: [
-              {
-                code: 'FUTURE_DATE',
-                message: 'A data não pode ser posterior a hoje.',
-                field: 'start_date',
-              },
-            ],
-          },
-          { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
-        ),
-      ),
-    );
-    const { user } = renderApp(PAGE);
-
-    const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
-    await user.click(menu.getByRole('menuitem', { name: 'Cancelar e criar novo processamento' }));
-    const dialog = within(
-      await screen.findByRole('dialog', { name: 'Cancelar e criar novo processamento' }),
-    );
-    await user.click(dialog.getByRole('button', { name: 'Cancelar e criar novo' }));
-
-    await waitFor(() => {
-      expect(dialog.getByRole('textbox', { name: 'Data inicial' })).toHaveAccessibleDescription(
-        'A data não pode ser posterior a hoje.',
-      );
-    });
-    expect(dialog.queryByRole('alert')).not.toBeInTheDocument();
-  });
-
-  it('OQ-15 keeps a second message for the same field in the alert, so none is lost', async () => {
-    seedJob({});
-    holdWorker();
-    server.use(
-      http.post(url('/processing/requests/:id/cancel-and-replace'), () =>
-        HttpResponse.json(
-          {
-            type: 'about:blank',
-            title: 'Dados inválidos',
-            status: 422,
-            errors: [
-              {
-                code: 'FUTURE_DATE',
-                message: 'A data não pode ser posterior a hoje.',
-                field: 'start_date',
-              },
-              {
-                code: 'INVALID_RANGE',
-                message: 'A data inicial deve ser anterior ou igual à data final.',
-                field: 'start_date',
-              },
-            ],
-          },
-          { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
-        ),
-      ),
-    );
-    const { user } = renderApp(PAGE);
-
-    const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
-    await user.click(menu.getByRole('menuitem', { name: 'Cancelar e criar novo processamento' }));
-    const dialog = within(
-      await screen.findByRole('dialog', { name: 'Cancelar e criar novo processamento' }),
-    );
-    await user.click(dialog.getByRole('button', { name: 'Cancelar e criar novo' }));
-
-    const alert = await dialog.findByRole('alert');
-    expect(alert).toHaveTextContent('A data inicial deve ser anterior ou igual à data final.');
-    expect(alert).not.toHaveTextContent('A data não pode ser posterior a hoje.');
-    expect(dialog.getByRole('textbox', { name: 'Data inicial' })).toHaveAccessibleDescription(
-      'A data não pode ser posterior a hoje.',
-    );
-  });
 });
 
 describe('Processamentos: details (§11.1, §10.4)', () => {
@@ -1072,8 +930,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     expect(field('Dias restantes').getByText('1')).toBeInTheDocument();
     expect(modal.getByRole('progressbar', { name: 'Progresso' })).toBeInTheDocument();
     expect(modal.getByRole('button', { name: 'Cancelar processamento' })).toBeInTheDocument();
-    expect(
-      modal.getByRole('button', { name: 'Cancelar e criar novo processamento' }),
-    ).toBeInTheDocument();
+    // OQ-30: there is no cancel-and-replace.
+    expect(modal.queryByRole('button', { name: /criar novo/ })).not.toBeInTheDocument();
   });
 });

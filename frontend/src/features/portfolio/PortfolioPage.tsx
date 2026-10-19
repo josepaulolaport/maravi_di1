@@ -18,7 +18,7 @@ import { useChartStart, useEvaluationDate, usePortfolioPositions } from './hooks
 /**
  * Carteira (spec §11.4): one evaluation date, published data only; nothing is recalculated
  * here. Cash and positions are published by separate chains (OQ-21), so each KPI and
- * notice follows its own chain's freshness; AUM joins both.
+ * notice follows its own chain's status (OQ-31); AUM joins both.
  */
 export function PortfolioPage() {
   const [date, setDate, today] = useEvaluationDate();

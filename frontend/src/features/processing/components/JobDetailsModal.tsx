@@ -35,13 +35,7 @@ interface JobDetailsModalProps extends Omit<JobActions, 'onDetails'> {
  * A run's details (§11.1, OQ-23): its range, times, days, progress, what it left published
  * and, if any, its error and the date it failed on.
  */
-export function JobDetailsModal({
-  job,
-  onClose,
-  onCancel,
-  onReplace,
-  onRequestAgain,
-}: JobDetailsModalProps) {
+export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobDetailsModalProps) {
   const progress = job ? progressOf(job) : null;
   return (
     <Modal
@@ -106,14 +100,6 @@ export function JobDetailsModal({
           <Group justify="flex-end" gap="sm">
             {canCancel(job.status) && (
               <>
-                <Button
-                  variant="default"
-                  onClick={() => {
-                    onReplace(job);
-                  }}
-                >
-                  Cancelar e criar novo processamento
-                </Button>
                 <Button
                   color="red"
                   onClick={() => {

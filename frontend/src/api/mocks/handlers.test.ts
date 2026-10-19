@@ -19,11 +19,10 @@ async function problemOf(promise: Promise<unknown>) {
 
 /**
  * The summary as one flat record, as these tests were written before OQ-21 split it: cash from
- * the cash chain, the rest from the positions chain; `stale` when either chain is.
+ * the cash chain, the rest from the positions chain.
  */
 function flat(summary: PortfolioSummary) {
   return {
-    stale: summary.cash.status === 'STALE' || summary.positions.status === 'STALE',
     published_at: summary.positions.published_at,
     cash_balance: summary.cash.balance,
     positions_market_value: summary.positions.market_value,
@@ -37,7 +36,7 @@ function flat(summary: PortfolioSummary) {
   };
 }
 
-/** The freshness of each chain on a date (OQ-21). */
+/** The processing status of each chain on a date (OQ-21, OQ-31). */
 async function chainStatus(date: string) {
   const summary = await portfolioApi.getSummary(date);
   return { cash: summary.cash.status, positions: summary.positions.status };
@@ -53,7 +52,6 @@ describe('mock portfolio', () => {
     const summary = flat(await portfolioApi.getSummary('2026-10-15'));
 
     expect(summary).toMatchObject({
-      stale: false,
       cash_balance: '199650.3745326500',
       positions_market_value: '1292315.4909390840',
       aum: '1491965.8654717340',
@@ -93,8 +91,11 @@ describe('mock portfolio', () => {
     });
   });
 
-  it('§10.4 OQ-21 a price corrected after publication makes only the positions stale', async () => {
-    expect(await chainStatus('2026-10-16')).toEqual({ cash: 'FRESH', positions: 'STALE' });
+  it('OQ-31 a price corrected after publication changes no status', async () => {
+    expect(await chainStatus('2026-10-16')).toEqual({
+      cash: 'PROCESSED',
+      positions: 'PROCESSED_WITH_ISSUES',
+    });
   });
 
   it('§12 D3 reports a date that was never processed instead of inventing figures', async () => {
@@ -122,13 +123,43 @@ describe('mock portfolio', () => {
   });
 });
 
-describe('OQ-21 positions and the P&L series use the same freshness as the summary', () => {
-  it('§8.3 positions report the positions chain: stale after a corrected price', async () => {
+describe('OQ-21 positions and the P&L series use the same status as the summary', () => {
+  it('§8.3 positions report the positions chain status and its processing time', async () => {
     expect(await portfolioApi.getPositions('2026-10-16')).toMatchObject({
-      status: 'STALE',
+      status: 'PROCESSED_WITH_ISSUES',
       published_at: '2026-10-16T18:40:00-03:00',
     });
-    expect((await portfolioApi.getPositions('2026-10-15')).status).toBe('FRESH');
+    expect((await portfolioApi.getPositions('2026-10-15')).status).toBe('PROCESSED');
+  });
+
+  it('OQ-30 a position row shows the current preferred reference price, not the processed one', async () => {
+    const positions = published(await portfolioApi.getPositions('2026-10-16'));
+    const di1f28 = positions.items.find((row) => row.asset_code === 'DI1F28');
+
+    // 16/10 was processed with 89.200,90; the price was corrected afterwards (MANUAL wins).
+    expect(di1f28).toMatchObject({
+      reference_source: 'MANUAL',
+      reference_pu: '89250.3147019396',
+      reference_rate: '0.0980',
+      financial_total: '535205.4053049072',
+    });
+  });
+
+  it('OQ-30 a reference price recorded after processing shows on the row at once', async () => {
+    await pricesApi.setReferencePrice({
+      asset_id: IDS.di1f29,
+      reference_date: '2026-10-16',
+      input_kind: 'PU',
+      pu: '80300.00',
+    });
+
+    const positions = published(await portfolioApi.getPositions('2026-10-16'));
+    expect(positions.items.find((row) => row.asset_code === 'DI1F29')).toMatchObject({
+      reference_source: 'MANUAL',
+      reference_pu: '80300.00',
+      financial_total: null,
+      valuation_status: 'MISSING',
+    });
   });
 
   it('§12 D3 a day never processed: NOT_PROCESSED, no rows, no publication time', async () => {
@@ -140,16 +171,37 @@ describe('OQ-21 positions and the P&L series use the same freshness as the summa
     });
   });
 
-  it('OQ-16 each P&L point carries its freshness', async () => {
+  it('OQ-16 OQ-31 each P&L point carries its status and processing time', async () => {
     const { items } = await portfolioApi.getPnlSeries({
       start_date: '2026-10-14',
       end_date: '2026-10-16',
     });
 
-    expect(items.map((p) => [p.date, p.status])).toEqual([
-      ['2026-10-14', 'FRESH'],
-      ['2026-10-15', 'FRESH'],
-      ['2026-10-16', 'STALE'],
+    expect(items.map((p) => [p.date, p.status, p.published_at])).toEqual([
+      ['2026-10-14', 'PROCESSED', '2026-10-16T18:40:00-03:00'],
+      ['2026-10-15', 'PROCESSED', '2026-10-16T18:40:00-03:00'],
+      ['2026-10-16', 'PROCESSED_WITH_ISSUES', '2026-10-16T18:40:00-03:00'],
+    ]);
+  });
+
+  it('OQ-31 range_cumulative_pnl sums the daily P&L from the start date, null from the first gap', async () => {
+    const fromFifteenth = await portfolioApi.getPnlSeries({
+      start_date: '2026-10-15',
+      end_date: '2026-10-16',
+    });
+    const fromFourteenth = await portfolioApi.getPnlSeries({
+      start_date: '2026-10-14',
+      end_date: '2026-10-16',
+    });
+
+    expect(fromFifteenth.items.map((p) => [p.date, p.range_cumulative_pnl])).toEqual([
+      ['2026-10-15', '-8034.1345282660'],
+      ['2026-10-16', null],
+    ]);
+    expect(fromFourteenth.items.map((p) => [p.date, p.range_cumulative_pnl])).toEqual([
+      ['2026-10-14', '0.0000000000'],
+      ['2026-10-15', '-8034.1345282660'],
+      ['2026-10-16', null],
     ]);
   });
 });
@@ -200,7 +252,11 @@ describe('mock reference prices', () => {
     expect(corrected).not.toHaveProperty('revision');
     expect(day?.sources.filter((p) => p.source === 'MANUAL')).toEqual([corrected]);
     expect((await problemOf(pricesApi.removeReferencePrice(PRICE_IDS.f28_1016))).status).toBe(404);
-    expect(await chainStatus('2026-10-16')).toEqual({ cash: 'FRESH', positions: 'STALE' });
+    // OQ-31: the write changes no status.
+    expect(await chainStatus('2026-10-16')).toEqual({
+      cash: 'PROCESSED',
+      positions: 'PROCESSED_WITH_ISSUES',
+    });
   });
 
   it('§5 removing a price deletes it; the other source then prevails', async () => {
@@ -368,7 +424,7 @@ describe('mock ledger validation', () => {
     expect(problem.errors?.[0]).toMatchObject({ code: 'VALIDATION_ERROR', field: 'cash_amount' });
   });
 
-  it('§10.1 a new trade only marks results stale; it never starts a job', async () => {
+  it('§10.1 OQ-31 a new trade changes no status and never starts a job', async () => {
     const before = (await processingApi.listRequests()).items.length;
 
     await ledgerApi.createEntry({
@@ -377,7 +433,7 @@ describe('mock ledger validation', () => {
       date: '2026-10-15',
     });
 
-    expect(await chainStatus('2026-10-15')).toEqual({ cash: 'STALE', positions: 'STALE' });
+    expect(await chainStatus('2026-10-15')).toEqual({ cash: 'PROCESSED', positions: 'PROCESSED' });
     expect((await processingApi.listRequests()).items).toHaveLength(before);
   });
 
@@ -503,7 +559,7 @@ describe('mock processing', () => {
       'JOB_NOT_CANCELLABLE',
     );
     expect(await poll(job.id)).toMatchObject({ status: 'CANCELLED', progress_date: null });
-    expect((await chainStatus('2026-10-14')).cash).toBe('FRESH');
+    expect((await chainStatus('2026-10-14')).cash).toBe('PROCESSED');
   });
 
   it('§10.2 runs one job at a time: the next stays queued until the active one ends', async () => {
@@ -525,7 +581,7 @@ describe('mock processing', () => {
     expect((await poll(second.id)).status).toBe('DISPATCHED');
   });
 
-  it('OQ-23 a write during a run marks only its chain stale; the run goes on (no SUPERSEDED)', async () => {
+  it('OQ-23 OQ-31 a write during a run changes no status; the run goes on (no SUPERSEDED)', async () => {
     const job = await processingApi.enqueue({
       start_date: '2026-10-14',
       end_date: '2026-10-15',
@@ -543,11 +599,10 @@ describe('mock processing', () => {
     await poll(job.id);
 
     expect((await poll(job.id)).status).toBe('COMPLETED');
-    // A deposit changes only the cash chain (OQ-21).
-    expect(await chainStatus('2026-10-15')).toEqual({ cash: 'STALE', positions: 'FRESH' });
+    expect(await chainStatus('2026-10-15')).toEqual({ cash: 'PROCESSED', positions: 'PROCESSED' });
   });
 
-  it('OQ-11 runs a range whose predecessor is stale and raises STALE_PREDECESSOR', async () => {
+  it('OQ-31 runs a range whose day before was processed with issues', async () => {
     const job = await processingApi.enqueue({
       start_date: '2026-10-17',
       end_date: '2026-10-17',
@@ -556,9 +611,6 @@ describe('mock processing', () => {
     for (let i = 0; i < 3; i += 1) await poll(job.id);
 
     expect((await poll(job.id)).status).toBe('COMPLETED_WITH_ISSUES');
-    expect((await processingApi.listIssues()).items).toContainEqual(
-      expect.objectContaining({ issue_type: 'STALE_PREDECESSOR', affected_date: '2026-10-17' }),
-    );
   });
 
   it('§10.2 refuses to cancel a finished job with JOB_NOT_CANCELLABLE', async () => {
@@ -571,31 +623,10 @@ describe('mock processing', () => {
     expect(problem.errors?.[0]?.code).toBe('JOB_NOT_CANCELLABLE');
   });
 
-  it('§10.2 cancel and replace cancels the active job and queues the new range', async () => {
-    const active = await processingApi.enqueue({
-      start_date: '2026-10-14',
-      end_date: '2026-10-16',
-      scope: 'ALL',
-    });
-
-    const result = await processingApi.cancelAndReplace(active.id, {
-      start_date: '2026-10-14',
-      end_date: '2026-10-18',
-      scope: 'ALL',
-    });
-
-    expect(result.cancelled.status).toBe('CANCELLED');
-    expect(result.replacement).toMatchObject({
-      status: 'QUEUED',
-      start_date: '2026-10-14',
-      end_date: '2026-10-18',
-    });
-  });
-
   it.each([
     ['2026-10-14', 'ZERO_STATE'],
-    ['2026-10-16', 'FRESH'],
-    ['2026-10-17', 'STALE'],
+    ['2026-10-16', 'PROCESSED'],
+    ['2026-10-17', 'PROCESSED_WITH_ISSUES'],
     ['2026-10-18', 'NOT_PROCESSED'],
   ])('OQ-11 OQ-26 previews a range starting %s with predecessor %s', async (start, state) => {
     const preview = await processingApi.preview({
@@ -649,12 +680,11 @@ describe('mock publication (a finished job publishes the precomputed results of 
       .sort();
   }
 
-  it('§10.4 OQ-12 republishes 16/10 with the corrected price and makes it current again', async () => {
+  it('§10.4 OQ-12 republishes 16/10 with the corrected price and a new processing time', async () => {
     expect((await run('2026-10-16', '2026-10-18')).status).toBe('COMPLETED_WITH_ISSUES');
 
     const summary = flat(await portfolioApi.getSummary('2026-10-16'));
     expect(summary).toMatchObject({
-      stale: false,
       cash_balance: '506059.2651460232',
       positions_market_value: null,
       aum: null,
@@ -699,7 +729,6 @@ describe('mock publication (a finished job publishes the precomputed results of 
       await run('2026-10-16', '2026-10-18');
 
       expect(flat(await portfolioApi.getSummary(date))).toMatchObject({
-        stale: false,
         cash_balance: '506059.2651460232',
         positions_market_value: null,
         aum: null,
@@ -737,24 +766,27 @@ describe('mock publication (a finished job publishes the precomputed results of 
       start_date: '2026-10-14',
       end_date: '2026-10-18',
     });
-    expect(items.map((p) => [p.date, p.cumulative_pnl, p.status === 'STALE'])).toEqual([
-      ['2026-10-14', '0.0000000000', false],
-      ['2026-10-15', '-8034.1345282660', false],
-      ['2026-10-16', null, false],
-      ['2026-10-17', null, false],
-      ['2026-10-18', null, false],
+    expect(items.map((p) => [p.date, p.cumulative_pnl, p.status])).toEqual([
+      ['2026-10-14', '0.0000000000', 'PROCESSED'],
+      ['2026-10-15', '-8034.1345282660', 'PROCESSED'],
+      ['2026-10-16', null, 'PROCESSED_WITH_ISSUES'],
+      ['2026-10-17', null, 'PROCESSED_WITH_ISSUES'],
+      ['2026-10-18', null, 'PROCESSED_WITH_ISSUES'],
     ]);
   });
 
-  it('OQ-23 after a stale 16/10, 17–18/10 publish but are written stale', async () => {
+  it('OQ-31 after 16/10 processed with issues, 17–18/10 process and read with issues', async () => {
     expect((await run('2026-10-17', '2026-10-18')).status).toBe('COMPLETED_WITH_ISSUES');
 
     for (const date of ['2026-10-16', '2026-10-17', '2026-10-18']) {
-      expect((await chainStatus(date)).positions).toBe('STALE');
+      expect(await chainStatus(date)).toEqual({
+        cash: 'PROCESSED',
+        positions: 'PROCESSED_WITH_ISSUES',
+      });
     }
   });
 
-  it('OQ-11 a range after an unprocessed day reads as stale until the gap is processed', async () => {
+  it('OQ-31 a range after an unprocessed day fails until the gap is processed', async () => {
     await run('2026-10-16', '2026-10-16');
     expect(
       (
@@ -764,39 +796,37 @@ describe('mock publication (a finished job publishes the precomputed results of 
           scope: 'ALL',
         })
       ).predecessor,
-    ).toEqual({ cash: 'FRESH', positions: 'FRESH_WITH_ISSUES' });
+    ).toEqual({ cash: 'PROCESSED', positions: 'PROCESSED_WITH_ISSUES' });
 
-    // OQ-22: cash after a day with no published cash is refused; positions still run (OQ-11).
+    // 17/10 was never processed: a run starting 18/10 fails on its first day.
     const positionsJob = await processingApi.enqueue({
       start_date: '2026-10-18',
       end_date: '2026-10-18',
       scope: 'POSITIONS',
     });
-    for (let i = 0; i < 10; i += 1) await processingApi.getRequest(positionsJob.id);
+    let failed = positionsJob;
+    for (let i = 0; i < 10; i += 1) failed = await processingApi.getRequest(positionsJob.id);
+    expect(failed).toMatchObject({
+      status: 'FAILED',
+      error_code: 'POSITIONS_PREDECESSOR_MISSING',
+    });
     expect(await chainStatus('2026-10-18')).toEqual({
       cash: 'NOT_PROCESSED',
-      positions: 'STALE',
+      positions: 'FAILED',
     });
-    expect((await processingApi.listIssues()).items).toContainEqual(
-      expect.objectContaining({ issue_type: 'STALE_PREDECESSOR', affected_date: '2026-10-18' }),
-    );
 
     await run('2026-10-17', '2026-10-18');
-    // Current again; 18/10 has no prices, so positions read Atualizado com pendências (OQ-23).
+    // 18/10 has no prices, so positions read Processado com pendências (OQ-23).
     expect(await chainStatus('2026-10-18')).toEqual({
-      cash: 'FRESH',
-      positions: 'FRESH_WITH_ISSUES',
+      cash: 'PROCESSED',
+      positions: 'PROCESSED_WITH_ISSUES',
     });
-    expect((await processingApi.listIssues()).items).not.toContainEqual(
-      expect.objectContaining({ issue_type: 'STALE_PREDECESSOR' }),
-    );
   });
 
   it('§7 publishes the days before the first entry as the zero state', async () => {
     expect((await run('2026-10-10', '2026-10-13')).status).toBe('COMPLETED');
 
     expect(flat(await portfolioApi.getSummary('2026-10-12'))).toMatchObject({
-      stale: false,
       cash_balance: '0',
       positions_market_value: '0',
       aum: '0',
@@ -820,9 +850,9 @@ describe('mock publication (a finished job publishes the precomputed results of 
 
     expect((await run('2026-10-14', '2026-10-16')).status).toBe('COMPLETED_WITH_ISSUES');
     const summary = flat(await portfolioApi.getSummary('2026-10-16'));
-    expect(summary).toMatchObject({ stale: false, trades_pnl: '-592.3681943852' });
+    expect(summary).toMatchObject({ trades_pnl: '-592.3681943852' });
     const rows = published(await portfolioApi.getPositions('2026-10-16')).items;
-    // OQ-25: the republished row keeps the PU it used (the corrected one) and its source.
+    // OQ-30: the row shows the current preferred price (the corrected one) and its source.
     const row = rows.find((r) => r.asset_code === 'DI1F28');
     expect(row).toMatchObject({ reference_source: 'MANUAL', reference_pu: '89250.3147019396' });
     expect(row).not.toHaveProperty('reference_price_id');
@@ -833,7 +863,6 @@ describe('mock publication (a finished job publishes the precomputed results of 
 
     const summary = flat(await portfolioApi.getSummary('2026-10-15'));
     expect(summary).toMatchObject({
-      stale: false,
       cash_balance: '199650.3745326500',
       aum: '1491965.8654717340',
       daily_pnl: '-8034.1345282660',
@@ -846,20 +875,11 @@ describe('mock publication (a finished job publishes the precomputed results of 
   it('§10.3 OQ-26 does not duplicate Pendências: a reprocessed date replaces its issues', async () => {
     await run('2026-10-17', '2026-10-18');
     await run('2026-10-17', '2026-10-18');
-    // OQ-23: each date after a stale one is written stale, with its own issue.
-    const stalePredecessors = (await processingApi.listIssues()).items.filter(
-      (i) => i.issue_type === 'STALE_PREDECESSOR',
-    );
-    expect(stalePredecessors.map((i) => i.affected_date)).toEqual(['2026-10-18', '2026-10-17']);
-
     await run('2026-10-16', '2026-10-18');
     await run('2026-10-16', '2026-10-18');
     await run('2026-10-17', '2026-10-18');
 
     expect(await missingPrices()).toHaveLength(5);
-    expect((await processingApi.listIssues()).items).not.toContainEqual(
-      expect.objectContaining({ issue_type: 'STALE_PREDECESSOR' }),
-    );
   });
 
   it.each<[string, () => Promise<unknown>, string]>([

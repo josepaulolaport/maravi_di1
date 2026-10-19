@@ -15,11 +15,13 @@ import { formatPeriod, formatProgress, shortId } from '../format';
 import type { useProcessingRequests } from '../hooks/useProcessing';
 import { canCancel, canRequestAgain, jobStatusBadge, progressOf } from '../jobStatus';
 
-/** What the user can do with a job, from its row menu or its details modal (OQ-20). */
+/**
+ * What the user can do with a job, from its row menu or its details modal (OQ-20). Cancel and
+ * queue are separate actions: there is no cancel and replace (OQ-30).
+ */
 export interface JobActions {
   onDetails: (job: ProcessingRequest) => void;
   onCancel: (job: ProcessingRequest) => void;
-  onReplace: (job: ProcessingRequest) => void;
   onRequestAgain: (job: ProcessingRequest) => void;
 }
 
@@ -158,23 +160,14 @@ function JobRow({ job, actions }: { job: ProcessingRequest; actions: JobActions 
               Ver detalhes
             </Menu.Item>
             {canCancel(job.status) && (
-              <>
-                <Menu.Item
-                  color="red"
-                  onClick={() => {
-                    actions.onCancel(job);
-                  }}
-                >
-                  Cancelar processamento
-                </Menu.Item>
-                <Menu.Item
-                  onClick={() => {
-                    actions.onReplace(job);
-                  }}
-                >
-                  Cancelar e criar novo processamento
-                </Menu.Item>
-              </>
+              <Menu.Item
+                color="red"
+                onClick={() => {
+                  actions.onCancel(job);
+                }}
+              >
+                Cancelar processamento
+              </Menu.Item>
             )}
             {canRequestAgain(job.status) && (
               <Menu.Item

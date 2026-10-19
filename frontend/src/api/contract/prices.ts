@@ -36,7 +36,7 @@ export interface ReferencePriceDay {
 /**
  * `POST /reference-prices`: records the MANUAL price of an asset and date (201). An existing
  * one for the same asset, date and source is deleted first, so the price gets a new id
- * (OQ-26 item 7); Corrigir works this way. The dependent results go stale (§10.4).
+ * (OQ-26 item 7); Corrigir works this way. No processed result changes (OQ-31).
  */
 export type SetReferencePriceRequest = {
   asset_id: string;

@@ -1,7 +1,6 @@
 import { http, HttpResponse } from 'msw';
 
 import type {
-  CancelAndReplaceResponse,
   FieldError,
   JobStatus,
   Page,
@@ -12,7 +11,7 @@ import type {
   ProcessingScope,
 } from '../../contract';
 import { addDays, daysInclusive } from '../dates';
-import { db, isPublished, newId, setStatus, statusOf } from '../db';
+import { db, newId, setStatus, statusOf } from '../db';
 import type { ChainStatus } from '../db';
 import {
   dayWithoutInputs,
@@ -38,8 +37,8 @@ import {
 const ACTIVE: JobStatus[] = ['DISPATCHED', 'RUNNING', 'CANCELLING'];
 const CANCELLABLE: JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING'];
 const SCOPES: readonly ProcessingScope[] = ['CASH', 'POSITIONS', 'ALL'];
-/** A date written with one of these makes the run end COMPLETED_WITH_ISSUES (OQ-23 item 8). */
-const WITH_ISSUES: readonly ChainStatus[] = ['FRESH_WITH_ISSUES', 'STALE'];
+/** A date written with this makes the run end COMPLETED_WITH_ISSUES (OQ-23 item 8, OQ-31). */
+const WITH_ISSUES: readonly ChainStatus[] = ['PROCESSED_WITH_ISSUES'];
 
 /** The chains a scope processes (OQ-21). */
 export function chainsOf(scope: ProcessingScope): ProcessingChain[] {
@@ -76,21 +75,16 @@ function precomputedDay(date: string): RecalculatedDay {
 
 const formatDateBr = (date: string) => date.split('-').reverse().join('/');
 
-/** The chain an issue belongs to: a missing price and an expired position are facts of positions. */
-function chainOfIssue(issue: (typeof db.issues)[number]): ProcessingChain | null {
-  return issue.issue_type === 'STALE_PREDECESSOR' ? issue.chain : 'POSITIONS';
-}
-
 /** The date a run processes next: the day after its last commit, or its start. */
 const nextDate = (job: ProcessingRequest) =>
   job.progress_date === null ? job.start_date : addDays(job.progress_date, 1);
 
 /**
  * Commits date D of a run, for each chain of its scope, in one step (OQ-23 item 4): publishes
- * D's results, replaces that chain's issues for D (OQ-26 item 5), and sets D's status: FRESH,
- * or FRESH_WITH_ISSUES with a missing price, when D−1 is FRESH, FRESH_WITH_ISSUES or the zero
- * state; otherwise STALE with a STALE_PREDECESSOR issue. Throws for a date the fake cannot
- * compute (its inputs changed since the seed).
+ * D's results (their `published_at` is the chain's processing time, OQ-31), replaces D's
+ * Pendências (OQ-26 item 5; both issue types are facts of positions) and sets D PROCESSED, or
+ * PROCESSED_WITH_ISSUES with a missing price. Throws for a date the fake cannot compute (its
+ * inputs changed since the seed). The predecessor was checked when D started.
  */
 function commitDate(job: ProcessingRequest, date: string): void {
   const chains = chainsOf(job.scope);
@@ -104,23 +98,6 @@ function commitDate(job: ProcessingRequest, date: string): void {
   const publishedAt = now();
   const statuses = db.written.get(job.id) ?? [];
   for (const chain of chains) {
-    const before = predecessorState(date, chain);
-    const current = before === 'ZERO_STATE' || before === 'FRESH' || before === 'FRESH_WITH_ISSUES';
-    db.issues = db.issues.filter(
-      (issue) => !(issue.affected_date === date && chainOfIssue(issue) === chain),
-    );
-    const issue = (fields: Partial<(typeof db.issues)[number]>) =>
-      db.issues.push({
-        id: newId(),
-        issue_type: 'STALE_PREDECESSOR',
-        asset_id: null,
-        asset_code: null,
-        affected_date: date,
-        required_price_date: null,
-        chain: null,
-        request_id: job.id,
-        ...fields,
-      });
     let missing = false;
     if (chain === 'CASH') {
       db.published.cash.set(date, {
@@ -134,20 +111,21 @@ function commitDate(job: ProcessingRequest, date: string): void {
       db.published.summaries.set(date, { ...day.summary, published_at: publishedAt });
       db.published.positions.set(date, { ...day.positions, published_at: publishedAt });
       db.published.pnl.set(date, day.pnl);
+      db.issues = db.issues.filter((issue) => issue.affected_date !== date);
       for (const row of day.positions.items.filter((r) => r.valuation_status === 'MISSING')) {
         missing = true;
-        issue({
+        db.issues.push({
+          id: newId(),
           issue_type: 'MISSING_REFERENCE_PRICE',
           asset_id: row.asset_id,
           asset_code: row.asset_code,
+          affected_date: date,
           required_price_date: date,
+          request_id: job.id,
         });
       }
     }
-    // OQ-11 also asks for null P&L on dates after a stale predecessor. The fake does not
-    // enforce it: in this scenario every such date (17/10 on) already has null P&L.
-    if (!current) issue({ chain });
-    const status: ChainStatus = !current ? 'STALE' : missing ? 'FRESH_WITH_ISSUES' : 'FRESH';
+    const status: ChainStatus = missing ? 'PROCESSED_WITH_ISSUES' : 'PROCESSED';
     setStatus(date, chain, status);
     statuses.push(status);
   }
@@ -162,9 +140,34 @@ class MockCannotCompute extends Error {
   }
 }
 
-/** Marks the next date of a run RUNNING for each chain of its scope (OQ-23 item 4). */
-function startDate(job: ProcessingRequest, date: string): void {
-  for (const chain of chainsOf(job.scope)) setStatus(date, chain, 'RUNNING');
+/**
+ * Starts date D of a run (OQ-23 item 4, OQ-31 item 4): for each chain of its scope, D−1 must be
+ * PROCESSED, PROCESSED_WITH_ISSUES or the chain's zero state. Otherwise nothing is written for
+ * D: each failing chain's D reads Erro, the run ends FAILED with that chain's error code
+ * (POSITIONS_… when both fail, OQ-31 item 7) and later dates are untouched. The fake checks
+ * before marking D RUNNING, so the other chain keeps its status as the backend puts it back.
+ * Returns whether D started.
+ */
+function startDate(job: ProcessingRequest, date: string): boolean {
+  const chains = chainsOf(job.scope);
+  const failing = chains.filter((chain) => {
+    const before = predecessorState(date, chain);
+    return before !== 'ZERO_STATE' && before !== 'PROCESSED' && before !== 'PROCESSED_WITH_ISSUES';
+  });
+  if (failing.length > 0) {
+    for (const chain of failing) setStatus(date, chain, 'FAILED');
+    finish(job, {
+      status: 'FAILED',
+      ...(job.started_at === null ? { started_at: now() } : {}),
+      error_code: failing.includes('POSITIONS')
+        ? 'POSITIONS_PREDECESSOR_MISSING'
+        : 'CASH_PREDECESSOR_MISSING',
+      error_message: 'Dia anterior não processado',
+    });
+    return false;
+  }
+  for (const chain of chains) setStatus(date, chain, 'RUNNING');
+  return true;
 }
 
 function finish(job: ProcessingRequest, fields: Partial<ProcessingRequest>): void {
@@ -186,25 +189,8 @@ function finish(job: ProcessingRequest, fields: Partial<ProcessingRequest>): voi
 function tick(): void {
   const active = db.requests.find((r) => ACTIVE.includes(r.status));
   if (active?.status === 'DISPATCHED') {
-    // OQ-22: cash cannot be carried from a day that has no published cash (with entries on or
-    // before it). Checked when the run starts; queuing it was allowed.
-    const start = active.start_date;
-    const before = addDays(start, -1);
-    const refused =
-      chainsOf(active.scope).includes('CASH') &&
-      !inZeroState(before, 'CASH') &&
-      !isPublished(before, 'CASH');
-    if (refused) {
-      finish(active, {
-        status: 'FAILED',
-        started_at: now(),
-        error_code: 'CASH_PREDECESSOR_MISSING',
-        error_message: `O caixa de ${formatDateBr(before)} não foi processado. Processe antes um intervalo que inclua esse dia. Nenhuma data foi publicada.`,
-      });
-      return;
-    }
+    if (!startDate(active, active.start_date)) return;
     Object.assign(active, { status: 'RUNNING', started_at: now(), updated_at: now() });
-    startDate(active, start);
     return;
   }
   if (active?.status === 'CANCELLING' && active.started_at === null) {
@@ -354,25 +340,6 @@ export const processingHandlers = [
     if (!request) return notFound('Processamento');
     if (!CANCELLABLE.includes(request.status)) return notCancellable();
     return HttpResponse.json(cancel(request));
-  }),
-
-  http.post(url('/processing/requests/:id/cancel-and-replace'), async ({ params, request }) => {
-    await latency();
-    const body = await readJson(request);
-    const errors = requestErrors(body.start_date, body.end_date, body.scope);
-    if (errors.length > 0) return problem(422, errors);
-    const active = db.requests.find((r) => r.id === params.id);
-    if (!active) return notFound('Processamento');
-    if (!CANCELLABLE.includes(active.status)) return notCancellable();
-    const response: CancelAndReplaceResponse = {
-      cancelled: cancel(active),
-      replacement: enqueue(
-        body.start_date as string,
-        body.end_date as string,
-        body.scope as ProcessingScope,
-      ),
-    };
-    return HttpResponse.json(response, { status: 201 });
   }),
 
   http.get(url('/processing/issues'), async () => {

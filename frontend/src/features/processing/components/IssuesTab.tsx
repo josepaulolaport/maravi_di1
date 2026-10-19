@@ -1,13 +1,13 @@
 import { Button, Group, Paper, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
-import { IconAlertTriangle, IconCalendarX, IconHistory } from '@tabler/icons-react';
+import { IconAlertTriangle, IconCalendarX } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { SearchInput } from '@/shared/ui/SearchInput';
 import { Loading } from '@/shared/ui/Loading';
 import type { Issue, IssueType } from '@/api/contract';
-import { assetLinks, controlCenterLinks, ledgerLinks } from '@/app/paths';
-import { UNAVAILABLE, addDays, countLabel, formatDate } from '@/shared/format';
+import { assetLinks, ledgerLinks } from '@/app/paths';
+import { UNAVAILABLE, countLabel, formatDate } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
 import type { useIssues } from '../hooks/useProcessing';
@@ -20,10 +20,6 @@ const ISSUE_TEXT: Record<IssueType, { text: string; icon: ReactNode }> = {
   EXPIRED_OPEN_POSITION: {
     text: 'Contrato vencido com posição aberta',
     icon: <IconCalendarX size={16} stroke={1.5} />,
-  },
-  STALE_PREDECESSOR: {
-    text: 'Estado anterior desatualizado',
-    icon: <IconHistory size={16} stroke={1.5} />,
   },
 };
 
@@ -41,15 +37,6 @@ function issueAction(issue: Issue): { label: string; to: string } | null {
       return issue.asset_code
         ? { label: 'Ver lançamentos', to: ledgerLinks.list({ search: issue.asset_code }) }
         : null;
-    case 'STALE_PREDECESSOR':
-      // A range ending the day before the affected one (OQ-11), for the chain that is behind.
-      return {
-        label: 'Processar intervalo anterior',
-        to: controlCenterLinks.processing({
-          end: addDays(issue.affected_date, -1),
-          ...(issue.chain ? { scope: issue.chain } : {}),
-        }),
-      };
   }
 }
 
@@ -130,12 +117,8 @@ export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
   );
 }
 
-/** STALE_PREDECESSOR says which chain is behind (OQ-21); the other types do not. */
-const CHAIN_SUFFIX = { CASH: ' (caixa)', POSITIONS: ' (posições)' } as const;
-
 function IssueRow({ issue }: { issue: Issue }) {
-  const { icon } = ISSUE_TEXT[issue.issue_type];
-  const text = `${ISSUE_TEXT[issue.issue_type].text}${issue.chain ? CHAIN_SUFFIX[issue.chain] : ''}`;
+  const { icon, text } = ISSUE_TEXT[issue.issue_type];
   const action = issueAction(issue);
   return (
     <Table.Tr>

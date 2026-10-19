@@ -58,7 +58,7 @@ function Money({ value }: { value: Decimal | null }) {
 
 /**
  * The five indicators of §11.4. Cash is a KPI, never a position row (D1), with the day's cash
- * movement under it. No figure carries a freshness badge of its own: the cash and positions
+ * movement under it. No figure carries a status badge of its own: the cash and positions
  * chains do (DataStatus).
  */
 export function KpiGrid({ summary }: { summary: PortfolioSummary }) {

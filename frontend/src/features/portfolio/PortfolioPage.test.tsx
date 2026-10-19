@@ -23,10 +23,14 @@ function dataStatus() {
   return group.getAllByText(/^(Caixa|Posições): /).map((badge) => badge.textContent);
 }
 
-/** No KPI carries a status badge of its own; freshness belongs to the chains. */
+/** No KPI carries a status badge of its own; the status belongs to the chains. */
 function expectNoKpiBadge() {
   for (const label of KPIS) {
-    expect(kpi(label).queryByText(/Desatualizado|Não processado|Atualizado/)).toBeNull();
+    expect(
+      kpi(label).queryByText(
+        /^(Processado|Processado com pendências|Processando|Erro|Não processado)$/,
+      ),
+    ).toBeNull();
   }
 }
 
@@ -68,7 +72,7 @@ function override15(changes: SummaryChanges, positionsChanges: Partial<Portfolio
       return HttpResponse.json(body);
     }),
     http.get(url('/portfolio/positions'), () =>
-      HttpResponse.json({ ...rows, status: 'FRESH', ...positionsChanges }),
+      HttpResponse.json({ ...rows, status: 'PROCESSED', ...positionsChanges }),
     ),
   );
 }
@@ -108,7 +112,7 @@ describe('Carteira (§11.4)', () => {
     expect(kpi('P&L diário').getByText('-R$ 8.034,13')).toBeInTheDocument();
     expect(kpi('P&L posições').getByText('+R$ 1.220,20')).toBeInTheDocument();
     expect(kpi('P&L operações').getByText('-R$ 9.254,33')).toBeInTheDocument();
-    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Atualizado']);
+    expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Processado']);
     expectNoKpiBadge();
     expectNoCard();
   });
@@ -189,26 +193,42 @@ describe('Carteira (§11.4)', () => {
     expect(rowOf('DI1F29').getByText('Sem preço')).toBeInTheDocument();
   });
 
-  it('§10.4 OQ-21 a corrected price: only the Posições badge says it', async () => {
+  it('OQ-31 a price corrected after processing changes no badge', async () => {
     await openCarteira('2026-10-16');
 
     expectNoCard();
-    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Desatualizado']);
+    expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Processado com pendências']);
     expectNoKpiBadge();
   });
 
-  it('§11.4 OQ-21 stale cash shows on the Caixa badge; positions stay current', async () => {
-    override15({ cash: { status: 'STALE' } });
+  it('OQ-31 each badge shows when its chain was processed, in Brasília time', async () => {
+    override15({ cash: { published_at: '2026-10-18T12:05:00-03:00' } });
     await openCarteira('2026-10-15');
 
-    expectNoCard();
-    expect(dataStatus()).toEqual(['Caixa: Desatualizado', 'Posições: Atualizado']);
-    expectNoKpiBadge();
+    const status = within(screen.getByRole('group', { name: 'Situação dos dados' }));
+    expect(status.getAllByText(/^Processado em /).map((time) => time.textContent)).toEqual([
+      'Processado em 18/10/2026 12:05',
+      'Processado em 16/10/2026 18:40',
+    ]);
+  });
+
+  it('OQ-30 a position shows the current reference price, even one corrected after processing', async () => {
+    await openCarteira('2026-10-16');
+
+    const row = rowOf('DI1F28');
+    expect(row.getByText('89.250,31')).toBeInTheDocument();
+    expect(row.getByText('9,80%')).toBeInTheDocument();
+    // The market value is the processed one (89.200,90 × 6).
+    expect(row.getByText('R$ 535.205,41')).toBeInTheDocument();
   });
 
   it.each([
     ['RUNNING', 'FAILED', ['Caixa: Processando', 'Posições: Erro']],
-    ['FRESH', 'FRESH_WITH_ISSUES', ['Caixa: Atualizado', 'Posições: Atualizado com pendências']],
+    [
+      'PROCESSED',
+      'PROCESSED_WITH_ISSUES',
+      ['Caixa: Processado', 'Posições: Processado com pendências'],
+    ],
   ] as const)(
     "OQ-23 each badge shows the date's chain status (cash %s, positions %s)",
     async (cash, positions, badges) => {
@@ -233,12 +253,12 @@ describe('Carteira (§11.4)', () => {
       }),
     );
     await openCarteira('2026-10-15');
-    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Processando']);
+    expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Processando']);
 
     // Polled every 2 s while a chain is RUNNING (§12); the wait allows one poll under load.
     await waitFor(
       () => {
-        expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Atualizado']);
+        expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Processado']);
       },
       { timeout: 5_000 },
     );
@@ -264,7 +284,12 @@ describe('Carteira (§11.4)', () => {
         const body: PortfolioPositions =
           positionsReads === 1
             ? { date: '2026-10-15', status: 'RUNNING', published_at: null, items: [] }
-            : { date: '2026-10-15', status: 'FRESH', published_at: null, items: rows?.items ?? [] };
+            : {
+                date: '2026-10-15',
+                status: 'PROCESSED',
+                published_at: null,
+                items: rows?.items ?? [],
+              };
         return HttpResponse.json(body);
       }),
     );
@@ -276,15 +301,16 @@ describe('Carteira (§11.4)', () => {
     expect(positionsReads).toBeGreaterThanOrEqual(2);
   });
 
-  it("§11.4 a stale chain's badge leads to Processamentos for that date and chain", async () => {
-    await openCarteira('2026-10-16');
+  it("§11.4 a failed chain's badge leads to Processamentos for that date and chain", async () => {
+    override15({ positions: { status: 'FAILED' } });
+    await openCarteira('2026-10-15');
 
     const status = within(screen.getByRole('group', { name: 'Situação dos dados' }));
     expect(
-      status.getByRole('link', { name: 'Posições: Desatualizado. Ir para Processamentos' }),
+      status.getByRole('link', { name: 'Posições: Erro. Ir para Processamentos' }),
     ).toHaveAttribute(
       'href',
-      '/central-de-controle?tab=processamentos&inicio=2026-10-16&fim=2026-10-16&escopo=posicoes',
+      '/central-de-controle?tab=processamentos&inicio=2026-10-15&fim=2026-10-15&escopo=posicoes',
     );
     // A current chain needs nothing: its badge is no link.
     expect(status.queryByRole('link', { name: /^Caixa/ })).not.toBeInTheDocument();
@@ -302,23 +328,23 @@ describe('Carteira (§11.4)', () => {
   });
 
   it('§11.4 a badge with issues leads to Pendências', async () => {
-    override15({ positions: { status: 'FRESH_WITH_ISSUES' } });
+    override15({ positions: { status: 'PROCESSED_WITH_ISSUES' } });
     await openCarteira('2026-10-15');
 
     expect(
-      screen.getByRole('link', { name: 'Posições: Atualizado com pendências. Ver pendências' }),
+      screen.getByRole('link', { name: 'Posições: Processado com pendências. Ver pendências' }),
     ).toHaveAttribute('href', '/central-de-controle?tab=pendencias');
   });
 
-  it('§11.4 OQ-21 both chains stale: both badges say so, no card', async () => {
+  it('§11.4 OQ-21 both chains failed: both badges say so, no card', async () => {
     override15({
-      cash: { status: 'STALE' },
-      positions: { status: 'STALE' },
+      cash: { status: 'FAILED' },
+      positions: { status: 'FAILED' },
     });
     await openCarteira('2026-10-15');
 
     expectNoCard();
-    expect(dataStatus()).toEqual(['Caixa: Desatualizado', 'Posições: Desatualizado']);
+    expect(dataStatus()).toEqual(['Caixa: Erro', 'Posições: Erro']);
   });
 
   it('§11.4 OQ-21 cash processed but positions not: cash shows, AUM and positions do not', async () => {
@@ -344,7 +370,7 @@ describe('Carteira (§11.4)', () => {
     expectNoCard();
     expect(kpi('Saldo em caixa').getByText('R$ 199.650,37')).toBeInTheDocument();
     expect(kpi('Patrimônio total').getByText('—')).toBeInTheDocument();
-    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Não processado']);
+    expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Não processado']);
     expectNoKpiBadge();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
@@ -555,13 +581,6 @@ describe('Carteira (§11.4)', () => {
       );
     });
     expect(router.state.location.search).toBe(`?date=${todayInSaoPaulo()}`);
-  });
-  it('§10.4 a stale but complete day: the Posições badge only', async () => {
-    override15({ positions: { status: 'STALE' } }, { status: 'STALE' });
-    await openCarteira('2026-10-15');
-
-    expectNoCard();
-    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Desatualizado']);
   });
 
   it('§8.3 P&L missing: no card, the asset is marked', async () => {

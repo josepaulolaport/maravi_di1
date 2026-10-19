@@ -1,5 +1,5 @@
 import type { IsoDate, IsoDateTime } from './common';
-import type { Freshness } from './portfolio';
+import type { DateStatus } from './portfolio';
 
 // Processing (spec §10, schema `processing.*`). Central de Controle (§11.1, OQ-20).
 
@@ -60,13 +60,12 @@ export interface ProcessingRangeRequest {
 }
 
 /**
- * The day before the range, per chain (OQ-11, OQ-26 item 8): its chain status (`Freshness`),
- * or ZERO_STATE when the chain has nothing before it (positions: no trade; cash: no entry of
- * either type). Unless it is FRESH, FRESH_WITH_ISSUES or ZERO_STATE, the run's dates are
- * written STALE with a STALE_PREDECESSOR issue; a cash day never processed refuses a CASH or
- * ALL run when it starts (OQ-22).
+ * The day before the range, per chain (OQ-26, OQ-31): its date status, or ZERO_STATE when the
+ * chain has nothing before it (positions: no trade; cash: no entry of either type). Unless it
+ * is PROCESSED, PROCESSED_WITH_ISSUES or ZERO_STATE, the run fails on its first date with
+ * CASH_PREDECESSOR_MISSING or POSITIONS_PREDECESSOR_MISSING ("Dia anterior não processado").
  */
-export type PredecessorState = Freshness | 'ZERO_STATE';
+export type PredecessorState = DateStatus | 'ZERO_STATE';
 
 /** Proposal: `GET /processing/preview?start_date&end_date` (`ProcessingService.preview_range`). */
 export interface ProcessingPreview {
@@ -79,17 +78,12 @@ export interface ProcessingPreview {
   predecessor: { cash: PredecessorState; positions: PredecessorState };
 }
 
-/** `POST /processing/requests/{id}/cancel-and-replace` (§10.2). */
-export interface CancelAndReplaceResponse {
-  cancelled: ProcessingRequest;
-  replacement: ProcessingRequest;
-}
-
-export type IssueType = 'MISSING_REFERENCE_PRICE' | 'EXPIRED_OPEN_POSITION' | 'STALE_PREDECESSOR';
+/** Pendências (OQ-31 item 5): the predecessor case is an error on the run, not an issue. */
+export type IssueType = 'MISSING_REFERENCE_PRICE' | 'EXPIRED_OPEN_POSITION';
 
 /**
  * Proposal: `GET /processing/issues` — the current, deduplicated Pendências (§10.3): the issues
- * of the latest publication covering each date. Exactly three types (OQ-19 item 2).
+ * of the latest processing of each date (OQ-26 item 5). Two types (OQ-31 item 5).
  */
 export interface Issue {
   id: string;
@@ -99,7 +93,5 @@ export interface Issue {
   affected_date: IsoDate;
   /** For MISSING_REFERENCE_PRICE: the exact date whose price is needed ("Definir preço"). */
   required_price_date: IsoDate | null;
-  /** For STALE_PREDECESSOR, the chain whose day before is not current; else `null` (OQ-22). */
-  chain: ProcessingChain | null;
   request_id: string;
 }

@@ -1,5 +1,4 @@
 import type {
-  CancelAndReplaceResponse,
   CreateInstrumentRequest,
   CreateLedgerEntryRequest,
   DeleteLedgerEntriesRequest,
@@ -103,11 +102,6 @@ export const processingApi = {
     http.post<ProcessingRequest>('/processing/requests', body),
   cancel: (requestId: string) =>
     http.post<ProcessingRequest>(`/processing/requests/${id(requestId)}/cancel`),
-  cancelAndReplace: (requestId: string, body: ProcessingRangeRequest) =>
-    http.post<CancelAndReplaceResponse>(
-      `/processing/requests/${id(requestId)}/cancel-and-replace`,
-      body,
-    ),
   listIssues: (signal?: AbortSignal) =>
     http.get<ListResponse<Issue>>('/processing/issues', abortable(signal)),
 };

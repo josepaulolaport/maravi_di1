@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 
-import type { JobStatus, ProcessingRangeRequest } from '@/api/contract';
+import type { JobStatus } from '@/api/contract';
 import { processingApi } from '@/api/endpoints';
 import { invalidateAfterJobFinished, queryRoots } from '@/api/queryRoots';
 
@@ -87,11 +87,4 @@ function useProcessingMutation<TVariables, TData>(fn: (variables: TVariables) =>
 
 export function useCancel() {
   return useProcessingMutation((requestId: string) => processingApi.cancel(requestId));
-}
-
-export function useCancelAndReplace() {
-  return useProcessingMutation(
-    ({ requestId, range }: { requestId: string; range: ProcessingRangeRequest }) =>
-      processingApi.cancelAndReplace(requestId, range),
-  );
 }

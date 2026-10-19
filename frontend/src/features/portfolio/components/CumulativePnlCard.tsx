@@ -111,8 +111,8 @@ export function CumulativePnlCard({
           </Text>
         ))}
       <Text size="xs" c="dimmed" mt="xs">
-        Somente dias processados com P&L completo e atual. Lacunas indicam dias sem resultado
-        válido.
+        P&L somado desde o início escolhido, somente com dias processados e completos. A partir de
+        uma lacuna, o acumulado do período fica indisponível.
       </Text>
     </Paper>
   );
