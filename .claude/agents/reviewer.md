@@ -32,13 +32,13 @@ You review one lane branch in a fresh context. You never edit files.
 4. **Atomicity:**
    - each write saves only its fact, in one UoW, with no invalidation (OQ-31);
    - each date's published rows (`positions`, `position_metrics`, `portfolio_metrics`, `cash_balances`), its AUM, its `date_status` and `progress_date` are written in that date's one transaction (OQ-23);
-   - the claim-token check and the D−1/D `date_status` row locks happen in that transaction.
+   - the D−1/D `date_status` row locks happen in that transaction (no claim-token check: one worker, OQ-45).
 5. **Concurrency:**
    - one active job;
    - overlapping queued jobs;
    - cooperative cancellation;
    - writes during a run, failure at a date and cancellation, which leave later dates untouched (OQ-23);
-   - duplicate delivery, crash recovery and lease fencing.
+   - duplicate delivery and crash recovery at worker start (one worker, no lease or fencing, OQ-45).
 6. **Interface hygiene:**
    - cross-module access only through `public.py`;
    - no ORM type across modules;

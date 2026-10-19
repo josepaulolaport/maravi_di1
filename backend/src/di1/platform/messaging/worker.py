@@ -44,6 +44,11 @@ class ConsumerRegistration:
 
 type ConsumerFactory = Callable[[WorkerResources], Sequence[ConsumerRegistration]]
 
+type StartupHook = Callable[[WorkerResources], Awaitable[None]]
+"""Work the worker awaits once at startup, before it consumes: Processing's recovery (a run
+left RUNNING resumes after its ``progress_date``). There is one worker, so nothing else runs
+meanwhile."""
+
 type DispatchTick = Callable[[], Awaitable[object | None]]
 """One dispatch attempt: what it dispatched, or `None` when there was nothing to dispatch."""
 

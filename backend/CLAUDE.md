@@ -88,7 +88,7 @@ Create only the files and packages that are used. Initially only Processing has 
   - modules use only the outbox, inbox and envelope parts of `platform.messaging`, and `presentation/messaging/` may also use its consumer base. aio-pika appears only in `platform/` and `workers/`;
   - no dynamic imports. Every file sits in the plan §1 layout: `infrastructure/` may hold any adapter, and `presentation/` holds `http/` and `messaging/`.
 - API tests use FastAPI's `TestClient`, which needs `httpx2`. Async tests run under pytest-asyncio in `auto` mode; do not use the `anyio` marker.
-- Time-based behaviour (leases, queue order) uses an injected clock, never the wall clock.
+- Time-based behaviour (queue order, today's date) uses an injected clock, never the wall clock.
 
 ## Commands (from `backend/`)
 
