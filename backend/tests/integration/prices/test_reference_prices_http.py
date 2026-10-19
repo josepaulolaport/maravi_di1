@@ -182,6 +182,30 @@ class TestList:
 
         assert (response.status_code, response.json()) == (200, {"items": []})
 
+    def test_a_range_ending_after_today_is_accepted_and_future_days_are_empty(
+        self, api: Api
+    ) -> None:
+        # GAP-D-1 (user, 2026-10-19): reads accept dates after today (19/10) and return no
+        # day for them; only writes are refused after today.
+        response = api.client.get(
+            "/reference-prices",
+            params={"asset_id": str(DI1F28), "start_date": "2026-10-15", "end_date": "2026-11-30"},
+        )
+
+        assert response.status_code == 200
+        assert [item["reference_date"] for item in response.json()["items"]] == [
+            "2026-10-16",
+            "2026-10-15",
+        ]
+
+    def test_a_range_entirely_after_today_is_empty(self, api: Api) -> None:
+        response = api.client.get(
+            "/reference-prices",
+            params={"asset_id": str(DI1F28), "start_date": "2026-10-20", "end_date": "2026-12-31"},
+        )
+
+        assert (response.status_code, response.json()) == (200, {"items": []})
+
     def test_an_unknown_asset_and_an_inverted_range_are_422(self, api: Api) -> None:
         response = api.client.get(
             "/reference-prices",
