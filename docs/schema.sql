@@ -206,13 +206,13 @@ CREATE TABLE portfolio.positions (
 );
 CREATE INDEX positions_date_idx ON portfolio.positions (position_date, asset_id);
 
+-- The reference PU, rate and source of a date live only in prices.reference_prices; a published
+-- day keeps its computed financial_total and P&L, and reads stale after a price change (OQ-30).
 CREATE TABLE portfolio.position_metrics (
     asset_id UUID NOT NULL,
     metric_date DATE NOT NULL,
     average_entry_pu NUMERIC,
     average_entry_rate NUMERIC,
-    reference_pu NUMERIC,
-    reference_source VARCHAR(16),      -- MANUAL | B3 of the PU used; NULL with no price or after maturity (OQ-25)
     financial_total NUMERIC,
     position_pnl NUMERIC,
     trades_pnl NUMERIC,
@@ -224,9 +224,6 @@ CREATE TABLE portfolio.position_metrics (
     FOREIGN KEY (asset_id, metric_date) REFERENCES portfolio.positions(asset_id, position_date) ON DELETE CASCADE,
     CONSTRAINT position_metrics_average_pu_positive CHECK (average_entry_pu IS NULL OR average_entry_pu > 0),
     CONSTRAINT position_metrics_average_rate_valid CHECK (average_entry_rate IS NULL OR average_entry_rate > -1),
-    -- >= 0: after maturity the reference PU is 0 by definition (OQ-1); otherwise it comes from a price > 0
-    CONSTRAINT position_metrics_reference_nonnegative CHECK (reference_pu IS NULL OR reference_pu >= 0),
-    CONSTRAINT position_metrics_reference_source_check CHECK (reference_source IS NULL OR (reference_source IN ('MANUAL','B3') AND reference_pu IS NOT NULL)),
     CONSTRAINT position_metrics_valuation_status CHECK (valuation_status IN ('COMPLETE','MISSING','NOT_REQUIRED')),
     CONSTRAINT position_metrics_pnl_status CHECK (pnl_status IN ('COMPLETE','MISSING')),
     CONSTRAINT position_metrics_daily_pnl_parts CHECK (daily_pnl IS NULL OR (position_pnl IS NOT NULL AND trades_pnl IS NOT NULL AND daily_pnl = position_pnl + trades_pnl)),
