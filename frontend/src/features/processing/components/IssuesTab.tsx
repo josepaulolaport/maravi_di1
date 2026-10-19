@@ -1,8 +1,9 @@
-import { Button, Group, Paper, Stack, Table, Text, TextInput, VisuallyHidden } from '@mantine/core';
-import { IconAlertTriangle, IconCalendarX, IconHistory, IconSearch } from '@tabler/icons-react';
+import { Button, Group, Paper, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
+import { IconAlertTriangle, IconCalendarX, IconHistory } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
+import { SearchInput } from '@/shared/ui/SearchInput';
 import { Loading } from '@/shared/ui/Loading';
 import type { Issue, IssueType } from '@/api/contract';
 import { assetLinks, controlCenterLinks, ledgerLinks } from '@/app/paths';
@@ -87,14 +88,11 @@ export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
   return (
     <Paper p="md">
       <Stack gap="md">
-        <TextInput
-          aria-label="Buscar pendência"
+        <SearchInput
+          label="Buscar pendência"
           placeholder="Buscar ativo ou data..."
-          leftSection={<IconSearch size={16} stroke={1.5} />}
           value={search}
-          onChange={(event) => {
-            onSearchChange(event.currentTarget.value);
-          }}
+          onChange={onSearchChange}
           maw={360}
         />
         <Table.ScrollContainer minWidth={640}>

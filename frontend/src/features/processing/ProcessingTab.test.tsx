@@ -489,7 +489,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     expect(search).toHaveAttribute('placeholder', 'Buscar processamento...');
     await user.type(search, 'falhou');
 
-    expect(screen.getByText('1 processamento encontrado')).toBeInTheDocument();
+    expect(await screen.findByText('1 processamento encontrado')).toBeInTheDocument();
     expect(history().queryByText('Concluído')).not.toBeInTheDocument();
   });
 

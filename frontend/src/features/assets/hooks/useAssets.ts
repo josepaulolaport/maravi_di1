@@ -1,6 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
-import { NavigationType, useNavigationType, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
 
 import type { CreateInstrumentRequest } from '@/api/contract';
 import { assetsApi } from '@/api/endpoints';
@@ -62,24 +61,12 @@ export function useCreateInstrument() {
 }
 
 /**
- * A text search kept in the URL (`?busca=`), so a filtered view can be linked and reloaded.
- * Returns the typed text (local state, so typing is never slowed by navigation) and the
- * search in the URL, which the queries use.
+ * The catalogue's search (`?busca=`): the value the queries use, and its setter, a REPLACE
+ * navigation so a search is not a history entry. The box is `SearchInput`.
  */
-export function useSearchParam(): [string, (value: string) => void, string] {
+export function useSearchParam(): [string, (value: string) => void] {
   const [params, setParams] = useSearchParams();
-  const search = params.get('busca') ?? '';
-  const [text, setText] = useState(search);
-  // The box follows the URL when navigation changes it (Back, a link). Our own updates while
-  // typing are REPLACE navigations and may lag behind the text, so they never overwrite it.
-  const navigationType = useNavigationType();
-  const [seen, setSeen] = useState(search);
-  if (seen !== search) {
-    setSeen(search);
-    if (navigationType !== NavigationType.Replace) setText(search);
-  }
   const setSearch = (value: string) => {
-    setText(value);
     setParams(
       (current) => {
         if (value) current.set('busca', value);
@@ -89,5 +76,5 @@ export function useSearchParam(): [string, (value: string) => void, string] {
       { replace: true },
     );
   };
-  return [text, setSearch, search];
+  return [params.get('busca') ?? '', setSearch];
 }

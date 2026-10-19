@@ -1,10 +1,10 @@
-import { Button, Group, List, Paper, Stack, Text, TextInput } from '@mantine/core';
+import { Button, Group, List, Paper, Stack, Text } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
-import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconCalendar, IconPlayerPlay, IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
-import { useEffect, useMemo, useState } from 'react';
+import { IconCalendar, IconPlayerPlay, IconPlus, IconTrash } from '@tabler/icons-react';
+import { useMemo, useState } from 'react';
 
+import { SearchInput } from '@/shared/ui/SearchInput';
 import { useInstrumentTypes } from '@/shared/queries';
 import { Loading } from '@/shared/ui/Loading';
 import type { IsoDate } from '@/api/contract';
@@ -20,7 +20,7 @@ import { LoadMore } from '@/shared/ui/LoadMore';
 import { CashStrip } from './components/CashStrip';
 import { EntriesTable, entryLabel } from './components/EntriesTable';
 import { NewEntryModal } from './components/NewEntryModal';
-import { type LedgerEntry, type SortDirection, toRow } from './entries';
+import { type LedgerEntry, toRow } from './entries';
 import {
   useDeleteEntries,
   useEntries,
@@ -30,8 +30,6 @@ import {
 import { processCashDraft, processDraft } from './processingDraft';
 
 type DeleteTarget = { mode: 'one'; entry: LedgerEntry } | { mode: 'many'; entries: LedgerEntry[] };
-
-const SEARCH_DEBOUNCE_MS = 300;
 
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
@@ -49,7 +47,7 @@ const entriesLabel = (n: number, more: boolean) =>
 export function LedgerPage() {
   const filters = useLedgerFilters();
   const { start, end, search, today } = filters;
-  const [sort, setSort] = useState<SortDirection>('desc');
+  const { order: sort } = filters;
   const list = useEntries(start, end, search, sort);
   const instrumentTypes = useInstrumentTypes();
   const saving = useIsSavingEntry();
@@ -105,7 +103,10 @@ export function LedgerPage() {
               filters.setRange(nextStart, nextEnd);
             }}
           />
-          <SearchBox
+          <SearchInput
+            label="Buscar"
+            placeholder="Buscar ativo ou lançamento..."
+            w={300}
             value={search}
             onChange={(next) => {
               filters.setSearch(next);
@@ -171,7 +172,7 @@ export function LedgerPage() {
             instrumentTypeNames={typeNames}
             sort={sort}
             onToggleSort={() => {
-              setSort((current) => (current === 'desc' ? 'asc' : 'desc'));
+              filters.setOrder(sort === 'desc' ? 'asc' : 'desc');
             }}
             selected={visibleSelection}
             onToggle={toggle}
@@ -264,39 +265,6 @@ function RangePicker({
  * The search box follows the URL (`busca`): typing is debounced into it, and a change from
  * outside (a link, the sidebar) replaces what was typed instead of being overwritten by it.
  */
-function SearchBox({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const [text, setText] = useState(value);
-  const [seen, setSeen] = useState(value);
-  // Whether the box holds the user's own typing (not yet in the URL, or already pushed).
-  const [typing, setTyping] = useState(false);
-  if (value !== seen) {
-    setSeen(value);
-    if (value !== text.trim()) {
-      setText(value);
-      setTyping(false);
-    }
-  }
-  const [debounced] = useDebouncedValue(text, SEARCH_DEBOUNCE_MS);
-  // Push only the user's typing once it has settled, so a stale debounced value is never
-  // written back over a change from outside.
-  useEffect(() => {
-    if (typing && debounced === text && debounced.trim() !== value) onChange(debounced);
-  }, [typing, debounced, text, value, onChange]);
-  return (
-    <TextInput
-      aria-label="Buscar"
-      placeholder="Buscar ativo ou lançamento..."
-      leftSection={<IconSearch size={16} stroke={1.5} />}
-      value={text}
-      onChange={(event) => {
-        setText(event.currentTarget.value);
-        setTyping(true);
-      }}
-      w={300}
-    />
-  );
-}
-
 function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClose: () => void }) {
   // One request for one entry or many, of either type (`POST /ledger/entries/deletions`).
   const mutation = useDeleteEntries();

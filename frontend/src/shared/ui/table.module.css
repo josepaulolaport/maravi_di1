@@ -1,0 +1,4 @@
+/* Cells whose content must stay on one line (dates with time, signed money, sortable headers). */
+.nowrap {
+  white-space: nowrap;
+}

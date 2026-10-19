@@ -46,7 +46,3 @@ export function splitProblem(
   }
   return { fields, page };
 }
-
-/** A field map where the form's field names are the API's. */
-export const sameFields = (fields: readonly string[]): Record<string, string> =>
-  Object.fromEntries(fields.map((field) => [field, field]));

@@ -1,7 +1,7 @@
 import type { FieldError } from '@/api/contract';
 import { ApiError } from '@/api/http';
 
-import { problemMessages, sameFields, splitProblem } from './problemMessages';
+import { problemMessages, splitProblem } from './problemMessages';
 
 const problem = (errors: FieldError[]) =>
   new ApiError({
@@ -71,7 +71,7 @@ describe('splitProblem (forms, OQ-15)', () => {
         { field: 'source', message: 'Fonte inválida.' },
         { field: 'source', message: 'Fonte desconhecida.' },
       ]),
-      sameFields(['pu']),
+      { pu: 'pu' },
     );
 
     expect(result.fields).toEqual({
@@ -86,7 +86,7 @@ describe('splitProblem (forms, OQ-15)', () => {
         { field: 'source', message: 'Fonte inválida.' },
         { field: null, message: 'Erro geral.' },
       ]),
-      sameFields(['pu']),
+      { pu: 'pu' },
     );
 
     expect(result.page).toEqual(['Fonte inválida.', 'Erro geral.']);

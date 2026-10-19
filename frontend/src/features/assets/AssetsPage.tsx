@@ -1,7 +1,7 @@
-import { Paper, Stack, Tabs, Text, TextInput, Title } from '@mantine/core';
-import { IconSearch } from '@tabler/icons-react';
+import { Paper, Stack, Tabs, Text, Title } from '@mantine/core';
 import { useSearchParams } from 'react-router';
 
+import { SearchInput } from '@/shared/ui/SearchInput';
 import { useInstrumentTypes } from '@/shared/queries';
 import { Loading } from '@/shared/ui/Loading';
 import { ErrorState } from '@/shared/ui/ErrorState';
@@ -17,7 +17,7 @@ import { useProducts, useSearchParam } from './hooks/useAssets';
 export function AssetsPage() {
   const types = useInstrumentTypes();
   const [params, setParams] = useSearchParams();
-  const [text, setSearch, search] = useSearchParam();
+  const [search, setSearch] = useSearchParam();
 
   const items = types.data?.items ?? [];
   const requested = params.get('tipo');
@@ -61,14 +61,11 @@ export function AssetsPage() {
             <Tabs.Panel key={type.code} value={type.code} pt="md">
               {type.code === selected && (
                 <Paper>
-                  <TextInput
-                    aria-label="Buscar produtos"
+                  <SearchInput
+                    label="Buscar produtos"
                     placeholder="Buscar por código, produto ou classe..."
-                    leftSection={<IconSearch size={16} stroke={1.5} />}
-                    value={text}
-                    onChange={(event) => {
-                      setSearch(event.currentTarget.value);
-                    }}
+                    value={search}
+                    onChange={setSearch}
                     m="md"
                   />
                   {products.isError ? (

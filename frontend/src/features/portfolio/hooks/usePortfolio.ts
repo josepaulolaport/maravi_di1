@@ -7,6 +7,8 @@ import { portfolioApi } from '@/api/endpoints';
 import { queryRoots } from '@/api/queryRoots';
 import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
 
+import { DEFAULT_SORT, SORT_KEYS, type Sort, type SortKey } from '../components/sortPositions';
+
 const portfolioKeys = {
   all: queryRoots.portfolio,
   positions: (date: IsoDate) => [...portfolioKeys.all, 'positions', date] as const,
@@ -98,4 +100,40 @@ export function useEvaluationDate(): [IsoDate, (date: IsoDate) => void, IsoDate]
     );
   };
   return [date, setDate, today];
+}
+
+/**
+ * The positions table's search and order, in the URL (`?busca=`, `?ordem=`), so a view of
+ * Carteira can be linked and reloaded. `ordem` is a column key, prefixed with `-` for
+ * descending; an unknown one is the default order.
+ */
+export function usePositionsView() {
+  const [params, setParams] = useSearchParams();
+  const search = params.get('busca') ?? '';
+  const raw = params.get('ordem') ?? '';
+  const key = raw.replace(/^-/, '');
+  const sort: Sort = SORT_KEYS.includes(key as SortKey)
+    ? { key: key as SortKey, direction: raw.startsWith('-') ? 'desc' : 'asc' }
+    : DEFAULT_SORT;
+  const update = (name: string, value: string) => {
+    setParams(
+      (current) => {
+        if (value) current.set(name, value);
+        else current.delete(name);
+        return current;
+      },
+      { replace: true },
+    );
+  };
+  return {
+    search,
+    setSearch: (value: string) => {
+      update('busca', value);
+    },
+    sort,
+    setSort: (next: Sort) => {
+      const isDefault = next.key === DEFAULT_SORT.key && next.direction === DEFAULT_SORT.direction;
+      update('ordem', isDefault ? '' : `${next.direction === 'desc' ? '-' : ''}${next.key}`);
+    },
+  };
 }

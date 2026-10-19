@@ -183,12 +183,14 @@ describe('Pendências (§11.1, §10.3)', () => {
     const search = screen.getByRole('textbox', { name: 'Buscar pendência' });
     expect(search).toHaveAttribute('placeholder', 'Buscar ativo ou data...');
     await user.type(search, 'f28');
-    expect(screen.queryByText('DI1F29')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText('DI1F29')).not.toBeInTheDocument();
+    });
     expect(screen.getByText('DI1F28')).toBeInTheDocument();
 
     await user.clear(search);
     await user.type(search, '16/10');
-    expect(screen.getByText('DI1F29')).toBeInTheDocument();
+    expect(await screen.findByText('DI1F29')).toBeInTheDocument();
     expect(screen.queryByText('DI1F28')).not.toBeInTheDocument();
     expect(screen.getByText('1 pendência encontrada')).toBeInTheDocument();
   });

@@ -31,13 +31,16 @@ interface LedgerFilters {
   end: IsoDate;
   search: string;
   today: IsoDate;
+  /** Newest first by default; `?ordem=asc` for the oldest first. */
+  order: LedgerOrder;
   setRange: (start: IsoDate, end: IsoDate) => void;
   setSearch: (search: string) => void;
+  setOrder: (order: LedgerOrder) => void;
 }
 
 /**
- * The inclusive range and the search live in the URL (`?inicio=&fim=&busca=`, `ledgerLinks`),
- * so a filtered view can be linked. A missing, invalid or future end is today; a missing or
+ * The inclusive range, the search and the order live in the URL (`?inicio=&fim=&busca=&ordem=`,
+ * `ledgerLinks`), so a filtered view can be linked. A missing, invalid or future end is today; a missing or
  * invalid start, or one after the end, is the end's 30-day window.
  */
 export function useLedgerFilters(): LedgerFilters {
@@ -51,6 +54,7 @@ export function useLedgerFilters(): LedgerFilters {
       ? requestedStart
       : addDays(end, -(DEFAULT_RANGE_DAYS - 1));
   const search = params.get('busca') ?? '';
+  const order: LedgerOrder = params.get('ordem') === 'asc' ? 'asc' : 'desc';
 
   const update = (changes: Record<string, string>, replace: boolean) => {
     setParams(
@@ -76,6 +80,10 @@ export function useLedgerFilters(): LedgerFilters {
     setSearch: (next) => {
       // Typing is debounced into the URL; each pause is not a history entry.
       update({ busca: next.trim() }, true);
+    },
+    order,
+    setOrder: (next) => {
+      update({ ordem: next === 'asc' ? 'asc' : '' }, true);
     },
   };
 }

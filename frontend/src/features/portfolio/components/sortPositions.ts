@@ -1,17 +1,23 @@
 import type { PositionRow } from '@/api/contract';
 import { compareDecimal } from '@/shared/format';
 
-export type SortKey =
-  | 'asset_code'
-  | 'maturity_date'
-  | 'quantity'
-  | 'average_entry_pu'
-  | 'average_entry_rate'
-  | 'reference_pu'
-  | 'reference_rate'
-  | 'financial_total'
-  | 'position_pnl'
-  | 'trades_pnl';
+export const SORT_KEYS = [
+  'asset_code',
+  'maturity_date',
+  'quantity',
+  'average_entry_pu',
+  'average_entry_rate',
+  'reference_pu',
+  'reference_rate',
+  'financial_total',
+  'position_pnl',
+  'trades_pnl',
+] as const;
+
+export type SortKey = (typeof SORT_KEYS)[number];
+
+/** The table's default order: by maturity, the nearest first. */
+export const DEFAULT_SORT: Sort = { key: 'maturity_date', direction: 'asc' };
 
 export interface Sort {
   key: SortKey;

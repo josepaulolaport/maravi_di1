@@ -1,16 +1,7 @@
-import {
-  ActionIcon,
-  Menu,
-  Paper,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-  Title,
-  VisuallyHidden,
-} from '@mantine/core';
-import { IconDots, IconSearch } from '@tabler/icons-react';
+import { ActionIcon, Menu, Paper, Stack, Table, Text, Title, VisuallyHidden } from '@mantine/core';
+import { IconDots } from '@tabler/icons-react';
 
+import { SearchInput } from '@/shared/ui/SearchInput';
 import { Loading } from '@/shared/ui/Loading';
 import type { ProcessingRequest } from '@/api/contract';
 import { countLabel } from '@/shared/format';
@@ -63,14 +54,11 @@ export function HistoryTable({ requests, search, onSearchChange, ...actions }: H
         <Title order={2} size="h4" id="history-title">
           Histórico de processamentos
         </Title>
-        <TextInput
-          aria-label="Buscar processamento"
+        <SearchInput
+          label="Buscar processamento"
           placeholder="Buscar processamento..."
-          leftSection={<IconSearch size={16} stroke={1.5} />}
           value={search}
-          onChange={(event) => {
-            onSearchChange(event.currentTarget.value);
-          }}
+          onChange={onSearchChange}
           maw={360}
         />
         <HistoryBody requests={requests} search={search} actions={actions} />

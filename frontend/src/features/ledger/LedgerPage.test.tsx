@@ -193,13 +193,15 @@ describe('Lançamentos (§11.3)', () => {
           return undefined;
         }),
       );
-      const { user } = await openLedger();
+      const { user, router } = await openLedger();
       const header = screen.getByRole('columnheader', { name: 'Data e hora' });
       expect(header).toHaveAttribute('aria-sort', 'descending');
 
       await user.click(within(header).getByRole('button'));
 
       expect(header).toHaveAttribute('aria-sort', 'ascending');
+      // The order is in the URL, so the view can be linked (`?ordem=asc`).
+      expect(router.state.location.search).toContain('ordem=asc');
       // The order is the backend's: the screen asks for it, it never sorts the rows itself.
       await waitFor(() => {
         expect(orders).toEqual(['desc', 'asc']);
@@ -488,7 +490,7 @@ describe('Lançamentos (§11.3)', () => {
         target: { value: '17:05' },
       });
       await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '2');
-      await user.click(modal.getByRole('radio', { name: 'Taxa a.a. (%)' }));
+      await user.click(modal.getByRole('radio', { name: 'Taxa a.a.' }));
       await user.type(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,45');
       await user.click(modal.getByRole('button', { name: 'Registrar venda' }));
 
@@ -591,7 +593,7 @@ describe('Lançamentos (§11.3)', () => {
       await chooseContract(user, modal, 'DI1F29');
       await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
       await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.click(modal.getByRole('radio', { name: 'Taxa a.a. (%)' }));
+      await user.click(modal.getByRole('radio', { name: 'Taxa a.a.' }));
       // 10,12345678901% = 0.1012345678901: 13 places, one more than OQ-3 allows.
       await user.type(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,12345678901');
       await user.click(modal.getByRole('button', { name: 'Registrar compra' }));

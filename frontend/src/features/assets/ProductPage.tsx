@@ -1,8 +1,9 @@
-import { Button, Paper, Stack, Text, TextInput, Title } from '@mantine/core';
-import { IconPlus, IconSearch } from '@tabler/icons-react';
+import { Button, Paper, Stack, Text, Title } from '@mantine/core';
+import { IconPlus } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useParams } from 'react-router';
 
+import { SearchInput } from '@/shared/ui/SearchInput';
 import { Loading } from '@/shared/ui/Loading';
 import type { Product } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
@@ -33,7 +34,7 @@ export function ProductPage() {
 }
 
 function ProductBody({ product }: { product: Product }) {
-  const [text, setSearch, search] = useSearchParam();
+  const [search, setSearch] = useSearchParam();
   const [modalOpen, setModalOpen] = useState(false);
   const instruments = useInstruments(product.id, search);
 
@@ -60,14 +61,11 @@ function ProductBody({ product }: { product: Product }) {
           <Title order={2} size="h4" fw={500} p="md" pb={0}>
             Contratos
           </Title>
-          <TextInput
-            aria-label="Buscar contratos"
+          <SearchInput
+            label="Buscar contratos"
             placeholder="Buscar contrato por código..."
-            leftSection={<IconSearch size={16} stroke={1.5} />}
-            value={text}
-            onChange={(event) => {
-              setSearch(event.currentTarget.value);
-            }}
+            value={search}
+            onChange={setSearch}
             m="md"
           />
           {instruments.isError ? (
