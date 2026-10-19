@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from di1.modules.pricing.domain.errors import InvalidPricingInputError
+from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind as InputKind  # one definition, shared (W0.3b)
 
 
@@ -42,8 +42,15 @@ class FuturesTerms:
     def __post_init__(self) -> None:
         if not isinstance(self.face_value, Decimal):
             raise TypeError(f"face value must be a Decimal, got {type(self.face_value).__name__}")
+        # The schema already enforces face_value > 0; this guards the invariant for any caller.
         if not self.face_value.is_finite() or self.face_value <= 0:
-            raise InvalidPricingInputError("the face value must be positive", field="face_value")
+            raise DomainError(
+                ErrorDetail(
+                    ErrorCode.VALIDATION_ERROR,
+                    "O valor de face deve ser maior que zero.",
+                    "face_value",
+                )
+            )
 
 
 @dataclass(frozen=True, slots=True)

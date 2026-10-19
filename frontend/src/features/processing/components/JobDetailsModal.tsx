@@ -15,7 +15,7 @@ import type { JobActions } from './HistoryTable';
  * What a cancelled or failed run left published (OQ-23): every date up to its last commit
  * stays; later dates were not processed.
  */
-export function publishedNotice(job: ProcessingRequest): string {
+function publishedNotice(job: ProcessingRequest): string {
   if (job.progress_date === null) {
     return 'Nenhuma data deste processamento foi publicada; os resultados anteriores permanecem inalterados.';
   }
@@ -35,13 +35,7 @@ interface JobDetailsModalProps extends Omit<JobActions, 'onDetails'> {
  * A run's details (§11.1, OQ-23): its range, times, days, progress, what it left published
  * and, if any, its error and the date it failed on.
  */
-export function JobDetailsModal({
-  job,
-  onClose,
-  onCancel,
-  onReplace,
-  onRequestAgain,
-}: JobDetailsModalProps) {
+export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobDetailsModalProps) {
   const progress = job ? progressOf(job) : null;
   return (
     <Modal
@@ -106,14 +100,6 @@ export function JobDetailsModal({
           <Group justify="flex-end" gap="sm">
             {canCancel(job.status) && (
               <>
-                <Button
-                  variant="default"
-                  onClick={() => {
-                    onReplace(job);
-                  }}
-                >
-                  Cancelar e criar novo processamento
-                </Button>
                 <Button
                   color="red"
                   onClick={() => {

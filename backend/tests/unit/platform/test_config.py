@@ -9,7 +9,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from di1.platform.config import BrokerSettings, Settings, get_broker_settings, get_settings
+from di1.platform.config import (
+    BrokerSettings,
+    LoggingSettings,
+    Settings,
+    get_broker_settings,
+    get_logging_settings,
+    get_settings,
+)
 
 URL = "postgresql+psycopg://di1:s3cret-pw@db:5432/di1"
 ENV_NAMES = ("DATABASE_URL", "DATABASE_POOL_SIZE", "DATABASE_MAX_OVERFLOW", "DATABASE_ECHO")
@@ -230,3 +237,35 @@ def test_the_broker_password_never_appears_in_repr(monkeypatch: pytest.MonkeyPat
 
     assert "s3cret-pw" not in repr(settings)
     assert "s3cret-pw" not in str(settings)
+
+
+@pytest.mark.parametrize("level", ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+def test_the_log_level_comes_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, level: str
+) -> None:
+    monkeypatch.setenv("LOG_LEVEL", level)
+
+    assert get_logging_settings().log_level == level
+
+
+def test_the_log_level_defaults_to_info(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+
+    assert LoggingSettings().log_level == "INFO"
+
+
+def test_an_unknown_log_level_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "VERBOSE")
+
+    with pytest.raises(ValidationError, match="log_level"):
+        LoggingSettings()
+
+
+@pytest.mark.parametrize(("value", "level"), [("info", "INFO"), ("Warning", "WARNING")])
+def test_the_log_level_is_case_insensitive(
+    monkeypatch: pytest.MonkeyPatch, value: str, level: str
+) -> None:
+    """uvicorn's ``--log-level`` and most tools write it in lower case."""
+    monkeypatch.setenv("LOG_LEVEL", value)
+
+    assert LoggingSettings().log_level == level

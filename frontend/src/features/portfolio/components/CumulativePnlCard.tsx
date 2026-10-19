@@ -1,8 +1,9 @@
 import { LineChart } from '@mantine/charts';
-import { Divider, Group, Paper, Skeleton, Stack, Text } from '@mantine/core';
+import { Divider, Group, Paper, Stack, Text } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { IconCalendar } from '@tabler/icons-react';
 
+import { Loading } from '@/shared/ui/Loading';
 import type { Decimal, IsoDate } from '@/api/contract';
 import { addDays, formatDate, formatSignedMoney } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
@@ -81,7 +82,7 @@ export function CumulativePnlCard({
         </Stack>
       </Group>
       <Divider my="md" />
-      {series.isPending && <Skeleton h={180} />}
+      {series.isPending && <Loading label="Carregando P&L acumulado" h={180} />}
       {series.isError && (
         <ErrorState
           error={series.error}
@@ -110,8 +111,8 @@ export function CumulativePnlCard({
           </Text>
         ))}
       <Text size="xs" c="dimmed" mt="xs">
-        Somente dias processados com P&L completo e atual. Lacunas indicam dias sem resultado
-        válido.
+        P&L somado desde o início escolhido, somente com dias processados e completos. A partir de
+        uma lacuna, o acumulado do período fica indisponível.
       </Text>
     </Paper>
   );

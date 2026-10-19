@@ -49,12 +49,12 @@ export function useControlCenterParams() {
     setEnd: (date: IsoDate | null) => {
       update({ fim: date });
     },
-    /** The request's scope (OQ-21 draft): Tudo unless the URL says otherwise. */
+    /** The request's scope (OQ-21): Tudo unless the URL says otherwise. */
     scope: scopeFromUrl(params.get('escopo')) ?? 'ALL',
     setScope: (scope: ProcessingScope) => {
       update({ escopo: scopeToUrl(scope) });
     },
-    /** Prefills the request form ("Solicitar novo processamento", OQ-20, OQ-21 draft). */
+    /** Prefills the request form ("Solicitar novo processamento", OQ-20, OQ-21). */
     setRange: (start: IsoDate, end: IsoDate, scope: ProcessingScope) => {
       update({ tab: 'processamentos', inicio: start, fim: end, escopo: scopeToUrl(scope) });
     },

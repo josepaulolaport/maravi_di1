@@ -22,11 +22,6 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from di1.modules.pricing.domain.errors import (
-    ContractMaturedError,
-    InvalidPricingInputError,
-    PricingError,
-)
 from di1.modules.pricing.domain.futures.di1 import DI1Calculator
 from di1.modules.pricing.domain.futures.model import (
     FuturesTerms,
@@ -34,6 +29,7 @@ from di1.modules.pricing.domain.futures.model import (
     Price,
     Quote,
 )
+from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 
 FACE = Decimal("100000")
 MATURITY = date(2028, 1, 1)
@@ -46,6 +42,15 @@ def price(reference_date: date, quote: Quote, face: Decimal = FACE) -> Price:
 
 def days_before_maturity(days: int) -> date:
     return MATURITY - timedelta(days=days)
+
+
+def invalid(message: str, field: str) -> ErrorDetail:
+    return ErrorDetail(ErrorCode.VALIDATION_ERROR, message, field)
+
+
+def refusal(caught: pytest.ExceptionInfo[DomainError]) -> ErrorDetail:
+    (detail,) = caught.value.errors
+    return detail
 
 
 # --- Challenge example (desafio §5; spec §15 D4) ----------------------------------------------
@@ -155,11 +160,10 @@ def test_on_maturity_the_pu_is_typed_and_the_rate_is_zero() -> None:
 
 
 def test_on_maturity_a_typed_rate_is_rejected() -> None:
-    with pytest.raises(InvalidPricingInputError) as caught:
+    with pytest.raises(DomainError) as caught:
         price(MATURITY, Quote.rate(Decimal("0.10")))
 
-    assert caught.value.field == "rate"
-    assert caught.value.code == "VALIDATION_ERROR"
+    assert refusal(caught) == invalid("No vencimento, informe o PU, não a taxa.", "rate")
 
 
 @pytest.mark.parametrize(
@@ -167,11 +171,14 @@ def test_on_maturity_a_typed_rate_is_rejected() -> None:
     [Quote.rate(Decimal("0.10")), Quote.pu(Decimal("90000"))],
 )
 def test_a_reference_date_after_maturity_is_rejected(quote: Quote) -> None:
-    with pytest.raises(ContractMaturedError) as caught:
+    with pytest.raises(DomainError) as caught:
         price(MATURITY + timedelta(days=1), quote)
 
-    assert caught.value.code == "CONTRACT_MATURED"
-    assert caught.value.field == "reference_date"
+    assert refusal(caught) == ErrorDetail(
+        ErrorCode.CONTRACT_MATURED,
+        "A data é posterior ao vencimento do contrato.",
+        "reference_date",
+    )
 
 
 def test_one_day_before_maturity_prices_normally() -> None:
@@ -187,18 +194,18 @@ def test_one_day_before_maturity_prices_normally() -> None:
 
 @pytest.mark.parametrize("pu", ["0", "-1", "-90909.09"])
 def test_nonpositive_pu_is_rejected(pu: str) -> None:
-    with pytest.raises(InvalidPricingInputError) as caught:
+    with pytest.raises(DomainError) as caught:
         price(date(2027, 1, 1), Quote.pu(Decimal(pu)))
 
-    assert caught.value.field == "pu"
+    assert refusal(caught) == invalid("O PU deve ser maior que zero.", "pu")
 
 
 @pytest.mark.parametrize("rate", ["-1", "-1.5", "-100"])
 def test_rate_at_or_below_minus_one_is_rejected(rate: str) -> None:
-    with pytest.raises(InvalidPricingInputError) as caught:
+    with pytest.raises(DomainError) as caught:
         price(date(2027, 1, 1), Quote.rate(Decimal(rate)))
 
-    assert caught.value.field == "rate"
+    assert refusal(caught) == invalid("A taxa deve ser maior que -1.", "rate")
 
 
 def test_a_rate_just_above_minus_one_is_accepted() -> None:
@@ -208,48 +215,59 @@ def test_a_rate_just_above_minus_one_is_accepted() -> None:
     assert result.pu == Decimal("100000000000000000.0000000000")
 
 
-@pytest.mark.parametrize("face", ["0", "-100000"])
+@pytest.mark.parametrize("face", ["0", "-100000", "NaN"])
 def test_nonpositive_face_value_is_rejected(face: str) -> None:
-    with pytest.raises(InvalidPricingInputError) as caught:
+    with pytest.raises(DomainError) as caught:
         price(date(2027, 1, 1), Quote.rate(Decimal("0.10")), face=Decimal(face))
 
-    assert caught.value.field == "face_value"
+    assert refusal(caught) == invalid("O valor de face deve ser maior que zero.", "face_value")
+
+
+PU_ROUNDS_TO_ZERO = invalid("A taxa resulta em um PU que arredonda para zero.", "rate")
 
 
 def test_a_pu_that_would_be_stored_as_zero_is_rejected() -> None:
     # 100000 / (1E+20)^10 rounds to 0 at 10 places, which the schema forbids (PU > 0).
-    with pytest.raises(InvalidPricingInputError) as caught:
+    with pytest.raises(DomainError) as caught:
         price(days_before_maturity(3650), Quote.rate(Decimal("100000000000000000000")))
 
-    assert caught.value.field == "rate"
+    assert refusal(caught) == PU_ROUNDS_TO_ZERO
 
 
 def test_a_discount_factor_beyond_the_context_range_gives_a_zero_pu() -> None:
     # (1E+100000)^10 overflows the context (Emax 999999): the PU is ~0, rejected like above.
-    with pytest.raises(InvalidPricingInputError, match="rounds to zero") as caught:
+    with pytest.raises(DomainError) as caught:
         price(days_before_maturity(3650), Quote.rate(Decimal("1E+100000")))
 
-    assert caught.value.field == "rate"
+    assert refusal(caught) == PU_ROUNDS_TO_ZERO
 
 
 def test_a_pu_beyond_the_context_range_is_rejected_as_out_of_range() -> None:
     # 1E+999990 / (1E-12)^(366/365) ≈ 1E+1000002 overflows the division, not the power.
-    with pytest.raises(InvalidPricingInputError, match="beyond the calculation's range") as caught:
+    with pytest.raises(DomainError) as caught:
         price(
             days_before_maturity(366),
             Quote.rate(Decimal("-0.999999999999")),
             face=Decimal("1E+999990"),
         )
 
-    assert caught.value.field == "rate"
+    assert refusal(caught) == invalid("A taxa resulta em um PU fora do limite de cálculo.", "rate")
+
+
+def test_a_rate_beyond_the_context_range_is_rejected() -> None:
+    # (1E+5000 / 1E-10)^365 = 1E+1828650 overflows the context (Emax 999999).
+    with pytest.raises(DomainError) as caught:
+        price(days_before_maturity(1), Quote.pu(Decimal("0.0000000001")), face=Decimal("1E+5000"))
+
+    assert refusal(caught) == invalid("O PU resulta em uma taxa fora do limite de cálculo.", "pu")
 
 
 def test_a_rate_that_would_be_stored_as_minus_one_is_rejected() -> None:
     # (100000 / 1E+10)^365 − 1 = 1E-1825 − 1 rounds to −1 at 12 places (schema: rate > −1).
-    with pytest.raises(InvalidPricingInputError) as caught:
+    with pytest.raises(DomainError) as caught:
         price(days_before_maturity(1), Quote.pu(Decimal("10000000000")))
 
-    assert caught.value.field == "pu"
+    assert refusal(caught) == invalid("O PU resulta em uma taxa que arredonda para -1.", "pu")
 
 
 # --- Typed precision: excess decimals rejected, never rounded (OQ-3) ------------------------------
@@ -257,10 +275,10 @@ def test_a_rate_that_would_be_stored_as_minus_one_is_rejected() -> None:
 
 @pytest.mark.parametrize("rate", ["0.1000000000001", "0.1000000000000", "0.0000000000005"])
 def test_typed_rate_with_more_than_12_places_is_rejected(rate: str) -> None:
-    with pytest.raises(InvalidPricingInputError) as caught:
+    with pytest.raises(DomainError) as caught:
         price(date(2027, 1, 1), Quote.rate(Decimal(rate)))
 
-    assert caught.value.field == "rate"
+    assert refusal(caught) == invalid("A taxa aceita no máximo 12 casas decimais.", "rate")
 
 
 def test_typed_rate_with_12_places_is_accepted() -> None:
@@ -271,23 +289,21 @@ def test_typed_rate_with_12_places_is_accepted() -> None:
 
 @pytest.mark.parametrize("pu", ["90909.09090909091", "90909.09090909090"])
 def test_typed_pu_with_more_than_10_places_is_rejected(pu: str) -> None:
-    with pytest.raises(InvalidPricingInputError) as caught:
+    with pytest.raises(DomainError) as caught:
         price(date(2027, 1, 1), Quote.pu(Decimal(pu)))
 
-    assert caught.value.field == "pu"
+    assert refusal(caught) == invalid("O PU aceita no máximo 10 casas decimais.", "pu")
 
 
 @pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "sNaN"])
 def test_non_finite_inputs_are_rejected(value: str) -> None:
-    with pytest.raises(InvalidPricingInputError):
+    with pytest.raises(DomainError) as pu_caught:
         price(date(2027, 1, 1), Quote.pu(Decimal(value)))
-    with pytest.raises(InvalidPricingInputError):
+    with pytest.raises(DomainError) as rate_caught:
         price(date(2027, 1, 1), Quote.rate(Decimal(value)))
 
-
-def test_errors_share_a_base_type() -> None:
-    assert issubclass(InvalidPricingInputError, PricingError)
-    assert issubclass(ContractMaturedError, PricingError)
+    assert refusal(pu_caught) == invalid("O PU deve ser um número finito.", "pu")
+    assert refusal(rate_caught) == invalid("A taxa deve ser um número finito.", "rate")
 
 
 # --- Input hygiene: Decimal only, exactly one input ----------------------------------------------
