@@ -17,7 +17,7 @@ from decimal import Decimal
 
 import pytest
 
-from di1.modules.portfolio.public import AccountingState, PortfolioAccounting, Trade
+from di1.modules.portfolio.public import Trade
 from tests.acceptance.harness import DI1F28, DI1F29, Facts, run, trade
 
 MONDAY = date(2027, 1, 4)
@@ -49,12 +49,8 @@ def test_trades_apply_in_time_order_whatever_the_input_order(given_order: list[T
 
 
 def test_each_step_of_the_day() -> None:
-    accounting = PortfolioAccounting()
-    start = AccountingState.zero(date(2027, 1, 3))
-
     def after(*trades: Trade) -> tuple[int, Decimal | None, Decimal | None]:
-        day = accounting.calculate_day(start, trades, Decimal(0), Decimal(0), MONDAY)
-        p = day.positions[0]
+        p = run(Facts(trades=trades), MONDAY, MONDAY)[MONDAY].position(DI1F28)
         return p.quantity, p.average_entry_pu, p.average_entry_rate
 
     assert after(T1) == (1, Decimal("90000"), Decimal("0.12"))

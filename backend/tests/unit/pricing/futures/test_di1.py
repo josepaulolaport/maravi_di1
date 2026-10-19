@@ -163,7 +163,7 @@ def test_on_maturity_a_typed_rate_is_rejected() -> None:
     with pytest.raises(DomainError) as caught:
         price(MATURITY, Quote.rate(Decimal("0.10")))
 
-    assert refusal(caught) == invalid("No vencimento, informe o PU, não a taxa.", "rate")
+    assert refusal(caught) == invalid("Na data de vencimento informe o PU.", "rate")
 
 
 @pytest.mark.parametrize(
@@ -176,7 +176,7 @@ def test_a_reference_date_after_maturity_is_rejected(quote: Quote) -> None:
 
     assert refusal(caught) == ErrorDetail(
         ErrorCode.CONTRACT_MATURED,
-        "A data é posterior ao vencimento do contrato.",
+        "O contrato já venceu nesta data.",
         "reference_date",
     )
 
@@ -205,7 +205,7 @@ def test_rate_at_or_below_minus_one_is_rejected(rate: str) -> None:
     with pytest.raises(DomainError) as caught:
         price(date(2027, 1, 1), Quote.rate(Decimal(rate)))
 
-    assert refusal(caught) == invalid("A taxa deve ser maior que -1.", "rate")
+    assert refusal(caught) == invalid("A taxa deve ser maior que −100%.", "rate")
 
 
 def test_a_rate_just_above_minus_one_is_accepted() -> None:
@@ -267,7 +267,7 @@ def test_a_rate_that_would_be_stored_as_minus_one_is_rejected() -> None:
     with pytest.raises(DomainError) as caught:
         price(days_before_maturity(1), Quote.pu(Decimal("10000000000")))
 
-    assert refusal(caught) == invalid("O PU resulta em uma taxa que arredonda para -1.", "pu")
+    assert refusal(caught) == invalid("O PU resulta em uma taxa que arredonda para −100%.", "pu")
 
 
 # --- Typed precision: excess decimals rejected, never rounded (OQ-3) ------------------------------
@@ -278,7 +278,7 @@ def test_typed_rate_with_more_than_12_places_is_rejected(rate: str) -> None:
     with pytest.raises(DomainError) as caught:
         price(date(2027, 1, 1), Quote.rate(Decimal(rate)))
 
-    assert refusal(caught) == invalid("A taxa aceita no máximo 12 casas decimais.", "rate")
+    assert refusal(caught) == invalid("Use no máximo 12 casas decimais.", "rate")
 
 
 def test_typed_rate_with_12_places_is_accepted() -> None:
@@ -292,7 +292,7 @@ def test_typed_pu_with_more_than_10_places_is_rejected(pu: str) -> None:
     with pytest.raises(DomainError) as caught:
         price(date(2027, 1, 1), Quote.pu(Decimal(pu)))
 
-    assert refusal(caught) == invalid("O PU aceita no máximo 10 casas decimais.", "pu")
+    assert refusal(caught) == invalid("Use no máximo 10 casas decimais.", "pu")
 
 
 @pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "sNaN"])
@@ -302,8 +302,8 @@ def test_non_finite_inputs_are_rejected(value: str) -> None:
     with pytest.raises(DomainError) as rate_caught:
         price(date(2027, 1, 1), Quote.rate(Decimal(value)))
 
-    assert refusal(pu_caught) == invalid("O PU deve ser um número finito.", "pu")
-    assert refusal(rate_caught) == invalid("A taxa deve ser um número finito.", "rate")
+    assert refusal(pu_caught) == invalid("Informe um número válido.", "pu")
+    assert refusal(rate_caught) == invalid("Informe um número válido.", "rate")
 
 
 # --- Input hygiene: Decimal only, exactly one input ----------------------------------------------

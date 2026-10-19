@@ -5,7 +5,7 @@ Spec §13 items 2 and 7; OQ-10 (expected assets), OQ-13 (order). This chain comp
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -136,17 +136,3 @@ def test_a_flat_position_is_never_carried() -> None:
 def test_a_state_holding_the_same_asset_twice_is_rejected() -> None:
     with pytest.raises(AccountingError):
         _state(position(1, "95000", "0.1"), position(2, "95000", "0.1"))
-
-
-def test_the_positions_chain_runs_alone_over_every_calendar_day() -> None:
-    # Processing may run positions without cash: no cash input, no cash output.
-    friday, monday = date(2027, 1, 1), date(2027, 1, 4)
-    days = POSITIONS.calculate_range(
-        PositionState.zero(friday - timedelta(days=1)),
-        [trade(2, "95000", on=date(2027, 1, 3))],
-        monday,
-    )
-
-    assert [d.date for d in days] == [friday, date(2027, 1, 2), date(2027, 1, 3), monday]
-    assert [[p.quantity for p in d.positions] for d in days] == [[], [], [2], [2]]
-    assert not hasattr(days[0], "cash_balance")

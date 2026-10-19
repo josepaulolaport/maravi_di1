@@ -25,13 +25,19 @@ from di1.modules.ledger.domain.entries import (
     validate_trade,
 )
 from di1.modules.ledger.domain.listing import EntryCursor, ListOrder, validate_page_request
-from di1.modules.pricing.public import PricingService, Quote
+from di1.modules.pricing.public import PricingService, Quote, QuoteFields, QuoteValidator
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 
 logger = logging.getLogger(__name__)
+
+TRADE_QUOTE_FIELDS = QuoteFields(reference_date="date", pu="execution_pu", rate="execution_rate")
+"""The request fields the client keys a trade's quote errors on (frontend ``ledger.ts``)."""
+
+validate_trade_quote = QuoteValidator(TRADE_QUOTE_FIELDS)
+"""Pricing's one quote validation, reported on the trade request's fields (OQ-34)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +83,9 @@ class LedgerService:
 
         descriptor = await self._instrument(draft.asset_id)
         known = KnownInstrument(descriptor.maturity_date) if descriptor is not None else None
-        trade = validate_trade(draft, today=today, instrument=known)
+        trade = validate_trade(
+            draft, today=today, instrument=known, validate_quote=validate_trade_quote
+        )
         try:
             price = await self._pricing.calculate(
                 trade.asset_id, trade.entry_date, Quote(trade.input_kind, trade.typed_value)
@@ -155,23 +163,13 @@ class LedgerService:
         return (await self._assets.get_instruments([asset_id])).get(asset_id)
 
 
-_REQUEST_FIELDS: Mapping[str | None, str | None] = {
-    "reference_date": "date",
-    "pu": "execution_pu",
-    "rate": "execution_rate",
-}
-"""Pricing's parameter names → the request fields the client keys on (lane B, PR #52)."""
-
-
 def _as_request_error(error: DomainError) -> DomainError:
     """Pricing's refusal, named after the request's fields. An instrument Pricing cannot find is
     a body field, so a validation error on ``asset_id``, never a 404."""
     details = [
         ErrorDetail(ErrorCode.VALIDATION_ERROR, "Selecione um contrato.", "asset_id")
         if detail.code is ErrorCode.NOT_FOUND
-        else ErrorDetail(
-            detail.code, detail.message, _REQUEST_FIELDS.get(detail.field, detail.field)
-        )
+        else ErrorDetail(detail.code, detail.message, TRADE_QUOTE_FIELDS.from_pricing(detail.field))
         for detail in error.errors
     ]
     return DomainError(*details, detail=error.detail if len(details) > 1 else None)

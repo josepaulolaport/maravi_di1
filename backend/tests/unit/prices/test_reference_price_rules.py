@@ -1,5 +1,6 @@
 """Prices' domain rules: what a typed reference price may be, and which observation is preferred
-(spec §5; OQ-1, OQ-3, OQ-14, OQ-25)."""
+(spec §5; OQ-1, OQ-3, OQ-14, OQ-25). The typed quote's rules are Pricing's one validation
+(code-review finding H3), run here on Pricing's field names, as the service does."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from di1.modules.prices.domain.reference_price import (
     choose_preferred,
     validate_reference_price,
 )
+from di1.modules.pricing.public import QuoteValidator
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 
@@ -37,6 +39,7 @@ def _validate(
         input_kind=input_kind,
         pu=pu,
         rate=rate,
+        validate_quote=QuoteValidator(),
     )
 
 
@@ -220,7 +223,7 @@ class TestRejectedValues:
             _validate(pu=pu)
 
         assert _errors(excinfo) == (
-            ErrorDetail(ErrorCode.VALIDATION_ERROR, "O valor deve ser maior que zero.", "pu"),
+            ErrorDetail(ErrorCode.VALIDATION_ERROR, "O PU deve ser maior que zero.", "pu"),
         )
 
     @pytest.mark.parametrize("rate", [Decimal("-1"), Decimal("-1.5")])

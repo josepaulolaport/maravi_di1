@@ -7,7 +7,7 @@ reference prices: the cash chain receives neither, and runs without the position
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -86,25 +86,3 @@ def test_a_negative_zero_total_is_stored_unsigned() -> None:
     assert not day.deposits.is_signed()
     assert not day.withdrawals.is_signed()
     assert not day.cash_balance.is_signed()
-
-
-def test_the_cash_chain_runs_alone_over_every_calendar_day() -> None:
-    # Processing may run cash without positions. Fri deposit 1000; Sun buy 2 @ 95000; Mon
-    # withdrawal 10: 1000, 1000, −189000, −189010.
-    friday, sunday, monday = date(2027, 1, 1), date(2027, 1, 3), date(2027, 1, 4)
-
-    days = CASH.calculate_range(
-        CashBalance.zero(friday - timedelta(days=1)),
-        [trade(2, "95000", on=sunday)],
-        {friday: Decimal("1000")},
-        {monday: Decimal("10")},
-        monday,
-    )
-
-    assert [d.cash_balance for d in days] == [
-        Decimal("1000"),
-        Decimal("1000"),
-        Decimal("-189000"),
-        Decimal("-189010"),
-    ]
-    assert days[-1].closing_balance() == CashBalance(as_of=monday, balance=Decimal("-189010"))

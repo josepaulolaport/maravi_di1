@@ -31,9 +31,10 @@ from di1.modules.portfolio.public import (
     PortfolioResultsWriter,
     PositionsEngine,
     PositionState,
-    ReferenceSource,
     Trade,
     ValuationCalculator,
+    is_past_maturity,
+    reference_pu_on,
 )
 from di1.modules.prices.public import PriceReader
 from di1.modules.processing.application.interfaces.repositories import IssueType
@@ -146,24 +147,21 @@ async def process_positions_day(
     )
 
     def reference_pu(asset_id: UUID, on: date) -> Decimal | None:
-        if on > maturities[asset_id]:
-            return ZERO  # after maturity the reference PU is 0 by definition (OQ-1)
         price = prices.get((asset_id, on))
-        return None if price is None else price.pu
+        return reference_pu_on(on, maturities[asset_id], None if price is None else price.pu)
 
     valuation_inputs: list[AssetValuationInput] = []
     asset_pnl: dict[UUID, AssetPnLResult] = {}
     issues: list[NewIssue] = []
     for position in positions_day.positions:
         asset_id, maturity = position.asset_id, maturities[position.asset_id]
-        current = prices.get((asset_id, day)) if day <= maturity else None
+        current = None if is_past_maturity(day, maturity) else prices.get((asset_id, day))
         valuation_inputs.append(
             AssetValuationInput(
                 asset_id=asset_id,
                 quantity=position.quantity,
                 maturity_date=maturity,
                 reference_pu=None if current is None else current.pu,
-                reference_source=None if current is None else ReferenceSource(current.source),
             )
         )
         result = AssetPnLCalculator().calculate(
@@ -177,16 +175,14 @@ async def process_positions_day(
             previous_day if missing is MissingReferencePrice.PREVIOUS else day
             for missing in result.missing_prices
         }
-        if position.quantity != 0 and reference_pu(asset_id, day) is None:
-            needed.add(day)  # the valuation of D needs D's price too
         issues.extend(
             NewIssue(IssueType.MISSING_REFERENCE_PRICE, asset_id, day, required)
             for required in sorted(needed)
         )
-        if day > maturity and position.quantity != 0:
+        if is_past_maturity(day, maturity) and position.quantity != 0:
             issues.append(NewIssue(IssueType.EXPIRED_OPEN_POSITION, asset_id, day, None))
 
-    valuation = ValuationCalculator().calculate_day(day, valuation_inputs, cash_balance=None)
+    valuation = ValuationCalculator().calculate_day(day, valuation_inputs)
     pnl = PortfolioPnLCalculator().aggregate(set(asset_ids), asset_pnl, previous_cumulative)
     await writer.write_positions_day(
         positions_day,

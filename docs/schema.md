@@ -35,7 +35,7 @@
 | processing | `date_status` | `date` | the current status of the portfolio and cash chains on each date and when each was last processed (OQ-23, OQ-31) |
 | processing | `issues` | `id` | job issues: `MISSING_REFERENCE_PRICE`, `EXPIRED_OPEN_POSITION` (OQ-31) |
 | platform | `outbox_messages` | `id` | committed commands awaiting broker publication |
-| platform | `inbox_messages` | `(consumer_name, message_id)` | handler delivery deduplication |
+| platform | `inbox_messages` | `(consumer_name, message_id)` | handler delivery deduplication; will get a retention cleanup of old rows (OQ-47 item 2; not yet implemented) |
 
 ## Important database integrity decisions
 
@@ -69,7 +69,7 @@
 - A run never stops for a concurrent write, and the write marks nothing: the dates already committed keep their figures until the user processes them again (OQ-31). Recovery happens only when the single worker starts (OQ-45): the run left `RUNNING` has its `RUNNING` dates restored from `*_previous`, then resumes after `requests.progress_date` (OQ-23), or ends `CANCELLED` if `cancel_requested_at` is set; then the worker drains the `QUEUED` requests (OQ-46).
 - There is no dispatcher (OQ-46). `POST /processing/requests` inserts the request `QUEUED` and, in the same transaction, one outbox message that is only a doorbell ("there is work", no request ID). On every doorbell, and at startup after recovery, the single worker repeats until nothing is `QUEUED`: one transaction row-locks the oldest `QUEUED` request by `(created_at, id)` and sets it `RUNNING` with `started_at`; then it runs it. A doorbell that finds nothing `QUEUED` does nothing; a lost one is recovered by any later doorbell or by a restart, and a duplicate is harmless. One run at a time follows from the single worker draining serially (OQ-45): no lease, no claim-token fencing, no slot. The run locks its request row, then its dates. The worker may ACK the doorbell on receipt; startup recovery covers a crash (integrator reading).
 - **Unused since OQ-46, with no migration:** the `requests.status` values `DISPATCHED` and `CANCELLING` stay in `requests_status_check` (and `requests_active_idx` keeps them in its predicate) but are never set: a run goes `QUEUED` → `RUNNING`, a cancelled `QUEUED` run becomes `CANCELLED` at once, and a cancelled `RUNNING` run gets `cancel_requested_at` (integrator reading for `CANCELLING`). `requests.dispatched_at` and `calculation_state.active_request_id` stay too and are never written; `calculation_state` is not locked (integrator reading).
-- `processing.requests.claim_token`, `lease_expires_at` and `attempt_count` stay in the schema but are **unused** since OQ-45 (one worker, no lease, no recovery cap; OQ-43 reversed). Nothing reads or writes them, and there is no migration 0007 to drop them (integrator choice; it avoids a migration hours before delivery).
+- `processing.requests.claim_token`, `lease_expires_at` and `attempt_count` stay in the schema but are **unused** since OQ-45 (one worker, no lease, no recovery cap; OQ-43 reversed). Nothing reads or writes them, and there is no migration 0007 to drop them (integrator choice; it avoids a migration hours before delivery). OQ-47 item 1 confirms it: no migration squash and no column drops; these statuses and columns stay documented as unused, and the README lists them as known debt.
 
 ## API and UI implications
 

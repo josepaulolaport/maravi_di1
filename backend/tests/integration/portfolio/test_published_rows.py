@@ -27,7 +27,6 @@ from di1.modules.portfolio.domain.trade import Trade
 from di1.modules.portfolio.domain.valuation import (
     AssetValuation,
     PortfolioValuation,
-    ReferenceSource,
     ValuationStatus,
 )
 from di1.modules.processing.public import ChainStatus, DateStatus
@@ -60,7 +59,6 @@ def _valued(asset_id: UUID, total: str | None, status: ValuationStatus) -> Asset
     return AssetValuation(
         asset_id,
         Decimal("89128.4824345118") if priced else None,
-        ReferenceSource.B3 if priced else None,
         None if total is None else Decimal(total),
         status,
     )
@@ -85,8 +83,6 @@ def _portfolio_pnl(daily: str | None, cumulative: str | None) -> PortfolioPnLRes
         daily_pnl=value,
         cumulative_pnl=None if cumulative is None else Decimal(cumulative),
         status=COMPLETE if value is not None else MISSING,
-        cumulative_status=COMPLETE if cumulative is not None else MISSING,
-        incomplete_assets=frozenset(),
     )
 
 
@@ -109,7 +105,6 @@ class Publisher:
             date=on,
             assets=tuple(v for _, v, _ in rows),
             positions_market_value=None if market_value is None else Decimal(market_value),
-            aum=Decimal("-1"),  # must be ignored
             status=ValuationStatus.COMPLETE
             if market_value is not None
             else ValuationStatus.MISSING,

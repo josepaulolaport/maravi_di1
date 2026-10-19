@@ -18,6 +18,7 @@ from di1.modules.portfolio.application.interfaces.repository import (
     PortfolioRepository,
     PublishedPosition,
 )
+from di1.modules.portfolio.domain.maturity import is_past_maturity, reference_pu_on
 from di1.modules.portfolio.domain.valuation import ReferenceSource
 from di1.modules.portfolio.public import (
     CashSummaryView,
@@ -103,14 +104,11 @@ class PortfolioQueries:
         for p in published:
             instrument = instruments[p.asset_id]
             maturity = instrument.maturity_date
-            price = prices.get((p.asset_id, on))
-            if maturity is not None and on > maturity:
-                # After maturity the contract is worth 0 by definition, with no price (OQ-1).
-                source, pu, rate = None, ZERO, None
-            elif price is None:
-                source, pu, rate = None, None, None
-            else:
-                source, pu, rate = ReferenceSource(price.source.value), price.pu, price.rate
+            # After maturity no price is read: the PU is 0 by definition, with no source (OQ-1).
+            price = None if is_past_maturity(on, maturity) else prices.get((p.asset_id, on))
+            pu = reference_pu_on(on, maturity, None if price is None else price.pu)
+            source = None if price is None else ReferenceSource(price.source.value)
+            rate = None if price is None else price.rate
             rows.append(_row(p, instrument.code, maturity, source, pu, rate))
         return PositionTableView(
             date=on,

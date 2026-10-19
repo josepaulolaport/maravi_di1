@@ -344,7 +344,7 @@ class TestSet:
                 [
                     {
                         "code": "VALIDATION_ERROR",
-                        "message": "O valor deve ser maior que zero.",
+                        "message": "O PU deve ser maior que zero.",
                         "field": "pu",
                     }
                 ],
@@ -386,7 +386,7 @@ class TestSet:
                     },
                     {
                         "code": "VALIDATION_ERROR",
-                        "message": "O valor deve ser maior que zero.",
+                        "message": "O PU deve ser maior que zero.",
                         "field": "pu",
                     },
                 ],
