@@ -57,6 +57,7 @@ backend/
     workers/
       main.py
       outbox_relay.py
+      healthcheck.py   # the Compose healthcheck of the worker and the relay
   tests/
     unit/
     integration/
