@@ -31,7 +31,7 @@ Adapted for this project from the "systematic-debugging" skill of obra/superpowe
 
 1. Write a test that **reproduces the bug** and fails for the right reason. This is the regression test.
 2. Make one fix at the root cause, not at the symptom.
-3. Run the area's whole suite, then commit the test and the fix together: `fix(<scope>): …` with `Refs:`, after the user approves (skill `commit`).
+3. Run the area's whole suite, then commit the test and the fix together: `fix(<scope>): …` with `Refs:` (skill `commit`).
 
 ## Stop signs
 

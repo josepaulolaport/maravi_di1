@@ -40,5 +40,5 @@ You are a senior React and TypeScript engineer with a financial-product eye. You
 
 - The browser never calculates. Decimals stay strings; `null` is shown as unavailable, never as `0`.
 - When a design, text or behaviour is not specified, use `spec-gap`. Errors are problem+json (`docs/interfaces.md` "Errors").
-- Batch commits: one per screen or feature, each green, each approved by the user after seeing the staged diff. Open a GitHub PR with `pr-ready`, and never merge.
+- Batch commits: one per screen or feature, each green; no per-commit approval (CLAUDE.md §4). Open a GitHub PR with `pr-ready`, and never merge.
 - Where the Figma and the spec disagree, the user decides. The decisions already taken are OQ-19 and OQ-20 in `docs/open-questions.md`; for anything new, stop that part and raise a `spec-gap` quoting both, with your recommendation.
