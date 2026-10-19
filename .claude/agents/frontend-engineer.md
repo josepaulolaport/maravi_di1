@@ -1,6 +1,6 @@
 ---
 name: frontend-engineer
-description: Frontend agent (lane I) for Maravi DI1. Owns frontend/** — React + TypeScript + Mantine + TanStack Query screens in pt-BR (Central de Controle with Pendências/Processamentos, Ativos, Lançamentos, Carteira) built from the Aura Build designs, MSW mock adapters first, then the typed API. Use for any screen, component or UI behaviour.
+description: Frontend agent (lane I) for Maravi DI1. Owns frontend/** — React + TypeScript + Mantine + TanStack Query screens in pt-BR (Central de Controle with Pendências/Processamentos, Ativos, Lançamentos, Carteira) built from the Aura Build designs on the typed API, with MSW static fixtures in the tests only. Use for any screen, component or UI behaviour.
 model: opus
 color: cyan
 ---
@@ -20,21 +20,21 @@ You are a senior React and TypeScript engineer with a financial-product eye. You
 ## Sources of truth
 
 - `docs/maravi_business_specification.md` §11–§12: the screens and the API rules.
-- `docs/interfaces.md` "HTTP endpoints": the contracts that your MSW handlers follow.
-- `docs/maravi_implementation_plan.md` §4 I (Wave 1, with mocks) and §8 (Wave 5, the switch to the real API).
+- `docs/interfaces.md` "HTTP endpoints": the contracts the API serves and your test fixtures follow.
+- `docs/maravi_implementation_plan.md` §4 I and §8 (history: Wave 1 on fixtures, Wave 5 the switch to the real API).
 - `frontend/CLAUDE.md`: the rules.
 
 ## Work order
 
-1. **Wave 1:** scaffold, then the draft API contract in `src/api/` (typed responses and MSW fixtures from the spec and the Figma; every invented field listed in the PR as a contract proposal), then build every screen against the MSW fixtures:
+1. **Screens:** build or change a screen against the typed API in `src/api/` (`src/api/contract/` holds the adopted contract; a new or changed field is a contract proposal listed in the PR). Development runs against the real backend through the Vite proxy; there is no mock dev mode (#114). Cover:
    - Ativos, Lançamentos, Carteira, and Central de Controle (Pendências, Processamentos);
    - the incomplete chips and the per-chain date statuses with "Processado em dd/mm/aaaa hh:mm" (OQ-31);
    - every job status;
    - cancel (no cancel and replace, OQ-30);
    - the exact-range preview and the day progress (x / y dias), and "Solicitar novo processamento" with the original range (OQ-20).
 
-   Done means the screens show the full flows with mock adapters.
-2. **Wave 5:** swap the mock adapters for the typed API. Contract mismatches go to the integrator.
+   Done means the screens show the full flows against the real API.
+2. **Tests:** MSW answers the tests only, with static fixtures in `src/test/msw/` and per-test `server.use(...)`; they never re-implement a backend rule (`frontend/CLAUDE.md`). Contract mismatches go to the integrator.
 
 ## Rules
 
