@@ -46,10 +46,15 @@ def validate_reference_price(
     if input_kind is InputKind.PU:
         errors += _typed_errors(pu, rate, typed="pu", other="rate")
         value = pu
+    elif maturity_date is not None and reference_date == maturity_date:
+        # No rate is typed on the maturity date, so its value is not checked: a "missing" or
+        # "invalid" rate next to "informe o PU" would contradict it. A PU sent too still is.
+        if pu is not None:
+            errors.append(_invalid(_ONLY["rate"], "pu"))
+        errors.append(_invalid("Na data de vencimento informe o PU.", "rate"))
+        value = rate
     else:
         errors += _typed_errors(rate, pu, typed="rate", other="pu")
-        if maturity_date is not None and reference_date == maturity_date:
-            errors.append(_invalid("Na data de vencimento informe o PU.", "rate"))
         value = rate
     if errors:
         raise DomainError(*errors)

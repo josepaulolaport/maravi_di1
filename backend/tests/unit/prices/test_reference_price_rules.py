@@ -118,6 +118,40 @@ class TestRejectedDates:
             ErrorDetail(ErrorCode.VALIDATION_ERROR, "Na data de vencimento informe o PU.", "rate"),
         )
 
+    @pytest.mark.parametrize("rate", [None, Decimal("0.1234567890123"), Decimal("-2")])
+    def test_on_the_maturity_date_a_rate_request_gets_one_message_on_rate(
+        self, rate: Decimal | None
+    ) -> None:
+        # The rate is not typed on that date at all, so its missing or invalid value is not
+        # reported next to "informe o PU", which would contradict it (CodeRabbit on #65).
+        with pytest.raises(DomainError) as excinfo:
+            _validate(
+                reference_date=MATURED_ON,
+                input_kind=InputKind.RATE,
+                pu=None,
+                rate=rate,
+                maturity_date=MATURED_ON,
+            )
+
+        assert _errors(excinfo) == (
+            ErrorDetail(ErrorCode.VALIDATION_ERROR, "Na data de vencimento informe o PU.", "rate"),
+        )
+
+    def test_on_the_maturity_date_a_rate_request_with_a_pu_still_flags_the_pu(self) -> None:
+        with pytest.raises(DomainError) as excinfo:
+            _validate(
+                reference_date=MATURED_ON,
+                input_kind=InputKind.RATE,
+                pu=Decimal("100000"),
+                rate=None,
+                maturity_date=MATURED_ON,
+            )
+
+        assert _errors(excinfo) == (
+            ErrorDetail(ErrorCode.VALIDATION_ERROR, "Informe apenas a taxa, sem o PU.", "pu"),
+            ErrorDetail(ErrorCode.VALIDATION_ERROR, "Na data de vencimento informe o PU.", "rate"),
+        )
+
 
 class TestRejectedValues:
     @pytest.mark.parametrize(
