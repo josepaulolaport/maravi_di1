@@ -4,6 +4,7 @@ returns its connection."""
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from typing import Annotated
 
@@ -33,6 +34,20 @@ def test_health_is_ok_when_the_database_answers(settings: Settings) -> None:
         response = client.get("/health")
 
     assert (response.status_code, response.json()) == (200, {"status": "ok"})
+
+
+def test_the_app_configures_logging_when_it_starts(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "warning")
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", list(root.handlers))
+    monkeypatch.setattr(root, "level", root.level)
+
+    with TestClient(create_app(settings)):
+        names = [handler.get_name() for handler in root.handlers]
+
+    assert (names.count("di1"), root.level) == (1, logging.WARNING)
 
 
 def test_a_request_unit_of_work_commits_only_when_told_to(settings: Settings) -> None:

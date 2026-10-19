@@ -95,8 +95,18 @@ class IssueView:
 
 
 def validate_range(start_date: date, end_date: date, today: date) -> None:
-    """``INVALID_RANGE`` when the start is after the end, else ``FUTURE_DATE`` when the range
-    ends after today in São Paulo (interfaces.md "Errors", OQ-29)."""
+    """``INVALID_RANGE`` when the start is the first representable date (it has no day before)
+    or after the end, else ``FUTURE_DATE`` when the range ends after today in São Paulo
+    (interfaces.md "Errors", OQ-29)."""
+    if start_date == date.min:
+        # The run and the preview need the day before the start; 01/01/0001 has none.
+        raise DomainError(
+            ErrorDetail(
+                ErrorCode.INVALID_RANGE,
+                "A data inicial deve ser posterior a 01/01/0001.",
+                "start_date",
+            )
+        )
     if start_date > end_date:
         raise DomainError(
             ErrorDetail(

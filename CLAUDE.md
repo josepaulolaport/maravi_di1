@@ -63,6 +63,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 - **Missing price:**
   - Quantity, average cost and cash are still computed.
   - The dependent figures are `null`, never zero.
+    - Sole exception (OQ-41): the Carteira chart's running sum `range_cumulative_pnl`, where a date adds 0 unless its positions status is `PROCESSED`/`PROCESSED_WITH_ISSUES` and its `daily_pnl` is not null.
   - The portfolio total is not complete if any expected asset is missing. An asset is expected on D when Q[D−1] ≠ 0 or it trades on D (OQ-10).
   - When Q[D−1] = 0, `position_pnl` = 0 exactly (OQ-4).
   - The cumulative P&L stays unavailable from the first gap onward.
@@ -137,7 +138,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - One logical change per commit. Every commit is green: it builds, passes lint and types, and every test passes.
   - Test and code go in the same commit.
 - **Tests first** for every rule, using the cases in spec §13 (skill `tdd`). Expected values come from the docs, never from running the code. Never delete, weaken or skip a test to make a change pass.
-- **A new worktree needs its dependencies once** before its first commit: `cd backend && uv sync --frozen`, and `cd frontend && npm ci` once the frontend exists. The pre-commit hook runs the backend checks (ruff, mypy, unit and architecture tests) and, once `frontend/package.json` exists, the frontend checks (eslint, tsc, vitest), and it fails if those dependencies are missing.
+- **A new worktree needs its dependencies once** before its first commit: `cd backend && uv sync --frozen`, and `cd frontend && npm ci` once the frontend exists. The pre-commit hook runs the backend checks (ruff, mypy, unit, architecture and phase-1 acceptance tests) and, once `frontend/package.json` exists, the frontend checks (eslint, tsc, vitest), and it fails if those dependencies are missing.
 - **Integration tests use PostgreSQL**, never SQLite. Each worktree has its own database or schema namespace; never share one mutable dev database.
 
 ## 5. Definition of done (skill `pr-ready`)

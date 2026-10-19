@@ -1,0 +1,131 @@
+# Local stack (plan §0): PostgreSQL 16, RabbitMQ 4.1, the one-shot migration, the API and the
+# outbox relay. `docker compose up --build`; the API answers on http://127.0.0.1:8000 (/health,
+# /api/...), the RabbitMQ management UI on http://127.0.0.1:15672.
+#
+# The credentials are local development defaults; override them with the DI1_* variables. Each
+# user and password sets the server's account and is also copied, as is, into DATABASE_URL or
+# RABBITMQ_URL, so use only URL-safe characters in them (letters, digits, - . _ ~): an @ : / % or
+# # would break the URL, and percent-encoding it would set the server's password to the encoded
+# text. Image tags name a version, not a digest (local stack; CI uses the same tags).
+# Settings come from di1.platform.config: DATABASE_URL (postgresql+psycopg://) for every backend
+# process, RABBITMQ_URL only for the processes that use the broker (the API never publishes).
+# The RABBITMQ_* tuning values must be the same in every broker process: a queue re-declared with
+# another delivery limit fails with PRECONDITION_FAILED.
+
+name: di1
+
+x-database-env: &database-env
+  DATABASE_URL: postgresql+psycopg://${DI1_DB_USER:-di1}:${DI1_DB_PASSWORD:-di1}@postgres:5432/${DI1_DB_NAME:-di1}
+  LOG_LEVEL: ${DI1_LOG_LEVEL:-INFO}
+
+x-broker-env: &broker-env
+  RABBITMQ_URL: amqp://${DI1_RABBITMQ_USER:-di1}:${DI1_RABBITMQ_PASSWORD:-di1}@rabbitmq:5672/
+  RABBITMQ_DELIVERY_LIMIT: ${DI1_RABBITMQ_DELIVERY_LIMIT:-5}
+
+x-backend: &backend
+  build: ./backend
+  image: di1-backend:local
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DI1_DB_USER:-di1}
+      POSTGRES_PASSWORD: ${DI1_DB_PASSWORD:-di1}
+      POSTGRES_DB: ${DI1_DB_NAME:-di1}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # TCP, not the socket: during initdb the temporary server listens on the socket only.
+      test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${DI1_RABBITMQ_USER:-di1}
+      RABBITMQ_DEFAULT_PASS: ${DI1_RABBITMQ_PASSWORD:-di1}
+    ports:
+      - "127.0.0.1:${DI1_RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      # As the rabbitmq user: run as root before the node starts, the CLI writes an Erlang cookie
+      # the node cannot read, and the node exits.
+      test: ["CMD", "gosu", "rabbitmq", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *database-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *backend
+    command: ["uvicorn", "di1.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *database-env
+    ports:
+      - "127.0.0.1:${DI1_API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  outbox-relay:
+    <<: *backend
+    command: ["python", "-m", "di1.workers.outbox_relay"]
+    environment:
+      <<: [*database-env, *broker-env]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Placeholder: the processing worker and the dispatcher are added when their entry points land
+  # on main (worker bootstrap, branch claude/worker-bootstrap-07f3e7; Processing, lane G). Each
+  # runs one replica and stops on SIGTERM within the default grace period.
+  #
+  # worker:
+  #   <<: *backend
+  #   command: ["python", "-m", "di1.workers.main"]
+  #   environment:
+  #     <<: [*database-env, *broker-env]
+  #   depends_on:
+  #     migrate: {condition: service_completed_successfully}
+  #     rabbitmq: {condition: service_healthy}
+  #   restart: unless-stopped
+  #
+  # dispatcher:          # database only, no broker
+  #   <<: *backend
+  #   command: ["python", "-m", "di1.workers.dispatcher"]
+  #   environment:
+  #     <<: *database-env
+  #     DISPATCHER_POLL_INTERVAL_SECONDS: "1.0"
+  #   depends_on:
+  #     migrate: {condition: service_completed_successfully}
+  #   restart: unless-stopped
+
+volumes:
+  postgres-data:
+  rabbitmq-data:

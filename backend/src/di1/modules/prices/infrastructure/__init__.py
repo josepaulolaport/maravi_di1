@@ -1,0 +1,1 @@
+"""Prices' outbound adapters."""

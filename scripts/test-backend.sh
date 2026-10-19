@@ -4,15 +4,21 @@
 # - TEST_DATABASE_URL set (CI: the postgres:16 service): that server is used.
 # - TEST_DATABASE_URL unset: a throwaway postgres:16 container is started on a free local port
 #   and removed on exit, whatever the outcome.
+# - TEST_RABBITMQ_URL set (CI: the rabbitmq:4.1-management service): that broker is used, with
+#   TEST_RABBITMQ_MANAGEMENT_URL.
+# - TEST_RABBITMQ_URL unset: a throwaway rabbitmq:4.1-management container is started the same way.
 #
-# REQUIRE_DATABASE_TESTS=1 always, so a database test can never be skipped silently. pytest's own
-# exit code is kept: 5 (no tests collected) fails, unlike the pre-commit hook's fast subset.
+# REQUIRE_DATABASE_TESTS=1 and REQUIRE_BROKER_TESTS=1 always, so a database or broker test can never
+# be skipped silently. pytest's own exit code is kept: 5 (no tests collected) fails, unlike the
+# pre-commit hook's fast subset.
 set -euo pipefail
 export LC_ALL=C.UTF-8
 cd "$(dirname "$0")/../backend"
 export REQUIRE_DATABASE_TESTS=1
+export REQUIRE_BROKER_TESTS=1
 
 container=""
+broker=""
 scratch=""
 # Both clean-up steps always run; the script's own failure wins, else a failed clean-up fails it.
 cleanup() {
@@ -24,6 +30,9 @@ cleanup() {
   fi
   if [[ -n "$container" ]]; then
     docker stop "$container" >/dev/null || failed=1
+  fi
+  if [[ -n "$broker" ]]; then
+    docker stop "$broker" >/dev/null || failed=1
   fi
   if [[ $rc -ne 0 ]]; then
     exit "$rc"
@@ -57,6 +66,37 @@ if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
   port=${mapping##*:}
   export TEST_DATABASE_URL="postgresql+psycopg://postgres:x@127.0.0.1:${port}/postgres"
   echo "test-backend: throwaway postgres:16 '$container' on 127.0.0.1:${port}"
+fi
+
+if [[ -z "${TEST_RABBITMQ_URL:-}" ]]; then
+  command -v docker >/dev/null 2>&1 || {
+    echo "test-backend: TEST_RABBITMQ_URL is unset and docker is not available" >&2
+    exit 1
+  }
+  name="di1-make-test-broker-$$"
+  docker run -d --rm --name "$name" -p 127.0.0.1::5672 -p 127.0.0.1::15672 \
+    rabbitmq:4.1-management >/dev/null
+  broker=$name
+  # check_port_connectivity: the AMQP and management listeners accept connections. As the rabbitmq
+  # user: run as root before the node starts, the CLI writes an Erlang cookie the node cannot read.
+  ready=0
+  for _ in $(seq 1 90); do
+    if docker exec "$broker" gosu rabbitmq rabbitmq-diagnostics -q check_port_connectivity \
+      >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 1
+  done
+  [[ $ready -eq 1 ]] || {
+    echo "test-backend: rabbitmq:4.1-management not ready after 90 s" >&2
+    exit 1
+  }
+  amqp=$(docker port "$broker" 5672/tcp)
+  management=$(docker port "$broker" 15672/tcp)
+  export TEST_RABBITMQ_URL="amqp://guest:guest@127.0.0.1:${amqp##*:}/"
+  export TEST_RABBITMQ_MANAGEMENT_URL="http://guest:guest@127.0.0.1:${management##*:}"
+  echo "test-backend: throwaway rabbitmq:4.1-management '$broker' on 127.0.0.1:${amqp##*:}"
 fi
 
 # Plan §2: exactly one Alembic head.
