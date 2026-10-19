@@ -60,6 +60,11 @@ def _post(client: TestClient, body: dict[str, Any]) -> dict[str, Any]:
     return created
 
 
+def _decimals(entry: dict[str, Any], *fields: str) -> tuple[Decimal, ...]:
+    """The entry's JSON decimal strings as `Decimal` (CLAUDE.md §2: never float, never text)."""
+    return tuple(Decimal(entry[f]) for f in fields)
+
+
 def _listed(client: TestClient, **params: Any) -> list[str]:
     response = client.get("/api/ledger/entries", params={**WEEK, **params})
     assert response.status_code == 200, response.text
@@ -70,20 +75,21 @@ def test_trade_typed_as_rate_or_pu_stores_both(
     client: TestClient, contracts: dict[str, str]
 ) -> None:
     pu = expected_pu("0.105", 360)
+    pu_value, rate_from_pu = Decimal(pu), Decimal(expected_rate(pu, 360))
 
     by_rate = _post(client, trade_body(contracts["DI1F28"], "2027-01-06", "10:00", 5, rate="0.105"))
     by_pu = _post(client, trade_body(contracts["DI1F28"], "2027-01-06", "11:00", -2, pu=pu))
 
-    assert (by_rate["execution_pu"], by_rate["execution_rate"]) == (pu, "0.105")
-    assert (by_pu["execution_pu"], by_pu["execution_rate"]) == (pu, expected_rate(pu, 360))
+    assert _decimals(by_rate, "execution_pu", "execution_rate") == (pu_value, Decimal("0.105"))
+    assert _decimals(by_pu, "execution_pu", "execution_rate") == (pu_value, rate_from_pu)
     # The cash effect is −signed quantity × execution PU (spec §7.3): a sale brings cash in.
-    assert Decimal(by_rate["cash_amount"]) == -5 * Decimal(pu)
-    assert Decimal(by_pu["cash_amount"]) == 2 * Decimal(pu)
+    assert Decimal(by_rate["cash_amount"]) == -5 * pu_value
+    assert Decimal(by_pu["cash_amount"]) == 2 * pu_value
     # Read back from storage: the typed value as typed, the computed one as stored (OQ-3).
     stored = client.get("/api/ledger/entries", params={**WEEK, "order": "asc"}).json()["items"]
-    assert [(e["input_kind"], e["execution_pu"], e["execution_rate"]) for e in stored] == [
-        ("RATE", pu, "0.105"),
-        ("PU", pu, expected_rate(pu, 360)),
+    assert [(e["input_kind"], *_decimals(e, "execution_pu", "execution_rate")) for e in stored] == [
+        ("RATE", pu_value, Decimal("0.105")),
+        ("PU", pu_value, rate_from_pu),
     ]
 
 
@@ -93,7 +99,7 @@ def test_the_day_before_maturity_is_one_calendar_day(
     # Near maturity (spec §13 case 1): Sunday 03/01/2027 is 1 calendar day before 04/01.
     near = _post(client, trade_body(contracts["DI1F27"], "2027-01-03", "10:00", 1, rate="0.10"))
 
-    assert near["execution_pu"] == expected_pu("0.10", 1)
+    assert Decimal(near["execution_pu"]) == Decimal(expected_pu("0.10", 1))
 
 
 def test_a_rate_with_12_places_is_accepted(client: TestClient, contracts: dict[str, str]) -> None:
@@ -101,7 +107,10 @@ def test_a_rate_with_12_places_is_accepted(client: TestClient, contracts: dict[s
 
     entry = _post(client, trade_body(contracts["DI1F28"], "2027-01-06", "10:00", 1, rate=rate))
 
-    assert (entry["execution_rate"], entry["execution_pu"]) == (rate, expected_pu(rate, 360))
+    assert _decimals(entry, "execution_rate", "execution_pu") == (
+        Decimal(rate),
+        Decimal(expected_pu(rate, 360)),
+    )
 
 
 def test_trades_and_cash_share_one_order(client: TestClient, contracts: dict[str, str]) -> None:
@@ -224,7 +233,7 @@ def test_maturity_date_takes_a_typed_pu_and_stores_rate_zero(
         json=trade_body(contracts["DI1F27"], "2027-01-04", "11:00", 1, rate="0.10"),
     )
 
-    assert on_maturity["execution_pu"] == "100000"
+    assert Decimal(on_maturity["execution_pu"]) == Decimal("100000")
     assert Decimal(on_maturity["execution_rate"]) == 0
     assert problem(typed_rate, 422) == [("VALIDATION_ERROR", "execution_rate")]
 
