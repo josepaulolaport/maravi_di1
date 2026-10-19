@@ -6,7 +6,8 @@ over HTTP and drained by the worker in-process; the Carteira is read back.
 Today is Friday 08/01/2027; DI1F28 matures on 01/01/2028 (Monday 04/01/2027 is 362 calendar days
 before it). Trades are typed as PU, so each execution rate is spec §4.1's
 ``(100000/PU)^(365/dias) − 1`` at 12 places (`expected_rate`). An average is a calculated PU or
-rate: stored at 10 or 12 places, half-up (OQ-3).
+rate, so it is stored at 10 or 12 places, half-up (OQ-3 item 2: "a calculated PU is stored
+with 10 dp, a calculated rate with 12 dp").
 
     Mon 10:00  buy  1 @ 90000                 Q 1
     Mon 11:00  buy  3 @ 91000                 Q 4, avg PU (90000 + 3×91000)/4 = 90750,
