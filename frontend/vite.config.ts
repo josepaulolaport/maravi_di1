@@ -1,8 +1,24 @@
 import react from '@vitejs/plugin-react';
+import { loadEnv } from 'vite';
 import { defineConfig } from 'vitest/config';
 
-export default defineConfig({
+/** The backend `docker compose up` serves locally. */
+export const DEFAULT_API_TARGET = 'http://127.0.0.1:8000';
+
+/**
+ * Dev server only: with VITE_API_MOCKS=false the app calls `/api` on its own origin, and the
+ * backend sends no CORS headers, so the dev server forwards the API (and the health check) to
+ * the backend. `API_PROXY_TARGET` (env or `.env.local`; not exposed to the browser) points it
+ * at another backend.
+ */
+export function apiProxy(target?: string): Record<string, string> {
+  const backend = target || DEFAULT_API_TARGET;
+  return { '/api': backend, '/health': backend };
+}
+
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
+  server: { proxy: apiProxy(loadEnv(mode, '.', '').API_PROXY_TARGET) },
   resolve: {
     alias: { '@': decodeURIComponent(new URL('./src', import.meta.url).pathname) },
   },
@@ -40,4 +56,4 @@ export default defineConfig({
     // default), so a failure seen only in CI can be read from its log.
     env: { DEBUG_PRINT_LIMIT: '200000' },
   },
-});
+}));
