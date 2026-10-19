@@ -1,10 +1,13 @@
-"""Revision 0002: cash and positions as two separately processable chains (OQ-21).
+"""Revision 0002: cash and positions as two separately processable chains (OQ-21, OQ-22).
 
 - 0001 + 0002 build exactly the database `docs/schema.sql` builds: same columns (type,
-  nullability, default), constraints and indexes.
+  nullability, default), constraints and indexes. Column order is deliberately not compared:
+  PostgreSQL appends added columns and cannot reorder them.
 - Existing rows are carried over: requests get scope ALL; the ledger revision and the accounting
   marker seed both new revisions and both new markers; published cash, which has no components,
-  is dropped, AUM becomes unavailable and cash is stale from the first published day.
+  is dropped, AUM becomes unavailable and cash is stale from the first published day; a stale
+  predecessor issue becomes a POSITIONS one.
+- Neither direction runs while a job is active, since both discard staged rows.
 - Downgrade to 0001 restores 0001's database exactly, and refuses while it would lose rows unless
   ``-x allow_data_loss=true`` is given.
 """
@@ -98,7 +101,9 @@ def test_upgrade_carries_existing_rows_over(database_url: str) -> None:
         " accounting_dirty_from = '2026-10-10';"
         "INSERT INTO portfolio.portfolio_metrics (metric_date, cash_balance,"
         " positions_market_value, aum, valuation_status, pnl_status)"
-        " VALUES ('2026-10-03', 100, 50, 150, 'COMPLETE', 'COMPLETE');",
+        " VALUES ('2026-10-03', 100, 50, 150, 'COMPLETE', 'COMPLETE');"
+        "INSERT INTO processing.issues (request_id, affected_date, issue_type)"
+        " SELECT id, '2026-10-01', 'STALE_PREDECESSOR' FROM processing.requests;",
     )
 
     command.upgrade(_alembic(database_url), "head")
@@ -116,7 +121,9 @@ def test_upgrade_carries_existing_rows_over(database_url: str) -> None:
     metrics = _fetch(
         database_url, "SELECT positions_market_value, aum FROM portfolio.portfolio_metrics"
     )
+    issues = _fetch(database_url, "SELECT issue_type, chain FROM processing.issues")
     assert requests == [("ALL", 7, 7)]
+    assert issues == [("STALE_PREDECESSOR", "POSITIONS")]
     assert state == [(7, 7, date(2026, 10, 3), date(2026, 10, 10))]
     assert [(str(value), aum) for value, aum in metrics] == [("50", None)]
 
@@ -149,3 +156,45 @@ def test_downgrade_refuses_to_lose_published_cash(database_url: str) -> None:
         "SELECT count(*) FROM information_schema.tables WHERE table_name = 'cash_balances'",
     )
     assert tables == [(0,)]
+
+
+def test_an_all_job_records_one_stale_predecessor_per_chain(database_url: str) -> None:
+    command.upgrade(_alembic(database_url), "head")
+    _execute(
+        database_url,
+        "INSERT INTO processing.requests (id, scope, requested_start_date, requested_end_date)"
+        " VALUES ('00000000-0000-0000-0000-000000000001', 'ALL', '2026-10-05', '2026-10-09');"
+        "INSERT INTO processing.issues (request_id, affected_date, issue_type, chain)"
+        " SELECT '00000000-0000-0000-0000-000000000001', '2026-10-05', 'STALE_PREDECESSOR',"
+        " chain FROM (VALUES ('CASH'), ('POSITIONS')) AS chains (chain);",
+    )
+
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _execute(
+            database_url,
+            "INSERT INTO processing.issues (request_id, affected_date, issue_type)"
+            " VALUES ('00000000-0000-0000-0000-000000000001', '2026-10-06', 'STALE_PREDECESSOR')",
+        )
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _execute(
+            database_url,
+            "INSERT INTO processing.issues (request_id, affected_date, issue_type, chain)"
+            " VALUES ('00000000-0000-0000-0000-000000000001', '2026-10-05',"
+            " 'STALE_PREDECESSOR', 'CASH')",
+        )
+
+
+@pytest.mark.parametrize("target", ["head", "0001"])
+def test_neither_direction_runs_while_a_job_is_active(database_url: str, target: str) -> None:
+    command.upgrade(_alembic(database_url), "0001" if target == "head" else "head")
+    scope = "" if target == "head" else "scope, "
+    value = "" if target == "head" else "'ALL', "
+    _execute(
+        database_url,
+        f"INSERT INTO processing.requests ({scope}requested_start_date, requested_end_date,"
+        f" status) VALUES ({value}'2026-10-01', '2026-10-02', 'RUNNING')",
+    )
+
+    migrate = command.upgrade if target == "head" else command.downgrade
+    with pytest.raises(RuntimeError, match="job is active"):
+        migrate(_alembic(database_url), target)

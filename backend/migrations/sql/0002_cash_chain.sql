@@ -1,5 +1,6 @@
--- OQ-21: cash and positions become two separately processable chains.
--- Run with no job active (none DISPATCHED, RUNNING or CANCELLING): staged rows are discarded.
+-- OQ-21, OQ-22: cash and positions become two separately processable chains.
+-- The revision refuses to run while a job is active (DISPATCHED, RUNNING or CANCELLING): staged
+-- rows are discarded.
 
 -- Requests: a scope, and the revisions captured per input. Existing requests covered both chains.
 ALTER TABLE processing.requests ADD COLUMN scope VARCHAR(16);
@@ -33,6 +34,16 @@ UPDATE portfolio.portfolio_metrics SET aum = NULL;
 ALTER TABLE portfolio.portfolio_metrics DROP COLUMN cash_balance;
 ALTER TABLE portfolio.portfolio_metrics
     ADD CONSTRAINT portfolio_metrics_aum_needs_market_value CHECK (aum IS NULL OR positions_market_value IS NOT NULL);
+-- Issues name the chain of a stale predecessor (OQ-22); the old ones were about the positions.
+ALTER TABLE processing.issues ADD COLUMN chain VARCHAR(16);
+UPDATE processing.issues SET chain = 'POSITIONS' WHERE issue_type = 'STALE_PREDECESSOR';
+ALTER TABLE processing.issues
+    ADD CONSTRAINT issues_chain_check CHECK (chain IS NULL OR chain IN ('CASH','POSITIONS'));
+ALTER TABLE processing.issues
+    ADD CONSTRAINT issues_chain_for_stale_predecessor CHECK ((issue_type = 'STALE_PREDECESSOR') = (chain IS NOT NULL));
+DROP INDEX processing.issues_unique_per_request_idx;
+CREATE UNIQUE INDEX issues_unique_per_request_idx ON processing.issues (request_id, asset_id, affected_date, required_price_date, issue_type, chain) NULLS NOT DISTINCT;
+
 DELETE FROM portfolio.staged_positions;
 DELETE FROM portfolio.staged_portfolio_metrics;
 ALTER TABLE portfolio.staged_portfolio_metrics DROP COLUMN cash_balance;

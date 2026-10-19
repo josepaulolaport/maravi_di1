@@ -194,11 +194,14 @@ CREATE TABLE processing.issues (
     affected_date DATE NOT NULL,
     required_price_date DATE,
     issue_type VARCHAR(64) NOT NULL,   -- MISSING_REFERENCE_PRICE | EXPIRED_OPEN_POSITION | STALE_PREDECESSOR
+    chain VARCHAR(16),                 -- CASH | POSITIONS: the chain of a STALE_PREDECESSOR (OQ-22)
     message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT issues_type_nonempty CHECK (length(btrim(issue_type)) > 0)
+    CONSTRAINT issues_type_nonempty CHECK (length(btrim(issue_type)) > 0),
+    CONSTRAINT issues_chain_check CHECK (chain IS NULL OR chain IN ('CASH','POSITIONS')),
+    CONSTRAINT issues_chain_for_stale_predecessor CHECK ((issue_type = 'STALE_PREDECESSOR') = (chain IS NOT NULL))
 );
-CREATE UNIQUE INDEX issues_unique_per_request_idx ON processing.issues (request_id, asset_id, affected_date, required_price_date, issue_type) NULLS NOT DISTINCT;
+CREATE UNIQUE INDEX issues_unique_per_request_idx ON processing.issues (request_id, asset_id, affected_date, required_price_date, issue_type, chain) NULLS NOT DISTINCT;
 CREATE INDEX issues_by_date_idx ON processing.issues (affected_date, issue_type);
 
 -- PORTFOLIO: one portfolio, no portfolio_id; published data only.
