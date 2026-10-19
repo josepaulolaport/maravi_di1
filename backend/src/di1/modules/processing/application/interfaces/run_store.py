@@ -93,6 +93,12 @@ class NewIssue:
 
 
 class RunStore(Protocol):
+    def is_transient(self, error: Exception) -> bool:
+        """Whether ``error``, raised by a call of this store or by its Unit of Work, may clear on
+        a retry or a restart (a dropped connection, a timeout); any other fails the same way on
+        every try."""
+        ...
+
     async def lock_oldest_queued(self, *, uow: UnitOfWork) -> ProcessingRequest | None:
         """The oldest QUEUED run by ``(created_at, id)``, row-locked (OQ-5 item 4, OQ-46)."""
         ...

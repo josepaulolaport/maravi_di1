@@ -12,6 +12,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.pnl.public import AssetPnLResult, PortfolioPnLResult
@@ -100,15 +101,23 @@ class TableWriter:
 
 
 class FlakyRunStore(SqlRunStore):
-    """`SqlRunStore` whose next ``end_failures`` writes of a finished run fail, as a database
-    blip would: the step's transaction then rolls back."""
+    """`SqlRunStore` whose writes of a finished run fail: the next ``end_failures`` as a
+    database blip would (transient), then the next ``end_bugs`` as a bug would (the same on
+    every try). The step's transaction then rolls back. ``end_attempts`` counts the writes."""
 
     end_failures = 0
+    end_bugs = 0
+    end_attempts = 0
 
     async def save_run(self, request: ProcessingRequest, *, uow: UnitOfWork) -> None:
-        if request.status in FINISHED and self.end_failures > 0:
-            self.end_failures -= 1
-            raise RuntimeError("database blip while ending the run")
+        if request.status in FINISHED:
+            self.end_attempts += 1
+            if self.end_failures > 0:
+                self.end_failures -= 1
+                raise OperationalError("UPDATE processing.requests", {}, Exception("database blip"))
+            if self.end_bugs > 0:
+                self.end_bugs -= 1
+                raise ValueError("bug while ending the run")
         await super().save_run(request, uow=uow)
 
 

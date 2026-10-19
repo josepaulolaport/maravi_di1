@@ -23,12 +23,27 @@ row lock on the run's ``requests`` row:
 3. the end: COMPLETED, COMPLETED_WITH_ISSUES or FAILED; any date of the range still RUNNING is
    restored from ``*_previous`` (OQ-26).
 
-**A step that cannot be recorded.** The end of a run (step 3) and the failure of a date
-(step 2c) are retried after short pauses (``end_retry_delays``), since a database blip there
-would leave the run RUNNING, and no later run is taken while it is. If they still fail, or any
-other step outside a date's chains fails, the error escapes `run`: the worker process stops
-with status 1 and restarts (`di1.platform.messaging.consumer.AfterAckRunner`), and recovery at
-its start finishes the run.
+**A step that cannot be recorded.** A run left RUNNING blocks the queue: no later run is
+taken while it is. An error in D's transaction outside every chain's savepoint always takes
+step 2c, whatever its kind (a lock timeout there fails D). Any other error of the run's steps
+(2a, 2c, 3, and the run's start) is handled by its kind (`RunStore.is_transient`):
+
+- a transient database error (a dropped connection, a timeout) may clear. The end of a run
+  (step 3) and the failure of a date (step 2c) are retried after short pauses
+  (``end_retry_delays``); if they still fail, or another step fails that way, the error
+  escapes `run`: the worker process stops with status 1 and restarts
+  (`di1.platform.messaging.consumer.AfterAckRunner`), and recovery at its start finishes the
+  run. A step that committed before its error finds the run ended on the retry and writes
+  nothing (`RunEndedError`);
+- any other error (a bug, a CHECK violation) would recur on every retry and every restart, a
+  crash loop with the queue blocked behind the run. It is not retried: the run ends FAILED
+  with ``PROCESSING_ERROR`` in a fresh short transaction (`_abort`), its RUNNING dates restored
+  and the dates it committed kept, and the worker goes on with the queue. Only if that write
+  fails too does the error escape for a restart.
+
+A known limit: a bug that breaks that FAILED end too (in restoring the dates, say) also breaks
+recovery at the worker start, which nothing catches, so it would still loop on restarts; so
+would a non-transient error classified transient (`is_transient` lists its limits).
 
 **Recovery at worker start** (`recover_at_startup`, before the worker consumes): the run left
 RUNNING was interrupted. Its dates left RUNNING are restored from ``*_previous`` (a row left
@@ -234,19 +249,52 @@ class PortfolioRangeProcessor:
     # --- 2. the dates ----------------------------------------------------------------------
 
     async def run(self, request_id: UUID) -> None:
-        """Processes the claimed run to its end. An error that escapes left the run RUNNING
-        (even recording its end failed): the worker must restart, and recovery at its start
-        resumes the run after ``progress_date``."""
+        """Processes the claimed run to its end. A transient error that escapes left the run
+        RUNNING: the worker must restart, and recovery at its start resumes the run after
+        ``progress_date``. Any other error ends the run FAILED (`_abort`)."""
         try:
             await self._run(request_id)
         except RunEndedError:
             logger.info("processing request %s has already ended", request_id)
+        except Exception as error:
+            if self._store.is_transient(error):
+                logger.exception(
+                    "processing request %s left RUNNING: the worker must restart to resume it",
+                    request_id,
+                )
+                raise
+            logger.exception(
+                "processing request %s: unexpected error; ending it FAILED", request_id
+            )
+            await self._abort(request_id, error)
+
+    async def _abort(self, request_id: UUID, error: Exception) -> None:
+        """Ends the run FAILED after a non-transient error, in a fresh short transaction: its
+        dates left RUNNING are restored (OQ-26), the dates it committed keep their statuses, and
+        a first failure already recorded (an ALL run's chain, OQ-36) is kept; otherwise the
+        run's error is ``PROCESSING_ERROR`` with no ``failed_date``, since no date failed. If
+        this write fails too, ``error`` escapes and the worker restarts."""
+        try:
+            async with self._uow_factory() as uow:
+                request = await self._lock_run(request_id, uow)
+                if request.error_code is None:
+                    request = replace(
+                        request,
+                        error_code=TECHNICAL_ERROR_CODE,
+                        error_message=TECHNICAL_ERROR_MESSAGE,
+                    )
+                await end_run(
+                    self._store, request, ProcessingStatus.FAILED, self._clock.now(), uow=uow
+                )
+                await uow.commit()
+        except RunEndedError:
+            return
         except Exception:
             logger.exception(
-                "processing request %s left RUNNING: the worker must restart to resume it",
-                request_id,
+                "processing request %s left RUNNING: ending it FAILED failed too", request_id
             )
-            raise
+            raise error from None
+        logger.warning("processing request %s ended FAILED (%s)", request_id, TECHNICAL_ERROR_CODE)
 
     async def _run(self, request_id: UUID) -> None:
         request, alive = await self._start(request_id)
@@ -277,15 +325,18 @@ class PortfolioRangeProcessor:
         self, step: Callable[[], Awaitable[None]], request_id: UUID, what: str
     ) -> None:
         """Runs ``step``, its own Unit of Work, again after each pause of
-        ``end_retry_delays`` while it fails; the last failure is raised. A step that committed
-        before its error finds the run ended on the retry (`RunEndedError`)."""
+        ``end_retry_delays`` while it fails with a transient error; the last failure, or the
+        first non-transient one, is raised. A step that committed before its error finds the
+        run ended on the retry (`RunEndedError`)."""
         for delay in self._end_retry_delays:
             try:
                 await step()
                 return
             except RunEndedError:
                 raise
-            except Exception:
+            except Exception as error:
+                if not self._store.is_transient(error):
+                    raise
                 logger.warning(
                     "processing request %s: recording %s failed; retrying in %s s",
                     request_id,

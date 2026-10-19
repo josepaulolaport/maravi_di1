@@ -15,6 +15,7 @@ from di1.modules.processing.application.interfaces.run_store import (
     DateStatusRow,
     NewIssue,
 )
+from di1.modules.processing.infrastructure.persistence.errors import is_transient
 from di1.modules.processing.infrastructure.persistence.queries import runs as sql
 from di1.modules.processing.public import (
     ChainStatus,
@@ -73,6 +74,9 @@ class SqlRunStore:
 
     def __init__(self, clock: Clock) -> None:
         self._clock = clock
+
+    def is_transient(self, error: Exception) -> bool:
+        return is_transient(error)
 
     async def has_queued(self, *, uow: UnitOfWork) -> bool:
         return bool(await uow.session.scalar(sql.EXISTS_QUEUED))
