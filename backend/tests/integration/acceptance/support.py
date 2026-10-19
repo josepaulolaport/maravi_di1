@@ -9,9 +9,10 @@ test.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
 from typing import Any
@@ -22,8 +23,13 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
+from di1.composition.consumers import processing_startup
 from di1.main import create_app
 from di1.platform.config import Settings
+from di1.platform.database.engine import create_engine
+from di1.platform.database.session import create_session_factory
+from di1.platform.database.unit_of_work import unit_of_work_factory
+from di1.platform.messaging.worker import WorkerResources
 from di1.shared.clock import FixedClock
 from tests.integration.databases import fresh_database_url, psycopg_url
 
@@ -54,6 +60,35 @@ def acceptance_app(today: date) -> Iterator[tuple[TestClient, str]]:
         app = create_app(Settings(database_url=SecretStr(url)), clock=FixedClock(today))
         with TestClient(app) as client:
             yield client, url
+
+
+def run_worker(database_url: str, now: datetime) -> None:
+    """The processing worker starting at ``now``, in-process on the same database, with the real
+    composition (``processing_startup``): it recovers, then drains every QUEUED request oldest
+    first (OQ-45, OQ-46). The doorbell left in the outbox is not relayed; RabbitMQ delivery is the
+    worker's end-to-end test, not these."""
+    asyncio.run(_run_worker(database_url, now))
+
+
+async def _run_worker(database_url: str, now: datetime) -> None:
+    engine = create_engine(Settings(database_url=SecretStr(database_url)))
+    try:
+        resources = WorkerResources(
+            uow_factory=unit_of_work_factory(create_session_factory(engine)),
+            clock=FixedClock(now.date(), fixed_now=now),
+        )
+        await processing_startup(resources)
+    finally:
+        await engine.dispose()
+
+
+def date_statuses(database_url: str) -> dict[date, tuple[str | None, str | None]]:
+    """``{date: (cash, portfolio)}`` from ``processing.date_status``, the only source of each
+    date's processing status (OQ-23, OQ-31)."""
+    rows = sql(
+        database_url, "SELECT date, cash, portfolio FROM processing.date_status ORDER BY date"
+    )
+    return {row[0]: (row[1], row[2]) for row in rows}
 
 
 def sql(database_url: str, statement: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
