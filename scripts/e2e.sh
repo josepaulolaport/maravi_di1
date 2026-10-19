@@ -6,6 +6,8 @@
 # It also checks that the web container serves the UI and forwards the API.
 # Ports: DI1_E2E_API_PORT (default 18000), DI1_E2E_WEB_PORT (18080) and
 # DI1_E2E_RABBITMQ_MANAGEMENT_PORT (25672).
+# Project: DI1_E2E_PROJECT (default di1-e2e). Two runs at once (two worktrees) need a different
+# project and different ports each, or they tear down each other's stack.
 # KEEP_E2E_STACK=1 leaves the stack running for inspection.
 set -euo pipefail
 
@@ -15,7 +17,7 @@ export DI1_WEB_PORT="${DI1_E2E_WEB_PORT:-18080}"
 export DI1_RABBITMQ_MANAGEMENT_PORT="${DI1_E2E_RABBITMQ_MANAGEMENT_PORT:-25672}"
 # The challenge checks need an empty ledger: the demo service skips its data.
 export DI1_DEMO=0
-project=di1-e2e
+project="${DI1_E2E_PROJECT:-di1-e2e}"
 compose=(docker compose -p "$project")
 
 # A stack left by KEEP_E2E_STACK=1, an interrupted run, or a `down` without -v (its volumes) would
