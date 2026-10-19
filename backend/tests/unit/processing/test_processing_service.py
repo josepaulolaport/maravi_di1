@@ -12,6 +12,7 @@ import pytest
 from di1.modules.processing.application.interfaces.repositories import (
     IssueRecord,
     IssueType,
+    ProcessingChain,
 )
 from di1.modules.processing.application.services.cursor import decode_cursor, encode_cursor
 from di1.modules.processing.application.services.processing import (
@@ -119,6 +120,49 @@ async def test_oq31_a_missing_cash_predecessor_is_reported_and_enqueueing_still_
 
     assert preview.cash is PredecessorState.NOT_PROCESSED
     assert queued.status is ProcessingStatus.QUEUED
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (ChainStatus.FAILED, PredecessorState.FAILED),  # (a) the run fails on A
+        (ChainStatus.RUNNING, PredecessorState.RUNNING),  # (c)
+        (ChainStatus.PROCESSED, PredecessorState.PROCESSED),  # (d) its real status
+        (ChainStatus.PROCESSED_WITH_ISSUES, PredecessorState.PROCESSED_WITH_ISSUES),
+    ],
+)
+async def test_oq37_a_status_on_the_day_before_wins_and_the_ledger_is_not_asked(
+    harness: Harness, status: ChainStatus, expected: PredecessorState
+) -> None:
+    """interfaces.md "Predecessor rule, per day" (OQ-37 item 4), with an empty ledger."""
+    harness.date_statuses.rows[date(2026, 10, 9)] = date_status(date(2026, 10, 9), cash=status)
+
+    preview = await harness.service.preview_range(
+        CASH, date(2026, 10, 10), date(2026, 10, 12), uow=FakeUnitOfWork()
+    )
+
+    assert preview.cash is expected
+    assert (ProcessingChain.CASH, date(2026, 10, 9)) not in harness.history.asked
+
+
+async def test_oq37_a_gap_in_the_chain_is_not_processed_without_asking_the_ledger(
+    harness: Harness,
+) -> None:
+    """(b) No row on A−1 while an earlier date of the chain has a status: every day must be
+    processed, so the run fails on A; the other chain's history does not count."""
+    harness.date_statuses.rows[date(2026, 10, 5)] = date_status(
+        date(2026, 10, 5), cash=ChainStatus.PROCESSED
+    )
+
+    preview = await harness.service.preview_range(
+        ALL, date(2026, 10, 10), date(2026, 10, 12), uow=FakeUnitOfWork()
+    )
+
+    assert (preview.cash, preview.positions) == (
+        PredecessorState.NOT_PROCESSED,
+        PredecessorState.ZERO_STATE,
+    )
+    assert harness.history.asked == [(ProcessingChain.POSITIONS, date(2026, 10, 9))]
 
 
 async def test_the_preview_refuses_a_start_after_the_end(harness: Harness) -> None:

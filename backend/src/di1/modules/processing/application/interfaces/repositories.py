@@ -55,6 +55,12 @@ class DateStatusRepository(Protocol):
         """The rows of [start_date, end_date]; a date with no row is absent."""
         ...
 
+    async def has_status_before(
+        self, chain: ProcessingChain, day: date, *, uow: UnitOfWork
+    ) -> bool:
+        """Whether ``chain`` has a status on any date before ``day``."""
+        ...
+
 
 class RequestRepository(Protocol):
     async def add(self, request: ProcessingRequest, *, uow: UnitOfWork) -> None: ...

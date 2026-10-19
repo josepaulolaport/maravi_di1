@@ -10,7 +10,11 @@ from uuid import UUID
 
 from sqlalchemy import Row
 
-from di1.modules.processing.application.interfaces.repositories import IssueRecord, IssueType
+from di1.modules.processing.application.interfaces.repositories import (
+    IssueRecord,
+    IssueType,
+    ProcessingChain,
+)
 from di1.modules.processing.infrastructure.persistence.queries import (
     date_status as date_status_sql,
 )
@@ -117,6 +121,13 @@ class SqlDateStatusRepository:
     ) -> Mapping[date, DateStatus]:
         result = await uow.session.execute(date_status_sql.select_range(start_date, end_date))
         return {row.day: _to_date_status(row) for row in result}
+
+    async def has_status_before(
+        self, chain: ProcessingChain, day: date, *, uow: UnitOfWork
+    ) -> bool:
+        column = "cash" if chain is ProcessingChain.CASH else "portfolio"
+        found = await uow.session.scalar(date_status_sql.exists_status_before(column, day))
+        return bool(found)
 
 
 class SqlIssueRepository:

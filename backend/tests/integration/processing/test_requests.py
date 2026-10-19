@@ -189,6 +189,42 @@ async def test_oq31_the_preview_reads_the_day_before_from_date_status(
     )
 
 
+async def test_oq37_the_preview_follows_the_runs_predecessor_rule(
+    engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """interfaces.md "Predecessor rule, per day" (OQ-37 item 4), with an empty ledger: a status
+    on A−1 is reported as is, a gap is not processed, and only a chain with no status before
+    A−1 can be in its zero state."""
+    await seed_statuses(
+        engine,
+        {
+            date(2026, 10, 1): (None, "PROCESSED"),  # cash's earlier status: 10/10 is a gap
+            date(2026, 10, 9): ("FAILED", None),
+            date(2026, 10, 14): ("RUNNING", "PROCESSED"),
+        },
+        processed_at=T0,
+    )
+    service = make_service()
+
+    async def preview(start: date) -> tuple[PredecessorState, PredecessorState]:
+        async with SqlAlchemyUnitOfWork(session_factory) as uow:
+            result = await service.preview_range(ALL, start, start, uow=uow)
+        return result.cash, result.positions
+
+    assert await preview(date(2026, 10, 10)) == (
+        PredecessorState.NOT_PROCESSED,  # (b) gap after 01/10
+        PredecessorState.FAILED,  # (a)
+    )
+    assert await preview(date(2026, 10, 2)) == (
+        PredecessorState.PROCESSED,  # (d) the real status, not the zero state
+        PredecessorState.ZERO_STATE,
+    )
+    assert await preview(date(2026, 10, 15)) == (
+        PredecessorState.PROCESSED,
+        PredecessorState.RUNNING,  # (c)
+    )
+
+
 async def test_10_3_issues_are_listed_newest_first_with_asset_codes(
     engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:

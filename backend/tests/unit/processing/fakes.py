@@ -14,6 +14,7 @@ from di1.modules.asset.public import InstrumentDescriptor
 from di1.modules.processing.application.interfaces.repositories import (
     IssueRecord,
     ProcessingChain,
+    status_of,
 )
 from di1.modules.processing.application.services.processing import ProcessingService
 from di1.modules.processing.public import (
@@ -93,6 +94,11 @@ class InMemoryDateStatuses:
     ) -> Mapping[date, DateStatus]:
         return {d: row for d, row in sorted(self.rows.items()) if start_date <= d <= end_date}
 
+    async def has_status_before(
+        self, chain: ProcessingChain, day: date, *, uow: UnitOfWork
+    ) -> bool:
+        return any(d < day and status_of(row, chain) is not None for d, row in self.rows.items())
+
 
 @dataclass
 class InMemoryIssues:
@@ -108,8 +114,10 @@ class FakeChainHistory:
 
     first_trade: date | None = None
     first_cash_movement: date | None = None
+    asked: list[tuple[ProcessingChain, date]] = field(default_factory=list)
 
     async def has_entries_on_or_before(self, chain: ProcessingChain, day: date) -> bool:
+        self.asked.append((chain, day))
         firsts = [self.first_trade]
         if chain is ProcessingChain.CASH:
             firsts.append(self.first_cash_movement)

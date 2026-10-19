@@ -247,11 +247,19 @@ class ProcessingService:
     async def _predecessor_state(
         self, chain: ProcessingChain, day: date, uow: UnitOfWork
     ) -> PredecessorState:
-        if not await self._chain_history.has_entries_on_or_before(chain, day):
-            return PredecessorState.ZERO_STATE
+        """The run's predecessor rule (interfaces.md "Predecessor rule, per day", OQ-37 item 4):
+        a status on ``day`` is reported as is; no status while an earlier date of the chain has
+        one is a gap, not processed; only when nothing of the chain is processed before is the
+        Ledger asked for the zero state."""
         row = (await self._date_statuses.get_date_statuses(day, day, uow=uow)).get(day)
         status = status_of(row, chain) if row is not None else None
-        return PredecessorState.NOT_PROCESSED if status is None else PredecessorState(status)
+        if status is not None:
+            return PredecessorState(status)
+        if await self._date_statuses.has_status_before(chain, day, uow=uow):
+            return PredecessorState.NOT_PROCESSED
+        if await self._chain_history.has_entries_on_or_before(chain, day):
+            return PredecessorState.NOT_PROCESSED
+        return PredecessorState.ZERO_STATE
 
     async def _add(
         self, scope: ProcessingScope, start_date: date, end_date: date, uow: UnitOfWork
