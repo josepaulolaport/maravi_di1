@@ -1,15 +1,15 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
-import { IDS } from '@/api/mocks/fixtures';
+import type { LastReference } from '@/api/contract';
+import { IDS, instruments } from '@/api/mocks/fixtures';
 import { url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { renderApp } from '@/test/render';
 
-// Expected values come from the fixture scenario (src/api/mocks/fixtures.ts). Each contract's
-// latest observation: DI1F27 none; DI1F28 16/10 MANUAL, corrected (PU 89250.3147019396, rate
-// 0.0980, preferred over B3); DI1F29 15/10 MANUAL (PU 80206.1333187932, rate 0.1045); DI1F30
-// none.
+// Expected values come from the fixture scenario (src/api/mocks/fixtures.ts). The API returns
+// `last_reference: null` for every contract for now (OQ-33 item 4); the test that shows an
+// observation answers it itself.
 
 async function openProduct() {
   const result = renderApp(`/ativos/produtos/${IDS.di1}`);
@@ -53,6 +53,28 @@ describe('Ativos: produto (§11.2)', () => {
   });
 
   it('§11.2 §5 lists each contract with its latest observation next to its own date', async () => {
+    // The API fills `last_reference` only once Prices exposes it (OQ-33 item 4).
+    const observed: Record<string, LastReference> = {
+      DI1F28: {
+        reference_date: '2026-10-16',
+        pu: '89250.3147019396',
+        rate: '0.0980',
+        source: 'MANUAL',
+      },
+      DI1F29: {
+        reference_date: '2026-10-15',
+        pu: '80206.1333187932',
+        rate: '0.1045',
+        source: 'MANUAL',
+      },
+    };
+    server.use(
+      http.get(url('/instruments'), () =>
+        HttpResponse.json({
+          items: instruments.map((i) => ({ ...i, last_reference: observed[i.code] ?? null })),
+        }),
+      ),
+    );
     await openProduct();
 
     const headers = within(screen.getByRole('table', { name: 'Contratos' }))
@@ -76,10 +98,12 @@ describe('Ativos: produto (§11.2)', () => {
     expect(screen.getByText('4 contratos cadastrados')).toBeInTheDocument();
   });
 
-  it('§5 shows a contract without any observation as unavailable, never as zero', async () => {
+  it('§5 OQ-33 shows a contract without a last reference as unavailable, never as zero', async () => {
     await openProduct();
 
+    // The API returns `last_reference: null` for every contract for now (OQ-33 item 4).
     expect(cellTexts('DI1F27').slice(0, 5)).toEqual(['DI1F27', '04/01/2027', '—', '—', '—']);
+    expect(cellTexts('DI1F28').slice(0, 5)).toEqual(['DI1F28', '03/01/2028', '—', '—', '—']);
   });
 
   it('§11.2 searches contracts by code and links each to its page', async () => {

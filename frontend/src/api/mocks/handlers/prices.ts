@@ -42,7 +42,8 @@ export const priceHandlers = [
     const assetId = params.get('asset_id') ?? '';
     const start = params.get('start_date');
     const end = params.get('end_date');
-    const errors = rangeErrors(start, end);
+    // Any range, dates after today included: those days have no price (OQ-42).
+    const errors = rangeErrors(start, end, { future: 'none' });
     if (!findInstrument(assetId)) {
       errors.push(fieldError('VALIDATION_ERROR', 'Selecione um contrato.', 'asset_id'));
     }

@@ -611,6 +611,8 @@ function job(
     progress_date: end,
     error_code: null,
     error_message: null,
+    failed_date: null,
+    failed_chain: null,
     created_at: createdAt,
     updated_at: createdAt,
     dispatched_at: createdAt,
@@ -630,6 +632,8 @@ export const processingRequests: ProcessingRequest[] = [
     progress_date: null,
     error_code: 'UNEXPECTED_ERROR',
     error_message: 'Falha inesperada ao gravar os resultados de 01/10/2026. Tente novamente.',
+    // A failure outside every chain: it has a date but no chain (OQ-40 item 3).
+    failed_date: '2026-10-01',
   }),
   job(REQUEST_IDS.cancelled, '2026-10-10', '2026-10-12', 'CANCELLED', '2026-10-14T08:30:00-03:00', {
     progress_date: null,

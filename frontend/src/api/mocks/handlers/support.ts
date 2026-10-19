@@ -116,8 +116,26 @@ export async function readJson(request: Request): Promise<Record<string, unknown
   }
 }
 
-export function rangeErrors(start: unknown, end: unknown): FieldError[] {
-  const errors = [...dateErrors(start, 'start_date'), ...dateErrors(end, 'end_date')];
+/** A date that must only be a valid calendar date, today or not. */
+const anyDateErrors = (value: unknown, field: string): FieldError[] =>
+  isIsoDate(value) ? [] : [fieldError('VALIDATION_ERROR', 'Informe uma data válida.', field)];
+
+/**
+ * Errors for an inclusive [start, end] range. Which dates are checked against today:
+ * - `'both'`, the default: either date (OQ-14);
+ * - `'end'`: only `end_date` (OQ-35 item 2), so a start after today is INVALID_RANGE;
+ * - `'none'`: neither, for reads that accept the future (OQ-42).
+ */
+export function rangeErrors(
+  start: unknown,
+  end: unknown,
+  { future = 'both' }: { future?: 'both' | 'end' | 'none' } = {},
+): FieldError[] {
+  const startErrors =
+    future === 'both' ? dateErrors(start, 'start_date') : anyDateErrors(start, 'start_date');
+  const endErrors =
+    future === 'none' ? anyDateErrors(end, 'end_date') : dateErrors(end, 'end_date');
+  const errors = [...startErrors, ...endErrors];
   if (errors.length === 0 && (start as string) > (end as string)) {
     errors.push(
       fieldError(

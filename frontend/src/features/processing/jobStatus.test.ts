@@ -2,12 +2,12 @@ import type { JobStatus, ProcessingRequest } from '@/api/contract';
 
 import {
   canCancel,
-  canRequestAgain,
   isActive,
   isFinal,
   jobStatusBadge,
   nextDate,
   progressOf,
+  retryRequests,
 } from './jobStatus';
 
 describe('job status (§10.3, OQ-20)', () => {
@@ -54,12 +54,97 @@ describe('job status (§10.3, OQ-20)', () => {
     expect(jobStatusBadge('SUPERSEDED' as JobStatus)).toBeUndefined();
   });
 
-  it('OQ-20 offers a new request only for cancelled or failed runs', () => {
-    expect(canRequestAgain('CANCELLED')).toBe(true);
-    expect(canRequestAgain('FAILED')).toBe(true);
-    expect(canRequestAgain('COMPLETED')).toBe(false);
-    expect(canRequestAgain('COMPLETED_WITH_ISSUES')).toBe(false);
-    expect(canRequestAgain('RUNNING')).toBe(false);
+  const run = (changes: Partial<ProcessingRequest>) =>
+    ({
+      scope: 'ALL',
+      start_date: '2026-10-14',
+      end_date: '2026-10-18',
+      progress_date: '2026-10-15',
+      failed_date: null,
+      failed_chain: null,
+      ...changes,
+    }) as ProcessingRequest;
+
+  it('OQ-20 OQ-23 offers the plain new request only for cancelled or failed runs, from where they stopped', () => {
+    const plain = {
+      label: 'Solicitar novo processamento',
+      start: '2026-10-16',
+      end: '2026-10-18',
+      scope: 'ALL',
+    };
+    expect(retryRequests(run({ status: 'CANCELLED' }))).toEqual([plain]);
+    expect(retryRequests(run({ status: 'FAILED' }))).toEqual([plain]);
+    for (const status of ['COMPLETED', 'COMPLETED_WITH_ISSUES', 'RUNNING'] as const) {
+      expect(retryRequests(run({ status }))).toEqual([]);
+    }
+  });
+
+  it('OQ-40 a Concluído com pendências ALL run where a chain failed offers that chain from failed_date', () => {
+    const job = run({
+      status: 'COMPLETED_WITH_ISSUES',
+      progress_date: '2026-10-18',
+      failed_date: '2026-10-16',
+      failed_chain: 'POSITIONS',
+    });
+
+    expect(retryRequests(job)).toEqual([
+      {
+        label: 'Solicitar novo processamento (Posições)',
+        start: '2026-10-16',
+        end: '2026-10-18',
+        scope: 'POSITIONS',
+      },
+    ]);
+  });
+
+  it('OQ-40 a Cancelado ALL run where a chain failed offers the plain retry and the failed-chain retry', () => {
+    const job = run({
+      status: 'CANCELLED',
+      progress_date: '2026-10-16',
+      failed_date: '2026-10-15',
+      failed_chain: 'CASH',
+    });
+
+    expect(retryRequests(job)).toEqual([
+      {
+        label: 'Solicitar novo processamento',
+        start: '2026-10-17',
+        end: '2026-10-18',
+        scope: 'ALL',
+      },
+      {
+        label: 'Solicitar novo processamento (Caixa)',
+        start: '2026-10-15',
+        end: '2026-10-18',
+        scope: 'CASH',
+      },
+    ]);
+  });
+
+  it('OQ-23 OQ-40 a Falhou run is asked again from its failed date, in its scope only', () => {
+    // Cash failed on 12/10 and positions on 15/10: the run committed up to 14/10.
+    const job = run({
+      status: 'FAILED',
+      start_date: '2026-10-10',
+      progress_date: '2026-10-14',
+      failed_date: '2026-10-12',
+      failed_chain: 'CASH',
+    });
+
+    expect(retryRequests(job)).toEqual([
+      {
+        label: 'Solicitar novo processamento',
+        start: '2026-10-12',
+        end: '2026-10-18',
+        scope: 'ALL',
+      },
+    ]);
+  });
+
+  it('OQ-23 a Falhou run without a failed date falls back to the day after its last commit', () => {
+    const job = run({ status: 'FAILED', progress_date: '2026-10-15', failed_date: null });
+
+    expect(retryRequests(job).map((r) => r.start)).toEqual(['2026-10-16']);
   });
 
   it('OQ-23 derives the days done and the next date from the range and progress_date', () => {

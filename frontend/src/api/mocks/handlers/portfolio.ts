@@ -43,8 +43,8 @@ export function summaryOf(date: string): PortfolioSummary {
       cumulative_pnl: positions?.cumulative_pnl ?? null,
       pnl_status: positions?.pnl_status ?? null,
     },
-    // The scenario's cash + market value, only while both sides are published.
-    aum: cash && positions ? positions.aum : null,
+    // As the last chain written on the date stored it (OQ-38, OQ-40), while both sides exist.
+    aum: cash && positions ? (db.published.aum.get(date) ?? null) : null,
   };
 }
 
@@ -69,23 +69,32 @@ function referenceOf(
 }
 
 /**
- * The published P&L series over [start, end] (OQ-16, OQ-31 item 8): one point per published
- * positions day, with its status and processing time, and `range_cumulative_pnl`, the daily
- * P&L summed from `start` (its own included). The sum is null from the first date in the range
- * whose daily P&L is null or that has no published day.
+ * The P&L series over [start, end] (OQ-16, OQ-31 item 8, OQ-41): one point per calendar date,
+ * with the positions status and processing time, and `range_cumulative_pnl`, the daily P&L
+ * summed from `start` (its own included). Only a PROCESSED or PROCESSED_WITH_ISSUES day shows
+ * its P&L and adds a non-null daily P&L; every other day shows none and adds 0 (item 4), even
+ * over an older published row, so the sum is never null and the line never breaks.
  */
 function pnlSeries(start: string, end: string): PnlPoint[] {
   const items: PnlPoint[] = [];
-  let sum: string | null = '0';
+  let sum = '0';
   for (let date = start; date <= end; date = addDays(date, 1)) {
-    const point = db.published.pnl.get(date);
-    sum = sum !== null && point?.daily_pnl != null ? addDecimal(sum, point.daily_pnl) : null;
-    if (!point) continue;
+    const status = statusOf(date, 'POSITIONS');
+    const processed = status === 'PROCESSED' || status === 'PROCESSED_WITH_ISSUES';
+    const point = processed ? db.published.pnl.get(date) : undefined;
+    if (point?.daily_pnl != null) sum = addDecimal(sum, point.daily_pnl);
     items.push({
-      ...point,
+      date,
+      status,
+      // A FAILED or RUNNING day keeps its stored processing time; a day never processed has none.
+      published_at:
+        status === 'NOT_PROCESSED'
+          ? null
+          : (db.published.summaries.get(date)?.published_at ?? null),
+      pnl_status: point?.pnl_status ?? null,
+      daily_pnl: point?.daily_pnl ?? null,
+      cumulative_pnl: point?.cumulative_pnl ?? null,
       range_cumulative_pnl: sum,
-      status: statusOf(date, 'POSITIONS'),
-      published_at: db.published.summaries.get(date)?.published_at ?? null,
     });
   }
   return items;
@@ -118,7 +127,8 @@ export const portfolioHandlers = [
     const params = new URL(request.url).searchParams;
     const start = params.get('start_date');
     const end = params.get('end_date');
-    const errors = rangeErrors(start, end);
+    // A series ending after today is FUTURE_DATE on end_date (OQ-35 item 2).
+    const errors = rangeErrors(start, end, { future: 'end' });
     if (errors.length > 0) return problem(422, errors);
     return HttpResponse.json<ListResponse<PnlPoint>>({
       items: pnlSeries(start as string, end as string),
