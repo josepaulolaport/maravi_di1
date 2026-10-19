@@ -28,7 +28,8 @@ COLUMNS = (
     RequestModel.failed_date,
     RequestModel.failed_chain,
 )
-"""What a `ProcessingRequest` exposes: the claim token and the lease stay inside."""
+"""What a `ProcessingRequest` exposes; ``claim_token``, ``lease_expires_at`` and ``attempt_count``
+are unused since OQ-45."""
 
 
 def insert_request(values: dict[str, Any]) -> Insert:
