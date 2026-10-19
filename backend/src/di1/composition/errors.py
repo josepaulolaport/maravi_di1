@@ -53,6 +53,7 @@ _TITLES: Mapping[int, str] = {
     409: "Conflito",
     422: "Dados inválidos",
     500: "Erro interno",
+    503: "Serviço indisponível",
 }
 _DETAILS: Mapping[int, str] = {
     404: "Recurso não encontrado.",

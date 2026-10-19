@@ -64,6 +64,9 @@ xfail_strict = true
 [tool.coverage.run]
 branch = true
 source = ["src/di1"]
+# SQLAlchemy's async engine runs database calls in greenlets; without this, code after an
+# awaited database call (e.g. an except branch) is reported as never run.
+concurrency = ["greenlet", "thread"]
 
 [dependency-groups]
 dev = [
