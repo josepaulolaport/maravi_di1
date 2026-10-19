@@ -1,12 +1,11 @@
 import { Modal, Skeleton, Table } from '@mantine/core';
 
 import type { IsoDate } from '@/api/contract';
-import { formatDate, formatPu, formatRate } from '@/shared/format';
+import { formatDate, formatDateTime, formatPu, formatRate } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
 import { useRevisions } from '../hooks/usePrices';
 import { SOURCE_LABELS } from './PriceCalendar';
-import { formatDateTime } from './calendarData';
 
 interface RevisionsModalProps {
   assetId: string;

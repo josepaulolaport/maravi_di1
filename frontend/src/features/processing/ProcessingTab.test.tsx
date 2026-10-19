@@ -393,7 +393,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     expect(jobRow('14/10/2026 a 15/10/2026', 'Concluído').getByText('2 / 2 dias')).toBeVisible();
     expect(jobRow('14/10/2026 a 16/10/2026', 'Obsoleto').getByText('3 / 3 dias')).toBeVisible();
     expect(
-      jobRow('14/10/2026 a 16/10/2026', 'Concluído com pendências').getByText('7f000000'),
+      jobRow('14/10/2026 a 16/10/2026', 'Concluído com pendências').getByText('5b7d2f41'),
     ).toBeVisible();
     expect(screen.getByText('5 processamentos encontrados')).toBeInTheDocument();
     expect(history().queryByText('Motivo')).not.toBeInTheDocument();
@@ -741,6 +741,50 @@ describe('Processamentos: cancel and replace with an invalid range (OQ-15)', () 
     });
     expect(dialog.queryByRole('alert')).not.toBeInTheDocument();
   });
+
+  it('OQ-15 keeps a second message for the same field in the alert, so none is lost', async () => {
+    seedJob({});
+    holdWorker();
+    server.use(
+      http.post(url('/processing/requests/:id/cancel-and-replace'), () =>
+        HttpResponse.json(
+          {
+            type: 'about:blank',
+            title: 'Dados inválidos',
+            status: 422,
+            errors: [
+              {
+                code: 'FUTURE_DATE',
+                message: 'A data não pode ser posterior a hoje.',
+                field: 'start_date',
+              },
+              {
+                code: 'INVALID_RANGE',
+                message: 'A data inicial deve ser anterior ou igual à data final.',
+                field: 'start_date',
+              },
+            ],
+          },
+          { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    );
+    const { user } = renderApp(PAGE);
+
+    const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
+    await user.click(menu.getByRole('menuitem', { name: 'Cancelar e criar novo processamento' }));
+    const dialog = within(
+      await screen.findByRole('dialog', { name: 'Cancelar e criar novo processamento' }),
+    );
+    await user.click(dialog.getByRole('button', { name: 'Cancelar e criar novo' }));
+
+    const alert = await dialog.findByRole('alert');
+    expect(alert).toHaveTextContent('A data inicial deve ser anterior ou igual à data final.');
+    expect(alert).not.toHaveTextContent('A data não pode ser posterior a hoje.');
+    expect(dialog.getByRole('textbox', { name: 'Data inicial' })).toHaveAccessibleDescription(
+      'A data não pode ser posterior a hoje.',
+    );
+  });
 });
 
 describe('Processamentos: details (§11.1, §10.4)', () => {
@@ -752,7 +796,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
 
     const drawer = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
     expect(drawer.getByRole('status')).toHaveTextContent('Falhou');
-    expect(drawer.getByText('7f000000')).toBeInTheDocument();
+    expect(drawer.getByText('a4f09d15')).toBeInTheDocument();
     const field = (label: string) => within(drawer.getByRole('group', { name: label }));
     expect(field('Período solicitado').getByText('01/10/2026 a 05/10/2026')).toBeInTheDocument();
     expect(field('Criação').getByText('14/10/2026 08:00')).toBeInTheDocument();

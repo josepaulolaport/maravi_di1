@@ -1,15 +1,6 @@
-import { formatDateTime, formatPeriod, formatProgress, parseDateInput, shortId } from './format';
+import { formatPeriod, formatProgress, parseDateInput, shortId } from './format';
 
 describe('Central de Controle formatting (§11.1)', () => {
-  it('§11.1 shows a timestamp in Brasília time, whatever its offset', () => {
-    expect(formatDateTime('2026-10-16T18:35:00-03:00')).toBe('16/10/2026 18:35');
-    expect(formatDateTime('2026-10-16T21:35:00Z')).toBe('16/10/2026 18:35');
-  });
-
-  it('§11.1 shows a missing timestamp as unavailable', () => {
-    expect(formatDateTime(null)).toBe('—');
-  });
-
   it('§11.1 shows the inclusive period with both dates', () => {
     expect(formatPeriod('2026-10-14', '2026-10-16')).toBe('14/10/2026 a 16/10/2026');
   });
