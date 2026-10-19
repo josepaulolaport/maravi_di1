@@ -217,6 +217,46 @@ describe('mock assets', () => {
       settlement_description: 'Liquidação financeira',
     });
   });
+
+  it('OQ-33 trims and upper-cases a new contract code', async () => {
+    const created = await assetsApi.createInstrument({
+      product_id: IDS.di1,
+      code: '  di1f31 ',
+      maturity_date: '2031-01-02',
+    });
+
+    expect(created.code).toBe('DI1F31');
+    const duplicate = await problemOf(
+      assetsApi.createInstrument({
+        product_id: IDS.di1,
+        code: 'Di1F31',
+        maturity_date: '2031-01-02',
+      }),
+    );
+    expect(duplicate.errors?.[0]).toMatchObject({ code: 'VALIDATION_ERROR', field: 'code' });
+  });
+
+  it('OQ-33 an unknown product_id in the body is 422 on product_id, with the other field errors', async () => {
+    const problem = await problemOf(
+      assetsApi.createInstrument({ product_id: 'missing', code: 'DI1F31', maturity_date: '' }),
+    );
+
+    expect(problem.status).toBe(422);
+    expect(problem.errors?.map((e) => [e.code, e.field])).toEqual([
+      ['VALIDATION_ERROR', 'product_id'],
+      ['VALIDATION_ERROR', 'maturity_date'],
+    ]);
+  });
+
+  it('OQ-33 search is a substring match ignoring case and accents', async () => {
+    const byName = await assetsApi.listProducts({ search: 'taxa media' });
+    const byClass = await assetsApi.listProducts({ search: 'JUROS' });
+    const byCode = await assetsApi.listInstruments({ product_id: IDS.di1, search: 'f28' });
+
+    expect(byName.items.map((p) => p.code)).toEqual(['DI1']);
+    expect(byClass.items.map((p) => p.code)).toEqual(['DI1']);
+    expect(byCode.items.map((i) => i.code)).toEqual(['DI1F28']);
+  });
 });
 
 describe('mock reference prices', () => {
@@ -286,15 +326,16 @@ describe('mock reference prices', () => {
     expect(problem.errors?.[0]).toMatchObject({ code: 'VALIDATION_ERROR', field: 'asset_id' });
   });
 
-  it('OQ-19 shows each contract latest observation with its date', async () => {
+  it('OQ-33 last_reference is null for every contract for now, prices or not', async () => {
     const { items } = await assetsApi.listInstruments({ product_id: IDS.di1 });
 
-    expect(items.map((i) => [i.code, i.last_reference?.reference_date ?? null])).toEqual([
+    expect(items.map((i) => [i.code, i.last_reference])).toEqual([
       ['DI1F27', null],
-      ['DI1F28', '2026-10-16'],
-      ['DI1F29', '2026-10-15'],
+      ['DI1F28', null],
+      ['DI1F29', null],
       ['DI1F30', null],
     ]);
+    expect((await assetsApi.getInstrument(IDS.di1f28)).last_reference).toBeNull();
   });
 });
 
