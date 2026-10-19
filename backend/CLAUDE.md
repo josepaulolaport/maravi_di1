@@ -28,6 +28,8 @@ backend/
       presentation/messaging/            # this module's RabbitMQ consumers and handlers
     workers/{main.py, dispatcher.py, outbox_relay.py}   # lane H
   tests/{unit/<module>/, integration/, architecture/, e2e/}
+  tests/acceptance/                  # spec §13 phase 1, pure; acceptance-tests session
+  tests/integration/acceptance/      # spec §13 phase 2; acceptance-tests session
 ```
 
 Create only the files and packages that are used. Initially only Processing has a messaging consumer. Its handlers parse the message and call `application/`, and hold no business logic. Shared RabbitMQ infrastructure (connection, publisher, consumer base, envelope, outbox, inbox, topology) lives in `platform/messaging/`.

@@ -78,6 +78,18 @@ def broker_settings() -> BrokerSettings:
 
 
 @pytest.fixture
+def management_url() -> str:
+    """``TEST_RABBITMQ_MANAGEMENT_URL`` (``http://guest:guest@127.0.0.1:15672``): the reconnect
+    test closes connections through the management API."""
+    url = os.environ.get("TEST_RABBITMQ_MANAGEMENT_URL")
+    if not url:
+        if os.environ.get("REQUIRE_BROKER_TESTS") == "1":
+            pytest.fail("REQUIRE_BROKER_TESTS=1 but TEST_RABBITMQ_MANAGEMENT_URL is not set")
+        pytest.skip("TEST_RABBITMQ_MANAGEMENT_URL is not set: reconnect test not run")
+    return url
+
+
+@pytest.fixture
 def topology() -> Topology:
     """Names of this test's own, so tests never share broker state."""
     prefix = f"test.{uuid.uuid4().hex[:12]}"

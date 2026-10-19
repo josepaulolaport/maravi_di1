@@ -61,11 +61,15 @@ export interface Instrument {
   /** Proposal: denormalised for breadcrumbs and tables. */
   product_code: string;
   maturity_date: IsoDate | null;
+  /** Always null for now (OQ-33 item 4), until Prices exposes a latest-observation read. */
   last_reference: LastReference | null;
   created_at: IsoDateTime;
 }
 
-/** `POST /instruments` ("Novo contrato"). */
+/**
+ * `POST /instruments` ("Novo contrato"). The code is trimmed and upper-cased; an unknown
+ * `product_id` is 422 on that field (OQ-33 items 1–2).
+ */
 export interface CreateInstrumentRequest {
   product_id: string;
   code: string;

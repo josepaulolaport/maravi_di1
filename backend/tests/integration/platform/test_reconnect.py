@@ -7,11 +7,6 @@ interfaces.md "Transaction boundaries" 7 (relay and workers recover); plan §5 H
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
-import os
-import urllib.parse
-import urllib.request
 from collections.abc import AsyncIterator
 
 import pytest
@@ -26,59 +21,12 @@ from di1.platform.messaging.topology import Topology, declare_queue
 from tests.integration.platform.conftest import queue_spec
 from tests.integration.platform.support import (
     RecordingHandler,
+    close_connections,
     effects,
     eventually,
     make_consumer,
     make_envelope,
 )
-
-
-@pytest.fixture
-def management_url() -> str:
-    """``TEST_RABBITMQ_MANAGEMENT_URL`` (``http://guest:guest@127.0.0.1:15672``): the reconnect
-    test closes connections through the management API."""
-    url = os.environ.get("TEST_RABBITMQ_MANAGEMENT_URL")
-    if not url:
-        if os.environ.get("REQUIRE_BROKER_TESTS") == "1":
-            pytest.fail("REQUIRE_BROKER_TESTS=1 but TEST_RABBITMQ_MANAGEMENT_URL is not set")
-        pytest.skip("TEST_RABBITMQ_MANAGEMENT_URL is not set: reconnect test not run")
-    return url
-
-
-def _management(url: str, method: str, path: str) -> object:
-    parsed = urllib.parse.urlsplit(url)
-    credentials = f"{parsed.username}:{parsed.password}".encode()
-    request = urllib.request.Request(
-        f"{parsed.scheme}://{parsed.hostname}:{parsed.port}{path}",
-        method=method,
-        headers={"Authorization": f"Basic {base64.b64encode(credentials).decode()}"},
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        body = response.read()
-    return json.loads(body) if body else None
-
-
-async def _close_connections(url: str, connection_name: str) -> int:
-    def close() -> int:
-        connections = _management(url, "GET", "/api/connections")
-        names = [
-            entry["name"]
-            for entry in connections  # type: ignore[attr-defined]
-            if entry.get("user_provided_name") == connection_name
-        ]
-        for name in names:
-            _management(url, "DELETE", f"/api/connections/{urllib.parse.quote(name, safe='')}")
-        return len(names)
-
-    closed = 0
-
-    async def any_closed() -> bool:  # the management API lists new connections late
-        nonlocal closed
-        closed = await asyncio.to_thread(close)
-        return closed > 0
-
-    await eventually(any_closed, within=15)
-    return closed
 
 
 @pytest.fixture
@@ -116,7 +64,7 @@ async def test_consuming_and_publishing_resume_after_a_reconnect(
     await publisher.publish(before)
     await eventually(lambda: len(handler.calls) == 1)
 
-    assert await _close_connections(management_url, name) >= 1
+    assert await close_connections(management_url, name) >= 1
     await asyncio.wait_for(reconnected.wait(), timeout=30)
     await publisher.publish(after)
 
