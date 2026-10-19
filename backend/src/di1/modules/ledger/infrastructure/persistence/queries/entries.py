@@ -16,6 +16,7 @@ from sqlalchemy import (
     Table,
     and_,
     delete,
+    exists,
     false,
     insert,
     literal,
@@ -63,6 +64,14 @@ def entries_of_type(entry_type: EntryType, start_date: date, end_date: date) -> 
         )
         .order_by(*_ORDER_KEY)
     )
+
+
+def any_on_or_before(day: date, entry_type: EntryType | None) -> Select[Any]:
+    """Whether an entry, of ``entry_type`` or of either type, is dated on or before ``day``."""
+    conditions = [entries.c.entry_date <= day]
+    if entry_type is not None:
+        conditions.append(entries.c.type == entry_type.value)
+    return select(exists().where(*conditions))
 
 
 def trade_asset_ids(start_date: date, end_date: date) -> Select[Any]:

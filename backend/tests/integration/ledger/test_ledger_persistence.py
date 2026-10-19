@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.dependencies import ledger_reader
+from di1.modules.ledger.domain.entries import EntryType
 from di1.modules.ledger.domain.listing import ListOrder
 from di1.modules.ledger.infrastructure.persistence.repositories import SqlLedgerRepository
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
@@ -89,6 +90,31 @@ async def test_the_reader_returns_active_entries_of_each_type_in_order(
     assert first.input_kind is InputKind.RATE
     assert movements[0].amount == Decimal("-1.00")
     assert movements[0].movement_time == time(8, 0)
+
+
+async def test_has_entries_on_or_before_checks_dates_and_type(
+    service: LedgerService, session_factory: Sessions
+) -> None:
+    # Processing's zero-state check (OQ-31, OQ-37): positions ask for trades, cash for any type.
+    async def has(day: date, entry_type: EntryType | None = None) -> bool:
+        async with session_factory() as session:
+            # Through the repository until #54 declares it on LedgerReader.
+            return await SqlLedgerRepository(session).has_entries_on_or_before(
+                day, entry_type=entry_type
+            )
+
+    assert not await has(TODAY)
+    await create(service, session_factory, cash(date(2026, 10, 14)))
+    await create(service, session_factory, trade(date(2026, 10, 16)))
+    deleted = await create(service, session_factory, trade(date(2026, 10, 13)))
+    await delete(service, session_factory, deleted)
+
+    assert not await has(date(2026, 10, 13))  # a deleted entry no longer exists (OQ-32)
+    assert await has(date(2026, 10, 14))  # on the day itself
+    assert await has(date(2026, 10, 14), EntryType.CASH)
+    assert not await has(date(2026, 10, 15), EntryType.TRADE)
+    assert await has(date(2026, 10, 16), EntryType.TRADE)
+    assert await has(TODAY)
 
 
 async def test_trades_and_cash_of_one_date_follow_time_then_seq(
