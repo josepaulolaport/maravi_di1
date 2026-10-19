@@ -80,12 +80,21 @@ def smoke(api: str, timeout: float) -> None:
     health = call(api, "GET", "/health")
     check("GET /health", health["status"], "ok")
 
+    types = call(api, "GET", "/api/instrument-types")["items"]
+    asset_class_id = next(
+        c["id"]
+        for t in types
+        if t["code"] == "FUTURE"
+        for c in t["asset_classes"]
+        if c["code"] == "INTEREST_RATE_FUTURE"
+    )
+
     product = call(
         api,
         "POST",
         "/api/products",
         {
-            "asset_class_id": 1,
+            "asset_class_id": asset_class_id,
             "code": "DI1",
             "name": "Futuro de Depósito Interfinanceiro",
             "futures": {
