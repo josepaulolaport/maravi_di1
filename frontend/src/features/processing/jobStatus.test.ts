@@ -5,6 +5,7 @@ import {
   isActive,
   isFinal,
   jobStatusBadge,
+  runBadge,
   nextDate,
   progressOf,
   retryRequests,
@@ -37,17 +38,28 @@ describe('job status (§10.3, OQ-20)', () => {
     }
   });
 
-  it('§10.2 cancels (and cancels and replaces) only queued, dispatched or running jobs', () => {
-    const cancellable: JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING'];
-    const notCancellable: JobStatus[] = [
-      'CANCELLING',
-      'CANCELLED',
-      'COMPLETED',
-      'COMPLETED_WITH_ISSUES',
-      'FAILED',
-    ];
-    for (const status of cancellable) expect(canCancel(status)).toBe(true);
-    for (const status of notCancellable) expect(canCancel(status)).toBe(false);
+  const withCancel = (status: JobStatus, cancel_requested_at: string | null = null) =>
+    ({ status, cancel_requested_at }) as ProcessingRequest;
+
+  it('§10.2 OQ-46 cancels only a queued job, or a running one whose cancel was not asked yet', () => {
+    expect(canCancel(withCancel('QUEUED'))).toBe(true);
+    expect(canCancel(withCancel('RUNNING'))).toBe(true);
+    expect(canCancel(withCancel('RUNNING', '2026-10-18T13:05:00Z'))).toBe(false);
+    const ended: JobStatus[] = ['CANCELLED', 'COMPLETED', 'COMPLETED_WITH_ISSUES', 'FAILED'];
+    for (const status of ended) expect(canCancel(withCancel(status))).toBe(false);
+  });
+
+  it('OQ-46 a running job with a cancel asked reads Cancelando; the API status stays RUNNING', () => {
+    expect(runBadge(withCancel('RUNNING', '2026-10-18T13:05:00Z'))).toEqual({
+      label: 'Cancelando',
+      color: 'yellow',
+    });
+    expect(runBadge(withCancel('RUNNING'))).toEqual({ label: 'Processando', color: 'blue' });
+    // A queued run cancelled at once is simply Cancelado.
+    expect(runBadge(withCancel('CANCELLED', '2026-10-18T13:05:00Z'))).toEqual({
+      label: 'Cancelado',
+      color: 'gray',
+    });
   });
 
   it('OQ-23 there are eight statuses: no SUPERSEDED (Obsoleto)', () => {

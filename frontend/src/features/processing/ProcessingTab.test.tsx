@@ -587,13 +587,13 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     ).toBeInTheDocument();
   });
 
-  it('OQ-20 offers only the actions each status allows', async () => {
+  it('OQ-20 OQ-46 offers only the actions each status allows; a cancel already asked shows Cancelando', async () => {
     seedJob({});
+    // OQ-46: the API keeps a run RUNNING with its cancel request set; the screen says Cancelando.
     seedJob({
       ...RUNNING,
       id: 'aa000000-0000-4000-8000-000000000002',
       start_date: '2026-10-15',
-      status: 'CANCELLING',
       created_at: '2026-10-18T09:00:00-03:00',
       cancel_requested_at: '2026-10-18T10:05:00-03:00',
     });
@@ -681,10 +681,8 @@ describe('Processamentos: polling (§11.1, §12)', () => {
     await act(() => vi.advanceTimersByTimeAsync(2_000));
     expect(worker.polls.count).toBe(before + 1);
 
-    // QUEUED → DISPATCHED → RUNNING (17/10) → RUNNING (18/10) → COMPLETED_WITH_ISSUES.
-    worker.release(4);
-    await act(() => vi.advanceTimersByTimeAsync(2_000));
-    await findJobRow('17/10/2026 a 18/10/2026', 'Enviado');
+    // QUEUED → RUNNING (17/10) → RUNNING (18/10) → COMPLETED_WITH_ISSUES; no dispatch (OQ-46).
+    worker.release(3);
     await act(() => vi.advanceTimersByTimeAsync(2_000));
     const running = await findJobRow('17/10/2026 a 18/10/2026', 'Processando');
     expect(running.getByText('0 / 2 dias')).toBeInTheDocument();
@@ -782,7 +780,7 @@ describe('Processamentos: cancel (§10.2)', () => {
     expect(db.requests.find((r) => r.id === SEEDED_ID)?.status).toBe('QUEUED');
   });
 
-  it('§10.2 OQ-23 cancels a running job cooperatively: Cancelando, then Cancelado', async () => {
+  it('§10.2 OQ-23 OQ-46 cancels a running job cooperatively: Cancelando, then Cancelado', async () => {
     // On 17/10 of 17–18/10: the current date commits, 18/10 is not processed. (A cancel during
     // the last date would let the run complete, OQ-26 item 9.)
     seedJob({ ...RUNNING, progress_date: null });
@@ -794,10 +792,31 @@ describe('Processamentos: cancel (§10.2)', () => {
     const dialog = within(await screen.findByRole('dialog', { name: 'Cancelar processamento?' }));
     await user.click(dialog.getByRole('button', { name: 'Confirmar cancelamento' }));
 
-    await findJobRow('17/10/2026 a 18/10/2026', 'Cancelando');
+    // The API status stays RUNNING with cancel_requested_at set (OQ-46).
+    const row = await findJobRow('17/10/2026 a 18/10/2026', 'Cancelando');
+    expect(db.requests.find((r) => r.id === SEEDED_ID)?.status).toBe('RUNNING');
+    expect(row.queryByText('Processando')).not.toBeInTheDocument();
     worker.release(1);
     await findJobRow('17/10/2026 a 18/10/2026', 'Cancelado', 3_000);
   }, 10_000);
+
+  it('OQ-46 shows the API message when a cancel was already asked', async () => {
+    seedJob({ ...RUNNING, progress_date: null });
+    holdWorker();
+    const { user } = renderApp(PAGE);
+
+    const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));
+    await user.click(menu.getByRole('menuitem', { name: 'Cancelar processamento' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Cancelar processamento?' }));
+    // Cancelled elsewhere in the meantime.
+    const job = db.requests.find((r) => r.id === SEEDED_ID);
+    if (job) job.cancel_requested_at = '2026-10-18T13:05:00Z';
+    await user.click(dialog.getByRole('button', { name: 'Confirmar cancelamento' }));
+
+    expect(await dialog.findByRole('alert')).toHaveTextContent(
+      'O cancelamento deste processamento já foi solicitado.',
+    );
+  });
 
   it('OQ-15 shows the 409 message when the job can no longer be cancelled', async () => {
     seedJob({});
@@ -835,6 +854,20 @@ describe('Processamentos: cancel (§10.2)', () => {
 });
 
 describe('Processamentos: details (§11.1, §10.4)', () => {
+  it('OQ-46 the details of a running job with a cancel asked show Cancelando and no cancel action', async () => {
+    holdWorker();
+    seedJob({ ...RUNNING, cancel_requested_at: '2026-10-18T13:05:00Z' });
+    const { user } = renderApp(PAGE);
+
+    const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Cancelando'));
+    await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
+
+    const modal = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
+    expect(modal.getByRole('status')).toHaveTextContent('Cancelando');
+    expect(field(modal, 'Data em processamento').getByText('18/10/2026')).toBeInTheDocument();
+    expect(modal.queryByRole('button', { name: 'Cancelar processamento' })).not.toBeInTheDocument();
+  });
+
   it('§10.2 from the details, "Cancelar processamento" moves the focus into the cancel dialog', async () => {
     holdWorker();
     seedJob(RUNNING);

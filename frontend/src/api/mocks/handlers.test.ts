@@ -733,10 +733,26 @@ describe('mock processing', () => {
     });
     expect(job).toMatchObject({ status: 'QUEUED', progress_date: null });
 
-    expect((await poll(job.id)).status).toBe('DISPATCHED');
-    expect(await poll(job.id)).toMatchObject({ status: 'RUNNING', progress_date: null });
+    // No dispatcher (OQ-46): the worker takes the queued run straight to RUNNING.
+    const started = await poll(job.id);
+    expect(started).toMatchObject({ status: 'RUNNING', progress_date: null, dispatched_at: null });
+    expect(started.started_at).not.toBeNull();
     expect(await poll(job.id)).toMatchObject({ status: 'RUNNING', progress_date: '2026-10-14' });
     expect(await poll(job.id)).toMatchObject({ status: 'COMPLETED', progress_date: '2026-10-15' });
+  });
+
+  it('OQ-46 a run never reads DISPATCHED or CANCELLING', async () => {
+    const job = await processingApi.enqueue({
+      start_date: '2026-10-14',
+      end_date: '2026-10-16',
+      scope: 'ALL',
+    });
+    const seen = new Set<string>([job.status]);
+    seen.add((await poll(job.id)).status);
+    seen.add((await processingApi.cancel(job.id)).status);
+    for (let i = 0; i < 5; i += 1) seen.add((await poll(job.id)).status);
+
+    expect([...seen]).toEqual(['QUEUED', 'RUNNING', 'CANCELLED']);
   });
 
   it('§10.3 ends with COMPLETED_WITH_ISSUES when the range has a missing price', async () => {
@@ -761,31 +777,36 @@ describe('mock processing', () => {
       end_date: '2026-10-16',
       scope: 'ALL',
     });
-    await poll(queued.id); // DISPATCHED
-    await poll(queued.id); // RUNNING
+    await poll(queued.id); // RUNNING, 14/10 being processed
 
     expect((await processingApi.cancel(second.id)).status).toBe('CANCELLED');
-    expect((await processingApi.cancel(queued.id)).status).toBe('CANCELLING');
-    expect((await poll(queued.id)).status).toBe('CANCELLED');
+    // OQ-46: a running run stays RUNNING with its cancel request set.
+    const requested = await processingApi.cancel(queued.id);
+    expect(requested.status).toBe('RUNNING');
+    expect(requested.cancel_requested_at).not.toBeNull();
+    // The current date commits; later dates are untouched.
+    expect(await poll(queued.id)).toMatchObject({
+      status: 'CANCELLED',
+      progress_date: '2026-10-14',
+    });
   });
 
-  it('GAP-G-2 cancelling a dispatched run moves it to CANCELLING, then CANCELLED with no date run', async () => {
+  it('OQ-46 a second cancel of a running run answers 409 JOB_NOT_CANCELLABLE', async () => {
     const job = await processingApi.enqueue({
       start_date: '2026-10-14',
       end_date: '2026-10-15',
       scope: 'ALL',
     });
-    await poll(job.id); // DISPATCHED
+    await poll(job.id); // RUNNING
+    await processingApi.cancel(job.id);
 
-    const cancelling = await processingApi.cancel(job.id);
+    const problem = await problemOf(processingApi.cancel(job.id));
 
-    expect(cancelling.status).toBe('CANCELLING');
-    expect(cancelling.cancel_requested_at).not.toBeNull();
-    expect((await problemOf(processingApi.cancel(job.id))).errors?.[0]?.code).toBe(
-      'JOB_NOT_CANCELLABLE',
-    );
-    expect(await poll(job.id)).toMatchObject({ status: 'CANCELLED', progress_date: null });
-    expect((await chainStatus('2026-10-14')).cash).toBe('PROCESSED');
+    expect(problem.status).toBe(409);
+    expect(problem.errors?.[0]).toMatchObject({
+      code: 'JOB_NOT_CANCELLABLE',
+      message: 'O cancelamento deste processamento já foi solicitado.',
+    });
   });
 
   it('§10.2 runs one job at a time: the next stays queued until the active one ends', async () => {
@@ -800,11 +821,15 @@ describe('mock processing', () => {
       scope: 'ALL',
     });
 
-    await poll(first.id); // first DISPATCHED
-    expect((await poll(second.id)).status).toBe('QUEUED'); // first RUNNING
-    expect((await poll(second.id)).status).toBe('QUEUED'); // first day 2
-    expect((await poll(first.id)).status).toBe('COMPLETED');
-    expect((await poll(second.id)).status).toBe('DISPATCHED');
+    expect((await poll(first.id)).status).toBe('RUNNING');
+    expect((await poll(second.id)).status).toBe('QUEUED'); // first commits 14/10
+    expect((await poll(second.id)).status).toBe('QUEUED'); // first commits 15/10 and ends
+    expect((await poll(first.id)).status).toBe('COMPLETED'); // the worker takes the next
+    // The second run started only then: its single date commits on this read.
+    expect(await poll(second.id)).toMatchObject({
+      status: 'COMPLETED',
+      progress_date: '2026-10-14',
+    });
   });
 
   it('OQ-23 OQ-31 a write during a run changes no status; the run goes on (no SUPERSEDED)', async () => {
@@ -813,7 +838,6 @@ describe('mock processing', () => {
       end_date: '2026-10-15',
       scope: 'POSITIONS',
     });
-    await poll(job.id); // DISPATCHED
     await poll(job.id); // RUNNING
 
     await ledgerApi.createEntry({

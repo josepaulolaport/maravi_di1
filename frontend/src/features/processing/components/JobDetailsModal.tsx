@@ -10,7 +10,7 @@ import { formatDays, formatPeriod, shortId } from '../format';
 import {
   canCancel,
   failedChainOf,
-  jobStatusBadge,
+  runBadge,
   nextDate,
   progressOf,
   retryRequests,
@@ -88,7 +88,7 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
             <Text ff="monospace" fw={500}>
               {shortId(job.id)}
             </Text>
-            <StatusBadge {...jobStatusBadge(job.status)} live />
+            <StatusBadge {...runBadge(job)} live />
           </Group>
           <Field label="Período solicitado">{formatPeriod(job.start_date, job.end_date)}</Field>
           <Field label="Escopo">{SCOPE_LABELS[job.scope]}</Field>
@@ -145,7 +145,7 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
                 </Text>
               )}
           <Group justify="flex-end" gap="sm">
-            {canCancel(job.status) && (
+            {canCancel(job) && (
               <>
                 <Button
                   color="red"

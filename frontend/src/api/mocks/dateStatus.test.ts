@@ -7,7 +7,8 @@ import { IDS } from './fixtures';
 // (Processado, Processado com pendências, Processando, Erro, Não processado) and a processing
 // time. There is no staleness: a write never changes a status. Each date needs its day before
 // processed (or the chain's zero state), or the run fails there. The fake worker advances one
-// step per read of a job: dispatch, then one date per read. Fixture scenario: 14–16/10 processed
+// step per read of a job: it takes the oldest queued run straight to RUNNING (no dispatcher,
+// OQ-46), then commits one date per read. Fixture scenario: 14–16/10 processed
 // for both chains; positions on 16/10 with issues (DI1F29 has no price); 17–18/10 never.
 
 const FINAL = ['COMPLETED', 'COMPLETED_WITH_ISSUES', 'CANCELLED', 'FAILED'];
@@ -68,8 +69,8 @@ describe('OQ-23 the run (eight statuses, per-date progress)', () => {
   it('OQ-23 publishes each date as it commits; the date being processed reads Processando', async () => {
     const job = await enqueue('2026-10-14', '2026-10-15', 'ALL');
 
-    // dispatch, start (14/10 Processando), commit 14/10 (15/10 Processando)
-    expect(await polls(job, 2)).toMatchObject({ status: 'RUNNING', progress_date: null });
+    // start (14/10 Processando), commit 14/10 (15/10 Processando)
+    expect(await polls(job, 1)).toMatchObject({ status: 'RUNNING', progress_date: null });
     expect(await status('2026-10-14')).toMatchObject({ cash: 'RUNNING', positions: 'RUNNING' });
     expect(await polls(job, 1)).toMatchObject({ status: 'RUNNING', progress_date: '2026-10-14' });
     expect(await status('2026-10-14')).toEqual({ cash: 'PROCESSED', positions: 'PROCESSED' });
@@ -84,7 +85,7 @@ describe('OQ-23 the run (eight statuses, per-date progress)', () => {
 
   it('OQ-23 a cancel keeps the dates committed, the current one included; later dates are untouched', async () => {
     const job = await enqueue('2026-10-14', '2026-10-16', 'POSITIONS');
-    await polls(job, 3); // 14/10 committed, 15/10 being processed
+    await polls(job, 2); // 14/10 committed, 15/10 being processed
 
     await processingApi.cancel(job.id);
 
@@ -100,7 +101,7 @@ describe('OQ-23 the run (eight statuses, per-date progress)', () => {
     'OQ-26 a cancel during the last date lets a %s run end as it would have (%s → %s)',
     async (scope, date, ending) => {
       const job = await enqueue(date, date, scope);
-      await polls(job, 2); // the only date is being processed
+      await polls(job, 1); // the only date is being processed
 
       await processingApi.cancel(job.id);
 
@@ -139,7 +140,7 @@ describe('OQ-23 the run (eight statuses, per-date progress)', () => {
 
   it('OQ-20 there is no SUPERSEDED: a write during a run never stops it', async () => {
     const job = await enqueue('2026-10-14', '2026-10-15', 'POSITIONS');
-    await polls(job, 2);
+    await polls(job, 1);
 
     await deposit('2026-10-14');
 
@@ -250,7 +251,7 @@ describe('OQ-23 the status of a date, per chain', () => {
   it('OQ-36 OQ-40 an ALL run cancelled after one chain failed ends CANCELLED and keeps the failure', async () => {
     await setPrice('2026-10-16');
     const job = await enqueue('2026-10-15', '2026-10-18', 'ALL');
-    await polls(job, 4); // 15/10 committed; 16/10 positions Erro, cash committed; 17/10 next
+    await polls(job, 3); // 15/10 committed; 16/10 positions Erro, cash committed; 17/10 next
 
     await processingApi.cancel(job.id);
 

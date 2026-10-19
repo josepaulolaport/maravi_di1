@@ -12,6 +12,11 @@ export type ProcessingScope = 'CASH' | 'POSITIONS' | 'ALL';
 /** One of the two daily chains (OQ-21). */
 export type ProcessingChain = 'CASH' | 'POSITIONS';
 
+/**
+ * Since OQ-46 there is no dispatcher: a run goes QUEUED → RUNNING, and the API never sends
+ * DISPATCHED or CANCELLING (both stay in the enum, unused). A running run whose cancel was
+ * asked stays RUNNING with `cancel_requested_at` set.
+ */
 export type JobStatus =
   | 'QUEUED'
   | 'DISPATCHED'
