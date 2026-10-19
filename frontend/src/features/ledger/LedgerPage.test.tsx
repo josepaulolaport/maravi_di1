@@ -355,6 +355,16 @@ describe('Lançamentos (§11.3)', () => {
     });
   });
 
+  describe('future dates in the link (OQ-14)', () => {
+    it('OQ-14 says a future end date in the link was ignored', async () => {
+      await openLedger('/lancamentos?inicio=2026-10-14&fim=2099-01-01');
+
+      expect(
+        await screen.findByText('A data 01/01/2099 não pode ser posterior a hoje e foi ignorada.'),
+      ).toBeInTheDocument();
+    });
+  });
+
   describe('cash strip (OQ-19 item 3)', () => {
     it('§11.3 OQ-21 shows the published cash of the range end and the day before, with its processing time', async () => {
       await openLedger();
@@ -617,6 +627,28 @@ describe('Lançamentos (§11.3)', () => {
         'true',
       );
     });
+
+    it.each(['Compra', 'Aporte'] as const)(
+      'OQ-14 refuses a typed future date in %s on the Data field, never replacing it silently',
+      async (kind) => {
+        const bodies = captureBodies('post', '/ledger/entries');
+        const { user } = await openLedger();
+        const modal = await openNew(user, kind);
+
+        const date = modal.getByRole('textbox', { name: 'Data' });
+        await typeDate(user, date, '19/10/2026');
+
+        expect(await modal.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+        expect(date).toHaveAttribute('aria-invalid', 'true');
+        // The refused date is not kept as some other date that could be saved unnoticed.
+        expect(date).not.toHaveValue('18/10/2026');
+        await user.click(modal.getByRole('button', { name: /^Registrar/ }));
+        expect(bodies).toEqual([]);
+
+        await typeDate(user, date, '17/10/2026');
+        expect(modal.queryByText('A data não pode ser posterior a hoje.')).not.toBeInTheDocument();
+      },
+    );
 
     it.each([
       ['FUTURE_DATE', 'A data não pode ser posterior a hoje.'],

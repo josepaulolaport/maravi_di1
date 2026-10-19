@@ -1,5 +1,5 @@
 import { Button, Group, NumberInput, Select, Stack } from '@mantine/core';
-import { DateInput, TimeInput } from '@mantine/dates';
+import { TimeInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { useMemo, useState } from 'react';
@@ -8,10 +8,11 @@ import { useAllInstruments, useAllProducts } from '@/shared/queries';
 import { MessageAlert } from '@/shared/ui/MessageAlert';
 import { PriceInput, typedPrice } from '@/shared/ui/PriceInput';
 import type { CreateTradeEntryRequest, InputKind, IsoDate } from '@/api/contract';
-import { formatDate, parsePtBrDate } from '@/shared/format';
+import { formatDate } from '@/shared/format';
 
 import { useCreateEntry } from '../hooks/useLedger';
 import { splitProblem } from '@/shared/ui/problemMessages';
+import { PastDateInput } from '@/shared/ui/PastDateInput';
 
 import { nowInSaoPaulo, toIsoTime } from './formSupport';
 
@@ -196,11 +197,11 @@ export function TradeForm({
           />
         </Group>
         <Group grow align="flex-start">
-          <DateInput
+          <PastDateInput
+            today={today}
             label="Data"
             withAsterisk
             valueFormat="DD/MM/YYYY"
-            dateParser={parsePtBrDate}
             maxDate={today}
             placeholder="DD/MM/AAAA"
             {...form.getInputProps('date')}

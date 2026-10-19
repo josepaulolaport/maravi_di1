@@ -6,6 +6,7 @@ import type { IsoDate } from '@/api/contract';
 import { portfolioApi } from '@/api/endpoints';
 import { queryRoots } from '@/api/queryRoots';
 import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
+import { useFutureDateNotice } from '@/shared/ui/futureDate';
 
 import { DEFAULT_SORT, SORT_KEYS, type Sort, type SortKey } from '../components/sortPositions';
 
@@ -70,13 +71,15 @@ export function useChartStart(date: IsoDate): [IsoDate, (start: IsoDate) => void
 
 /**
  * The evaluation date lives in the URL (`?date=YYYY-MM-DD`), so a Carteira view can be linked
- * and reloaded. Invalid or future dates fall back to today (São Paulo).
+ * and reloaded. Invalid or future dates fall back to today (São Paulo); a future one is
+ * reported (OQ-14).
  */
 export function useEvaluationDate(): [IsoDate, (date: IsoDate) => void, IsoDate] {
   const [params, setParams] = useSearchParams();
   const today = todayInSaoPaulo();
   const requested = params.get('date');
   const date = isIsoDate(requested) && requested <= today ? requested : today;
+  useFutureDateNotice([requested], today);
   // A future or invalid date in the URL is corrected there too, so links match the view.
   useEffect(() => {
     if (requested !== null && requested !== date) {

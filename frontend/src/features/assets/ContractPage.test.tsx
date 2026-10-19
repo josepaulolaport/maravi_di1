@@ -367,6 +367,32 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
     expect(modal.queryByText('A data não pode ser posterior a hoje.')).not.toBeInTheDocument();
   });
 
+  it('OQ-14 refuses a typed future date on the date field', async () => {
+    const bodies: unknown[] = [];
+    server.use(
+      http.post(url('/reference-prices'), async ({ request }) => {
+        bodies.push(await request.clone().json());
+        return undefined;
+      }),
+    );
+    const { user } = await openContract(`${F28}?registrar=2026-10-17`);
+
+    const modal = within(
+      await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
+    );
+    const dateInput = modal.getByRole('textbox', { name: 'Data de referência' });
+    await user.clear(dateInput);
+    await user.type(dateInput, '19/10/2026');
+    await user.tab();
+
+    expect(await modal.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+    expect(dateInput).toHaveAttribute('aria-invalid', 'true');
+    expect(dateInput).not.toHaveValue('17/10/2026');
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '89.300,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
+    expect(bodies).toEqual([]);
+  });
+
   it('OQ-1 shows CONTRACT_MATURED on the date field', async () => {
     server.use(
       http.post(url('/reference-prices'), () =>

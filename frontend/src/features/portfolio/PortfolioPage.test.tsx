@@ -1,4 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
+import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
 import type { PortfolioPositions, PortfolioSummary } from '@/api/contract';
@@ -18,6 +19,11 @@ const INCOMPLETE_NOTE =
 // Expected figures are the fixture scenario's published values (src/api/mocks/fixtures.ts),
 // formatted in pt-BR. Intl puts a no-break space after "R$"; Testing Library's default
 // normalizer turns it into a plain space, so expectations use a plain space.
+
+// The notifications store is module-global: a notice of one test must not stay for the next.
+afterEach(() => {
+  notifications.clean();
+});
 
 function kpi(label: string) {
   return within(screen.getByRole('group', { name: label }));
@@ -660,6 +666,10 @@ describe('Carteira (§11.4)', () => {
       );
     });
     expect(router.state.location.search).toBe(`?date=${todayInSaoPaulo()}`);
+    // Not silently: the user is told why the date changed.
+    expect(
+      await screen.findByText('A data 01/01/2999 não pode ser posterior a hoje e foi ignorada.'),
+    ).toBeInTheDocument();
   });
 
   it('§8.3 P&L missing: no card, the asset is marked', async () => {

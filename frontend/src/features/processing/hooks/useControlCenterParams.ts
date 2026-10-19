@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router';
 import type { IsoDate, ProcessingScope } from '@/api/contract';
 import { isIsoDate, todayInSaoPaulo } from '@/shared/format';
 import { scopeFromUrl, scopeToUrl } from '@/shared/processing/scope';
+import { useFutureDateNotice } from '@/shared/ui/futureDate';
 
 // Central de Controle keeps its URL state in the query string (frontend/CLAUDE.md), with the
 // keys `controlCenterLinks` builds: `tab`, `inicio`, `fim`, `escopo`, plus `busca` for the search.
@@ -11,7 +12,7 @@ export type ControlCenterTab = 'pendencias' | 'processamentos';
 
 const TABS: readonly ControlCenterTab[] = ['pendencias', 'processamentos'];
 
-/** A date from the URL, or `null` when missing, invalid or after today (OQ-14). */
+/** A date from the URL, or `null` when missing, invalid or after today (OQ-14, reported). */
 function readDate(value: string | null, today: IsoDate): IsoDate | null {
   return isIsoDate(value) && value <= today ? value : null;
 }
@@ -20,6 +21,7 @@ export function useControlCenterParams() {
   const [params, setParams] = useSearchParams();
   const today = todayInSaoPaulo();
   const requestedTab = params.get('tab');
+  useFutureDateNotice([params.get('inicio'), params.get('fim')], today);
   const tab: ControlCenterTab = TABS.find((t) => t === requestedTab) ?? 'pendencias';
 
   const update = (changes: Record<string, string | null>) => {
