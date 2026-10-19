@@ -741,6 +741,50 @@ describe('Processamentos: cancel and replace with an invalid range (OQ-15)', () 
     });
     expect(dialog.queryByRole('alert')).not.toBeInTheDocument();
   });
+
+  it('OQ-15 keeps a second message for the same field in the alert, so none is lost', async () => {
+    seedJob({});
+    holdWorker();
+    server.use(
+      http.post(url('/processing/requests/:id/cancel-and-replace'), () =>
+        HttpResponse.json(
+          {
+            type: 'about:blank',
+            title: 'Dados inválidos',
+            status: 422,
+            errors: [
+              {
+                code: 'FUTURE_DATE',
+                message: 'A data não pode ser posterior a hoje.',
+                field: 'start_date',
+              },
+              {
+                code: 'INVALID_RANGE',
+                message: 'A data inicial deve ser anterior ou igual à data final.',
+                field: 'start_date',
+              },
+            ],
+          },
+          { status: 422, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+    );
+    const { user } = renderApp(PAGE);
+
+    const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
+    await user.click(menu.getByRole('menuitem', { name: 'Cancelar e criar novo processamento' }));
+    const dialog = within(
+      await screen.findByRole('dialog', { name: 'Cancelar e criar novo processamento' }),
+    );
+    await user.click(dialog.getByRole('button', { name: 'Cancelar e criar novo' }));
+
+    const alert = await dialog.findByRole('alert');
+    expect(alert).toHaveTextContent('A data inicial deve ser anterior ou igual à data final.');
+    expect(alert).not.toHaveTextContent('A data não pode ser posterior a hoje.');
+    expect(dialog.getByRole('textbox', { name: 'Data inicial' })).toHaveAccessibleDescription(
+      'A data não pode ser posterior a hoje.',
+    );
+  });
 });
 
 describe('Processamentos: details (§11.1, §10.4)', () => {
