@@ -174,9 +174,10 @@ class PortfolioRangeProcessor:
                 await uow.commit()
                 return None
             while (queued := await self._store.lock_oldest_queued(uow=uow)) is None:
-                # No row can also mean a cancel committed on the oldest row while we waited on
-                # its lock: PostgreSQL re-checks that row and returns none, not the next one.
-                # Select again until a row is locked or none is queued at all.
+                # Defensive: a cancel may commit on the oldest row while we wait on its lock.
+                # With this query's plan PostgreSQL then moves on to the next row; should a plan
+                # ever return no row instead, select again until a row is locked or none is
+                # queued at all. No test can force that case on this query.
                 if not await self._store.has_queued(uow=uow):
                     await uow.commit()
                     return None
