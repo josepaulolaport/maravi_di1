@@ -31,9 +31,9 @@ maturity is a phase 2 obligation.
 
 Partly here: case 13 and OQ-38 (AUM null without a cash balance: valuation only).
 
-## Phase 2: over HTTP (not built yet)
+## Phase 2: over HTTP (`tests/integration/acceptance/`)
 
-Same scenarios against the wired API, PostgreSQL and the Wave 4 worker, with the clock injected
+Started there: its README lists what is covered and what waits for the worker. Same scenarios against the wired API, PostgreSQL and the Wave 4 worker, with the clock injected
 at 01/01/2027 (D4): register the contracts, entries and prices through the API, request
 processing, wait for the job, read `/portfolio/*`. It adds what the domain cannot reach:
 PU ↔ rate and pricing at maturity (1), no carry-forward and PU 0 after maturity in the real
