@@ -19,12 +19,8 @@ from typing import Protocol
 from uuid import UUID
 
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
-from di1.modules.portfolio.domain.accounting import (
-    AccountingDay,
-    AccountingState,
-    PortfolioAccounting,
-)
 from di1.modules.portfolio.domain.cash import CashBalance, CashCalculator, CashDay
+from di1.modules.portfolio.domain.maturity import is_past_maturity, reference_pu_on
 from di1.modules.portfolio.domain.positions import (
     OpenPosition,
     PositionDay,
@@ -45,8 +41,6 @@ from di1.modules.processing.public import ChainStatus
 from di1.platform.database.unit_of_work import UnitOfWork
 
 __all__ = [
-    "AccountingDay",
-    "AccountingState",
     "AssetValuation",
     "AssetValuationInput",
     "CashBalance",
@@ -55,7 +49,6 @@ __all__ = [
     "CashSummaryView",
     "OpenPosition",
     "PnLPointView",
-    "PortfolioAccounting",
     "PortfolioQueryService",
     "PortfolioReader",
     "PortfolioResultsWriter",
@@ -73,6 +66,8 @@ __all__ = [
     "Trade",
     "ValuationCalculator",
     "ValuationStatus",
+    "is_past_maturity",
+    "reference_pu_on",
 ]
 
 
@@ -109,8 +104,8 @@ class PortfolioResultsWriter(Protocol):
 
         The assets of ``day.positions``, ``valuation.assets`` and ``asset_pnl`` must be the same
         set, the expected assets of the date; the writer raises ``ValueError`` otherwise.
-        ``valuation.aum`` is not stored: the written AUM is recomputed from the published cash,
-        or null when ``other_chain_processed`` is ``False`` (OQ-38)."""
+        The written AUM is recomputed from the published cash and this market value, or null
+        when ``other_chain_processed`` is ``False`` (OQ-38)."""
         ...
 
     async def write_cash_day(

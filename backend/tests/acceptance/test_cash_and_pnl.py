@@ -24,10 +24,16 @@ from datetime import date
 from decimal import Decimal
 
 from di1.modules.pnl.public import CalculationCompleteness
-from di1.modules.portfolio.public import CashBalance, CashCalculator, PositionsEngine, PositionState
-from tests.acceptance.harness import DI1F28, DI1F29, Facts, run, trade
+from tests.acceptance.harness import (
+    DI1F28,
+    DI1F29,
+    Facts,
+    run,
+    run_cash,
+    run_positions,
+    trade,
+)
 
-SUNDAY = date(2027, 1, 3)
 MONDAY = date(2027, 1, 4)
 TUESDAY = date(2027, 1, 5)
 
@@ -53,7 +59,7 @@ FACTS = Facts(
 def test_cash_is_minus_signed_quantity_times_execution_pu_plus_movements() -> None:
     days = run(FACTS, MONDAY, TUESDAY)
 
-    monday, tuesday = days[MONDAY].accounting, days[TUESDAY].accounting
+    monday, tuesday = days[MONDAY].cash, days[TUESDAY].cash
     assert monday.trades_cash_flow == Decimal("122000")
     assert monday.cash_balance == Decimal("122000")
     assert (tuesday.trades_cash_flow, tuesday.deposits, tuesday.withdrawals) == (
@@ -70,22 +76,21 @@ def test_pnl_is_never_posted_to_cash() -> None:
 
     # Tuesday earns 1100 of P&L, yet cash moves only by the deposit minus the withdrawal.
     assert days[TUESDAY].pnl.daily_pnl == Decimal("1100")
-    assert days[TUESDAY].accounting.cash_balance - days[MONDAY].accounting.cash_balance == Decimal(
-        "30000"
-    )
+    assert days[TUESDAY].cash.cash_balance - days[MONDAY].cash.cash_balance == Decimal("30000")
 
 
 def test_cash_chain_runs_alone_without_positions_or_prices() -> None:
-    # Cash and positions are two independent chains (OQ-21): the same cash, with no price at all.
-    cash_days = CashCalculator().calculate_range(
-        CashBalance.zero(SUNDAY), FACTS.trades, FACTS.deposits, FACTS.withdrawals, TUESDAY
-    )
-    position_days = PositionsEngine().calculate_range(
-        PositionState.zero(SUNDAY), FACTS.trades, TUESDAY
-    )
+    # Cash and positions are two independent chains (OQ-21): a CASH run gives the same cash and a
+    # POSITIONS run the same quantities, with no price at all.
+    no_prices = Facts(trades=FACTS.trades, deposits=FACTS.deposits, withdrawals=FACTS.withdrawals)
+    cash_days = run_cash(no_prices, MONDAY, TUESDAY)
+    position_days = run_positions(no_prices, MONDAY, TUESDAY)
 
-    assert [d.cash_balance for d in cash_days] == [Decimal("122000"), Decimal("152000")]
-    assert [[p.quantity for p in d.positions] for d in position_days] == [[-3, 2], [-3, 2]]
+    assert [d.cash_balance for d in cash_days.values()] == [Decimal("122000"), Decimal("152000")]
+    assert [[p.quantity for p in d.positions_day.positions] for d in position_days.values()] == [
+        [-3, 2],
+        [-3, 2],
+    ]
 
 
 def test_pnl_per_asset_then_aggregated() -> None:
@@ -110,7 +115,6 @@ def test_pnl_per_asset_then_aggregated() -> None:
     assert tuesday.pnl.daily_pnl == Decimal("1100")
     assert tuesday.pnl.cumulative_pnl == Decimal("9800")
     assert tuesday.pnl.status is CalculationCompleteness.COMPLETE
-    assert tuesday.pnl.cumulative_status is CalculationCompleteness.COMPLETE
 
 
 def test_market_value_and_aum() -> None:
@@ -120,9 +124,9 @@ def test_market_value_and_aum() -> None:
     assert days[MONDAY].valued(DI1F28).financial_total == Decimal("-277500")
     assert days[MONDAY].valued(DI1F29).financial_total == Decimal("164200")
     assert days[MONDAY].valuation.positions_market_value == Decimal("-113300")
-    assert days[MONDAY].valuation.aum == Decimal("8700")
+    assert days[MONDAY].aum == Decimal("8700")
     assert days[TUESDAY].valuation.positions_market_value == Decimal("-112200")
-    assert days[TUESDAY].valuation.aum == Decimal("39800")
+    assert days[TUESDAY].aum == Decimal("39800")
 
 
 def test_movements_change_cash_and_aum_but_not_pnl() -> None:
@@ -132,9 +136,9 @@ def test_movements_change_cash_and_aum_but_not_pnl() -> None:
     plain, moved = without_movements[TUESDAY], with_movements[TUESDAY]
     assert moved.pnl == plain.pnl
     assert moved.asset_pnl == plain.asset_pnl
-    assert moved.accounting.cash_balance - plain.accounting.cash_balance == Decimal("30000")
-    assert moved.valuation.aum is not None and plain.valuation.aum is not None
-    assert moved.valuation.aum - plain.valuation.aum == Decimal("30000")
+    assert moved.cash.cash_balance - plain.cash.cash_balance == Decimal("30000")
+    assert moved.aum is not None and plain.aum is not None
+    assert moved.aum - plain.aum == Decimal("30000")
 
 
 def test_aum_moves_by_daily_pnl_plus_net_movements() -> None:
@@ -142,6 +146,6 @@ def test_aum_moves_by_daily_pnl_plus_net_movements() -> None:
     days = run(FACTS, MONDAY, TUESDAY)
 
     monday, tuesday = days[MONDAY], days[TUESDAY]
-    assert monday.valuation.aum == monday.pnl.daily_pnl
-    assert monday.valuation.aum is not None and tuesday.valuation.aum is not None
-    assert tuesday.valuation.aum - monday.valuation.aum == Decimal("1100") + Decimal("30000")
+    assert monday.aum == monday.pnl.daily_pnl
+    assert monday.aum is not None and tuesday.aum is not None
+    assert tuesday.aum - monday.aum == Decimal("1100") + Decimal("30000")

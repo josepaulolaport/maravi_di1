@@ -6,7 +6,7 @@ application layer maps Ledger's public ``TradeRecord`` onto it.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, time
 from decimal import Decimal
@@ -45,11 +45,3 @@ def day_trades(trades: Iterable[Trade], on: date) -> list[Trade]:
     if any(t.trade_date != on for t in ordered):
         raise AccountingError(f"every trade must be dated {on}")
     return ordered
-
-
-def trades_by_date(trades: Sequence[Trade]) -> dict[date, list[Trade]]:
-    """Trades grouped by their trade date, each group in input order."""
-    grouped: dict[date, list[Trade]] = {}
-    for t in trades:
-        grouped.setdefault(t.trade_date, []).append(t)
-    return grouped

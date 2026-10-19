@@ -44,11 +44,9 @@ def test_position_view_on_01_01_2027() -> None:
     result = run(facts, DAY, DAY)[DAY]
 
     # Cash: 0 − 1 × 90909.0909090909 + 200000 (spec §7.3); "BRL 109090.91" in the challenge.
-    assert result.accounting.cash_balance == Decimal("109090.9090909091")
-    assert result.accounting.cash_balance.quantize(CENTS, rounding=ROUND_HALF_UP) == Decimal(
-        "109090.91"
-    )
-    assert result.accounting.trades_cash_flow == Decimal("-90909.0909090909")  # "-90.909,09"
+    assert result.cash.cash_balance == Decimal("109090.9090909091")
+    assert result.cash.cash_balance.quantize(CENTS, rounding=ROUND_HALF_UP) == Decimal("109090.91")
+    assert result.cash.trades_cash_flow == Decimal("-90909.0909090909")  # "-90.909,09"
 
     # "DI1F28 | 1 | 90.909,09": quantity, reference PU and market value (spec §8.2).
     position = result.position(DI1F28)
@@ -62,7 +60,7 @@ def test_position_view_on_01_01_2027() -> None:
 
     # "Financeiro total: 200.000" is AUM = cash + market value (spec §15 I3).
     assert result.valuation.positions_market_value == PU_AT_10_PERCENT
-    assert result.valuation.aum == Decimal("200000")
+    assert result.aum == Decimal("200000")
     assert result.valuation.status is ValuationStatus.COMPLETE
 
 

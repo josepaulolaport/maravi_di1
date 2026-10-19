@@ -24,7 +24,6 @@ import pytest
 from di1.modules.pnl.public import CalculationCompleteness
 from di1.modules.portfolio.public import (
     AssetValuationInput,
-    ReferenceSource,
     ValuationCalculator,
     ValuationStatus,
 )
@@ -51,9 +50,7 @@ def test_maturity_is_the_harness_contract_date() -> None:
 def test_a_reference_price_after_maturity_is_rejected() -> None:
     with pytest.raises(ValueError, match="no reference price is accepted after maturity"):
         ValuationCalculator().calculate_day(
-            THURSDAY,
-            [AssetValuationInput(DI1F27, 1, MATURITY, Decimal("1"), ReferenceSource.MANUAL)],
-            cash_balance=Decimal(0),
+            THURSDAY, [AssetValuationInput(DI1F27, 1, MATURITY, Decimal("1"))]
         )
 
 
@@ -61,16 +58,16 @@ def test_close_on_the_maturity_date_and_leave_one_open() -> None:
     days = run(FACTS, TUESDAY, FRIDAY)
 
     assert days[TUESDAY].pnl.cumulative_pnl == Decimal("10")
-    assert days[TUESDAY].valuation.aum == Decimal("10")
+    assert days[TUESDAY].aum == Decimal("10")
 
     maturity = days[MATURITY]
     assert maturity.position(DI1F27).quantity == 1
     assert maturity.asset_pnl[DI1F27].position_pnl == Decimal("30")
     assert maturity.asset_pnl[DI1F27].trades_pnl == 0
     assert maturity.pnl.cumulative_pnl == Decimal("40")
-    assert maturity.accounting.cash_balance == Decimal("-99960")
+    assert maturity.cash.cash_balance == Decimal("-99960")
     assert maturity.valued(DI1F27).financial_total == Decimal("100000")
-    assert maturity.valuation.aum == Decimal("40")
+    assert maturity.aum == Decimal("40")
 
 
 def test_after_maturity_the_value_is_zero_and_the_open_position_loses_its_pu() -> None:
@@ -84,7 +81,7 @@ def test_after_maturity_the_value_is_zero_and_the_open_position_loses_its_pu() -
     assert thursday.asset_pnl[DI1F27].position_pnl == Decimal("-100000")
     assert thursday.pnl.daily_pnl == Decimal("-100000")
     assert thursday.pnl.cumulative_pnl == Decimal("-99960")
-    assert thursday.valuation.aum == Decimal("-99960")
+    assert thursday.aum == Decimal("-99960")
 
     friday = days[FRIDAY]
     assert friday.asset_pnl[DI1F27].position_pnl == 0
