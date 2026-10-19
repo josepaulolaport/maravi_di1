@@ -488,7 +488,8 @@ async def test_stopping_the_runner_cancels_the_run_and_drops_the_waiting_ones(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The worker's shutdown: the run in progress is cancelled (its open transaction rolls
-    back); a waiting run is dropped, its claim committed, and recovered from the lease."""
+    back); a waiting run is dropped, its start committed, and recovered when the worker starts
+    again (OQ-45)."""
     first, second = make_envelope(), make_envelope()
     runner = AfterAckRunner()
     handler = _ClaimThenRun(hold=asyncio.Event())
@@ -515,8 +516,8 @@ async def test_the_work_after_the_ack_runs_even_when_the_ack_fails(
     engine: AsyncEngine,
     runner: AfterAckRunner,
 ) -> None:
-    """The claim is committed: the redelivery will be an inbox duplicate without a run, so the
-    run must not wait for the lease to expire. The claim token fences it."""
+    """The run's start is committed: the redelivery will be an inbox duplicate without a run, so
+    the run must go on now instead of waiting for the worker's next start."""
     envelope = make_envelope()
     handler = _ClaimThenRun()
 
