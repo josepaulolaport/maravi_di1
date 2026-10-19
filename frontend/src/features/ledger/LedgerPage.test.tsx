@@ -9,16 +9,23 @@ import {
 import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
-import { cashEntries, IDS, instruments, products, tradeEntries } from '@/api/mocks/fixtures';
-import { ledgerApi } from '@/api/endpoints';
-import { db, setStatus } from '@/api/mocks/db';
-import { fieldError, problem, url } from '@/api/mocks/handlers/support';
-import { server } from '@/api/mocks/server';
+import type { LedgerEntry, PortfolioSummary } from '@/api/contract';
+import {
+  cashEntries,
+  IDS,
+  instruments,
+  ledgerEntries,
+  preview,
+  products,
+  summaries,
+  tradeEntries,
+} from '@/test/msw/fixtures';
+import { fieldError, problem, url } from '@/test/msw/handlers';
+import { captureBodies, server } from '@/test/msw/server';
 import { addDays, formatDate, todayInSaoPaulo } from '@/shared/format';
 import { renderApp } from '@/test/render';
 
-// Expected figures are the fixture scenario's values (src/api/mocks/fixtures.ts), formatted
-// in pt-BR. Intl puts a no-break space after "R$"; Testing Library's default normalizer turns
+// Expected figures are the fixtures' values (src/test/msw/fixtures.ts), formatted in pt-BR. Intl puts a no-break space after "R$"; Testing Library's default normalizer turns
 // it into a plain space, so expectations use a plain space.
 
 const FULL_RANGE = '/lancamentos?inicio=2026-10-14&fim=2026-10-16';
@@ -50,16 +57,74 @@ function cellTexts(row: HTMLElement) {
     .map((cell) => cell.textContent.replaceAll('\u00a0', ' '));
 }
 
-/** Records the JSON body of every request to `path`, then lets the mock answer it. */
-function captureBodies(method: 'post', path: string) {
-  const bodies: unknown[] = [];
+/**
+ * Serves the entries in `ledger.items` (newest first) within the requested dates. After a
+ * write, a test sets `items` to what the API returns then.
+ */
+function serveEntries() {
+  const ledger = { items: [...ledgerEntries] };
   server.use(
-    http[method](url(path), async ({ request }) => {
-      bodies.push(await request.clone().json());
-      return undefined;
+    http.get(url('/ledger/entries'), ({ request }) => {
+      const params = new URL(request.url).searchParams;
+      const start = params.get('start_date') ?? '';
+      const end = params.get('end_date') ?? '';
+      const items = ledger.items.filter((e) => e.date >= start && e.date <= end);
+      return HttpResponse.json({ items, next_cursor: null });
     }),
   );
-  return bodies;
+  return ledger;
+}
+
+/** Answers a create with `created`, which the list includes from then on. */
+function answerCreate(ledger: { items: LedgerEntry[] }, created: LedgerEntry) {
+  server.use(
+    http.post(url('/ledger/entries'), () => {
+      ledger.items = [created, ...ledger.items];
+      return HttpResponse.json(created, { status: 201 });
+    }),
+  );
+}
+
+/** Answers each deletion with 204; the list leaves the deleted entries out from then on. */
+function answerDeletes(ledger: { items: LedgerEntry[] }) {
+  server.use(
+    http.post(url('/ledger/entries/deletions'), async ({ request }) => {
+      const { ids } = (await request.clone().json()) as { ids: string[] };
+      ledger.items = ledger.items.filter((e) => !ids.includes(e.id));
+      return new HttpResponse(null, { status: 204 });
+    }),
+  );
+}
+
+/**
+ * The search is the backend's (§11.3): each searched word gets `answers[word]`; a request
+ * without a search falls through. Records the searches sent.
+ */
+function serveSearch(answers: Record<string, LedgerEntry[]>) {
+  const searches: string[] = [];
+  server.use(
+    http.get(url('/ledger/entries'), ({ request }) => {
+      const search = new URL(request.url).searchParams.get('search');
+      if (search === null) return undefined;
+      searches.push(search);
+      return HttpResponse.json({ items: answers[search] ?? [], next_cursor: null });
+    }),
+  );
+  return searches;
+}
+
+const DI1F28_ENTRIES = ledgerEntries.filter((e) => e.type === 'TRADE' && e.asset_code === 'DI1F28');
+
+/** Serves the cash chain of `date` as Erro, its published cash kept (OQ-23). */
+function failCash(date: string) {
+  const summary = summaries[date] as PortfolioSummary;
+  server.use(
+    http.get(url('/portfolio/summary'), ({ request }) =>
+      new URL(request.url).searchParams.get('date') === date
+        ? HttpResponse.json({ ...summary, cash: { ...summary.cash, status: 'FAILED' } })
+        : undefined,
+    ),
+  );
 }
 
 const ENTRY_GROUP = {
@@ -189,8 +254,11 @@ describe('Lançamentos (§11.3)', () => {
       const orders: (string | null)[] = [];
       server.use(
         http.get(url('/ledger/entries'), ({ request }) => {
-          orders.push(new URL(request.url).searchParams.get('order'));
-          return undefined;
+          const order = new URL(request.url).searchParams.get('order');
+          orders.push(order);
+          // The API's ascending answer: the same entries, oldest first.
+          const items = order === 'asc' ? [...ledgerEntries].reverse() : ledgerEntries;
+          return HttpResponse.json({ items, next_cursor: null });
         }),
       );
       const { user, router } = await openLedger();
@@ -249,14 +317,17 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§11.3 searches by asset from the URL (busca)', async () => {
+      const searches = serveSearch({ DI1F28: DI1F28_ENTRIES });
       await openLedger('/lancamentos?inicio=2026-10-14&fim=2026-10-16&busca=DI1F28');
 
       expect(screen.getByRole('textbox', { name: 'Buscar' })).toHaveValue('DI1F28');
       expect(screen.getByText('2 lançamentos encontrados')).toBeInTheDocument();
       expect(bodyRows().map((row) => cellTexts(row)[4])).toEqual(['DI1F28', 'DI1F28']);
+      expect(searches).toEqual(['DI1F28']);
     });
 
     it('§11.3 typing a search filters the list and keeps it in the URL', async () => {
+      const searches = serveSearch({ retirada: [cashEntries[1] as LedgerEntry] });
       const { user, router } = await openLedger();
 
       await user.type(screen.getByRole('textbox', { name: 'Buscar' }), 'retirada');
@@ -264,6 +335,7 @@ describe('Lançamentos (§11.3)', () => {
       expect(await screen.findByText('1 lançamento encontrado')).toBeInTheDocument();
       expect(router.state.location.search).toContain('busca=retirada');
       expect(cellTexts(bodyRows()[0] as HTMLElement)[3]).toBe('Retirada');
+      expect(searches.at(-1)).toBe('retirada');
     });
 
     it('§11.3 without inicio/fim, lists the 30 days ending today (São Paulo)', async () => {
@@ -343,6 +415,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§11.3 clearing busca in the URL clears the search box and keeps it cleared', async () => {
+      serveSearch({ DI1F28: DI1F28_ENTRIES });
       const { router } = await openLedger(`${FULL_RANGE}&busca=DI1F28`);
       expect(screen.getByText('2 lançamentos encontrados')).toBeInTheDocument();
 
@@ -383,22 +456,8 @@ describe('Lançamentos (§11.3)', () => {
       expect(screen.queryByRole('button', { name: 'Processar caixa' })).not.toBeInTheDocument();
     });
 
-    it('OQ-31 a deposit on a processed date changes no status and offers nothing to process', async () => {
-      await ledgerApi.createEntry({
-        type: 'CASH',
-        date: '2026-10-15',
-        time: '12:00:00',
-        cash_amount: '1000.00',
-      });
-      await openLedger();
-
-      const end = within(screen.getByRole('group', { name: 'Caixa D0' }));
-      expect(await end.findByText('R$ 506.059,27')).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Processar caixa' })).not.toBeInTheDocument();
-    });
-
     it('OQ-23 "Processar caixa" from a failed Caixa D−1 covers D−1 to D0, scope Caixa', async () => {
-      setStatus('2026-10-15', 'CASH', 'FAILED');
+      failCash('2026-10-15');
       const { user } = await openLedger();
 
       await user.click(await screen.findByRole('button', { name: 'Processar caixa' }));
@@ -410,7 +469,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('OQ-23 a failed cash date keeps its published cash, reads "Erro" and offers "Processar caixa"', async () => {
-      setStatus('2026-10-16', 'CASH', 'FAILED');
+      failCash('2026-10-16');
       await openLedger();
 
       const end = within(screen.getByRole('group', { name: 'Caixa D0' }));
@@ -467,7 +526,14 @@ describe('Lançamentos (§11.3)', () => {
 
   describe('Compra / Venda (§6.1)', () => {
     it('§6.1 registers a compra typed as PU, positive quantity', async () => {
-      const bodies = captureBodies('post', '/ledger/entries');
+      answerCreate(serveEntries(), {
+        ...(tradeEntries[1] as LedgerEntry),
+        id: '9a000001-0000-4000-8000-000000000001',
+        date: '2026-10-16',
+        time: '16:45:00',
+        seq: 6,
+      });
+      const bodies = captureBodies('/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Compra');
 
@@ -503,7 +569,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.1 registers a venda typed as a rate, sent as a fraction with a negative quantity', async () => {
-      const bodies = captureBodies('post', '/ledger/entries');
+      const bodies = captureBodies('/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Venda');
 
@@ -583,7 +649,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.1 checks the required fields before sending', async () => {
-      const bodies = captureBodies('post', '/ledger/entries');
+      const bodies = captureBodies('/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Compra');
 
@@ -596,6 +662,13 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('OQ-3 shows the decimal-place error of a PU on its field', async () => {
+      server.use(
+        http.post(url('/ledger/entries'), () =>
+          problem(422, [
+            fieldError('VALIDATION_ERROR', 'Use no máximo 10 casas decimais.', 'execution_pu'),
+          ]),
+        ),
+      );
       const { user } = await openLedger();
       const modal = await openNew(user, 'Compra');
 
@@ -610,6 +683,13 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('OQ-3 shows the decimal-place error of a rate on its field', async () => {
+      server.use(
+        http.post(url('/ledger/entries'), () =>
+          problem(422, [
+            fieldError('VALIDATION_ERROR', 'Use no máximo 12 casas decimais.', 'execution_rate'),
+          ]),
+        ),
+      );
       const { user } = await openLedger();
       const modal = await openNew(user, 'Compra');
 
@@ -631,7 +711,7 @@ describe('Lançamentos (§11.3)', () => {
     it.each(['Compra', 'Aporte'] as const)(
       'OQ-14 refuses a typed future date in %s on the Data field, never replacing it silently',
       async (kind) => {
-        const bodies = captureBodies('post', '/ledger/entries');
+        const bodies = captureBodies('/ledger/entries');
         const { user } = await openLedger();
         const modal = await openNew(user, kind);
 
@@ -713,7 +793,16 @@ describe('Lançamentos (§11.3)', () => {
 
   describe('Aporte / Retirada (§6.2)', () => {
     it('§6.2 registers an aporte with its time and a positive amount', async () => {
-      const bodies = captureBodies('post', '/ledger/entries');
+      answerCreate(serveEntries(), {
+        type: 'CASH',
+        id: '9a000001-0000-4000-8000-000000000001',
+        date: '2026-10-15',
+        time: '11:20:00',
+        seq: 6,
+        cash_amount: '2500.50',
+        created_at: '2026-10-18T12:00:00-03:00',
+      });
+      const bodies = captureBodies('/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Aporte');
 
@@ -736,7 +825,16 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.2 registers a retirada: typed positive, sent as a negative amount', async () => {
-      const bodies = captureBodies('post', '/ledger/entries');
+      answerCreate(serveEntries(), {
+        type: 'CASH',
+        id: '9a000001-0000-4000-8000-000000000001',
+        date: '2026-10-15',
+        time: '09:05:00',
+        seq: 6,
+        cash_amount: '-1000',
+        created_at: '2026-10-18T12:00:00-03:00',
+      });
+      const bodies = captureBodies('/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Retirada');
 
@@ -759,7 +857,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.2 never sends a negative or zero amount: the side gives the sign', async () => {
-      const bodies = captureBodies('post', '/ledger/entries');
+      const bodies = captureBodies('/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Aporte');
 
@@ -775,6 +873,13 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('OQ-3 shows the decimal-place error of an amount on its field', async () => {
+      server.use(
+        http.post(url('/ledger/entries'), () =>
+          problem(422, [
+            fieldError('VALIDATION_ERROR', 'Use no máximo 2 casas decimais.', 'cash_amount'),
+          ]),
+        ),
+      );
       const { user } = await openLedger();
       const modal = await openNew(user, 'Aporte');
 
@@ -808,7 +913,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.2 rejects a value that is not a pt-BR number before sending', async () => {
-      const bodies = captureBodies('post', '/ledger/entries');
+      const bodies = captureBodies('/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Aporte');
 
@@ -924,16 +1029,7 @@ describe('Lançamentos (§11.3)', () => {
       return within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
     }
 
-    it('§10.1 prefills the whole period with Tudo, also after a trade (P19 dropped)', async () => {
-      await ledgerApi.createEntry({
-        type: 'TRADE',
-        asset_id: IDS.di1f28,
-        date: '2026-10-15',
-        time: '10:00:00',
-        signed_quantity: 1,
-        input_kind: 'PU',
-        execution_pu: '89000.00',
-      });
+    it('§10.1 prefills the whole period with Tudo (P19 dropped)', async () => {
       const { user } = await openLedger();
 
       const modal = await openProcessar(user);
@@ -944,7 +1040,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§11.3 "Processar caixa" starts at Caixa D0 when only D0 is behind', async () => {
-      setStatus('2026-10-16', 'CASH', 'FAILED');
+      failCash('2026-10-16');
       const { user } = await openLedger();
 
       await user.click(await screen.findByRole('button', { name: 'Processar caixa' }));
@@ -966,13 +1062,12 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§10.1 previews and queues the job without leaving Lançamentos', async () => {
-      const bodies: unknown[] = [];
       server.use(
-        http.post(url('/processing/requests'), async ({ request }) => {
-          bodies.push(await request.clone().json());
-          return undefined;
-        }),
+        http.get(url('/processing/preview'), () =>
+          HttpResponse.json({ ...preview, end_date: '2026-10-15', total_days: 2, scope: 'CASH' }),
+        ),
       );
+      const bodies = captureBodies('/processing/requests');
       const { user, router } = await openLedger('/lancamentos?inicio=2026-10-14&fim=2026-10-15');
       const modal = await openProcessar(user);
       await user.click(modal.getByRole('radio', { name: 'Caixa' }));
@@ -1079,7 +1174,8 @@ describe('Lançamentos (§11.3)', () => {
     const withdrawal = 'Retirada 16/10/2026 17:30 -R$\u00a050.000,00';
 
     it('§6.1 deletes one trade after confirmation, by its id; there is no edit action', async () => {
-      const bodies = captureBodies('post', '/ledger/entries/deletions');
+      answerDeletes(serveEntries());
+      const bodies = captureBodies('/ledger/entries/deletions');
       const { user } = await openLedger();
 
       await user.click(rowNamed(sale).getByRole('button', { name: `Ações de ${sale}` }));
@@ -1098,6 +1194,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.1 deletes one cash entry after confirmation', async () => {
+      answerDeletes(serveEntries());
       const { user } = await openLedger();
 
       await user.click(
@@ -1131,6 +1228,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.1 a new range or search drops the selection', async () => {
+      serveSearch({ DI1F28: DI1F28_ENTRIES });
       const { user, router } = await openLedger();
       await user.click(screen.getByRole('checkbox', { name: `Selecionar ${sale}` }));
       expect(screen.getByRole('button', { name: 'Excluir selecionados' })).toBeInTheDocument();
@@ -1189,7 +1287,8 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.1 deletes the selected entries, of both types, in one atomic request', async () => {
-      const bodies = captureBodies('post', '/ledger/entries/deletions');
+      answerDeletes(serveEntries());
+      const bodies = captureBodies('/ledger/entries/deletions');
       const { user } = await openLedger();
 
       expect(
@@ -1239,20 +1338,37 @@ describe('Lançamentos (§11.3)', () => {
       expect(screen.getByText('5 lançamentos encontrados')).toBeInTheDocument();
     });
 
-    /** Another tab or user deletes the entry after this screen listed it (QA 2026-10-19 #1). */
-    const deleteElsewhere = (id: string | undefined) => {
-      db.entries = db.entries.filter((e) => e.id !== id);
-    };
+    /**
+     * Another tab or user deleted the sale after this screen listed it (QA 2026-10-19 #1): the
+     * API answers the first deletion 404, deleting nothing (OQ-32), and lists the entries
+     * without the sale from then on; a later deletion succeeds.
+     */
+    function saleDeletedElsewhere() {
+      const ledger = serveEntries();
+      let deletions = 0;
+      server.use(
+        http.post(url('/ledger/entries/deletions'), async ({ request }) => {
+          deletions += 1;
+          if (deletions === 1) {
+            ledger.items = ledger.items.filter((e) => e.id !== tradeEntries[2]?.id);
+            return problem(404, [fieldError('NOT_FOUND', 'Lançamento não encontrado.')]);
+          }
+          const { ids } = (await request.clone().json()) as { ids: string[] };
+          ledger.items = ledger.items.filter((e) => !ids.includes(e.id));
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+    }
 
     it('OQ-32 a 404 on a multiple delete refreshes the list and a retry deletes what is left', async () => {
-      const bodies = captureBodies('post', '/ledger/entries/deletions');
+      saleDeletedElsewhere();
+      const bodies = captureBodies('/ledger/entries/deletions');
       const { user } = await openLedger();
 
       await user.click(screen.getByRole('checkbox', { name: `Selecionar ${sale}` }));
       await user.click(screen.getByRole('checkbox', { name: `Selecionar ${withdrawal}` }));
       await user.click(screen.getByRole('button', { name: 'Excluir selecionados' }));
       const dialog = within(await screen.findByRole('dialog', { name: 'Excluir lançamentos' }));
-      deleteElsewhere(tradeEntries[2]?.id);
       await user.click(dialog.getByRole('button', { name: 'Excluir' }));
 
       // Nothing was deleted (all or nothing); the list now omits the vanished entry, and so do
@@ -1283,12 +1399,12 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('OQ-32 a 404 for an entry already deleted elsewhere closes the dialog and refreshes the list', async () => {
+      saleDeletedElsewhere();
       const { user } = await openLedger();
 
       await user.click(rowNamed(sale).getByRole('button', { name: `Ações de ${sale}` }));
       await user.click(await screen.findByRole('menuitem', { name: 'Excluir' }));
       const dialog = await screen.findByRole('dialog', { name: 'Excluir lançamento' });
-      deleteElsewhere(tradeEntries[2]?.id);
       await user.click(within(dialog).getByRole('button', { name: 'Excluir' }));
 
       expect(

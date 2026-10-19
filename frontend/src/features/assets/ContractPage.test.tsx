@@ -1,13 +1,14 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
-import { IDS } from '@/api/mocks/fixtures';
-import { problem, url } from '@/api/mocks/handlers/support';
-import { server } from '@/api/mocks/server';
+import type { ReferencePrice, ReferencePriceDay } from '@/api/contract';
+import { IDS, PRICES, referencePriceDays } from '@/test/msw/fixtures';
+import { fieldError, problem, url } from '@/test/msw/handlers';
+import { server } from '@/test/msw/server';
 import { renderApp } from '@/test/render';
 
-// Expected values come from the fixture scenario (src/api/mocks/fixtures.ts), with today fixed
-// at MOCK_TODAY (18/10/2026, São Paulo). DI1F28 matures on 03/01/2028, so its calendar is
+// Expected values come from the fixtures (src/test/msw/fixtures.ts), with today fixed at
+// TEST_TODAY (18/10/2026, São Paulo). DI1F28 matures on 03/01/2028, so its calendar is
 // 19/09–18/10. Its current observations in that window: 24/09 B3, 30/09 MANUAL, 05/10 MANUAL,
 // 08/10 B3, 09/10 MANUAL, 14/10 MANUAL, 15/10 B3, 16/10 MANUAL, corrected (89250.3147019396,
 // 0.0980) and B3 (89240.4279488087, 0.0981). Nothing on 17/10 or 18/10.
@@ -22,6 +23,85 @@ afterEach(() => {
 
 const F28 = `/ativos/contratos/${IDS.di1f28}`;
 
+/**
+ * Serves DI1F28's price days from `prices.days`, within the requested dates. A write's test
+ * sets `days` to what the API returns after it: the screen must show that answer.
+ */
+function servePrices() {
+  const prices = { days: [...(referencePriceDays[IDS.di1f28] ?? [])] };
+  server.use(
+    http.get(url('/reference-prices'), ({ request }) => {
+      const params = new URL(request.url).searchParams;
+      const start = params.get('start_date') ?? '';
+      const end = params.get('end_date') ?? '';
+      return HttpResponse.json({
+        items: prices.days.filter((d) => d.reference_date >= start && d.reference_date <= end),
+      });
+    }),
+  );
+  return prices;
+}
+
+/** A day of DI1F28 with one MANUAL observation, as the API returns it after a save. */
+function manualDay(date: string, pu: string, rate: string, n: number): ReferencePriceDay {
+  const price: ReferencePrice = {
+    id: `9b000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
+    asset_id: IDS.di1f28,
+    reference_date: date,
+    source: 'MANUAL',
+    input_kind: 'PU',
+    pu,
+    rate,
+    created_at: '2026-10-18T12:00:00-03:00',
+  };
+  return { reference_date: date, preferred: price, sources: [price] };
+}
+
+/** Answers a save with `day`'s price and from then on lists `day` in place of its date. */
+function answerSave(prices: { days: ReferencePriceDay[] }, day: ReferencePriceDay) {
+  const bodies: unknown[] = [];
+  server.use(
+    http.post(url('/reference-prices'), async ({ request }) => {
+      bodies.push(await request.json());
+      prices.days = [...prices.days.filter((d) => d.reference_date !== day.reference_date), day];
+      return HttpResponse.json(day.preferred, { status: 201 });
+    }),
+  );
+  return bodies;
+}
+
+/**
+ * Answers the delete of each price id with 204 and, from then on, lists the date as `after`
+ * gives it for that id (no observation left: no entry).
+ */
+function answerDeletes(
+  prices: { days: ReferencePriceDay[] },
+  after: Record<string, ReferencePriceDay | null>,
+) {
+  const deleted: string[] = [];
+  server.use(
+    http.delete(url('/reference-prices/:id'), ({ params }) => {
+      const id = params.id as string;
+      deleted.push(id);
+      const day = after[id];
+      const date =
+        day?.reference_date ??
+        prices.days.find((d) => d.sources.some((p) => p.id === id))?.reference_date;
+      prices.days = [
+        ...prices.days.filter((d) => d.reference_date !== date),
+        ...(day ? [day] : []),
+      ];
+      return new HttpResponse(null, { status: 204 });
+    }),
+  );
+  return deleted;
+}
+
+const B3_ONLY_1016: ReferencePriceDay = {
+  reference_date: '2026-10-16',
+  preferred: PRICES.f28_1016_b3,
+  sources: [PRICES.f28_1016_b3],
+};
 async function openContract(route = F28) {
   const result = renderApp(route);
   await screen.findByRole('heading', { name: 'DI1F28' });
@@ -127,6 +207,12 @@ describe('Ativos: contrato (§11.2)', () => {
   });
 
   it('§5 OQ-26 a correction replaces the price and is shown at once', async () => {
+    // The API replaces the MANUAL price of 16/10 (OQ-26 item 7); B3 stays.
+    const corrected = manualDay('2026-10-16', '89299.7784186254', '0.0975', 1);
+    const bodies = answerSave(servePrices(), {
+      ...corrected,
+      sources: [...corrected.sources, PRICES.f28_1016_b3],
+    });
     const { user } = await openContract();
 
     await rowAction(user, '16/10/2026', 'Corrigir');
@@ -149,9 +235,18 @@ describe('Ativos: contrato (§11.2)', () => {
       ).not.toBeInTheDocument();
     });
     expect(cells('16/10/2026')[3]).toBe('Manual');
+    expect(bodies).toEqual([
+      {
+        asset_id: IDS.di1f28,
+        reference_date: '2026-10-16',
+        input_kind: 'RATE',
+        rate: '0.0975',
+      },
+    ]);
   });
 
-  it('§5 Remover lists each current observation of the date; removing MANUAL lets B3 prevail', async () => {
+  it('§5 Remover lists each current observation of the date; removing MANUAL shows what the API prefers next', async () => {
+    const deleted = answerDeletes(servePrices(), { [PRICES.f28_1016_manual.id]: B3_ONLY_1016 });
     const { user } = await openContract();
 
     await rowAction(user, '16/10/2026', 'Remover');
@@ -167,9 +262,14 @@ describe('Ativos: contrato (§11.2)', () => {
     await waitFor(() => {
       expect(cells('16/10/2026')).toEqual(['16/10/2026', '89.240,43', '9,8100%', 'B3']);
     });
+    expect(deleted).toEqual([PRICES.f28_1016_manual.id]);
   });
 
   it('§5 removes any source the user selects: both observations leave the day without a price', async () => {
+    const deleted = answerDeletes(servePrices(), {
+      [PRICES.f28_1016_manual.id]: null,
+      [PRICES.f28_1016_b3.id]: null,
+    });
     const { user } = await openContract();
 
     await rowAction(user, '16/10/2026', 'Remover');
@@ -183,9 +283,13 @@ describe('Ativos: contrato (§11.2)', () => {
       expect(cells('16/10/2026')).toEqual(['16/10/2026', '—', '—', '—']);
     });
     expect(screen.getByText('30 dias · 7 referências registradas')).toBeInTheDocument();
+    expect(deleted.toSorted()).toEqual(
+      [PRICES.f28_1016_manual.id, PRICES.f28_1016_b3.id].toSorted(),
+    );
   });
 
   it('§5 removes a B3 observation', async () => {
+    const deleted = answerDeletes(servePrices(), { [PRICES.f28_1015_b3.id]: null });
     const { user } = await openContract();
 
     await rowAction(user, '15/10/2026', 'Remover');
@@ -198,13 +302,18 @@ describe('Ativos: contrato (§11.2)', () => {
     await waitFor(() => {
       expect(cells('15/10/2026')).toEqual(['15/10/2026', '—', '—', '—']);
     });
+    expect(deleted).toEqual([PRICES.f28_1015_b3.id]);
   });
 
   it('§5 after a partial failure the modal lists what is left, and a retry removes only that', async () => {
-    // B3 16/10 (fixture price 10) fails once; MANUAL is removed.
+    // B3 16/10 fails once; MANUAL is removed.
+    answerDeletes(servePrices(), {
+      [PRICES.f28_1016_manual.id]: B3_ONLY_1016,
+      [PRICES.f28_1016_b3.id]: null,
+    });
     let failures = 0;
     server.use(
-      http.delete(url('/reference-prices/7e000000-0000-4000-8000-000000000010'), () => {
+      http.delete(url(`/reference-prices/${PRICES.f28_1016_b3.id}`), () => {
         failures += 1;
         return failures === 1
           ? problem(500, [{ code: 'VALIDATION_ERROR', message: 'Falha ao remover.', field: null }])
@@ -284,6 +393,7 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
   });
 
   it('§11.1 ?registrar= opens the modal on that date; saving fills the calendar', async () => {
+    answerSave(servePrices(), manualDay('2026-10-17', '89300.00', '0.097728267032', 1));
     const { user, router } = await openContract(`${F28}?registrar=2026-10-17`);
 
     const modal = within(
@@ -331,6 +441,11 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
   });
 
   it('§4.1 shows the API decimal-places error on the value field (OQ-3)', async () => {
+    server.use(
+      http.post(url('/reference-prices'), () =>
+        problem(422, [fieldError('VALIDATION_ERROR', 'Use no máximo 10 casas decimais.', 'pu')]),
+      ),
+    );
     const { user } = await openContract(`${F28}?registrar=2026-10-17`);
 
     const modal = within(
@@ -366,6 +481,13 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
   });
 
   it('OQ-14 shows FUTURE_DATE on the date field', async () => {
+    server.use(
+      http.post(url('/reference-prices'), () =>
+        problem(422, [
+          fieldError('FUTURE_DATE', 'A data não pode ser posterior a hoje.', 'reference_date'),
+        ]),
+      ),
+    );
     const { user } = await openContract(`${F28}?registrar=2026-10-19`);
 
     const modal = within(
@@ -464,6 +586,7 @@ describe('Ativos: período do calendário (§11.2)', () => {
   });
 
   it('§11.1 "registrar" on an older date opens the calendar on it, and the saved price stays in view', async () => {
+    answerSave(servePrices(), manualDay('2026-08-20', '88000.00', '0.097606716255', 1));
     const { user, router } = await openContract(`${F28}?registrar=2026-08-20`);
 
     const modal = within(
@@ -500,6 +623,7 @@ describe('Ativos: período do calendário (§11.2)', () => {
   });
 
   it('§11.2 saving a price outside the period moves the period to show it', async () => {
+    answerSave(servePrices(), manualDay('2026-09-01', '88100.00', '0.099185908720', 1));
     const { user, router } = await openContract();
 
     await user.click(screen.getByRole('button', { name: 'Registrar preço' }));

@@ -8,48 +8,24 @@ import {
 } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
-import type { ProcessingRequest } from '@/api/contract';
-import { db, setStatus } from '@/api/mocks/db';
-import { url } from '@/api/mocks/handlers/support';
-import { server } from '@/api/mocks/server';
+import type {
+  PredecessorState,
+  ProcessingPreview,
+  ProcessingRequest,
+  ProcessingScope,
+} from '@/api/contract';
+import { job, processingRequests } from '@/test/msw/fixtures';
+import { url } from '@/test/msw/handlers';
+import { countReads, server, serveJobs } from '@/test/msw/server';
 import { renderApp } from '@/test/render';
 
-import { isFinal } from './jobStatus';
-
-// Expected values come from the fixture scenario (src/api/mocks/fixtures.ts): five finished
-// runs (FAILED 01–05/10 on its first date, CANCELLED 10–12/10 before its first date, COMPLETED
-// 14–15/10, CANCELLED 14–16/10 after committing 14 and 15/10, COMPLETED_WITH_ISSUES 14–16/10);
-// entries start on 14/10; 14/10 and 15/10 are processed for both chains; on 16/10 cash is
-// processed and positions processed with issues; 17/10 and 18/10 are not processed. Each run
-// publishes date by date (OQ-23).
+// The history is the fixtures' five finished runs (src/test/msw/fixtures.ts): FAILED 01–05/10
+// on its first date, CANCELLED 10–12/10 before its first date, COMPLETED 14–15/10, CANCELLED
+// 14–16/10 after committing 14 and 15/10, COMPLETED_WITH_ISSUES 14–16/10. A test that follows
+// a run scripts what the API reports on each poll (`serveJobs`); the preview and every write
+// answer what the test serves.
 
 const PAGE = '/central-de-controle?tab=processamentos';
-
-/**
- * Serves the job list from the mock store without advancing the fake worker (each mock poll
- * advances it one step), except for the polls released with `release(n)`. Counts the polls.
- */
-function holdWorker() {
-  let released = 0;
-  const polls = { count: 0 };
-  server.use(
-    http.get(url('/processing/requests'), () => {
-      polls.count += 1;
-      if (released > 0) {
-        released -= 1;
-        return undefined; // falls through to the mock handler, which advances the worker
-      }
-      const items = [...db.requests].sort((a, b) => b.created_at.localeCompare(a.created_at));
-      return HttpResponse.json({ items, next_cursor: null });
-    }),
-  );
-  return {
-    polls,
-    release: (n = 1) => {
-      released += n;
-    },
-  };
-}
 
 function problemResponse(status: number, code: string, message: string) {
   return HttpResponse.json(
@@ -58,56 +34,72 @@ function problemResponse(status: number, code: string, message: string) {
   );
 }
 
-/** Counts the enqueue requests; `gate` holds each answer until it resolves. */
-function countEnqueues(gate?: Promise<void>) {
-  const posts = { count: 0 };
-  server.use(
-    http.post(url('/processing/requests'), async () => {
-      posts.count += 1;
-      if (gate) await gate;
-      return undefined;
-    }),
-  );
-  return posts;
+/** Serves `preview` as the API's answer to `GET /processing/preview`, whatever the range. */
+function servePreview(preview: ProcessingPreview) {
+  server.use(http.get(url('/processing/preview'), () => HttpResponse.json(preview)));
 }
 
-function countIssueReads() {
-  const reads = { count: 0 };
-  server.use(
-    http.get(url('/processing/issues'), () => {
-      reads.count += 1;
-      return undefined;
-    }),
-  );
-  return reads;
-}
-
-const SEEDED_ID = 'aa000000-0000-4000-8000-000000000001';
-
-/** Adds a job to the mock store (newest of all). */
-function seedJob(changes: Partial<ProcessingRequest>): ProcessingRequest {
-  const job: ProcessingRequest = {
-    id: SEEDED_ID,
-    scope: 'ALL',
-    start_date: '2026-10-17',
-    end_date: '2026-10-18',
-    status: 'QUEUED',
-    progress_date: null,
-    error_code: null,
-    error_message: null,
-    failed_date: null,
-    failed_chain: null,
-    created_at: '2026-10-18T10:00:00-03:00',
-    updated_at: '2026-10-18T10:00:00-03:00',
-    dispatched_at: null,
-    started_at: null,
-    finished_at: null,
-    cancel_requested_at: null,
-    ...changes,
+/** The preview of [start, end], whose day before is `before`, with each chain's state there. */
+function previewOf(
+  start: string,
+  end: string,
+  before: string,
+  totalDays: number,
+  cash: PredecessorState,
+  positions: PredecessorState,
+  scope: ProcessingScope = 'ALL',
+): ProcessingPreview {
+  return {
+    start_date: start,
+    end_date: end,
+    total_days: totalDays,
+    scope,
+    predecessor_date: before,
+    predecessor: { cash, positions },
   };
-  db.requests.push(job);
-  return job;
 }
+
+/**
+ * Answers each enqueue with the queued run, which the job list includes from then on. Records
+ * the bodies; `gate` holds each answer until it resolves.
+ */
+function answerEnqueue(jobs: { items: ProcessingRequest[] }, gate?: Promise<void>) {
+  const bodies: unknown[] = [];
+  server.use(
+    http.post(url('/processing/requests'), async ({ request }) => {
+      const body = (await request.json()) as Pick<
+        ProcessingRequest,
+        'start_date' | 'end_date' | 'scope'
+      >;
+      bodies.push(body);
+      if (gate) await gate;
+      const queued = job({
+        ...body,
+        id: `9a00000${bodies.length}-0000-4000-8000-000000000000`,
+        created_at: `2026-10-18T11:0${bodies.length}:00-03:00`,
+      });
+      jobs.items = [queued, ...jobs.items];
+      return HttpResponse.json(queued, { status: 201 });
+    }),
+  );
+  return bodies;
+}
+
+/** Answers a cancel with `answer`, which the job list shows from then on. Counts the cancels. */
+function answerCancel(jobs: { items: ProcessingRequest[] }, answer: ProcessingRequest) {
+  const cancels = { count: 0 };
+  server.use(
+    http.post(url('/processing/requests/:id/cancel'), () => {
+      cancels.count += 1;
+      jobs.items = jobs.items.map((j) => (j.id === answer.id ? answer : j));
+      return HttpResponse.json(answer);
+    }),
+  );
+  return cancels;
+}
+
+/** Serves `run` as the newest job, above the fixtures' history. */
+const serveWith = (...runs: ProcessingRequest[]) => serveJobs([...runs, ...processingRequests]);
 
 const RUNNING = {
   status: 'RUNNING',
@@ -250,6 +242,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
   });
 
   it("OQ-11 OQ-26 previews a range after a current day with that day's status", async () => {
+    servePreview(previewOf('2026-10-15', '2026-10-16', '2026-10-14', 2, 'PROCESSED', 'PROCESSED'));
     const { user } = renderApp(`${PAGE}&inicio=2026-10-15&fim=2026-10-16`);
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
@@ -267,6 +260,9 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
   });
 
   it('OQ-31 a day before processed with issues is enough: no warning', async () => {
+    servePreview(
+      previewOf('2026-10-17', '2026-10-18', '2026-10-16', 2, 'PROCESSED', 'PROCESSED_WITH_ISSUES'),
+    );
     const { user } = renderApp(`${PAGE}&inicio=2026-10-17&fim=2026-10-18`);
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
@@ -284,6 +280,9 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
   });
 
   it('OQ-31 after an unprocessed day: warns per chain that the run will fail on its first day', async () => {
+    servePreview(
+      previewOf('2026-10-18', '2026-10-18', '2026-10-17', 1, 'NOT_PROCESSED', 'NOT_PROCESSED'),
+    );
     const { user } = renderApp(`${PAGE}&inicio=2026-10-18&fim=2026-10-18`);
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
@@ -303,7 +302,9 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
   it('OQ-36 in Tudo, a day before missing for one chain only warns that this chain fails and the other goes on', async () => {
     // Cash has 17/10; positions do not.
-    setStatus('2026-10-17', 'CASH', 'PROCESSED');
+    servePreview(
+      previewOf('2026-10-18', '2026-10-18', '2026-10-17', 1, 'PROCESSED', 'NOT_PROCESSED'),
+    );
     const { user } = renderApp(`${PAGE}&inicio=2026-10-18&fim=2026-10-18`);
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
@@ -316,13 +317,15 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
   });
 
   it.each([
-    ['Caixa', 'Estado anterior do caixa', 0],
-    ['Posições', 'Estado anterior das posições', 1],
-  ])(
+    ['Caixa', 'CASH', 'Estado anterior do caixa', 0],
+    ['Posições', 'POSITIONS', 'Estado anterior das posições', 1],
+  ] as const)(
     'OQ-39 the preview returns both chains; %s shows and warns only for its own chain',
-    async (scope, shown, warnings) => {
-      // Cash has 17/10; positions do not. The mock answers both chains for any scope.
-      setStatus('2026-10-17', 'CASH', 'PROCESSED');
+    async (scope, code, shown, warnings) => {
+      // Cash has 17/10; positions do not. The API answers both chains for any scope.
+      servePreview(
+        previewOf('2026-10-18', '2026-10-18', '2026-10-17', 1, 'PROCESSED', 'NOT_PROCESSED', code),
+      );
       const { user } = renderApp(`${PAGE}&inicio=2026-10-18&fim=2026-10-18`);
 
       await user.click(await screen.findByRole('radio', { name: scope }));
@@ -336,6 +339,17 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
   );
 
   it('OQ-21 the scope defaults to Tudo and Caixa warns only about the cash chain', async () => {
+    servePreview(
+      previewOf(
+        '2026-10-17',
+        '2026-10-18',
+        '2026-10-16',
+        2,
+        'PROCESSED',
+        'PROCESSED_WITH_ISSUES',
+        'CASH',
+      ),
+    );
     const { user } = renderApp(`${PAGE}&inicio=2026-10-17&fim=2026-10-18`);
     expect(await screen.findByRole('radio', { name: 'Tudo' })).toBeChecked();
 
@@ -359,14 +373,10 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
   });
 
   it('OQ-21 sends the chosen scope and shows it in the history', async () => {
-    holdWorker();
-    const bodies: unknown[] = [];
-    server.use(
-      http.post(url('/processing/requests'), async ({ request }) => {
-        bodies.push(await request.clone().json());
-        return undefined;
-      }),
+    servePreview(
+      previewOf('2026-10-17', '2026-10-18', '2026-10-16', 2, 'PROCESSED', 'NOT_PROCESSED', 'CASH'),
     );
+    const bodies = answerEnqueue(serveJobs([...processingRequests]));
     const { user } = renderApp(`${PAGE}&inicio=2026-10-17&fim=2026-10-18&escopo=caixa`);
     await findJobRow('01/10/2026 a 05/10/2026', 'Falhou');
 
@@ -381,7 +391,10 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
   });
 
   it('§10.1 queues the confirmed range and shows it in the history', async () => {
-    holdWorker();
+    servePreview(
+      previewOf('2026-10-17', '2026-10-18', '2026-10-16', 2, 'PROCESSED', 'PROCESSED_WITH_ISSUES'),
+    );
+    answerEnqueue(serveJobs([...processingRequests]));
     const { user } = renderApp(PAGE);
     await findJobRow('01/10/2026 a 05/10/2026', 'Falhou');
 
@@ -400,6 +413,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
   });
 
   it('§11.1 closes the confirmation with "Cancelar" without queueing', async () => {
+    const bodies = answerEnqueue(serveJobs([...processingRequests]));
     const { user } = renderApp(`${PAGE}&inicio=2026-10-14&fim=2026-10-16`);
     await findJobRow('01/10/2026 a 05/10/2026', 'Falhou');
 
@@ -412,7 +426,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
       expect(screen.queryByRole('dialog', { name: 'Confirmar processamento' })).toBeNull();
     });
     expect(screen.getByText('5 processamentos encontrados')).toBeInTheDocument();
-    expect(db.requests).toHaveLength(5);
+    expect(bodies).toEqual([]);
   });
 });
 
@@ -425,25 +439,23 @@ describe('Processamentos: request safety (§10.2, OQ-15)', () => {
   }
 
   it('§10.2 queues one job on a double click', async () => {
-    holdWorker();
-    const posts = countEnqueues();
+    const bodies = answerEnqueue(serveJobs([...processingRequests]));
     const { user } = renderApp(`${PAGE}&inicio=2026-10-14&fim=2026-10-16`);
 
     const dialog = await openConfirmation(user);
     await user.dblClick(dialog.getByRole('button', { name: 'Confirmar processamento' }));
 
     await findJobRow('14/10/2026 a 16/10/2026', 'Na fila');
-    expect(posts.count).toBe(1);
-    expect(db.requests).toHaveLength(6);
+    expect(bodies).toHaveLength(1);
+    expect(screen.getByText('6 processamentos encontrados')).toBeInTheDocument();
   });
 
   it('§10.2 keeps the confirmation open while the job is being queued, then allows another', async () => {
-    holdWorker();
     let open: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {
       open = resolve;
     });
-    const posts = countEnqueues(gate);
+    const bodies = answerEnqueue(serveJobs([...processingRequests]), gate);
     const { user } = renderApp(`${PAGE}&inicio=2026-10-14&fim=2026-10-16`);
 
     let dialog = await openConfirmation(user);
@@ -459,11 +471,9 @@ describe('Processamentos: request safety (§10.2, OQ-15)', () => {
     dialog = await openConfirmation(user);
     await user.click(dialog.getByRole('button', { name: 'Confirmar processamento' }));
     await waitFor(() => {
-      expect(posts.count).toBe(2);
+      expect(bodies).toHaveLength(2);
     });
-    await waitFor(() => {
-      expect(db.requests).toHaveLength(7);
-    });
+    expect(await screen.findByText('7 processamentos encontrados')).toBeInTheDocument();
   });
 
   it('OQ-15 shows the API message when queueing fails, and keeps the confirmation open', async () => {
@@ -480,7 +490,6 @@ describe('Processamentos: request safety (§10.2, OQ-15)', () => {
     expect(await dialog.findByRole('alert')).toHaveTextContent(
       'A data não pode ser posterior a hoje.',
     );
-    expect(db.requests).toHaveLength(5);
   });
 });
 
@@ -561,9 +570,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
         const params = new URL(request.url).searchParams;
         seen.push(params.toString());
         // Final jobs only, so nothing is polled: every request below is one the test caused.
-        const jobs = [...db.requests]
-          .filter((job) => isFinal(job.status))
-          .sort((a, b) => b.created_at.localeCompare(a.created_at));
+        const jobs = processingRequests;
         return params.get('cursor') === 'page-2'
           ? HttpResponse.json({ items: jobs.slice(2), next_cursor: null })
           : HttpResponse.json({ items: jobs.slice(0, 2), next_cursor: 'page-2' });
@@ -574,8 +581,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     expect(await screen.findByText('2 processamentos exibidos')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Carregar mais' }));
 
-    const total = db.requests.filter((job) => isFinal(job.status)).length;
-    expect(await screen.findByText(`${total} processamentos encontrados`)).toBeInTheDocument();
+    expect(await screen.findByText('5 processamentos encontrados')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Carregar mais' })).not.toBeInTheDocument();
     // Older finished jobs from page 2 are history, not news: no "job finished" refresh rereads
     // the pages (review finding, PR for frontend/contract-review).
@@ -585,12 +591,9 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
 
   it('P21 a search with no match among the loaded jobs points to "Carregar mais"', async () => {
     server.use(
-      http.get(url('/processing/requests'), () => {
-        const jobs = [...db.requests]
-          .filter((job) => isFinal(job.status))
-          .sort((a, b) => b.created_at.localeCompare(a.created_at));
-        return HttpResponse.json({ items: jobs.slice(0, 2), next_cursor: 'page-2' });
-      }),
+      http.get(url('/processing/requests'), () =>
+        HttpResponse.json({ items: processingRequests.slice(0, 2), next_cursor: 'page-2' }),
+      ),
     );
     const { user } = renderApp(PAGE);
     await screen.findByText('2 processamentos exibidos');
@@ -605,16 +608,17 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
   });
 
   it('OQ-20 OQ-46 offers only the actions each status allows; a cancel already asked shows Cancelando', async () => {
-    seedJob({});
-    // OQ-46: the API keeps a run RUNNING with its cancel request set; the screen says Cancelando.
-    seedJob({
-      ...RUNNING,
-      id: 'aa000000-0000-4000-8000-000000000002',
-      start_date: '2026-10-15',
-      created_at: '2026-10-18T09:00:00-03:00',
-      cancel_requested_at: '2026-10-18T10:05:00-03:00',
-    });
-    holdWorker();
+    serveWith(
+      job(),
+      // OQ-46: the API keeps a run RUNNING with its cancel request set; the screen says Cancelando.
+      job({
+        ...RUNNING,
+        id: 'aa000000-0000-4000-8000-000000000002',
+        start_date: '2026-10-15',
+        created_at: '2026-10-18T09:00:00-03:00',
+        cancel_requested_at: '2026-10-18T10:05:00-03:00',
+      }),
+    );
     const { user } = renderApp(PAGE);
 
     let menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
@@ -652,8 +656,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
   });
 
   it('OQ-20 OQ-21 OQ-23 prefills a new request from the failed date, with the scope of the run', async () => {
-    const failed = db.requests.find((job) => job.status === 'FAILED');
-    if (failed) failed.scope = 'CASH';
+    serveJobs(processingRequests.map((j) => (j.status === 'FAILED' ? { ...j, scope: 'CASH' } : j)));
     const { user, router } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '01/10/2026 a 05/10/2026', 'Falhou'));
@@ -677,35 +680,45 @@ describe('Processamentos: polling (§11.1, §12)', () => {
   });
 
   it('§12 does not poll when no job is active', async () => {
-    const worker = holdWorker();
+    const jobs = serveJobs([...processingRequests]);
     renderApp(PAGE);
     await findJobRow('01/10/2026 a 05/10/2026', 'Falhou');
-    const before = worker.polls.count;
+    const before = jobs.polls;
 
     await act(() => vi.advanceTimersByTimeAsync(10_000));
 
-    expect(worker.polls.count).toBe(before);
+    expect(jobs.polls).toBe(before);
   });
 
   it('§12 polls every 2 s while a job is active, and stops once it has finished', async () => {
-    seedJob({});
-    const worker = holdWorker();
-    const issueReads = countIssueReads();
+    const jobs = serveWith(job());
+    const issueReads = countReads('/processing/issues');
     renderApp(PAGE);
     await findJobRow('17/10/2026 a 18/10/2026', 'Na fila');
-    const before = worker.polls.count;
+    const before = jobs.polls;
 
     await act(() => vi.advanceTimersByTimeAsync(2_000));
-    expect(worker.polls.count).toBe(before + 1);
+    expect(jobs.polls).toBe(before + 1);
 
     // QUEUED → RUNNING (17/10) → RUNNING (18/10) → COMPLETED_WITH_ISSUES; no dispatch (OQ-46).
-    worker.release(3);
+    const started = { status: 'RUNNING', started_at: '2026-10-18T10:00:02-03:00' } as const;
+    jobs.items = [job(started), ...processingRequests];
     await act(() => vi.advanceTimersByTimeAsync(2_000));
     const running = await findJobRow('17/10/2026 a 18/10/2026', 'Processando');
     expect(running.getByText('0 / 2 dias')).toBeInTheDocument();
+    jobs.items = [job({ ...started, progress_date: '2026-10-17' }), ...processingRequests];
     await act(() => vi.advanceTimersByTimeAsync(2_000));
     await findJobRow('17/10/2026 a 18/10/2026', '1 / 2 dias');
     const issuesBefore = issueReads.count;
+    jobs.items = [
+      job({
+        ...started,
+        status: 'COMPLETED_WITH_ISSUES',
+        progress_date: '2026-10-18',
+        finished_at: '2026-10-18T10:00:09-03:00',
+      }),
+      ...processingRequests,
+    ];
     await act(() => vi.advanceTimersByTimeAsync(2_000));
     await findJobRow('17/10/2026 a 18/10/2026', 'Concluído com pendências');
 
@@ -713,9 +726,9 @@ describe('Processamentos: polling (§11.1, §12)', () => {
     await waitFor(() => {
       expect(issueReads.count).toBe(issuesBefore + 1);
     });
-    const afterFinish = worker.polls.count;
+    const afterFinish = jobs.polls;
     await act(() => vi.advanceTimersByTimeAsync(10_000));
-    expect(worker.polls.count).toBe(afterFinish);
+    expect(jobs.polls).toBe(afterFinish);
     expect(issueReads.count).toBe(issuesBefore + 1);
   });
 });
@@ -729,9 +742,8 @@ describe('Processamentos: a job that finished between two reads (§10.4)', () =>
   });
 
   it('§10.4 refreshes the results when a new job is first seen already finished', async () => {
-    seedJob({});
-    holdWorker();
-    const issueReads = countIssueReads();
+    const jobs = serveWith(job());
+    const issueReads = countReads('/processing/issues');
     renderApp(PAGE);
     await findJobRow('17/10/2026 a 18/10/2026', 'Na fila');
     await waitFor(() => {
@@ -740,14 +752,17 @@ describe('Processamentos: a job that finished between two reads (§10.4)', () =>
     const before = issueReads.count;
 
     // Queued and finished elsewhere between two polls.
-    seedJob({
-      id: 'bb000000-0000-4000-8000-000000000001',
-      start_date: '2026-10-15',
-      end_date: '2026-10-15',
-      status: 'COMPLETED',
-      created_at: '2026-10-18T11:00:00-03:00',
-      progress_date: '2026-10-15',
-    });
+    jobs.items = [
+      job({
+        id: 'bb000000-0000-4000-8000-000000000001',
+        start_date: '2026-10-15',
+        end_date: '2026-10-15',
+        status: 'COMPLETED',
+        created_at: '2026-10-18T11:00:00-03:00',
+        progress_date: '2026-10-15',
+      }),
+      ...jobs.items,
+    ];
     await act(() => vi.advanceTimersByTimeAsync(2_000));
 
     await findJobRow('15/10/2026 a 15/10/2026', 'Concluído');
@@ -766,9 +781,8 @@ describe('Processamentos: UTC timestamps (OQ-46, #93)', () => {
   });
 
   it('§10.4 compares creation times as instants: an older job in UTC is not news', async () => {
-    seedJob({ created_at: '2026-10-18T22:00:00-03:00' }); // 19/10 01:00 UTC
-    holdWorker();
-    const issueReads = countIssueReads();
+    const jobs = serveWith(job({ created_at: '2026-10-18T22:00:00-03:00' })); // 19/10 01:00 UTC
+    const issueReads = countReads('/processing/issues');
     renderApp(PAGE);
     await findJobRow('17/10/2026 a 18/10/2026', 'Na fila');
     await waitFor(() => {
@@ -777,14 +791,20 @@ describe('Processamentos: UTC timestamps (OQ-46, #93)', () => {
     const before = issueReads.count;
 
     // Finished, but created before the newest job seen: its string sorts later, its instant not.
-    seedJob({
-      id: 'bb000000-0000-4000-8000-000000000001',
-      start_date: '2026-10-15',
-      end_date: '2026-10-15',
-      status: 'COMPLETED',
-      created_at: '2026-10-19T00:59:00Z',
-      progress_date: '2026-10-15',
-    });
+    // Newest first by instant, so it comes second.
+    const [newest, ...older] = jobs.items;
+    jobs.items = [
+      newest as ProcessingRequest,
+      job({
+        id: 'bb000000-0000-4000-8000-000000000001',
+        start_date: '2026-10-15',
+        end_date: '2026-10-15',
+        status: 'COMPLETED',
+        created_at: '2026-10-19T00:59:00Z',
+        progress_date: '2026-10-15',
+      }),
+      ...older,
+    ];
     await act(() => vi.advanceTimersByTimeAsync(2_000));
 
     await findJobRow('15/10/2026 a 15/10/2026', 'Concluído');
@@ -795,8 +815,15 @@ describe('Processamentos: UTC timestamps (OQ-46, #93)', () => {
 
 describe('Processamentos: cancel (§10.2)', () => {
   it('§10.2 cancels a queued job at once, after confirmation', async () => {
-    seedJob({});
-    holdWorker();
+    const jobs = serveWith(job());
+    const cancels = answerCancel(
+      jobs,
+      job({
+        status: 'CANCELLED',
+        cancel_requested_at: '2026-10-18T10:05:00-03:00',
+        finished_at: '2026-10-18T10:05:00-03:00',
+      }),
+    );
     const { user } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
@@ -820,11 +847,12 @@ describe('Processamentos: cancel (§10.2)', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Cancelar processamento?' })).toBeNull();
     });
+    expect(cancels.count).toBe(1);
   });
 
   it('§10.2 goes back without cancelling', async () => {
-    seedJob({});
-    holdWorker();
+    const jobs = serveWith(job());
+    const cancels = answerCancel(jobs, job({ status: 'CANCELLED' }));
     const { user } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
@@ -832,14 +860,20 @@ describe('Processamentos: cancel (§10.2)', () => {
     const dialog = within(await screen.findByRole('dialog', { name: 'Cancelar processamento?' }));
     await user.click(dialog.getByRole('button', { name: 'Voltar' }));
 
-    expect(db.requests.find((r) => r.id === SEEDED_ID)?.status).toBe('QUEUED');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Cancelar processamento?' })).toBeNull();
+    });
+    expect(cancels.count).toBe(0);
+    expect(jobRow('17/10/2026 a 18/10/2026', 'Na fila')).toBeTruthy();
   });
 
   it('§10.2 OQ-23 OQ-46 cancels a running job cooperatively: Cancelando, then Cancelado', async () => {
     // On 17/10 of 17–18/10: the current date commits, 18/10 is not processed. (A cancel during
     // the last date would let the run complete, OQ-26 item 9.)
-    seedJob({ ...RUNNING, progress_date: null });
-    const worker = holdWorker();
+    const running = job({ ...RUNNING, progress_date: null });
+    const jobs = serveWith(running);
+    // The API keeps the run RUNNING with cancel_requested_at set (OQ-46).
+    answerCancel(jobs, { ...running, cancel_requested_at: '2026-10-18T10:05:00-03:00' });
     const { user } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));
@@ -853,25 +887,38 @@ describe('Processamentos: cancel (§10.2)', () => {
     expect(dialog.queryByText(/cancelado imediatamente/)).toBeNull();
     await user.click(dialog.getByRole('button', { name: 'Confirmar cancelamento' }));
 
-    // The API status stays RUNNING with cancel_requested_at set (OQ-46).
     const row = await findJobRow('17/10/2026 a 18/10/2026', 'Cancelando');
-    expect(db.requests.find((r) => r.id === SEEDED_ID)?.status).toBe('RUNNING');
     expect(row.queryByText('Processando')).not.toBeInTheDocument();
-    worker.release(1);
+    // 17/10 commits; the run ends CANCELLED on the next poll.
+    jobs.items = [
+      job({
+        ...RUNNING,
+        status: 'CANCELLED',
+        cancel_requested_at: '2026-10-18T10:05:00-03:00',
+        finished_at: '2026-10-18T10:05:30-03:00',
+      }),
+      ...processingRequests,
+    ];
     await findJobRow('17/10/2026 a 18/10/2026', 'Cancelado', 3_000);
   }, 10_000);
 
   it('OQ-46 shows the API message when a cancel was already asked', async () => {
-    seedJob({ ...RUNNING, progress_date: null });
-    holdWorker();
+    serveWith(job({ ...RUNNING, progress_date: null }));
+    // Cancelled elsewhere in the meantime: the API refuses a second cancel.
+    server.use(
+      http.post(url('/processing/requests/:id/cancel'), () =>
+        problemResponse(
+          409,
+          'JOB_NOT_CANCELLABLE',
+          'O cancelamento deste processamento já foi solicitado.',
+        ),
+      ),
+    );
     const { user } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));
     await user.click(menu.getByRole('menuitem', { name: 'Cancelar processamento' }));
     const dialog = within(await screen.findByRole('dialog', { name: 'Cancelar processamento?' }));
-    // Cancelled elsewhere in the meantime.
-    const job = db.requests.find((r) => r.id === SEEDED_ID);
-    if (job) job.cancel_requested_at = '2026-10-18T13:05:00Z';
     await user.click(dialog.getByRole('button', { name: 'Confirmar cancelamento' }));
 
     expect(await dialog.findByRole('alert')).toHaveTextContent(
@@ -880,8 +927,7 @@ describe('Processamentos: cancel (§10.2)', () => {
   });
 
   it('OQ-15 shows the 409 message when the job can no longer be cancelled', async () => {
-    seedJob({});
-    holdWorker();
+    serveWith(job());
     server.use(
       http.post(url('/processing/requests/:id/cancel'), () =>
         HttpResponse.json(
@@ -916,8 +962,7 @@ describe('Processamentos: cancel (§10.2)', () => {
 
 describe('Processamentos: details (§11.1, §10.4)', () => {
   it('OQ-46 the details of a running job with a cancel asked show Cancelando and no cancel action', async () => {
-    holdWorker();
-    seedJob({ ...RUNNING, cancel_requested_at: '2026-10-18T13:05:00Z' });
+    serveWith(job({ ...RUNNING, cancel_requested_at: '2026-10-18T13:05:00Z' }));
     const { user } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Cancelando'));
@@ -930,8 +975,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   });
 
   it('§10.2 from the details, "Cancelar processamento" moves the focus into the cancel dialog', async () => {
-    holdWorker();
-    seedJob(RUNNING);
+    serveWith(job(RUNNING));
     const { user } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));
@@ -1029,7 +1073,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   } as const;
 
   it('OQ-36 OQ-40 a Concluído com pendências Tudo run where a chain failed shows the error, its date and chain', async () => {
-    seedJob(PARTIAL);
+    serveWith(job(PARTIAL));
     const { user } = renderApp(PAGE);
 
     const menu = within(
@@ -1057,13 +1101,15 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   });
 
   it('OQ-36 a Falhou Tudo run where the chains failed on different dates says what each published', async () => {
-    seedJob({
-      ...PARTIAL,
-      status: 'FAILED',
-      progress_date: '2026-10-17',
-      error_code: 'MOCK_INPUTS_CHANGED',
-      error_message: 'Falha nas posições de 17/10/2026.',
-    });
+    serveWith(
+      job({
+        ...PARTIAL,
+        status: 'FAILED',
+        progress_date: '2026-10-17',
+        error_code: 'PROCESSING_ERROR',
+        error_message: 'Falha nas posições de 17/10/2026.',
+      }),
+    );
     const { user } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '16/10/2026 a 18/10/2026', 'Falhou'));
@@ -1084,7 +1130,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   });
 
   it('OQ-40 the failed-chain retry prefills that chain from failed_date to the original end', async () => {
-    seedJob(PARTIAL);
+    serveWith(job(PARTIAL));
     const { user, router } = renderApp(PAGE);
 
     const menu = within(
@@ -1103,18 +1149,20 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   });
 
   it('OQ-36 OQ-40 a Cancelado Tudo run after a chain failed keeps the error and offers both retries', async () => {
-    seedJob({
-      status: 'CANCELLED',
-      start_date: '2026-10-15',
-      progress_date: '2026-10-16',
-      error_code: 'MOCK_INPUTS_CHANGED',
-      error_message: 'Falha ao processar o caixa de 16/10/2026.',
-      failed_date: '2026-10-16',
-      failed_chain: 'CASH',
-      started_at: '2026-10-18T10:00:02-03:00',
-      finished_at: '2026-10-18T10:00:09-03:00',
-      cancel_requested_at: '2026-10-18T10:00:05-03:00',
-    });
+    serveWith(
+      job({
+        status: 'CANCELLED',
+        start_date: '2026-10-15',
+        progress_date: '2026-10-16',
+        error_code: 'PROCESSING_ERROR',
+        error_message: 'Falha ao processar o caixa de 16/10/2026.',
+        failed_date: '2026-10-16',
+        failed_chain: 'CASH',
+        started_at: '2026-10-18T10:00:02-03:00',
+        finished_at: '2026-10-18T10:00:09-03:00',
+        cancel_requested_at: '2026-10-18T10:00:05-03:00',
+      }),
+    );
     const { user, router } = renderApp(PAGE);
 
     let menu = within(await openMenu(user, '15/10/2026 a 18/10/2026', 'Cancelado'));
@@ -1167,11 +1215,13 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   });
 
   it('§11.1 still shows an error box for a failed job without a message', async () => {
-    seedJob({
-      status: 'FAILED',
-      error_code: 'PROCESSING_ERROR',
-      finished_at: '2026-10-18T10:01:00-03:00',
-    });
+    serveWith(
+      job({
+        status: 'FAILED',
+        error_code: 'PROCESSING_ERROR',
+        finished_at: '2026-10-18T10:01:00-03:00',
+      }),
+    );
     const { user } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Falhou'));
@@ -1196,8 +1246,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   });
 
   it('§10.4 follows a running job: the date being processed, progress and the cancel actions', async () => {
-    seedJob({ ...RUNNING, created_at: '2026-10-18T09:58:00-03:00' });
-    holdWorker();
+    serveWith(job({ ...RUNNING, created_at: '2026-10-18T09:58:00-03:00' }));
     const { user } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));

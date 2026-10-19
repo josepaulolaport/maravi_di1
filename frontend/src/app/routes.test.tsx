@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react';
 
-import { IDS } from '@/api/mocks/fixtures';
+import { IDS } from '@/test/msw/fixtures';
 import { renderApp } from '@/test/render';
 
 import { assetLinks, paths } from './paths';

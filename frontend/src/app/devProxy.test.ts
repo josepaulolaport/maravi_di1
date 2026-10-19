@@ -1,7 +1,7 @@
 import { apiProxy, DEFAULT_API_TARGET } from '../../vite.config';
 
-// With VITE_API_MOCKS=false the app calls `/api` on its own origin (the Vite dev server), and
-// the backend sends no CORS headers, so the dev server forwards the API to the backend.
+// The app calls `/api` on its own origin (the Vite dev server), and the backend sends no CORS
+// headers, so the dev server forwards the API to the backend.
 describe('dev-server proxy to the real backend (Wave 5)', () => {
   it('forwards /api and /health to the local backend by default', () => {
     expect(DEFAULT_API_TARGET).toBe('http://127.0.0.1:8000');

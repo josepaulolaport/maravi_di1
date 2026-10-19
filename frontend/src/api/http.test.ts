@@ -1,6 +1,6 @@
 import { http as mock, HttpResponse } from 'msw';
 
-import { server } from './mocks/server';
+import { server } from '@/test/msw/server';
 import { API_BASE, ApiError, buildUrl, http } from './http';
 
 const path = '/probe';

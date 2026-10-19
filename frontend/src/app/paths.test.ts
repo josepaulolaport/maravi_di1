@@ -1,6 +1,6 @@
 import { matchPath } from 'react-router';
 
-import { IDS } from '@/api/mocks/fixtures';
+import { IDS } from '@/test/msw/fixtures';
 
 import { assetLinks, controlCenterLinks, ledgerLinks, paths } from './paths';
 
