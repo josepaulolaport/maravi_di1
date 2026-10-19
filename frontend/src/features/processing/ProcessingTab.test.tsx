@@ -14,7 +14,7 @@ import type {
   ProcessingRequest,
   ProcessingScope,
 } from '@/api/contract';
-import { job, processingRequests } from '@/test/msw/fixtures';
+import { job, preview, processingRequests } from '@/test/msw/fixtures';
 import { url } from '@/test/msw/handlers';
 import { countReads, server, serveJobs } from '@/test/msw/server';
 import { renderApp } from '@/test/render';
@@ -34,9 +34,22 @@ function problemResponse(status: number, code: string, message: string) {
   );
 }
 
-/** Serves `preview` as the API's answer to `GET /processing/preview`, whatever the range. */
+/**
+ * Serves `preview` as the API's answer to `GET /processing/preview` for its own range and
+ * scope only; any other request gets an error, so a screen that asks for the wrong range or
+ * scope fails the test.
+ */
 function servePreview(preview: ProcessingPreview) {
-  server.use(http.get(url('/processing/preview'), () => HttpResponse.json(preview)));
+  server.use(
+    http.get(url('/processing/preview'), ({ request }) => {
+      const params = new URL(request.url).searchParams;
+      const asked = [params.get('start_date'), params.get('end_date'), params.get('scope')];
+      const expected = [preview.start_date, preview.end_date, preview.scope];
+      return asked.join() === expected.join()
+        ? HttpResponse.json(preview)
+        : problemResponse(500, 'VALIDATION_ERROR', `Prévia inesperada: ${asked.join(' ')}`);
+    }),
+  );
 }
 
 /** The preview of [start, end], whose day before is `before`, with each chain's state there. */
@@ -224,6 +237,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
   });
 
   it('OQ-11 previews a range starting on the first entry as starting from the zero state', async () => {
+    servePreview(preview);
     const { user } = renderApp(`${PAGE}&inicio=2026-10-14&fim=2026-10-16`);
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
@@ -490,6 +504,8 @@ describe('Processamentos: request safety (§10.2, OQ-15)', () => {
     expect(await dialog.findByRole('alert')).toHaveTextContent(
       'A data não pode ser posterior a hoje.',
     );
+    expect(screen.getByRole('dialog', { name: 'Confirmar processamento' })).toBeInTheDocument();
+    expect(screen.getByText('5 processamentos encontrados')).toBeInTheDocument();
   });
 });
 

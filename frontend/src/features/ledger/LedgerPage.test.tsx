@@ -526,12 +526,19 @@ describe('Lançamentos (§11.3)', () => {
 
   describe('Compra / Venda (§6.1)', () => {
     it('§6.1 registers a compra typed as PU, positive quantity', async () => {
+      // The API's answer: the complementary rate and the cash amount are the backend's (DC/365).
       answerCreate(serveEntries(), {
-        ...(tradeEntries[1] as LedgerEntry),
+        ...(tradeEntries[1] as LedgerEntry & { type: 'TRADE' }),
         id: '9a000001-0000-4000-8000-000000000001',
         date: '2026-10-16',
         time: '16:45:00',
         seq: 6,
+        signed_quantity: 3,
+        execution_pu: '80000.00',
+        execution_rate: '0.105918966419',
+        input_kind: 'PU',
+        cash_amount: '-240000.00',
+        created_at: '2026-10-18T12:00:00-03:00',
       });
       const bodies = captureBodies('/ledger/entries');
       const { user } = await openLedger();

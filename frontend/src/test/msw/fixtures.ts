@@ -581,7 +581,11 @@ export const processingRequests: ProcessingRequest[] = [
   ),
 ];
 
-/** `GET /processing/preview` for 14/10 to 16/10: both chains start from the zero state. */
+/**
+ * `GET /processing/preview` for 14/10 to 16/10: both chains start from the zero state. Each
+ * fixture is one endpoint's answer, not a consistent database: with the FAILED 01/10 run above,
+ * the real backend would answer NOT_PROCESSED here (OQ-40 item 5). No screen cross-checks them.
+ */
 export const preview: ProcessingPreview = {
   start_date: '2026-10-14',
   end_date: '2026-10-16',

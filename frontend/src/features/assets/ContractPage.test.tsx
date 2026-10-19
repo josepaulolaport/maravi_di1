@@ -43,13 +43,19 @@ function servePrices() {
 }
 
 /** A day of DI1F28 with one MANUAL observation, as the API returns it after a save. */
-function manualDay(date: string, pu: string, rate: string, n: number): ReferencePriceDay {
+function manualDay(
+  date: string,
+  pu: string,
+  rate: string,
+  n: number,
+  inputKind: ReferencePrice['input_kind'] = 'PU',
+): ReferencePriceDay {
   const price: ReferencePrice = {
     id: `9b000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
     asset_id: IDS.di1f28,
     reference_date: date,
     source: 'MANUAL',
-    input_kind: 'PU',
+    input_kind: inputKind,
     pu,
     rate,
     created_at: '2026-10-18T12:00:00-03:00',
@@ -208,7 +214,7 @@ describe('Ativos: contrato (§11.2)', () => {
 
   it('§5 OQ-26 a correction replaces the price and is shown at once', async () => {
     // The API replaces the MANUAL price of 16/10 (OQ-26 item 7); B3 stays.
-    const corrected = manualDay('2026-10-16', '89299.7784186254', '0.0975', 1);
+    const corrected = manualDay('2026-10-16', '89299.7784186254', '0.0975', 1, 'RATE');
     const bodies = answerSave(servePrices(), {
       ...corrected,
       sources: [...corrected.sources, PRICES.f28_1016_b3],

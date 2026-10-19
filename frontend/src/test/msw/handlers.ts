@@ -74,7 +74,8 @@ export const handlers = [
     const items = fixtures.ledgerEntries.filter((e) => e.date >= start && e.date <= end);
     return HttpResponse.json({ items, next_cursor: null });
   }),
-  // Echoes the entry with an id; a trade's complementary price is a fixed placeholder.
+  // Echoes the entry with an id. For a trade, the complementary price and `cash_amount` are
+  // fixed placeholders, not the backend's figures: a test that shows them serves its own answer.
   http.post(url('/ledger/entries'), async ({ request }) => {
     const entry = await body(request);
     const created = {
