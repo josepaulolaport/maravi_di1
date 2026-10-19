@@ -1,1 +1,1 @@
-"""Processing: user-requested jobs, invalidation, dispatch and publication (lane G; spec §10)."""
+"""Processing: user-requested runs, per-date statuses, dispatch and publication (lane G; §10)."""
