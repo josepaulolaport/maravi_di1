@@ -5,7 +5,8 @@ at 10% a.a., a 10% reference price (D2), then an ALL processing run for today (D
 by hand (spec §4.1, OQ-3): PU = 100000 / 1.1 = 90909.0909090909; cash = 200000 − PU =
 109090.9090909091 (109.090,91); AUM = cash + market value = 200000.
 
-Needs an empty stack with the catalogue roots seeded (`scripts/seed_catalogue.sql`); `make e2e`
+Needs an empty stack with the catalogue seeded (`scripts/seed_catalogue.sql`: FUTURE, its
+INTEREST_RATE_FUTURE class and the DI1 product, which `docker compose up` applies); `make e2e`
 starts one, runs this and removes it. Standard library only, so it runs from any Python 3.12.
 
     python scripts/e2e_smoke.py --api http://127.0.0.1:18000
@@ -80,30 +81,14 @@ def smoke(api: str, timeout: float) -> None:
     health = call(api, "GET", "/health")
     check("GET /health", health["status"], "ok")
 
-    types = call(api, "GET", "/api/instrument-types")["items"]
-    asset_class_id = next(
-        c["id"]
-        for t in types
-        if t["code"] == "FUTURE"
-        for c in t["asset_classes"]
-        if c["code"] == "INTEREST_RATE_FUTURE"
-    )
-
-    product = call(
-        api,
-        "POST",
-        "/api/products",
-        {
-            "asset_class_id": asset_class_id,
-            "code": "DI1",
-            "name": "Futuro de Depósito Interfinanceiro",
-            "futures": {
-                "face_value": "100000",
-                "contract_multiplier": "1",
-                "settlement_method": "CASH",
-            },
-        },
-    )
+    # The stack seeds the DI1 product (Compose `seed` service, scripts/seed_catalogue.sql); the
+    # UI cannot create products (spec §11.2), so the smoke uses the seeded one.
+    products = call(api, "GET", "/api/products?instrument_type=FUTURE")["items"]
+    product = next((p for p in products if p["code"] == "DI1"), None)
+    if product is None:
+        raise SmokeError("the DI1 product was not seeded: GET /api/products has no DI1")
+    check("DI1 asset class", product["asset_class"]["code"], "INTEREST_RATE_FUTURE")
+    check("DI1 face value", Decimal(product["futures"]["face_value"]), Decimal("100000"))
     instrument = call(
         api,
         "POST",

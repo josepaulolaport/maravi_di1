@@ -187,8 +187,8 @@ def test_a_created_entry_is_answered_in_the_list_shape(client: TestClient) -> No
         "execution_rate", "input_kind",
     }  # fmt: skip
     assert set(created[0]) == {"id", "type", "date", "time", "seq", "cash_amount", "created_at"}
-    # An instant with the São Paulo offset, like the fixtures' created_at.
-    assert trade["created_at"].endswith("-03:00")
+    # An instant in UTC ("Z"), like every other module's timestamps (processing's _utc).
+    assert all(c["created_at"].endswith("Z") for c in created)
 
 
 def test_ascending_order_is_the_exact_reverse(client: TestClient) -> None:
