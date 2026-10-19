@@ -1,4 +1,10 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  infiniteQueryOptions,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 
 import type { JobStatus } from '@/api/contract';
@@ -26,24 +32,40 @@ export function useIssues() {
   });
 }
 
+/** The job history, newest first, read page by page (P21). One cache entry for every reader. */
+const requestsQuery = infiniteQueryOptions({
+  queryKey: processingKeys.requests(),
+  queryFn: ({ pageParam }) =>
+    processingApi.listRequests({
+      limit: JOBS_PAGE_SIZE,
+      ...(pageParam ? { cursor: pageParam } : {}),
+    }),
+  initialPageParam: null as string | null,
+  getNextPageParam: (page) => page.next_cursor,
+});
+
 /**
- * The job history, newest first, read page by page (P21); `data.items` holds every page read
- * so far. It is polled only while some loaded job is queued, dispatched, running or
- * cancelling (§11.1, §12); a poll rereads the loaded pages. When a job reaches a final
- * status, the published results and the job views are refreshed once (§10.4).
+ * The job history for Central de Controle; `data.items` holds every page read so far. It does
+ * not poll: `useJobWatcher`, mounted with the app shell, polls the same cache entry, so the
+ * history follows a job without a second poll.
  */
 export function useProcessingRequests() {
+  return useInfiniteQuery({
+    ...requestsQuery,
+    select: (data) => ({ items: data.pages.flatMap((page) => page.items) }),
+  });
+}
+
+/**
+ * Follows the jobs on every screen (§10.4, §12). The history is polled only while some loaded
+ * job is queued, dispatched, running or cancelling (§11.1); a poll rereads the loaded pages.
+ * When a job reaches a final status, the published results and the job views are refreshed
+ * once, whichever screen is open (Carteira, the Lançamentos cash strip).
+ */
+export function useJobWatcher(): void {
   const queryClient = useQueryClient();
   const query = useInfiniteQuery({
-    queryKey: processingKeys.requests(),
-    queryFn: ({ pageParam }) =>
-      processingApi.listRequests({
-        limit: JOBS_PAGE_SIZE,
-        ...(pageParam ? { cursor: pageParam } : {}),
-      }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (page) => page.next_cursor,
-    select: (data) => ({ items: data.pages.flatMap((page) => page.items) }),
+    ...requestsQuery,
     refetchInterval: (q) =>
       q.state.data?.pages.some((page) => page.items.some((job) => isActive(job.status)))
         ? POLL_INTERVAL_MS
@@ -55,7 +77,7 @@ export function useProcessingRequests() {
   // compared as strings.
   const lastSeen = useRef<{ statuses: Map<string, JobStatus>; newest: number } | null>(null);
   useEffect(() => {
-    const items = query.data?.items;
+    const items = query.data?.pages.flatMap((page) => page.items);
     if (!items) return;
     const seen = lastSeen.current;
     // A job seen active that is now final, or a job newer than any seen before that is
@@ -76,8 +98,6 @@ export function useProcessingRequests() {
     lastSeen.current = { statuses: new Map(items.map((job) => [job.id, job.status])), newest };
     if (finished) void invalidateAfterJobFinished(queryClient);
   }, [query.data, queryClient]);
-
-  return query;
 }
 
 function useProcessingMutation<TVariables, TData>(fn: (variables: TVariables) => Promise<TData>) {
