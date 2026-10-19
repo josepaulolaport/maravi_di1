@@ -71,6 +71,9 @@ class BrokerSettings(BaseSettings):
     """Pause before the relay retries a row it failed to publish, doubled on each attempt, so a
     failing row is not retried on every poll."""
     outbox_relay_retry_max_delay_seconds: float = Field(default=60.0, gt=0)
+    inbox_retention_days: int = Field(default=7, ge=1)
+    """Inbox records older than this are deleted by the outbox relay (user decision M9)."""
+    inbox_retention_interval_seconds: float = Field(default=3600.0, gt=0)
 
     @field_validator("rabbitmq_url")
     @classmethod

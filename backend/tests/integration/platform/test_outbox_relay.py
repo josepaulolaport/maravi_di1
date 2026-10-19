@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections.abc import Awaitable, Callable
+from datetime import timedelta
 
 import pytest
 from aio_pika.abc import AbstractQueue, AbstractRobustConnection
@@ -19,11 +21,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from di1.platform.config import BrokerSettings
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, unit_of_work_factory
 from di1.platform.messaging.envelope import Envelope
+from di1.platform.messaging.inbox import InboxRetention
 from di1.platform.messaging.outbox import add_outbox_message
 from di1.platform.messaging.outbox_relay import OutboxRelay
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import Topology, declare_queue
 from tests.integration.platform.conftest import queue_spec
+from tests.integration.platform.support import eventually
 
 
 class _CrashError(BaseException):
@@ -458,3 +462,44 @@ async def test_an_unavailable_broker_stops_the_batch_at_its_first_row(
     switch.current = publisher  # the broker is back
     assert await relay.relay_batch() == 3
     assert await _drain(queue) == written
+
+
+async def test_run_deletes_old_inbox_rows(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    publisher: MessagePublisher,
+) -> None:
+    """The relay's poll loop runs the inbox retention (the worker has no periodic loop: it
+    waits for doorbells)."""
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO platform.inbox_messages (consumer_name, message_id, processed_at)"
+                " VALUES ('old', :m, now() - interval '8 days'), ('new', :n, now())"
+            ),
+            {"m": uuid.uuid4(), "n": uuid.uuid4()},
+        )
+    retention = InboxRetention(
+        unit_of_work_factory(session_factory), older_than=timedelta(days=7), interval_seconds=3600
+    )
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        _relay(session_factory, publisher).run(
+            stop, poll_interval_seconds=0.05, inbox_retention=retention
+        )
+    )
+
+    async def consumers() -> list[str]:
+        async with engine.connect() as connection:
+            rows = await connection.execute(
+                text("SELECT consumer_name FROM platform.inbox_messages")
+            )
+            return [row[0] for row in rows]
+
+    await eventually(lambda: _only_new(consumers))
+    stop.set()
+    await asyncio.wait_for(running, timeout=5)
+
+
+async def _only_new(consumers: Callable[[], Awaitable[list[str]]]) -> bool:
+    return await consumers() == ["new"]

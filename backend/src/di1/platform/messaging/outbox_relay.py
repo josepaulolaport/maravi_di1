@@ -41,6 +41,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.platform.messaging.envelope import Envelope
+from di1.platform.messaging.inbox import InboxRetention
 from di1.platform.messaging.publisher import BrokerUnavailableError, PublishFailedError
 
 logger = logging.getLogger(__name__)
@@ -191,15 +192,25 @@ class OutboxRelay:
             return f"{type(error).__name__}: {error}", False
         return None
 
-    async def run(self, stop: asyncio.Event, *, poll_interval_seconds: float) -> None:
+    async def run(
+        self,
+        stop: asyncio.Event,
+        *,
+        poll_interval_seconds: float,
+        inbox_retention: InboxRetention | None = None,
+    ) -> None:
         """Relay until ``stop`` is set. A full batch is followed at once by the next one; an
-        empty, short or failed batch, or a database error, waits ``poll_interval_seconds``."""
+        empty, short or failed batch, or a database error, waits ``poll_interval_seconds``.
+        Each turn also runs ``inbox_retention`` when it is due: this loop is the platform's
+        only periodic one (the worker waits for doorbells and runs one job at a time)."""
         while not stop.is_set():
             try:
                 published = await self.relay_batch()
             except Exception:
                 logger.exception("outbox relay batch failed")
                 published = 0
+            if inbox_retention is not None:
+                await inbox_retention.run_if_due()
             if published < self._batch_size:
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(stop.wait(), timeout=poll_interval_seconds)

@@ -134,6 +134,8 @@ BROKER_ENV_NAMES = (
     "OUTBOX_RELAY_POLL_INTERVAL_SECONDS",
     "OUTBOX_RELAY_RETRY_BASE_DELAY_SECONDS",
     "OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS",
+    "INBOX_RETENTION_DAYS",
+    "INBOX_RETENTION_INTERVAL_SECONDS",
 )
 
 
@@ -158,6 +160,8 @@ def test_broker_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.outbox_relay_poll_interval_seconds == 1.0
     assert settings.outbox_relay_retry_base_delay_seconds == 1.0
     assert settings.outbox_relay_retry_max_delay_seconds == 60.0
+    assert settings.inbox_retention_days == 7
+    assert settings.inbox_retention_interval_seconds == 3600.0
 
 
 @pytest.mark.usefixtures("clean_broker_environment")
@@ -172,6 +176,8 @@ def test_broker_values_come_from_the_environment(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("OUTBOX_RELAY_POLL_INTERVAL_SECONDS", "0.2")
     monkeypatch.setenv("OUTBOX_RELAY_RETRY_BASE_DELAY_SECONDS", "2")
     monkeypatch.setenv("OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS", "8")
+    monkeypatch.setenv("INBOX_RETENTION_DAYS", "30")
+    monkeypatch.setenv("INBOX_RETENTION_INTERVAL_SECONDS", "600")
 
     settings = get_broker_settings()
 
@@ -183,6 +189,8 @@ def test_broker_values_come_from_the_environment(monkeypatch: pytest.MonkeyPatch
     assert settings.outbox_relay_poll_interval_seconds == 0.2
     assert settings.outbox_relay_retry_base_delay_seconds == 2.0
     assert settings.outbox_relay_retry_max_delay_seconds == 8.0
+    assert settings.inbox_retention_days == 30
+    assert settings.inbox_retention_interval_seconds == 600.0
 
 
 @pytest.mark.usefixtures("clean_broker_environment")
@@ -219,6 +227,8 @@ def test_only_amqp_urls_are_accepted(monkeypatch: pytest.MonkeyPatch, url: str) 
         ("OUTBOX_RELAY_POLL_INTERVAL_SECONDS", "0"),
         ("OUTBOX_RELAY_RETRY_BASE_DELAY_SECONDS", "0"),
         ("OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS", "0"),
+        ("INBOX_RETENTION_DAYS", "0"),
+        ("INBOX_RETENTION_INTERVAL_SECONDS", "0"),
     ],
 )
 def test_broker_bounds(monkeypatch: pytest.MonkeyPatch, name: str, value: str) -> None:
