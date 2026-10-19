@@ -157,7 +157,7 @@ async def test_the_dispatcher_process_stops_cleanly_on_sigterm(settings: Setting
 
     output = (started + rest).decode()
     assert code == 0, output
-    assert "no dispatch tick is configured" in output
+    assert "dispatch tick failed" not in output  # the composition's tick on a migrated database
     assert "dispatcher started (poll interval 0.1 s)" in output
     assert "dispatcher stopped" in output
     assert settings.database_url.get_secret_value() not in output

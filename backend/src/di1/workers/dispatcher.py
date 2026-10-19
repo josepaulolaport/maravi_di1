@@ -17,8 +17,8 @@ transaction, so either all of it commits or none (the job then stays QUEUED for 
 Startup checks that PostgreSQL answers within 5 s, so a database that is wrong or hangs ends
 the process with status 1.
 
-The tick comes from the composition root; until it provides one (``composition.consumers``,
-integrator), `main` uses a placeholder that dispatches nothing.
+`main` takes the tick from the composition root (``composition.consumers``): Processing's
+`ProcessingDispatcher.dispatch_next`.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ import asyncio
 import contextlib
 import logging
 
+from di1.composition import consumers as composition
 from di1.platform.clock import SystemClock
 from di1.platform.config import (
     DispatcherSettings,
@@ -94,21 +95,14 @@ async def dispatch_until_stopped(
                 await asyncio.wait_for(stop.wait(), timeout=poll_interval_seconds)
 
 
-def _no_dispatch(resources: WorkerResources) -> DispatchTick:
-    """Until Processing's tick is wired: dispatches nothing."""
-    logger.warning("no dispatch tick is configured: queued jobs are not dispatched")
-
-    async def tick() -> None:
-        return None
-
-    return tick
-
-
 def main() -> None:
     run_process(
         "dispatcher",
         lambda stop: run_dispatcher(
-            get_settings(), get_dispatcher_settings(), tick_factory=_no_dispatch, stop=stop
+            get_settings(),
+            get_dispatcher_settings(),
+            tick_factory=composition.dispatch_tick,
+            stop=stop,
         ),
         logger,
     )
