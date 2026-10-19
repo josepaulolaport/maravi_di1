@@ -1,7 +1,7 @@
 """The Unit of Work: one `AsyncSession`, one transaction, one commit.
 
-interfaces.md "Transaction boundaries" 1: a write saves the fact and the invalidation of the
-dependent results in the same transaction, with one COMMIT. The roles:
+interfaces.md "Transaction boundaries" 1: a write saves the fact in one transaction, with one
+COMMIT (OQ-31: writes no longer invalidate dependent results). The roles:
 
 - the provider (an HTTP dependency, or a worker's plain factory) opens the UoW with
   ``async with``;

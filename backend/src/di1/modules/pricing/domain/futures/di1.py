@@ -21,8 +21,8 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal, Overflow
+from typing import NoReturn
 
-from di1.modules.pricing.domain.errors import ContractMaturedError, InvalidPricingInputError
 from di1.modules.pricing.domain.futures.model import (
     FuturesTerms,
     InputKind,
@@ -38,6 +38,7 @@ from di1.shared.decimals import (
     quantize_pu,
     quantize_rate,
 )
+from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 
 
 class DI1Calculator:
@@ -46,15 +47,17 @@ class DI1Calculator:
     def calculate(self, terms: FuturesTerms, reference_date: date, quote: Quote) -> Price:
         days = calendar_days(reference_date, terms.maturity_date)
         if days < 0:
-            raise ContractMaturedError(
-                "the reference date is after the contract's maturity", field="reference_date"
+            raise DomainError(
+                ErrorDetail(
+                    ErrorCode.CONTRACT_MATURED,
+                    "A data é posterior ao vencimento do contrato.",
+                    "reference_date",
+                )
             )
         if quote.kind is InputKind.RATE:
             rate = _typed_rate(quote.value)
             if days == 0:
-                raise InvalidPricingInputError(
-                    "on the maturity date the PU is typed, not the rate", field="rate"
-                )
+                _invalid("No vencimento, informe o PU, não a taxa.", "rate")
             pu = _pu_from_rate(rate, days, terms.face_value)
         else:
             pu = _typed_pu(quote.value)
@@ -62,51 +65,49 @@ class DI1Calculator:
                 rate = quantize_rate(Decimal(0))
             else:
                 rate = _rate_from_pu(pu, days, terms.face_value)
-        return Price(
-            pu=pu,
-            rate=rate,
-            input_kind=quote.kind,
-        )
+        return Price(pu=pu, rate=rate, input_kind=quote.kind)
+
+
+def _invalid(message: str, field: str) -> NoReturn:
+    raise DomainError(ErrorDetail(ErrorCode.VALIDATION_ERROR, message, field))
 
 
 def _typed_rate(rate: Decimal) -> Decimal:
+    if not rate.is_finite():
+        _invalid("A taxa deve ser um número finito.", "rate")
     if not fits_places(rate, RATE_PLACES):
-        raise InvalidPricingInputError(
-            f"a typed rate has at most {RATE_PLACES} decimal places", field="rate"
-        )
+        _invalid(f"A taxa aceita no máximo {RATE_PLACES} casas decimais.", "rate")
     if rate <= -1:
-        raise InvalidPricingInputError("the rate must be greater than -1", field="rate")
+        _invalid("A taxa deve ser maior que -1.", "rate")
     return rate
 
 
 def _typed_pu(pu: Decimal) -> Decimal:
+    if not pu.is_finite():
+        _invalid("O PU deve ser um número finito.", "pu")
     if not fits_places(pu, PU_PLACES):
-        raise InvalidPricingInputError(
-            f"a typed PU has at most {PU_PLACES} decimal places", field="pu"
-        )
+        _invalid(f"O PU aceita no máximo {PU_PLACES} casas decimais.", "pu")
     if pu <= 0:
-        raise InvalidPricingInputError("the PU must be positive", field="pu")
+        _invalid("O PU deve ser maior que zero.", "pu")
     return pu
 
 
+_PU_ROUNDS_TO_ZERO = "A taxa resulta em um PU que arredonda para zero."
+
+
 def _pu_from_rate(rate: Decimal, days: int, face_value: Decimal) -> Decimal:
-    rounds_to_zero = InvalidPricingInputError(
-        "the rate gives a PU that rounds to zero at 10 places", field="rate"
-    )
     with financial_context():
         try:
             discount = (1 + rate) ** (Decimal(days) / DAYS_PER_YEAR)
-        except Overflow as exc:
-            raise rounds_to_zero from exc  # a discount factor that large gives a PU of ~0
+        except Overflow:
+            _invalid(_PU_ROUNDS_TO_ZERO, "rate")  # a discount factor that large gives a PU of ~0
         try:
             pu = face_value / discount
-        except Overflow as exc:
-            raise InvalidPricingInputError(
-                "the rate gives a PU beyond the calculation's range", field="rate"
-            ) from exc
+        except Overflow:
+            _invalid("A taxa resulta em um PU fora do limite de cálculo.", "rate")
     stored = quantize_pu(pu)
     if stored <= 0:
-        raise rounds_to_zero
+        _invalid(_PU_ROUNDS_TO_ZERO, "rate")
     return stored
 
 
@@ -114,13 +115,9 @@ def _rate_from_pu(pu: Decimal, days: int, face_value: Decimal) -> Decimal:
     try:
         with financial_context():
             rate = (face_value / pu) ** (DAYS_PER_YEAR / Decimal(days)) - 1
-    except Overflow as exc:
-        raise InvalidPricingInputError(
-            "the PU gives a rate beyond the calculation's range", field="pu"
-        ) from exc
+    except Overflow:
+        _invalid("O PU resulta em uma taxa fora do limite de cálculo.", "pu")
     stored = quantize_rate(rate)
     if stored <= -1:
-        raise InvalidPricingInputError(
-            "the PU gives a rate that rounds to -1 at 12 places", field="pu"
-        )
+        _invalid("O PU resulta em uma taxa que arredonda para -1.", "pu")
     return stored
