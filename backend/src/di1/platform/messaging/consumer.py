@@ -11,20 +11,19 @@ interfaces.md "Transaction boundaries" 7. For each delivery:
 3. only then is the delivery acknowledged. If the process dies before the ack, the broker
    redelivers and the inbox turns the redelivery into a no-op;
 4. a handler may return work to run after the ack (`AfterAck`): the processing run, whose
-   claim is the durable state change of step 2 and which then commits date by date in Units of
+   start is the durable state change of step 2 and which then commits date by date in Units of
    Work of its own (plan §7). The ack does not wait for a range that may take longer than the
-   broker's consumer timeout; after a crash or a stop, the run resumes at the (one) worker's
-   next start, through its startup hook (`di1.workers.main`), not through a redelivery. A
-   failure there is logged: the message is already acknowledged.
+   broker's consumer timeout. After a crash, the run is recovered when the worker starts again
+   (its ``on_startup`` hook resumes after ``progress_date``; one worker, OQ-45), not by a
+   redelivery. A failure there is logged: the message is already acknowledged.
 
 The work after the ack runs in an `AfterAckRunner`, one at a time, in a task the process owns,
 not in the broker's delivery task: a channel that closes (a broker restart, a missed heartbeat)
 does not cancel a run that no longer depends on it. Deliveries are not serialised behind a run:
-a command that arrives meanwhile (a duplicate the relay resent, a re-dispatch) is claimed and
-acknowledged at once, and its run, if any, waits its turn in the runner. One active job at a
-time is the database's guarantee (the claim), not the consumer's. If the ack itself fails after
-the commit, the work still runs: the redelivery is an inbox duplicate with no run of its own,
-and the claim makes the work its own.
+a command that arrives meanwhile (a duplicate the relay resent) is recorded and acknowledged
+at once, and its run, if any, waits its turn in the runner. One active job at a time is the
+database's guarantee, not the consumer's. If the ack itself fails after the commit, the work
+still runs: the redelivery is an inbox duplicate with no run of its own.
 
 Failures: a `PermanentMessageError` from the handler dead-letters the delivery at once; any
 other exception rolls back and, after a pause, returns it to the queue, where the broker
@@ -69,10 +68,12 @@ class PermanentMessageError(Exception):
 type AfterAck = Callable[[], Awaitable[None]]
 """Work a handler hands back to run once its delivery is acknowledged.
 
-What such work must guarantee, since the consumer cannot:
+What such work must guarantee, since the consumer cannot (interfaces.md "Transaction
+boundaries" 4 and 6):
 
-- it may start long after its claim committed, behind another run: it re-reads its run's
-  state when it starts, and ends without writing if the run is no longer its to do;
+- it may start long after its start committed, behind another run: it re-reads the run's
+  state when it begins and ends without writing if the run is no longer its to carry on
+  (finished or cancelled meanwhile);
 - it bounds every wait (statement and lock timeouts): a run that hangs holds every later run
   of the process behind it.
 """
@@ -87,7 +88,7 @@ class AfterAckRunner:
 
     A process shares one runner among its consumers, so it runs one job at a time. `stop`
     cancels the work in progress and drops the waiting work, and any submitted after it: each
-    was claimed, and resumes at the worker's next start."""
+    run's start is committed, so the worker recovers it when it starts again (OQ-45)."""
 
     def __init__(self) -> None:
         self._waiting: asyncio.Queue[tuple[AfterAck, str]] = asyncio.Queue()
@@ -98,7 +99,8 @@ class AfterAckRunner:
         """Queue ``work``; a failure is logged with ``description``."""
         if self._stopped:
             logger.warning(
-                "%s dropped: the worker is stopping; it resumes at the next start", description
+                "%s dropped: the worker is stopping; it is recovered when the worker starts",
+                description,
             )
             return
         self._waiting.put_nowait((work, description))
@@ -126,7 +128,9 @@ class AfterAckRunner:
         while not self._waiting.empty():
             self._waiting.get_nowait()
         if dropped:
-            logger.warning("%d waiting runs dropped; they resume at the next start", dropped)
+            logger.warning(
+                "%d waiting runs dropped; they are recovered when the worker starts", dropped
+            )
         running, self._running = self._running, None
         if running is None or running.done():
             return
