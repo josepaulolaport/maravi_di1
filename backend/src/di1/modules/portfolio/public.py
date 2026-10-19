@@ -79,8 +79,9 @@ __all__ = [
 
 class PortfolioResultsWriter(Protocol):
     """Publishes one date of a chain inside Processing's date transaction; never commits. Each
-    call upserts that date's rows and recomputes its AUM from the other chain's published value
-    (OQ-21); ALL calls both in the same transaction."""
+    call replaces that date's rows (rows of assets no longer expected on the date are deleted,
+    OQ-10) and recomputes the date's AUM from the other chain's published value (OQ-21); ALL
+    calls both in the same transaction."""
 
     async def write_positions_day(
         self,
@@ -92,8 +93,13 @@ class PortfolioResultsWriter(Protocol):
         uow: UnitOfWork,
     ) -> None:
         """``positions``, ``position_metrics`` and ``portfolio_metrics`` for ``day.date``: the
-        quantities and averages of ``day``, the valuation (reference PU and source, OQ-25) and the
-        P&L of each expected asset (OQ-10), and the portfolio totals."""
+        quantities and averages of ``day``, each expected asset's ``financial_total`` and P&L
+        (OQ-10), and the portfolio totals. The reference PU and source are not stored: they stay
+        in the price table (OQ-30).
+
+        The assets of ``day.positions``, ``valuation.assets`` and ``asset_pnl`` must be the same
+        set, the expected assets of the date; the writer raises ``ValueError`` otherwise.
+        ``valuation.aum`` is not stored: the written AUM is recomputed from the published cash."""
         ...
 
     async def write_cash_day(self, day: CashDay, *, uow: UnitOfWork) -> None:
@@ -106,12 +112,11 @@ class PortfolioResultsWriter(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class PreviousPositionsDay:
-    """What the positions chain of D needs from the published D−1: the closing state, the
-    reference PU each asset was valued at (OQ-9) and the cumulative P&L (``None`` once the chain
-    is broken, spec §8.3)."""
+    """What the positions chain of D needs from the published D−1: the closing state and the
+    cumulative P&L (``None`` once the chain is broken, spec §8.3). The D−1 reference PUs are not
+    here: they come from the price table through ``PriceReader`` (OQ-30)."""
 
     state: PositionState
-    reference_pus: Mapping[UUID, Decimal]
     cumulative_pnl: Decimal | None
 
 
@@ -120,7 +125,10 @@ class PortfolioReader(Protocol):
     ``processing.date_status``, not from Portfolio (OQ-23)."""
 
     async def get_previous_positions(self, before_date: date) -> PreviousPositionsDay | None:
-        """The positions chain published for ``before_date − 1``, or ``None`` if not published."""
+        """The positions chain published for ``before_date − 1``, or ``None`` if not published.
+        ``None`` is a usable start only in the zero state (no trade dated on or before
+        ``before_date − 1``); otherwise the run is refused with ``POSITIONS_PREDECESSOR_MISSING``
+        (OQ-30)."""
         ...
 
     async def get_previous_cash(self, before_date: date) -> CashBalance | None:
@@ -167,6 +175,11 @@ class PortfolioSummaryView:
 
 @dataclass(frozen=True, slots=True)
 class PositionRowView:
+    """``reference_source``, ``reference_pu`` and ``reference_rate`` are the current preferred
+    price of the date (MANUAL, else B3, exact date; PU 0 after maturity), read from the price
+    table; the stored figures are those of the last processing, so after a price correction the
+    two may differ and the date reads stale until reprocessed (OQ-30)."""
+
     asset_id: UUID
     asset_code: str
     maturity_date: date | None
@@ -198,12 +211,15 @@ class PnLPointView:
     daily_pnl: Decimal | None
     cumulative_pnl: Decimal | None
     pnl_status: CalculationCompleteness
-    status: ChainStatus | None
+    status: ChainStatus
+    """A published day always has a status (never "not processed")."""
 
 
 class PortfolioQueryService(Protocol):
     """Published data only, never recalculated on read (spec §11.4); each date's chain statuses
-    come from ``processing.date_status`` (OQ-23)."""
+    come from ``processing.date_status`` (OQ-23), read in the same transaction as the published
+    rows (``DateStatusReader`` takes the caller's Unit of Work), so figures and statuses always
+    come from one snapshot."""
 
     async def get_summary(self, on: date) -> PortfolioSummaryView: ...
 

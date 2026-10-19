@@ -104,3 +104,7 @@ def test_a_table_is_dated_and_carries_its_chain_status() -> None:
     table = PositionTableView(date=date(2026, 10, 1), status=None, published_at=None, items=())
 
     assert table.status is None  # not processed
+
+
+def test_the_previous_day_carries_no_reference_pus() -> None:
+    assert _fields(PreviousPositionsDay) == ["state", "cumulative_pnl"]
