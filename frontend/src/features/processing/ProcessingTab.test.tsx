@@ -393,7 +393,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     expect(jobRow('14/10/2026 a 15/10/2026', 'Concluído').getByText('2 / 2 dias')).toBeVisible();
     expect(jobRow('14/10/2026 a 16/10/2026', 'Obsoleto').getByText('3 / 3 dias')).toBeVisible();
     expect(
-      jobRow('14/10/2026 a 16/10/2026', 'Concluído com pendências').getByText('7f000000'),
+      jobRow('14/10/2026 a 16/10/2026', 'Concluído com pendências').getByText('5b7d2f41'),
     ).toBeVisible();
     expect(screen.getByText('5 processamentos encontrados')).toBeInTheDocument();
     expect(history().queryByText('Motivo')).not.toBeInTheDocument();
@@ -796,7 +796,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
 
     const drawer = within(await screen.findByRole('dialog', { name: 'Detalhes do processamento' }));
     expect(drawer.getByRole('status')).toHaveTextContent('Falhou');
-    expect(drawer.getByText('7f000000')).toBeInTheDocument();
+    expect(drawer.getByText('a4f09d15')).toBeInTheDocument();
     const field = (label: string) => within(drawer.getByRole('group', { name: label }));
     expect(field('Período solicitado').getByText('01/10/2026 a 05/10/2026')).toBeInTheDocument();
     expect(field('Criação').getByText('14/10/2026 08:00')).toBeInTheDocument();

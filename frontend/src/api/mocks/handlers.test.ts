@@ -297,6 +297,19 @@ describe('mock ledger validation', () => {
 });
 
 describe('mock processing', () => {
+  it('§11.1 gives every job a distinct first id block, which the history shows', async () => {
+    const first = await processingApi.enqueue({ start_date: '2026-10-17', end_date: '2026-10-17' });
+    const second = await processingApi.enqueue({
+      start_date: '2026-10-18',
+      end_date: '2026-10-18',
+    });
+    const { items } = await processingApi.listRequests();
+
+    const blocks = items.map((job) => job.id.slice(0, 8));
+    expect(new Set(blocks).size).toBe(blocks.length);
+    expect(first.id.slice(0, 8)).not.toBe(second.id.slice(0, 8));
+  });
+
   async function poll(id: string): Promise<ProcessingRequest> {
     return processingApi.getRequest(id);
   }
