@@ -12,6 +12,7 @@ import asyncio
 import itertools
 import time
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -22,7 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from di1.platform.config import BrokerSettings
 from di1.platform.database.unit_of_work import UnitOfWork, unit_of_work_factory
 from di1.platform.messaging.consumer import (
+    AfterAck,
+    AfterAckRunner,
     MessageConsumer,
+    MessageHandler,
     open_consumer_channel,
 )
 from di1.platform.messaging.envelope import Envelope
@@ -31,6 +35,7 @@ from di1.platform.messaging.topology import Topology, dead_letter_queue_name, de
 from tests.integration.platform.conftest import queue_spec
 from tests.integration.platform.support import (
     EFFECT,
+    FAST_RETRIES,
     RecordingHandler,
     effects,
     eventually,
@@ -315,3 +320,210 @@ async def test_a_short_outage_is_outlasted_by_the_retry_pauses(
     assert len(handler.calls) == 3
     gaps = [later - earlier for earlier, later in itertools.pairwise(handler.calls)]
     assert gaps[0] >= 0.2 and gaps[1] >= 0.4
+
+
+# Work after the acknowledgement (the processing run: the claim commits, the message is acked,
+# then the per-date run goes on with its own Units of Work; plan §7, lane G Wave 4 plan point 2).
+# The work runs in the runner's task, not in the broker's delivery task, so a channel that
+# closes does not cancel a run that no longer depends on the broker.
+
+
+@dataclass
+class _ClaimThenRun:
+    """Writes the effect (the claim) and returns the work to run once the message is acked."""
+
+    delivery: _FakeDelivery | None = None
+    fails: bool = False
+    hold: asyncio.Event | None = None
+    calls: list[uuid.UUID] = field(default_factory=list)
+    started: list[uuid.UUID] = field(default_factory=list)
+    ran: list[tuple[uuid.UUID, list[str]]] = field(default_factory=list)
+    cancelled: list[uuid.UUID] = field(default_factory=list)
+
+    async def __call__(self, envelope: Envelope, *, uow: UnitOfWork) -> AfterAck:
+        self.calls.append(envelope.message_id)
+        await uow.session.execute(EFFECT, {"m": envelope.message_id})
+
+        async def run() -> None:
+            self.started.append(envelope.message_id)
+            if self.hold is not None:
+                try:
+                    await self.hold.wait()
+                except asyncio.CancelledError:
+                    self.cancelled.append(envelope.message_id)
+                    raise
+            settled = [] if self.delivery is None else [s for s, _ in self.delivery.settled]
+            self.ran.append((envelope.message_id, settled))
+            if self.fails:
+                raise RuntimeError("the run failed")
+
+        return run
+
+
+def _consumer_with(
+    session_factory: async_sessionmaker[AsyncSession],
+    handler: MessageHandler,
+    runner: AfterAckRunner,
+) -> MessageConsumer:
+    return MessageConsumer(
+        consumer_name="worker",
+        handler=handler,
+        uow_factory=unit_of_work_factory(session_factory),
+        settings=FAST_RETRIES,
+        after_ack=runner,
+    )
+
+
+@pytest.fixture
+async def runner() -> AsyncIterator[AfterAckRunner]:
+    runner = AfterAckRunner()
+    try:
+        yield runner
+    finally:
+        await runner.stop()
+
+
+async def test_the_work_after_the_ack_runs_once_the_message_is_acked(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    runner: AfterAckRunner,
+) -> None:
+    envelope = make_envelope()
+    delivery = _FakeDelivery(envelope.to_json(), engine)
+    handler = _ClaimThenRun(delivery)
+
+    await _deliver(_consumer_with(session_factory, handler, runner), delivery)
+    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+
+    assert delivery.settled == [("ack", [envelope.message_id])]
+    assert handler.ran == [(envelope.message_id, ["ack"])]
+
+
+async def test_the_delivery_does_not_wait_for_the_work_after_the_ack(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    runner: AfterAckRunner,
+) -> None:
+    """The run is not inside the broker's delivery task: that task ends at the ack."""
+    envelope = make_envelope()
+    delivery = _FakeDelivery(envelope.to_json(), engine)
+    handler = _ClaimThenRun(delivery, hold=asyncio.Event())
+
+    await asyncio.wait_for(
+        _deliver(_consumer_with(session_factory, handler, runner), delivery), timeout=5
+    )
+
+    assert delivery.settled == [("ack", [envelope.message_id])]
+    await eventually(lambda: handler.started == [envelope.message_id])
+    assert handler.ran == []
+
+
+async def test_a_failure_after_the_ack_is_logged_and_the_message_stays_acked(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    runner: AfterAckRunner,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    envelope = make_envelope()
+    delivery = _FakeDelivery(envelope.to_json(), engine)
+
+    await _deliver(
+        _consumer_with(session_factory, _ClaimThenRun(delivery, fails=True), runner), delivery
+    )
+    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+
+    assert delivery.settled == [("ack", [envelope.message_id])]
+    assert (
+        f"work after the ack of message {envelope.message_id} (test.command) failed" in caplog.text
+    )
+
+
+async def test_a_duplicate_does_not_run_the_work_after_the_ack(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    runner: AfterAckRunner,
+) -> None:
+    envelope = make_envelope()
+    handler = _ClaimThenRun()
+    consumer = _consumer_with(session_factory, handler, runner)
+
+    for _ in range(2):
+        await _deliver(consumer, _FakeDelivery(envelope.to_json(), engine))
+    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+
+    assert [message_id for message_id, _ in handler.ran] == [envelope.message_id]
+
+
+async def test_a_delivery_during_a_run_is_acked_at_once_and_its_run_waits(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    runner: AfterAckRunner,
+) -> None:
+    """A second command (a duplicate resent by the relay, a re-dispatch) never sits unacked
+    behind a run, where the broker's consumer timeout would close the channel; the runs
+    themselves go one at a time (one run at a time per process)."""
+    first, second = make_envelope(), make_envelope()
+    handler = _ClaimThenRun(hold=asyncio.Event())
+    consumer = _consumer_with(session_factory, handler, runner)
+    first_delivery = _FakeDelivery(first.to_json(), engine)
+    second_delivery = _FakeDelivery(second.to_json(), engine)
+
+    await _deliver(consumer, first_delivery)
+    await eventually(lambda: handler.started == [first.message_id])
+    await asyncio.wait_for(_deliver(consumer, second_delivery), timeout=5)
+
+    assert second_delivery.settled == [("ack", [first.message_id, second.message_id])]
+    await asyncio.sleep(0.1)
+    assert handler.started == [first.message_id]
+
+    assert handler.hold is not None
+    handler.hold.set()
+    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+    assert [message_id for message_id, _ in handler.ran] == [first.message_id, second.message_id]
+
+
+async def test_stopping_the_runner_cancels_the_run_and_drops_the_waiting_ones(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The worker's shutdown: the run in progress is cancelled (its open transaction rolls
+    back); a waiting run is dropped, its claim committed, and recovered from the lease."""
+    first, second = make_envelope(), make_envelope()
+    runner = AfterAckRunner()
+    handler = _ClaimThenRun(hold=asyncio.Event())
+    consumer = _consumer_with(session_factory, handler, runner)
+    await _deliver(consumer, _FakeDelivery(first.to_json(), engine))
+    await _deliver(consumer, _FakeDelivery(second.to_json(), engine))
+    await eventually(lambda: handler.started == [first.message_id])
+
+    await asyncio.wait_for(runner.stop(), timeout=5)
+
+    assert handler.cancelled == [first.message_id]
+    assert handler.started == [first.message_id]
+    assert "1 waiting runs dropped" in caplog.text
+
+
+@dataclass
+class _AckFails(_FakeDelivery):
+    async def ack(self) -> None:
+        raise RuntimeError("channel closed")
+
+
+async def test_the_work_after_the_ack_runs_even_when_the_ack_fails(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    runner: AfterAckRunner,
+) -> None:
+    """The claim is committed: the redelivery will be an inbox duplicate without a run, so the
+    run must not wait for the lease to expire. The claim token fences it."""
+    envelope = make_envelope()
+    handler = _ClaimThenRun()
+
+    await _deliver(
+        _consumer_with(session_factory, handler, runner),
+        _AckFails(envelope.to_json(), engine),
+    )
+    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+
+    assert [message_id for message_id, _ in handler.ran] == [envelope.message_id]
