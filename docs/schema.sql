@@ -160,10 +160,10 @@ CREATE TABLE processing.calculation_state (
 );
 INSERT INTO processing.calculation_state(singleton) VALUES (TRUE);
 
--- The current status of each chain on each date (OQ-23): the single source of freshness. A NULL
--- status, or no row, is "not processed". A write dated W sets the affected chain to STALE on
--- every date >= W that has a status; a run sets RUNNING, then FRESH, FRESH_WITH_ISSUES, STALE or
--- FAILED. Dirty markers and revision counters no longer exist. A RUNNING chain keeps its previous
+-- The current status of each chain on each date (OQ-23, OQ-31). A NULL status, or no row, is "not
+-- processed". Only a run writes it: RUNNING, then PROCESSED, PROCESSED_WITH_ISSUES or FAILED; a
+-- write in Ledger or Prices changes nothing here (no staleness, OQ-31). *_processed_at is when a
+-- run last committed that chain for the date ("Processado em ..."). A RUNNING chain keeps its previous
 -- status in *_previous, put back if the run ends without committing that date (OQ-26).
 CREATE TABLE processing.date_status (
     date DATE PRIMARY KEY,
@@ -172,10 +172,12 @@ CREATE TABLE processing.date_status (
     portfolio_previous VARCHAR(32),    -- the status before RUNNING, put back if the run ends without this date (OQ-26)
     cash_previous VARCHAR(32),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT date_status_portfolio_check CHECK (portfolio IS NULL OR portfolio IN ('FRESH','FRESH_WITH_ISSUES','STALE','RUNNING','FAILED')),
-    CONSTRAINT date_status_cash_check CHECK (cash IS NULL OR cash IN ('FRESH','FRESH_WITH_ISSUES','STALE','RUNNING','FAILED')),
-    CONSTRAINT date_status_portfolio_previous_check CHECK (portfolio_previous IS NULL OR (portfolio = 'RUNNING' AND portfolio_previous IN ('FRESH','FRESH_WITH_ISSUES','STALE','FAILED'))),
-    CONSTRAINT date_status_cash_previous_check CHECK (cash_previous IS NULL OR (cash = 'RUNNING' AND cash_previous IN ('FRESH','FRESH_WITH_ISSUES','STALE','FAILED'))),
+    portfolio_processed_at TIMESTAMPTZ,
+    cash_processed_at TIMESTAMPTZ,
+    CONSTRAINT date_status_portfolio_check CHECK (portfolio IS NULL OR portfolio IN ('PROCESSED','PROCESSED_WITH_ISSUES','RUNNING','FAILED')),
+    CONSTRAINT date_status_cash_check CHECK (cash IS NULL OR cash IN ('PROCESSED','PROCESSED_WITH_ISSUES','RUNNING','FAILED')),
+    CONSTRAINT date_status_portfolio_previous_check CHECK (portfolio_previous IS NULL OR (portfolio = 'RUNNING' AND portfolio_previous IN ('PROCESSED','PROCESSED_WITH_ISSUES','FAILED'))),
+    CONSTRAINT date_status_cash_previous_check CHECK (cash_previous IS NULL OR (cash = 'RUNNING' AND cash_previous IN ('PROCESSED','PROCESSED_WITH_ISSUES','FAILED'))),
     CONSTRAINT date_status_not_empty CHECK (portfolio IS NOT NULL OR cash IS NOT NULL)
 );
 
@@ -185,15 +187,12 @@ CREATE TABLE processing.issues (
     asset_id UUID REFERENCES asset.instruments(id) ON DELETE RESTRICT,
     affected_date DATE NOT NULL,
     required_price_date DATE,
-    issue_type VARCHAR(64) NOT NULL,   -- MISSING_REFERENCE_PRICE | EXPIRED_OPEN_POSITION | STALE_PREDECESSOR
-    chain VARCHAR(16),                 -- CASH | POSITIONS: the chain of a STALE_PREDECESSOR (OQ-22)
+    issue_type VARCHAR(64) NOT NULL,   -- MISSING_REFERENCE_PRICE | EXPIRED_OPEN_POSITION (OQ-31)
     message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT issues_type_nonempty CHECK (length(btrim(issue_type)) > 0),
-    CONSTRAINT issues_chain_check CHECK (chain IS NULL OR chain IN ('CASH','POSITIONS')),
-    CONSTRAINT issues_chain_for_stale_predecessor CHECK ((issue_type = 'STALE_PREDECESSOR') = (chain IS NOT NULL))
+    CONSTRAINT issues_type_nonempty CHECK (length(btrim(issue_type)) > 0)
 );
-CREATE UNIQUE INDEX issues_unique_per_request_idx ON processing.issues (request_id, asset_id, affected_date, required_price_date, issue_type, chain) NULLS NOT DISTINCT;
+CREATE UNIQUE INDEX issues_unique_per_request_idx ON processing.issues (request_id, asset_id, affected_date, required_price_date, issue_type) NULLS NOT DISTINCT;
 CREATE INDEX issues_by_date_idx ON processing.issues (affected_date, issue_type);
 
 -- PORTFOLIO: one portfolio, no portfolio_id; published data only.
@@ -206,13 +205,13 @@ CREATE TABLE portfolio.positions (
 );
 CREATE INDEX positions_date_idx ON portfolio.positions (position_date, asset_id);
 
+-- The reference PU, rate and source of a date live only in prices.reference_prices; a published
+-- day keeps its computed financial_total and P&L until the user processes it again (OQ-30, OQ-31).
 CREATE TABLE portfolio.position_metrics (
     asset_id UUID NOT NULL,
     metric_date DATE NOT NULL,
     average_entry_pu NUMERIC,
     average_entry_rate NUMERIC,
-    reference_pu NUMERIC,
-    reference_source VARCHAR(16),      -- MANUAL | B3 of the PU used; NULL with no price or after maturity (OQ-25)
     financial_total NUMERIC,
     position_pnl NUMERIC,
     trades_pnl NUMERIC,
@@ -224,9 +223,6 @@ CREATE TABLE portfolio.position_metrics (
     FOREIGN KEY (asset_id, metric_date) REFERENCES portfolio.positions(asset_id, position_date) ON DELETE CASCADE,
     CONSTRAINT position_metrics_average_pu_positive CHECK (average_entry_pu IS NULL OR average_entry_pu > 0),
     CONSTRAINT position_metrics_average_rate_valid CHECK (average_entry_rate IS NULL OR average_entry_rate > -1),
-    -- >= 0: after maturity the reference PU is 0 by definition (OQ-1); otherwise it comes from a price > 0
-    CONSTRAINT position_metrics_reference_nonnegative CHECK (reference_pu IS NULL OR reference_pu >= 0),
-    CONSTRAINT position_metrics_reference_source_check CHECK (reference_source IS NULL OR (reference_source IN ('MANUAL','B3') AND reference_pu IS NOT NULL)),
     CONSTRAINT position_metrics_valuation_status CHECK (valuation_status IN ('COMPLETE','MISSING','NOT_REQUIRED')),
     CONSTRAINT position_metrics_pnl_status CHECK (pnl_status IN ('COMPLETE','MISSING')),
     CONSTRAINT position_metrics_daily_pnl_parts CHECK (daily_pnl IS NULL OR (position_pnl IS NOT NULL AND trades_pnl IS NOT NULL AND daily_pnl = position_pnl + trades_pnl)),
