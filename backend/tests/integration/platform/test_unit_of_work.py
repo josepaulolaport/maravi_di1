@@ -1,8 +1,8 @@
 """A Unit of Work wraps exactly one `AsyncSession` and one transaction: it commits only when the
 service calls `commit()` once, and anything else rolls back.
 
-Sources: interfaces.md "Transaction boundaries" 1 (a fact and its invalidation in one
-transaction, one COMMIT); backend/CLAUDE.md "Services" (a write receives `*, uow` and commits
+Sources: interfaces.md "Transaction boundaries" 1 (a write saves the fact in one transaction,
+one COMMIT; OQ-31); backend/CLAUDE.md "Services" (a write receives `*, uow` and commits
 once); plan §3 (Unit of Work around one AsyncSession). The provider opens the UoW, the service
 commits, leaving the block without a commit rolls back (decided with the user, 2026-10-18).
 
@@ -100,7 +100,7 @@ async def test_an_exception_rolls_back_and_propagates(
 async def test_writes_are_committed_together_or_not_at_all(
     uow: SqlAlchemyUnitOfWork, engine: AsyncEngine
 ) -> None:
-    """A fact and its invalidation: when the second write fails, the first is not kept."""
+    """A write saves its rows together: when the second fails, the first is not kept."""
     duplicate = uuid.uuid4()
 
     with pytest.raises(IntegrityError):
