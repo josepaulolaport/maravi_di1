@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.processing.public import (
     ChainStatus,
+    DateStatus,
     FinancialResultInvalidator,
     ProcessingRequest,
     ProcessingScope,
@@ -98,3 +99,9 @@ def test_chain_status_matches_the_schema_check() -> None:
         "RUNNING",
         "FAILED",
     }
+
+
+def test_a_date_status_holds_both_chains() -> None:
+    status = DateStatus(date=date(2026, 10, 1), portfolio=ChainStatus.STALE, cash=None)
+
+    assert (status.portfolio, status.cash) == (ChainStatus.STALE, None)

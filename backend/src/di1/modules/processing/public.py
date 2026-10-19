@@ -8,6 +8,7 @@ integrator.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
@@ -58,6 +59,26 @@ class ChainStatus(StrEnum):
     STALE = "STALE"
     RUNNING = "RUNNING"
     FAILED = "FAILED"
+
+
+@dataclass(frozen=True, slots=True)
+class DateStatus:
+    """The current status of both chains on one date (OQ-23; ``processing.date_status``);
+    ``None`` is "not processed"."""
+
+    date: date
+    portfolio: ChainStatus | None
+    cash: ChainStatus | None
+
+
+class DateStatusReader(Protocol):
+    """Read access to ``processing.date_status`` for Portfolio's read models (OQ-23)."""
+
+    async def get_date_statuses(
+        self, start_date: date, end_date: date
+    ) -> Mapping[date, DateStatus]:
+        """The statuses of [start_date, end_date]; a date with no row is absent (not processed)."""
+        ...
 
 
 class ProcessingStatus(StrEnum):
