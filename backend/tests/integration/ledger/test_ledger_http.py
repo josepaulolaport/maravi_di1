@@ -433,6 +433,7 @@ def test_the_range_is_required(client: TestClient) -> None:
 
 
 def test_a_rejected_write_leaves_nothing(client: TestClient) -> None:
-    client.post("/ledger/entries", json={**FIXTURE_REQUESTS[0], "date": "2026-10-19"})
+    response = client.post("/ledger/entries", json={**FIXTURE_REQUESTS[0], "date": "2026-10-19"})
 
+    assert_problem(response, 422, ("FUTURE_DATE", "date"))
     assert client.get("/ledger/entries", params=RANGE).json()["items"] == []
