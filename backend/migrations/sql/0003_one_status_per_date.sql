@@ -4,7 +4,8 @@
 -- The revision refuses to run while a job is active.
 
 -- OQ-26 item 5: Pendências show each date's latest processing. Issues of runs that published
--- nothing go, and so do issues of a date that a later published run covered.
+-- nothing go, and so do issues of a date that a later published run covered for the issue's
+-- chain (chainless issue types belong to the positions chain).
 DELETE FROM processing.issues AS i
     USING processing.requests AS r
     WHERE i.request_id = r.id AND r.status NOT IN ('COMPLETED', 'COMPLETED_WITH_ISSUES');
@@ -13,6 +14,7 @@ DELETE FROM processing.issues AS i
     WHERE i.request_id = mine.id
       AND EXISTS (SELECT 1 FROM processing.requests AS later
                   WHERE later.status IN ('COMPLETED', 'COMPLETED_WITH_ISSUES')
+                    AND (later.scope = 'ALL' OR later.scope = COALESCE(i.chain, 'POSITIONS'))
                     AND i.affected_date BETWEEN later.requested_start_date AND later.requested_end_date
                     AND (later.created_at, later.id) > (mine.created_at, mine.id));
 

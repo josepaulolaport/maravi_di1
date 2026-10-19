@@ -269,3 +269,34 @@ def test_neither_direction_runs_while_a_job_is_active(database_url: str, target:
     migrate = command.upgrade if target == "0003" else command.downgrade
     with pytest.raises(RuntimeError, match="job is active"):
         migrate(_alembic(database_url), target)
+
+
+ISSUE_ON_THE_FIRST = (
+    "INSERT INTO processing.requests (id, scope, requested_start_date, requested_end_date,"
+    " status, created_at) VALUES ('00000000-0000-0000-0000-000000000041', 'ALL',"
+    " '2026-10-01', '2026-10-01', 'COMPLETED_WITH_ISSUES', '2026-10-05 10:00-03');"
+    "INSERT INTO processing.issues (request_id, asset_id, affected_date, issue_type)"
+    f" VALUES ('00000000-0000-0000-0000-000000000041', '{INSTRUMENT}', '2026-10-01',"
+    " 'EXPIRED_OPEN_POSITION');"
+)
+
+
+@pytest.mark.parametrize(
+    ("later_scope", "kept"), [("CASH", 1), ("POSITIONS", 0), ("ALL", 0)], ids=lambda v: str(v)
+)
+def test_a_later_run_prunes_only_the_issues_of_its_own_chain(
+    database_url: str, later_scope: str, kept: int
+) -> None:
+    command.upgrade(_alembic(database_url), "0002")
+    execute(
+        database_url,
+        AN_INSTRUMENT
+        + ISSUE_ON_THE_FIRST
+        + "INSERT INTO processing.requests (scope, requested_start_date, requested_end_date,"
+        f" status, created_at) VALUES ('{later_scope}', '2026-10-01', '2026-10-01', 'COMPLETED',"
+        " '2026-10-06 10:00-03');",
+    )
+
+    command.upgrade(_alembic(database_url), "0003")
+
+    assert fetch(database_url, "SELECT count(*) FROM processing.issues") == [(kept,)]
