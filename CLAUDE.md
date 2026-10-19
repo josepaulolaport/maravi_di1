@@ -59,7 +59,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - `cumulative = previous + daily`
   - Deposits and withdrawals are never P&L.
   - No realized/unrealized P&L in the default view.
-- **AUM = cash + Σ signed market value** (`financial_total = Q × reference_PU`). There are no exposure fields and no `total_equity`. AUM is `null` when either chain is missing; it has no status of its own, so the screens show the cash and positions statuses (OQ-28); whichever scope publishes recomputes it (OQ-21).
+- **AUM = cash + Σ signed market value** (`financial_total = Q × reference_PU`). There are no exposure fields and no `total_equity`. AUM is `null` when either chain is missing, or when the other chain of the date is not `PROCESSED`/`PROCESSED_WITH_ISSUES` (OQ-38; on ALL it is computed after both chains are written); it has no status of its own, so the screens show the cash and positions statuses (OQ-28); whichever scope publishes recomputes it (OQ-21).
 - **Missing price:**
   - Quantity, average cost and cash are still computed.
   - The dependent figures are `null`, never zero.
