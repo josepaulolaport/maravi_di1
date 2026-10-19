@@ -252,7 +252,7 @@ Run locally on 2026-10-19 (GitHub Actions is down; the user decided merges go on
 - `make lint-frontend`: eslint and `tsc --noEmit` clean, "All matched files use Prettier code style!".
 - `make test-frontend`: "Test Files 31 passed (31)", "Tests 537 passed (537)".
 - `npm run build`: "✓ built in 717ms".
-- `make e2e` (throwaway Compose stack: postgres, rabbitmq, migrate, api, outbox-relay, worker): the challenge example dated today, 12 checks ok (PU 90909.0909090909, run `COMPLETED`, cash and positions `PROCESSED`, cash 109090.9090909091, AUM 200000, one position), "E2E SMOKE PASSED".
+- `make e2e` (throwaway Compose stack: postgres, rabbitmq, migrate, api, outbox-relay, worker): the challenge example dated today, 11 checks ok (PU 90909.0909090909, run `COMPLETED`, cash and positions `PROCESSED`, cash 109090.9090909091, AUM 200000, one position), "E2E SMOKE PASSED".
 
 Since then `9f9c40d` merged #99 (the Compose `web` service); its reviewer reported the frontend at 540 tests passed. Not rerun here.
 
@@ -284,5 +284,5 @@ Gates: G0–G5 are met (Gate 4 by `make e2e` on Compose: challenge example, run 
 |---|---|
 | Acceptance phase 2 processing scenarios (spec §13: the challenge example through a run, missing price, predecessor rule, P&L chart, the second halves of cases 9, 16 and 17) | in flight (acceptance follow-ups session); phase 2 today covers catalogue, ledger, prices, errors and the challenge example without a run |
 | QA against the real API | in flight (read-only QA session); its findings are not triaged yet |
-| `POST /pricing/calculate` | deliberately not built: OQ-19 keeps it "if needed", and the UI computes the complementary PU or rate when an entry is saved |
+| `POST /pricing/calculate` | deliberately not built: OQ-19 keeps it "if needed", and the backend computes the complementary PU or rate when an entry is saved (OQ-19 item 7) |
 | CSV and B3 reference-price import | post-delivery TODO (§11, spec §14) |
