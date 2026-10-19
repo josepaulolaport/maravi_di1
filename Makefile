@@ -5,6 +5,8 @@
 #                  (+ frontend eslint, tsc and prettier --check)
 #   make test      Alembic head and migration smoke, then pytest with coverage against PostgreSQL 16
 #                  (a throwaway container unless TEST_DATABASE_URL is set) (+ frontend tests)
+#   make seed      catalogue roots (FUTURE, INTEREST_RATE_FUTURE) into the running Compose stack
+#   make e2e       the challenge example end to end on a throwaway Compose stack (scripts/e2e.sh)
 #
 # Every recipe fails on the first failing command; nothing is silenced. Recipes avoid pipes:
 # macOS ships GNU Make 3.81, which ignores .SHELLFLAGS, so pipefail lives in the scripts.
@@ -16,10 +18,10 @@ SHELL := bash
 FRONTEND_MISSING := echo "make: frontend/package.json not found: no frontend scaffold yet, nothing to run"
 
 .PHONY: help install install-backend install-frontend lint lint-backend lint-frontend \
-	test test-backend test-frontend lint-commits
+	test test-backend test-frontend lint-commits seed e2e
 
 help:
-	@echo "make install | make lint | make test"
+	@echo "make install | make lint | make test | make seed | make e2e"
 	@echo "split: {install,lint,test}-{backend,frontend}; make lint-commits [BASE=origin/main] [HEAD_REF=HEAD]"
 
 install: install-backend install-frontend
@@ -53,3 +55,9 @@ BASE ?= origin/main
 HEAD_REF ?= HEAD
 lint-commits:
 	scripts/lint-commits.sh "$(BASE)" "$(HEAD_REF)"
+
+seed:
+	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -q -U "$${DI1_DB_USER:-di1}" -d "$${DI1_DB_NAME:-di1}" < scripts/seed_catalogue.sql
+
+e2e:
+	scripts/e2e.sh
