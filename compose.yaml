@@ -1,5 +1,5 @@
 # Local stack (plan §0): PostgreSQL 16, RabbitMQ 4.1, the one-shot migration, the API, the outbox
-# relay, the dispatcher and the one processing worker. `docker compose up --build`; the API
+# relay and the one processing worker. `docker compose up --build`; the API
 # answers on http://127.0.0.1:8000 (/health, /api/...), the RabbitMQ management UI on
 # http://127.0.0.1:15672.
 #
@@ -103,10 +103,10 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Exactly one processing worker (OQ-45): it recovers an interrupted run at startup, before it
-  # consumes, so it must never be scaled. Both processes stop on SIGTERM within the default grace
-  # period and exit 1 on a startup failure; without a health check `up --wait` waits for them
-  # to be running.
+  # Exactly one processing worker (OQ-45), and no dispatcher (OQ-46): at startup it recovers an
+  # interrupted run and drains the queued requests, then it drains again on each doorbell message,
+  # so it must never be scaled. It stops on SIGTERM within the default grace period and exits 1
+  # on a startup failure; without a health check `up --wait` waits for it to be running.
   worker:
     <<: *backend
     command: ["python", "-m", "di1.workers.main"]
@@ -117,17 +117,6 @@ services:
         condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
-    restart: unless-stopped
-
-  dispatcher: # database only, no broker
-    <<: *backend
-    command: ["python", "-m", "di1.workers.dispatcher"]
-    environment:
-      <<: *database-env
-      DISPATCHER_POLL_INTERVAL_SECONDS: ${DI1_DISPATCHER_POLL_INTERVAL_SECONDS:-1.0}
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:

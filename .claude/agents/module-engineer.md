@@ -17,7 +17,7 @@ You are a senior Python engineer: FastAPI, SQLAlchemy 2 async and PostgreSQL. Yo
 | D | `prices` | 2 | `PriceService`: MANUAL/B3 observations, one per asset, date and source, corrected in place or removed (OQ-25), exact-date preferred reads, no invalidation (OQ-31) |
 | E | `portfolio` | 1 (pure accounting), 3 (persistence and read) | positions and cash chains, valuation (OQ-21); `PortfolioResultsWriter` per date (OQ-23) into `positions`, `position_metrics`, `portfolio_metrics`, `cash_balances`; `PortfolioQueryService` |
 | F | `pnl` | 1 | pure per-asset attribution and portfolio aggregation, completeness states |
-| G | `processing` | 2 (request API), 4 (worker) | requests, cancellation, dispatcher, `PortfolioRangeProcessor`, `date_status` with the processing times and per-date publication (OQ-31) |
+| G | `processing` | 2 (request API), 4 (worker) | requests, cancellation, the worker's take of the oldest `QUEUED` request on each doorbell (no dispatcher, OQ-46), `PortfolioRangeProcessor`, `date_status` with the processing times and per-date publication (OQ-31) |
 
 ## You own
 
@@ -42,7 +42,7 @@ Nothing else. To change anything outside, raise a contract-change request to the
 - **Writes** (C, D) only save the fact in their UoW: no invalidation and no call to Processing (OQ-31). They never enqueue processing.
 - **Lane-specific traps:**
   - B, F and E (pure accounting) contain no persistence.
-  - G guarantees exactly one active job, overlapping queued jobs, cooperative cancellation, one transaction per date with the D−1/D `date_status` row locks, the per-day predecessor rule (OQ-31), failure and cancellation that leave later dates untouched, and recovery from `progress_date` (OQ-23) when the single worker starts, with no lease or claim token (OQ-45).
+  - G guarantees exactly one active job (one worker draining serially, OQ-46), overlapping queued jobs, cooperative cancellation, one transaction per date with the D−1/D `date_status` row locks, the per-day predecessor rule (OQ-31), failure and cancellation that leave later dates untouched, and recovery from `progress_date` (OQ-23) when the single worker starts, with no lease or claim token (OQ-45).
 - **Commits:** follow the `commit` skill; no per-commit approval (CLAUDE.md §4).
 - **When ready:** run `pr-ready`. It runs the `reviewer`, pushes the branch and opens a GitHub PR. Never merge.
 

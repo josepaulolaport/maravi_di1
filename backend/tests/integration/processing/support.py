@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from di1.modules.processing.application.services.processing import ProcessingService
+from di1.modules.processing.infrastructure.messaging.outbox_doorbell import OutboxDoorbell
 from di1.modules.processing.infrastructure.persistence.repositories import (
     SqlDateStatusRepository,
     SqlIssueRepository,
@@ -33,6 +34,7 @@ def make_service(
         chain_history=history or FakeChainHistory(),
         assets=assets or FakeAssets(),
         clock=clock or SteppingClock(),
+        doorbell=OutboxDoorbell(),
     )
 
 
