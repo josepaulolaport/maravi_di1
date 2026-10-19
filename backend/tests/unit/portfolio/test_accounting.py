@@ -253,3 +253,12 @@ def test_each_day_pairs_the_independent_chains() -> None:
 
     assert tuple(d.cash for d in together) == cash_alone
     assert tuple(d.positions_day for d in together) == positions_alone
+
+
+def test_an_accounting_state_holding_the_same_asset_twice_is_rejected() -> None:
+    with pytest.raises(AccountingError):
+        AccountingState(
+            as_of=YESTERDAY,
+            cash_balance=Decimal("0"),
+            positions=(position(1, "95000", "0.1"), position(2, "95000", "0.1")),
+        )

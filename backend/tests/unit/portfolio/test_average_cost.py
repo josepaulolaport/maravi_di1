@@ -9,6 +9,10 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 
+import pytest
+
+from di1.modules.portfolio.domain.average_cost import next_average
+from di1.modules.portfolio.domain.errors import AccountingError
 from di1.modules.portfolio.domain.positions import (
     OpenPosition,
     PositionDay,
@@ -115,3 +119,9 @@ def test_a_partial_cover_of_a_short_keeps_the_average() -> None:
     assert result.quantity == -15
     assert result.average_entry_pu == Decimal("95500")
     assert result.average_entry_rate == Decimal("0.1")
+
+
+def test_an_open_quantity_without_an_average_is_rejected() -> None:
+    # A held position always carries an average; a missing one is a broken state, not an opening.
+    with pytest.raises(AccountingError):
+        next_average(5, None, 1, Decimal("95000"))

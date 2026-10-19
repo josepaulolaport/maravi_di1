@@ -12,6 +12,7 @@ from uuid import UUID
 
 import pytest
 
+from di1.modules.portfolio.domain.cash import CashBalance, CashCalculator
 from di1.modules.portfolio.domain.errors import AccountingError
 from di1.modules.portfolio.domain.valuation import (
     AssetValuationInput,
@@ -171,3 +172,53 @@ def test_the_multiplier_is_not_applied() -> None:
 def test_the_same_asset_twice_is_rejected() -> None:
     with pytest.raises(AccountingError):
         VALUATION.calculate_day(DAY, [_asset(1, "95000"), _asset(2, "95000")], ZERO)
+
+
+def test_a_deposit_moves_aum_but_not_the_market_value() -> None:
+    # Spec §8.2 and §13 item 6: deposits change cash and AUM, never the valuation of positions.
+    # 1 × 95000 held; cash 5000 → AUM 100000; after a 1000 deposit cash 6000 → AUM 101000.
+    cash = CashCalculator().calculate_day(
+        CashBalance(as_of=DAY - timedelta(days=1), balance=Decimal("5000")),
+        [],
+        Decimal("1000"),
+        ZERO,
+        DAY,
+    )
+    held = [_asset(1, "95000")]
+
+    before = VALUATION.calculate_day(DAY, held, cash.previous_cash_balance)
+    after = VALUATION.calculate_day(DAY, held, cash.cash_balance)
+
+    assert before.aum == Decimal("100000")
+    assert after.aum == Decimal("101000")
+    assert after.positions_market_value == before.positions_market_value == Decimal("95000")
+
+
+def test_the_reference_price_used_is_traceable_to_its_observation() -> None:
+    # CLAUDE.md §2 / OQ-9: the price used is traceable to its revision (position_metrics row).
+    price_id = UUID("00000000-0000-0000-0000-0000000000aa")
+    priced = AssetValuationInput(
+        asset_id=DI1F27,
+        quantity=1,
+        maturity_date=FAR_MATURITY,
+        reference_pu=Decimal("95000"),
+        reference_price_id=price_id,
+    )
+    expired = _asset(1, None, maturity=DAY - timedelta(days=1))
+
+    result = VALUATION.calculate_day(DAY, [priced], ZERO)
+    after_maturity = VALUATION.calculate_day(DAY, [expired], ZERO)
+
+    assert result.assets[0].reference_price_id == price_id
+    assert after_maturity.assets[0].reference_price_id is None  # 0 by definition, no observation
+
+
+def test_a_price_id_without_a_price_is_rejected() -> None:
+    with pytest.raises(AccountingError):
+        AssetValuationInput(
+            asset_id=DI1F27,
+            quantity=1,
+            maturity_date=FAR_MATURITY,
+            reference_pu=None,
+            reference_price_id=UUID("00000000-0000-0000-0000-0000000000aa"),
+        )

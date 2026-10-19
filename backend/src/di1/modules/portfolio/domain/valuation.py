@@ -4,11 +4,12 @@
     positions_market_value[D]  = Σ financial_total[a, D]
     aum[D]                     = cash_balance[D] + positions_market_value[D]
 
-Pure: it takes published inputs (closing quantities, exact-date reference PUs chosen by the
-caller, maturities and the cash balance). A missing required price leaves the dependent figures
-null, never zero: the portfolio total is not complete if any expected asset is missing. A flat
-position is worth zero without a price. After maturity the reference PU is 0 by definition and no
-price is accepted (OQ-1). The multiplier is not applied (OQ-2). Money is kept exact (OQ-3).
+Pure: it takes the day's closing quantities, the exact-date reference PUs chosen by the caller
+(with the observation each came from, for traceability), the maturities and the cash balance.
+A missing required price leaves the dependent figures null, never zero: the portfolio total is
+not complete if any expected asset is missing. A flat position is worth zero without a price.
+After maturity the reference PU is 0 by definition and no price is accepted (OQ-1). The
+multiplier is not applied (OQ-2). Money is kept exact (OQ-3).
 """
 
 from __future__ import annotations
@@ -37,20 +38,29 @@ class ValuationStatus(Enum):
 @dataclass(frozen=True)
 class AssetValuationInput:
     """One expected asset on the valuation date: its closing quantity, its maturity and the
-    exact-date reference PU, ``None`` when there is no observation."""
+    exact-date reference PU, ``None`` when there is no observation. ``reference_price_id`` is the
+    observation (revision) the PU came from, so the price used stays traceable (OQ-9)."""
 
     asset_id: UUID
     quantity: int
     maturity_date: date
     reference_pu: Decimal | None
+    reference_price_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        if self.reference_price_id is not None and self.reference_pu is None:
+            raise AccountingError("a reference price id needs its reference PU")
 
 
 @dataclass(frozen=True)
 class AssetValuation:
-    """``reference_pu`` is the PU used: the observation, or 0 after maturity."""
+    """``reference_pu`` is the PU used: the observation's, 0 after maturity, or ``None`` when
+    there is none (MISSING, or a flat position without a price, NOT_REQUIRED).
+    ``reference_price_id`` is the observation it came from; ``None`` after maturity."""
 
     asset_id: UUID
     reference_pu: Decimal | None
+    reference_price_id: UUID | None
     financial_total: Decimal | None
     status: ValuationStatus
 
@@ -68,6 +78,8 @@ class PortfolioValuation:
 
 
 class ValuationCalculator:
+    """Values every expected asset of one day, then the portfolio total and AUM."""
+
     def calculate_day(
         self,
         date: date,
@@ -100,7 +112,7 @@ class ValuationCalculator:
 
 
 def _value(asset: AssetValuationInput, on: date) -> AssetValuation:
-    reference_pu = asset.reference_pu
+    reference_pu, price_id = asset.reference_pu, asset.reference_price_id
     if on > asset.maturity_date:
         if reference_pu is not None:
             raise AccountingError(
@@ -108,9 +120,13 @@ def _value(asset: AssetValuationInput, on: date) -> AssetValuation:
             )
         reference_pu = ZERO
     if asset.quantity == 0:
-        return AssetValuation(asset.asset_id, reference_pu, ZERO, ValuationStatus.NOT_REQUIRED)
+        return AssetValuation(
+            asset.asset_id, reference_pu, price_id, ZERO, ValuationStatus.NOT_REQUIRED
+        )
     if reference_pu is None:
-        return AssetValuation(asset.asset_id, None, None, ValuationStatus.MISSING)
+        return AssetValuation(asset.asset_id, None, None, None, ValuationStatus.MISSING)
     # 0 + Q × PU: a short position at a zero PU must not yield a negative zero.
     financial_total = ZERO + asset.quantity * reference_pu
-    return AssetValuation(asset.asset_id, reference_pu, financial_total, ValuationStatus.COMPLETE)
+    return AssetValuation(
+        asset.asset_id, reference_pu, price_id, financial_total, ValuationStatus.COMPLETE
+    )

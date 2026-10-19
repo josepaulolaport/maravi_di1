@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from di1.modules.portfolio.domain.errors import AccountingError
 from di1.shared.decimals import financial_context, quantize_pu, quantize_rate
 
 
@@ -19,8 +20,10 @@ def next_average(
 ) -> Decimal | None:
     """The average after one trade of ``traded_quantity`` at ``price`` (a PU or a rate)."""
     current_quantity = previous_quantity + traded_quantity
-    if previous_quantity == 0 or average is None:
+    if previous_quantity == 0:
         return price
+    if average is None:
+        raise AccountingError("a held position must carry an average entry price")
     if (previous_quantity > 0) == (traded_quantity > 0):
         held, added = abs(previous_quantity), abs(traded_quantity)
         with financial_context():
@@ -33,8 +36,10 @@ def next_average(
 
 
 def closing_average_pu(average: Decimal | None) -> Decimal | None:
+    """The average PU as stored at the day's close: 10 places, half-up (OQ-3)."""
     return None if average is None else quantize_pu(average)
 
 
 def closing_average_rate(average: Decimal | None) -> Decimal | None:
+    """The average rate as stored at the day's close: 12 places, half-up (OQ-3)."""
     return None if average is None else quantize_rate(average)

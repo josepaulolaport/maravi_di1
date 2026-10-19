@@ -48,6 +48,7 @@ def day_trades(trades: Iterable[Trade], on: date) -> list[Trade]:
 
 
 def trades_by_date(trades: Sequence[Trade]) -> dict[date, list[Trade]]:
+    """Trades grouped by their trade date, each group in input order."""
     grouped: dict[date, list[Trade]] = {}
     for t in trades:
         grouped.setdefault(t.trade_date, []).append(t)
