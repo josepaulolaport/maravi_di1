@@ -36,7 +36,7 @@ lint-backend:
 	cd backend && uv lock --check
 	cd backend && uv run --frozen ruff check . ../scripts
 	cd backend && uv run --frozen ruff format --check . ../scripts
-	cd backend && uv run --frozen mypy src tests migrations ../scripts/scratch_database.py ../scripts/ai_review.py
+	cd backend && uv run --frozen mypy src tests migrations ../scripts/scratch_database.py
 
 lint-frontend:
 	@if [[ -f frontend/package.json ]]; then cd frontend && npm run lint && npm run typecheck && npm run format:check; else $(FRONTEND_MISSING); fi

@@ -29,12 +29,8 @@ messages of `origin/main..HEAD`.
 Backend and frontend jobs run only when their files change; `ci-ok` aggregates them and is the
 check to require on `main`.
 
-The AI review job (`scripts/ai_review.py`) runs after `ci-ok` passes. It sends the PR diff to
-Google's Gemini API (`gemini-3.8-flash`) in one request, or a few for a large diff, and posts one
-review with an inline comment per finding. The reviewer's instructions are in
-`.github/ai-review/prompt.md`; the answer, also kept as `review.json` in the run's `ai-review`
-artifact, must match `.github/ai-review/review.schema.json`. It needs one repository secret,
-`GEMINI_API_KEY`, holding a Google AI Studio API key; until it is set the job fails without
-blocking the merge. On the free tier Google may use the prompts to improve its products, and
-fork PRs get no review (secrets are unavailable to them). PRs that change only documentation
-(`docs/**` or Markdown files) skip it; Markdown is also left out of a mixed PR's review.
+AI review is [CodeRabbit](https://www.coderabbit.ai), a GitHub App installed on the repository
+(free for public repositories), configured in `.coderabbit.yaml`. It is not a CI job and never
+blocks a merge: it only comments, and documentation (`docs/**`, Markdown) is excluded. With fewer
+than 10 repository stars CodeRabbit does not review automatically; comment
+`@coderabbitai review` on the PR to start one.

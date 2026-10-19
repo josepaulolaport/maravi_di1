@@ -15,6 +15,12 @@ const ControlCenterPage = lazy(() =>
 const AssetsPage = lazy(() =>
   import('@/features/assets/AssetsPage').then((m) => ({ default: m.AssetsPage })),
 );
+const ProductPage = lazy(() =>
+  import('@/features/assets/ProductPage').then((m) => ({ default: m.ProductPage })),
+);
+const ContractPage = lazy(() =>
+  import('@/features/assets/ContractPage').then((m) => ({ default: m.ContractPage })),
+);
 const PortfolioPage = lazy(() =>
   import('@/features/portfolio/PortfolioPage').then((m) => ({ default: m.PortfolioPage })),
 );
@@ -35,6 +41,8 @@ export const routes: RouteObject[] = [
           { index: true, element: <Navigate to={paths.controlCenter} replace /> },
           { path: paths.controlCenter, element: <ControlCenterPage /> },
           { path: paths.assets, element: <AssetsPage /> },
+          { path: paths.assetProduct, element: <ProductPage /> },
+          { path: paths.assetContract, element: <ContractPage /> },
           { path: paths.portfolio, element: <PortfolioPage /> },
           { path: paths.ledger, element: <LedgerPage /> },
           { path: '*', element: <NotFoundPage /> },
