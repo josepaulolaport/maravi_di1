@@ -42,7 +42,8 @@ export function resetDb(): void {
 /** Deterministic ids for records created during a session. */
 export function newId(): string {
   const n = db.nextId++;
-  return `9a000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  // The counter is in the first block too: the history shows a job by its first 8 characters.
+  return `9a${String(n).padStart(6, '0')}-0000-4000-8000-${String(n).padStart(12, '0')}`;
 }
 
 /** Marks accounting (ledger change) or valuation (price change) dirty from `date` (§10.4). */

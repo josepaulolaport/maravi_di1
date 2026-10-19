@@ -23,7 +23,7 @@ const issue = (changes: Partial<Issue>): Issue => ({
   asset_code: 'DI1F29',
   affected_date: '2026-10-16',
   required_price_date: '2026-10-16',
-  request_id: '7f000000-0000-4000-8000-000000000002',
+  request_id: '5b7d2f41-0000-4000-8000-000000000002',
   ...changes,
 });
 

@@ -36,8 +36,6 @@ export function PeriodPicker({ start, end, maxDate, onChange }: PeriodPickerProp
         if (from && to) onChange({ start: from, end: to });
       }}
       maxDate={maxDate}
-      // Keep the calendar open while picking even if the field scrolls out of view.
-      popoverProps={{ hideDetached: false }}
       valueFormat="DD/MM/YYYY"
       leftSection={<IconCalendar size={16} stroke={1.5} />}
       miw={260}

@@ -1,4 +1,4 @@
-import type { Decimal, IsoDate, IsoDateTime, ReferencePriceDay } from '@/api/contract';
+import type { Decimal, IsoDate, ReferencePriceDay } from '@/api/contract';
 import { addDays, formatDate, isIsoDate } from '@/shared/format';
 
 /** Calendar days shown on the contract page, ending on min(today, maturity) (§11.2). */
@@ -94,22 +94,4 @@ export function toPriceChart(
     });
   }
   return points;
-}
-
-const dateTimeParts = new Intl.DateTimeFormat('pt-BR', {
-  timeZone: 'America/Sao_Paulo',
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-});
-
-/** An instant shown in São Paulo time: 2026-10-17T10:00:00-03:00 → 17/10/2026 10:00. */
-export function formatDateTime(value: IsoDateTime): string {
-  const parts = Object.fromEntries(
-    dateTimeParts.formatToParts(new Date(value)).map((part) => [part.type, part.value]),
-  );
-  return `${parts.day ?? ''}/${parts.month ?? ''}/${parts.year ?? ''} ${parts.hour ?? ''}:${parts.minute ?? ''}`;
 }
