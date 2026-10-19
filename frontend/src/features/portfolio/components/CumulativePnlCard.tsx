@@ -8,13 +8,16 @@ import { addDays, formatDate, formatSignedMoney } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
 
-import { useChartStart, useCumulativePnl } from '../hooks/usePortfolio';
+import { useCumulativePnl } from '../hooks/usePortfolio';
 import { type ChartPoint, hasHistory, toChartData } from './chartData';
 
 interface CumulativePnlCardProps {
   date: IsoDate;
   /** The cumulative P&L of the selected date, from the same publication as the KPIs. */
   cumulative: Decimal | null;
+  /** The chart's first day, before `date` (`useChartStart`). */
+  start: IsoDate;
+  onStartChange: (start: IsoDate) => void;
 }
 
 interface TooltipContentProps {
@@ -41,8 +44,12 @@ function ChartTooltip({ active, payload }: TooltipContentProps) {
  * The user picks where the chart starts; it always ends on the selected date, so the line
  * ends at the headline figure of the same publication.
  */
-export function CumulativePnlCard({ date, cumulative }: CumulativePnlCardProps) {
-  const [start, setStart] = useChartStart(date);
+export function CumulativePnlCard({
+  date,
+  cumulative,
+  start,
+  onStartChange,
+}: CumulativePnlCardProps) {
   const series = useCumulativePnl(start, date);
   const points = series.data ? toChartData(series.data.items, start, date) : [];
 
@@ -61,7 +68,7 @@ export function CumulativePnlCard({ date, cumulative }: CumulativePnlCardProps) 
             size="xs"
             value={start}
             onChange={(value) => {
-              if (value) setStart(value);
+              if (value) onStartChange(value);
             }}
             maxDate={addDays(date, -1)}
             valueFormat="DD/MM/YYYY"

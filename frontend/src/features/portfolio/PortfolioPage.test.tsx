@@ -249,6 +249,9 @@ describe('Carteira (§11.4)', () => {
       expect(ranges.at(-1)).toEqual(['2026-10-10', '2026-10-16']);
     });
 
+    const card = within(await screen.findByRole('region', { name: 'P&L acumulado' }));
+    const headline = card.getByText('P&L acumulado').nextElementSibling?.textContent;
+
     await user.click(await screen.findByRole('button', { name: /Início do gráfico/ }));
     await user.click(await screen.findByRole('button', { name: '14 outubro 2026' }));
 
@@ -257,7 +260,8 @@ describe('Carteira (§11.4)', () => {
       expect(ranges.at(-1)).toEqual(['2026-10-14', '2026-10-16']);
     });
     // The headline stays the date's own published figure.
-    const card = within(screen.getByRole('region', { name: 'P&L acumulado' }));
+    expect(headline).toBeTruthy();
+    expect(card.getByText('P&L acumulado').nextElementSibling).toHaveTextContent(headline ?? '');
     expect(card.getByText('Até 16/10/2026')).toBeInTheDocument();
   });
 
@@ -271,12 +275,46 @@ describe('Carteira (§11.4)', () => {
     expect(screen.getByLabelText('16 outubro 2026')).toBeDisabled();
   });
 
-  it('§11.4 OQ-16 ignores a linked chart start on or after the date', async () => {
-    const ranges = recordPnlRanges();
-    renderApp('/carteira?date=2026-10-16&pnl_start=2026-10-16');
+  it.each(['2026-10-16', '2026-10-20', '2026-13-01', 'abc'])(
+    '§11.4 OQ-16 ignores the linked chart start %s, and drops it from the URL',
+    async (linked) => {
+      const ranges = recordPnlRanges();
+      const { router } = renderApp(`/carteira?date=2026-10-16&pnl_start=${linked}`);
 
+      await waitFor(() => {
+        expect(ranges.at(-1)).toEqual(['2026-09-17', '2026-10-16']);
+      });
+      await waitFor(() => {
+        expect(router.state.location.search).toBe('?date=2026-10-16');
+      });
+    },
+  );
+
+  it('§11.4 OQ-16 drops a chart start the date has passed, so it never comes back', async () => {
+    const ranges = recordPnlRanges();
+    const { user, router } = renderApp('/carteira?date=2026-10-16&pnl_start=2026-10-14');
     await waitFor(() => {
-      expect(ranges.at(-1)).toEqual(['2026-09-17', '2026-10-16']);
+      expect(ranges.at(-1)).toEqual(['2026-10-14', '2026-10-16']);
+    });
+
+    // A Carteira date before the start drops the start.
+    await user.click(await screen.findByRole('button', { name: /Data de avaliação/ }));
+    await user.click(await screen.findByRole('button', { name: '10 outubro 2026' }));
+    // 10/10 is not processed, so no chart is shown, but the start is still dropped.
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?date=2026-10-10');
+    });
+
+    // Moving forward again keeps the default, not the old start.
+    // The first calendar must have finished closing, or this click would only close it.
+    await waitFor(() => {
+      expect(document.querySelector('[aria-label="10 outubro 2026"]')).toBeNull();
+    });
+    await user.click(screen.getByRole('button', { name: /Data de avaliação/ }));
+    // jsdom has no layout, so Mantine may hide this calendar as "detached"; find it by label.
+    await user.click(await screen.findByLabelText('15 outubro 2026'));
+    await waitFor(() => {
+      expect(ranges.at(-1)).toEqual(['2026-09-16', '2026-10-15']);
     });
   });
 

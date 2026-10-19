@@ -42,13 +42,26 @@ export function useCumulativePnl(start: IsoDate, date: IsoDate) {
 /**
  * The cumulative P&L chart's first day, in the URL (`?pnl_start=YYYY-MM-DD`). It must be
  * before the selected date; otherwise (or when absent) the chart shows the CHART_DAYS days
- * ending on the date.
+ * ending on the date, and the invalid start is removed from the URL.
  */
 export function useChartStart(date: IsoDate): [IsoDate, (start: IsoDate) => void] {
   const [params, setParams] = useSearchParams();
   const requested = params.get('pnl_start');
-  const start =
-    isIsoDate(requested) && requested < date ? requested : addDays(date, -(CHART_DAYS - 1));
+  const valid = isIsoDate(requested) && requested < date;
+  const start = valid ? requested : addDays(date, -(CHART_DAYS - 1));
+  // A start that no longer applies (the date moved before it, or a bad link) is dropped from
+  // the URL, so links match the view and it never comes back when the date moves again.
+  useEffect(() => {
+    if (requested !== null && !valid) {
+      setParams(
+        (current) => {
+          current.delete('pnl_start');
+          return current;
+        },
+        { replace: true },
+      );
+    }
+  }, [requested, valid, setParams]);
   const setStart = (next: IsoDate) => {
     setParams(
       (current) => {
