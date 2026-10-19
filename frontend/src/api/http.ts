@@ -9,8 +9,9 @@ export class ApiError extends Error {
   readonly status: number;
   readonly problem: Problem;
 
-  constructor(problem: Problem) {
-    super(problem.detail ?? problem.title);
+  /** `options.cause`: the original error, e.g. the fetch rejection behind a network failure. */
+  constructor(problem: Problem, options?: ErrorOptions) {
+    super(problem.detail ?? problem.title, options);
     this.name = 'ApiError';
     this.status = problem.status;
     this.problem = problem;
@@ -104,7 +105,7 @@ async function request<T>(method: string, path: string, options: RequestOptions 
     response = await fetch(buildUrl(path, options.query), init);
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    throw new ApiError(NETWORK_PROBLEM);
+    throw new ApiError(NETWORK_PROBLEM, { cause: error });
   }
 
   if (!response.ok) throw await toApiError(response);
