@@ -9,7 +9,6 @@ after a crash comes from the lease and the dispatcher's re-dispatch, not from re
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import Protocol
 from uuid import UUID
 
@@ -18,11 +17,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from di1.modules.processing.application.services.dispatcher import RUN_REQUEST_MESSAGE_TYPE
 from di1.modules.processing.application.services.run_processor import Claim
 from di1.platform.database.unit_of_work import UnitOfWork
-from di1.platform.messaging.consumer import PermanentMessageError
+from di1.platform.messaging.consumer import AfterAck, PermanentMessageError
 from di1.platform.messaging.envelope import Envelope
-
-AfterAck = Callable[[], Awaitable[None]]
-"""Work the consumer awaits after it acknowledged the delivery."""
 
 CONSUMER_NAME = "processing.run_request"
 SCHEMA_VERSION = 1
