@@ -55,7 +55,12 @@ export function CashMovementForm({
       time: (value) => (/^\d{2}:\d{2}(:\d{2})?$/.test(value) ? null : 'Informe a hora.'),
       amount: (value) => {
         if (!value.trim()) return 'Informe o valor.';
-        return parsePtBrDecimal(value) === null ? 'Informe um valor válido, como 1.234,56.' : null;
+        const amount = parsePtBrDecimal(value);
+        if (amount === null) return 'Informe um valor válido, como 1.234,56.';
+        // The side gives the sign: a typed sign or a zero would turn an aporte into a retirada.
+        return amount.startsWith('-') || /^0+(\.0+)?$/.test(amount)
+          ? 'Informe um valor maior que zero.'
+          : null;
       },
     },
   });

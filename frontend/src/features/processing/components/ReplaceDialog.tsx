@@ -104,7 +104,12 @@ function ReplaceForm({ job, replace, onClose, today }: ReplaceFormProps) {
         startError={fieldErrors.start_date}
         endError={fieldErrors.end_date}
       />
-      <ScopeField value={scope} onChange={setScope} disabled={replace.isPending} />
+      <ScopeField
+        value={scope}
+        onChange={setScope}
+        disabled={replace.isPending}
+        error={fieldErrors.scope}
+      />
       <ActionError error={replace.error} shownOnFields={RANGE_FIELDS} />
       <Group justify="flex-end" gap="sm">
         <Button variant="default" onClick={onClose} disabled={replace.isPending}>

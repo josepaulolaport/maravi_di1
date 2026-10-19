@@ -10,6 +10,7 @@ import {
   type ProcessingDraft,
   ProcessingRequestModal,
 } from '@/shared/processing/ProcessingRequestModal';
+import { formatQuantity } from '@/shared/format';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { LoadMore } from '@/shared/ui/LoadMore';
@@ -35,8 +36,8 @@ const NO_SELECTION: ReadonlySet<string> = new Set();
 
 /** "encontrados" once every page is read; "exibidos" while the backend has more (P21). */
 const countLabel = (n: number, more: boolean) => {
-  if (more) return `${String(n)} lançamentos exibidos`;
-  return n === 1 ? '1 lançamento encontrado' : `${String(n)} lançamentos encontrados`;
+  if (more) return `${formatQuantity(n)} lançamentos exibidos`;
+  return n === 1 ? '1 lançamento encontrado' : `${formatQuantity(n)} lançamentos encontrados`;
 };
 
 /**

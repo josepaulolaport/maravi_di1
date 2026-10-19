@@ -14,6 +14,8 @@ import { url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { renderApp } from '@/test/render';
 
+import { isFinal } from './jobStatus';
+
 // Expected values come from the fixture scenario (src/api/mocks/fixtures.ts): five finished
 // jobs (FAILED 01–05/10, CANCELLED 10–12/10, COMPLETED 14–15/10, SUPERSEDED and
 // COMPLETED_WITH_ISSUES 14–16/10); entries start on 14/10; 14/10 and 15/10 are published and
@@ -506,7 +508,10 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
       http.get(url('/processing/requests'), ({ request }) => {
         const params = new URL(request.url).searchParams;
         seen.push(params.toString());
-        const jobs = [...db.requests].sort((a, b) => b.created_at.localeCompare(a.created_at));
+        // Final jobs only, so nothing is polled: every request below is one the test caused.
+        const jobs = [...db.requests]
+          .filter((job) => isFinal(job.status))
+          .sort((a, b) => b.created_at.localeCompare(a.created_at));
         return params.get('cursor') === 'page-2'
           ? HttpResponse.json({ items: jobs.slice(2), next_cursor: null })
           : HttpResponse.json({ items: jobs.slice(0, 2), next_cursor: 'page-2' });
@@ -517,9 +522,13 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
     expect(await screen.findByText('2 processamentos exibidos')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Carregar mais' }));
 
-    expect(await screen.findByText('5 processamentos encontrados')).toBeInTheDocument();
+    const total = db.requests.filter((job) => isFinal(job.status)).length;
+    expect(await screen.findByText(`${total} processamentos encontrados`)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Carregar mais' })).not.toBeInTheDocument();
-    expect(seen.slice(0, 2)).toEqual(['limit=20', 'limit=20&cursor=page-2']);
+    // Older finished jobs from page 2 are history, not news: no "job finished" refresh rereads
+    // the pages (review finding, PR for frontend/contract-review).
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(seen).toEqual(['limit=20', 'limit=20&cursor=page-2']);
   });
 
   it('OQ-20 offers only the actions each status allows', async () => {

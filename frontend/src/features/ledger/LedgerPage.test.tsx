@@ -700,6 +700,22 @@ describe('Lançamentos (§11.3)', () => {
       expect(await screen.findByText('-R$ 1.000,00')).toBeInTheDocument();
     });
 
+    it('§6.2 never sends a negative or zero amount: the side gives the sign', async () => {
+      const bodies = captureBodies('post', '/ledger/entries');
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Aporte');
+
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '-1.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
+      expect(modal.getByText('Informe um valor maior que zero.')).toBeInTheDocument();
+
+      await user.clear(modal.getByRole('textbox', { name: 'Valor (R$)' }));
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '0,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
+      expect(modal.getByText('Informe um valor maior que zero.')).toBeInTheDocument();
+      expect(bodies).toEqual([]);
+    });
+
     it('OQ-3 shows the decimal-place error of an amount on its field', async () => {
       const { user } = await openLedger();
       const modal = await openNew(user, 'Aporte');
@@ -921,6 +937,27 @@ describe('Lançamentos (§11.3)', () => {
       ).toBeInTheDocument();
       expect(bodies).toEqual([{ start_date: '2026-10-14', end_date: '2026-10-15', scope: 'CASH' }]);
       expect(router.state.location.pathname).toBe('/lancamentos');
+    });
+  });
+
+  describe('Processar: API errors (OQ-15)', () => {
+    it('OQ-15 shows an error on scope under the Escopo group', async () => {
+      server.use(
+        http.post(url('/processing/requests'), () =>
+          problem(422, [fieldError('VALIDATION_ERROR', 'Escopo não aceito.', 'scope')]),
+        ),
+      );
+      const { user } = await openLedger();
+      await user.click(screen.getByRole('button', { name: 'Processar' }));
+      const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
+      await modal.findByRole('group', { name: 'Estado anterior do caixa' });
+
+      await user.click(modal.getByRole('button', { name: 'Confirmar processamento' }));
+
+      const scope = await modal.findByRole('radiogroup', { name: 'Escopo' });
+      await waitFor(() => {
+        expect(scope).toHaveAccessibleDescription('Escopo não aceito.');
+      });
     });
   });
 

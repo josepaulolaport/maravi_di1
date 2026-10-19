@@ -48,20 +48,26 @@ export function useProcessingRequests() {
   });
 
   // `null` until the first load: the jobs already finished then are not news.
-  const lastSeen = useRef<Map<string, JobStatus> | null>(null);
+  const lastSeen = useRef<{ statuses: Map<string, JobStatus>; newest: string } | null>(null);
   useEffect(() => {
     const items = query.data?.items;
     if (!items) return;
     const seen = lastSeen.current;
-    // A job seen active that is now final, or a new job that finished between two reads
-    // (queued elsewhere, or too short to be seen running).
+    // A job seen active that is now final, or a job newer than any seen before that is
+    // already final (queued elsewhere, or too short to be seen running). An older job that
+    // "Carregar mais" brings in is history, not news (P21).
     const finished =
       seen !== null &&
       items.some((job) => {
-        const before = seen.get(job.id);
-        return isFinal(job.status) && (before === undefined || isActive(before));
+        const before = seen.statuses.get(job.id);
+        if (!isFinal(job.status)) return false;
+        return before === undefined ? job.created_at > seen.newest : isActive(before);
       });
-    lastSeen.current = new Map(items.map((job) => [job.id, job.status]));
+    const newest = items.reduce(
+      (latest, job) => (job.created_at > latest ? job.created_at : latest),
+      seen?.newest ?? '',
+    );
+    lastSeen.current = { statuses: new Map(items.map((job) => [job.id, job.status])), newest };
     if (finished) void invalidateAfterJobFinished(queryClient);
   }, [query.data, queryClient]);
 

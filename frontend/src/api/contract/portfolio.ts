@@ -26,7 +26,9 @@ export interface CashSummary {
    * not processed.
    */
   trades_cash_flow: Decimal | null;
+  /** Sum of the day's aportes, always ≥ 0. */
   deposits: Decimal | null;
+  /** Sum of the day's retiradas, always ≥ 0 and subtracted: balance = previous + trades_cash_flow + deposits − withdrawals. */
   withdrawals: Decimal | null;
   published_at: IsoDateTime | null;
 }

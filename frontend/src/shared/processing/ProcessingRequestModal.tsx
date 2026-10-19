@@ -118,7 +118,12 @@ function RequestForm({ draft, enqueue, onClose, today }: RequestFormProps) {
         startError={fieldErrors.start_date}
         endError={fieldErrors.end_date}
       />
-      <ScopeField value={scope} onChange={setScope} disabled={enqueue.isPending} />
+      <ScopeField
+        value={scope}
+        onChange={setScope}
+        disabled={enqueue.isPending}
+        error={fieldErrors.scope}
+      />
       {!valid ? (
         <Text size="sm" c="dimmed">
           Informe um intervalo válido para ver o que será processado.
