@@ -19,7 +19,7 @@ git diff --name-only origin/main...HEAD
   - `migrations/`;
   - `pyproject.toml`, `uv.lock`;
   - `compose.yaml`, CI.
-- **No commit is pending the user's approval.** Every commit on the branch was approved.
+- **Every commit on the branch is green** and one logical change; review happens on this PR (CLAUDE.md §4).
 
 ## 2. Checks for the touched areas
 

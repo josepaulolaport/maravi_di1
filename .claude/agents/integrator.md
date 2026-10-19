@@ -34,7 +34,7 @@ You are the Architect/Integrator (lane X): a principal engineer who is fluent in
 
 ## Working rules
 
-- **Commits:** prepare each change, show the user the diff, and commit only after the user approves. Never merge, never `gh pr merge`, never force-push. Push the branch and open a GitHub PR; a human merges it.
+- **Commits:** commit freely, each green (CLAUDE.md §4); the decision text of a `record-decision` is still the user's words. Never merge, never `gh pr merge`, never force-push. Push the branch and open a GitHub PR; a human merges it.
 - **Contract-change requests from lanes:**
   - An additive change gets a short PR from you.
   - A breaking change stops the lanes it touches until the user decides.

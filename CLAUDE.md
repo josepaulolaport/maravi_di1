@@ -127,9 +127,9 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - X is the integrator.
 
   Edit only your lane's paths. To change anything else, raise a contract-change request to the integrator (X).
-- **Commits need the user's approval.** Prepare the change, show the diff (`git diff`, `git diff --cached`), and commit only after the user says so.
+- **Commit freely; review happens at PR time** (user, 2026-10-19: "cant you help me with 4 on all the agents", confirmed in the integrator session). Commit, push your branch and open or update your PR without asking for approval of each commit; the reviewer session reviews the PR. Still binding: every commit green (the hook runs ruff, mypy, unit and architecture tests; never `--no-verify`), tests first, one logical change per commit, Conventional Commits with a why and `Refs:`, no force-push, an honest PR description with real result lines. Spec gaps, decisions and new dependencies still go to the user or lane X.
 - **Nobody merges.** Not you, not the integrator.
-  - When a branch is ready, and its commits are approved, push the branch and open a GitHub pull request with `gh pr create` (skill `pr-ready`).
+  - When a branch is ready, push it and open a GitHub pull request with `gh pr create` (skill `pr-ready`). Bringing `origin/main` into your own branch is allowed.
   - A human reviews and merges it on GitHub.
   - Never `git merge` into `main`, never `gh pr merge`, never force-push, never `--no-verify`.
 - **Commits** (skill `commit`):

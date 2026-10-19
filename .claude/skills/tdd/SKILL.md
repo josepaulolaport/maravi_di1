@@ -51,4 +51,4 @@ Run them, and **see them fail for the right reason**.
 
 ## 4. Verify and commit
 
-Run the module's whole unit suite, plus lint and type checks. Commit the test and the code together, after the user approves (skill `commit`). **Never change an expected value to make a test pass**: a mismatch is a bug, or a `spec-gap`.
+Run the module's whole unit suite, plus lint and type checks. Commit the test and the code together (skill `commit`). **Never change an expected value to make a test pass**: a mismatch is a bug, or a `spec-gap`.

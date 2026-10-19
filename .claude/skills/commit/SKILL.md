@@ -1,11 +1,11 @@
 ---
 name: commit
-description: Make a Maravi DI1 commit the way the project requires — the user approves the diff first, one logical change, green, test and code together, Conventional Commits message with why and Refs, generated files separate, fixups squashed before the PR. Use every time you commit.
+description: Make a Maravi DI1 commit the way the project requires — no per-commit approval (review at PR time), one logical change, green, test and code together, Conventional Commits message with why and Refs, generated files separate, fixups squashed before the PR. Use every time you commit.
 ---
 
 # Commit
 
-**Nothing is committed without the user's approval.** Prepare the change, show it, and wait.
+**Commit freely; review happens at PR time** (CLAUDE.md §4). Every commit is still green, one logical change, tests first.
 
 ## 1. Prepare
 
@@ -21,7 +21,7 @@ git diff --cached --stat         # about 300 changed lines at most, lock and gen
 git diff --cached
 ```
 
-Show the user the staged diff and the proposed message. **Commit only after the user says yes.**
+Check the staged diff yourself, then commit. After a commit, check that it landed (`git log -1`): if the hook failed, unstage before the next commit so nothing spills into it.
 
 Generated files and lock files go in their own `chore` commit.
 
@@ -50,7 +50,7 @@ Use `git commit -F <file>` or a heredoc. **Never use `--no-verify`.**
 ## 4. Fixing an earlier commit of your own branch (before its PR)
 
 ```bash
-git commit --fixup <sha>                                  # also after the user's approval
+git commit --fixup <sha>                                  # no per-commit approval
 GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash main     # before opening the PR
 git rebase main --exec "<the area's fast test command>"   # every commit still green
 ```
