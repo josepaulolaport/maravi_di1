@@ -95,7 +95,7 @@ GOLDEN_ROW_OCT_14 = {
 }
 
 
-async def _publish_fixture_days(settings: Settings, di1f28: UUID) -> None:
+async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) -> None:
     """Writes 14/10 (both chains) and 15/10 (positions totals) as Processing would."""
     engine = create_engine(settings)
     try:
@@ -163,13 +163,63 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID) -> None:
             )
             await uow.commit()
         async with SqlAlchemyUnitOfWork(factory) as uow:
-            # 15/10's totals only; its rows are not needed by the P&L series.
+            # fixtures.ts positions[1]: DI1F28 held, DI1F29 bought 5 on 15/10.
+            buy_f29 = Trade(di1f29, OCT_15, time(11), 2, 5, Decimal("82057.00"), Decimal("0.0932"))
             await writer.write_positions_day(
-                PositionsDay(OCT_15, ()),
-                PortfolioValuation(
-                    OCT_15, (), Decimal("1292315.4909390840"), None, ValuationStatus.COMPLETE
+                PositionsDay(
+                    OCT_15,
+                    (
+                        PositionDay(
+                            di1f28, 10, 10, Decimal("89006.4625467350"), Decimal("0.10"), ()
+                        ),
+                        PositionDay(
+                            di1f29,
+                            0,
+                            5,
+                            Decimal("82057.00"),
+                            Decimal("0.093203413834"),
+                            (buy_f29,),
+                        ),
+                    ),
                 ),
-                {},
+                PortfolioValuation(
+                    OCT_15,
+                    (
+                        AssetValuation(
+                            di1f28,
+                            Decimal("89128.4824345118"),
+                            ReferenceSource.B3,
+                            Decimal("891284.8243451180"),
+                            ValuationStatus.COMPLETE,
+                        ),
+                        AssetValuation(
+                            di1f29,
+                            Decimal("80206.1333187932"),
+                            ReferenceSource.MANUAL,
+                            Decimal("401030.6665939660"),
+                            ValuationStatus.COMPLETE,
+                        ),
+                    ),
+                    Decimal("1292315.4909390840"),
+                    None,
+                    ValuationStatus.COMPLETE,
+                ),
+                {
+                    di1f28: AssetPnLResult(
+                        Decimal("1220.1988777680"),
+                        Decimal("0"),
+                        Decimal("1220.1988777680"),
+                        COMPLETE,
+                        frozenset(),
+                    ),
+                    di1f29: AssetPnLResult(
+                        Decimal("0"),
+                        Decimal("-9254.3334060340"),
+                        Decimal("-9254.3334060340"),
+                        COMPLETE,
+                        frozenset(),
+                    ),
+                },
                 PortfolioPnLResult(
                     Decimal("1220.1988777680"),
                     Decimal("-9254.3334060340"),
@@ -195,7 +245,9 @@ def seeded(settings: Settings) -> Di1Catalogue:
             catalogue = await seed_di1(create_session_factory(engine))
         finally:
             await engine.dispose()
-        await _publish_fixture_days(settings, catalogue.instrument_ids["DI1F28"])
+        await _publish_fixture_days(
+            settings, catalogue.instrument_ids["DI1F28"], catalogue.instrument_ids["DI1F29"]
+        )
         return catalogue
 
     return asyncio.run(seed())
@@ -219,6 +271,12 @@ def client(
     prices = FakePriceReader()
     prices.add(
         seeded.instrument_ids["DI1F28"], OCT_14, PriceSource.MANUAL, "89006.4625467350", "0.10"
+    )
+    prices.add(
+        seeded.instrument_ids["DI1F28"], OCT_15, PriceSource.B3, "89128.4824345118", "0.0990"
+    )
+    prices.add(
+        seeded.instrument_ids["DI1F29"], OCT_15, PriceSource.MANUAL, "80206.1333187932", "0.1045"
     )
 
     async def provide(request: Request) -> AsyncIterator[PortfolioQueryService]:
@@ -281,6 +339,47 @@ def test_the_positions_table_matches_the_fixture(client: TestClient, seeded: Di1
     (row,) = body["items"]
     assert UUID(row.pop("asset_id")) == seeded.instrument_ids["DI1F28"]
     assert row == GOLDEN_ROW_OCT_14
+
+
+def test_the_15_10_table_matches_the_fixture(client: TestClient) -> None:
+    # fixtures.ts positions[1].items, the asset ids aside.
+    body = _get(client, "/portfolio/positions?date=2026-10-15")
+
+    rows = [{k: v for k, v in row.items() if k != "asset_id"} for row in body["items"]]
+    assert rows == [
+        {
+            "asset_code": "DI1F28",
+            "maturity_date": "2028-01-03",
+            "quantity": 10,
+            "average_entry_pu": "89006.4625467350",
+            "average_entry_rate": "0.10",
+            "reference_source": "B3",
+            "reference_pu": "89128.4824345118",
+            "reference_rate": "0.0990",
+            "financial_total": "891284.8243451180",
+            "position_pnl": "1220.1988777680",
+            "trades_pnl": "0",
+            "daily_pnl": "1220.1988777680",
+            "valuation_status": "COMPLETE",
+            "pnl_status": "COMPLETE",
+        },
+        {
+            "asset_code": "DI1F29",
+            "maturity_date": "2029-01-02",
+            "quantity": 5,
+            "average_entry_pu": "82057.00",
+            "average_entry_rate": "0.093203413834",
+            "reference_source": "MANUAL",
+            "reference_pu": "80206.1333187932",
+            "reference_rate": "0.1045",
+            "financial_total": "401030.6665939660",
+            "position_pnl": "0",
+            "trades_pnl": "-9254.3334060340",
+            "daily_pnl": "-9254.3334060340",
+            "valuation_status": "COMPLETE",
+            "pnl_status": "COMPLETE",
+        },
+    ]
 
 
 def test_a_date_never_processed_has_an_empty_table(client: TestClient) -> None:

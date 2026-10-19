@@ -3,6 +3,7 @@ OQ-23, OQ-28, OQ-30)."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import time
 from decimal import Decimal
 from uuid import UUID
@@ -236,14 +237,12 @@ async def test_the_three_inputs_must_cover_the_same_assets(
 
 
 async def test_the_valuation_must_be_of_the_same_date(writer: ResultsWriter) -> None:
-    other_day = PortfolioValuation(
-        DAY.replace(day=5), (), Decimal("0"), None, ValuationStatus.COMPLETE
-    )
+    other_day = replace(_valuation(DI1F27), date=DAY.replace(day=5))
     with pytest.raises(ValueError):
         await writer.write_positions_day(
-            PositionsDay(DAY, ()),
+            _positions(DI1F27),
             other_day,
-            {},
+            _asset_pnl(DI1F27),
             PNL,
             uow=FakeUnitOfWork(),
             other_chain_processed=True,
@@ -258,14 +257,16 @@ async def test_a_market_value_must_match_its_status(
     writer: ResultsWriter, market_value: str | None, status: ValuationStatus
 ) -> None:
     # Unavailable data is never stored as complete, nor a figure as missing (spec §8.3).
-    inconsistent = PortfolioValuation(
-        DAY, (), None if market_value is None else Decimal(market_value), None, status
+    inconsistent = replace(
+        _valuation(DI1F27),
+        positions_market_value=None if market_value is None else Decimal(market_value),
+        status=status,
     )
     with pytest.raises(ValueError):
         await writer.write_positions_day(
-            PositionsDay(DAY, ()),
+            _positions(DI1F27),
             inconsistent,
-            {},
+            _asset_pnl(DI1F27),
             PNL,
             uow=FakeUnitOfWork(),
             other_chain_processed=True,
@@ -333,3 +334,41 @@ class TestOtherChainProcessed:
         await writer.write_cash_day(self.CASH, uow=FakeUnitOfWork(), other_chain_processed=True)
 
         assert repository.days[DAY].aum == Decimal("1000000")
+
+
+ZERO_PNL = PortfolioPnLResult(
+    Decimal("0"), Decimal("0"), Decimal("0"), Decimal("7"), COMPLETE, COMPLETE, frozenset()
+)
+
+
+@pytest.mark.parametrize(
+    ("market_value", "pnl"),
+    [
+        ("1", ZERO_PNL),
+        (None, ZERO_PNL),
+        ("0", replace(ZERO_PNL, position_pnl=Decimal("1"), daily_pnl=Decimal("1"))),
+        ("0", replace(ZERO_PNL, trades_pnl=Decimal("-1"), daily_pnl=Decimal("-1"))),
+        ("0", replace(ZERO_PNL, position_pnl=None, daily_pnl=None, status=MISSING)),
+    ],
+)
+async def test_a_day_with_no_expected_asset_has_zero_value_and_zero_pnl(
+    writer: ResultsWriter, market_value: str | None, pnl: PortfolioPnLResult
+) -> None:
+    # OQ-22 item 5: with no expected asset the market value is 0 and position, trades and daily
+    # P&L are exactly 0 (reviewer m4); anything else cannot come from an empty day.
+    valuation = PortfolioValuation(
+        DAY,
+        (),
+        None if market_value is None else Decimal(market_value),
+        None,
+        ValuationStatus.MISSING if market_value is None else ValuationStatus.COMPLETE,
+    )
+    with pytest.raises(ValueError):
+        await writer.write_positions_day(
+            PositionsDay(DAY, ()),
+            valuation,
+            {},
+            pnl,
+            uow=FakeUnitOfWork(),
+            other_chain_processed=True,
+        )

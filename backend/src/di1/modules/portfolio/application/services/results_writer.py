@@ -47,6 +47,12 @@ class ResultsWriter:
             valuation.positions_market_value is None
         ):
             raise ValueError("a market value is missing exactly when its valuation is MISSING")
+        if not day.positions and (
+            valuation.positions_market_value != 0
+            or any(v != 0 for v in (pnl.position_pnl, pnl.trades_pnl, pnl.daily_pnl))
+        ):
+            # OQ-22 item 5: a day with no expected asset is worth 0 and its P&L is exactly 0.
+            raise ValueError(f"{day.date} has no expected asset but a market value or P&L")
         held = {p.asset_id for p in day.positions}
         valued = {v.asset_id: v for v in valuation.assets}
         if held != set(valued) or held != set(asset_pnl):
