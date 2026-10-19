@@ -2,7 +2,11 @@
 # outbox relay. `docker compose up --build`; the API answers on http://127.0.0.1:8000 (/health,
 # /api/...), the RabbitMQ management UI on http://127.0.0.1:15672.
 #
-# The credentials are local development defaults; override them with the DI1_* variables.
+# The credentials are local development defaults; override them with the DI1_* variables. Each
+# user and password sets the server's account and is also copied, as is, into DATABASE_URL or
+# RABBITMQ_URL, so use only URL-safe characters in them (letters, digits, - . _ ~): an @ : / % or
+# # would break the URL, and percent-encoding it would set the server's password to the encoded
+# text. Image tags name a version, not a digest (local stack; CI uses the same tags).
 # Settings come from di1.platform.config: DATABASE_URL (postgresql+psycopg://) for every backend
 # process, RABBITMQ_URL only for the processes that use the broker (the API never publishes).
 # The RABBITMQ_* tuning values must be the same in every broker process: a queue re-declared with
