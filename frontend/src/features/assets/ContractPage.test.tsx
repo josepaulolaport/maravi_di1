@@ -301,6 +301,23 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
     expect(router.state.location.search).not.toContain('registrar');
   });
 
+  it('§11.1 after "Definir preço" the period still shows the days after the date (the next pendência)', async () => {
+    const { user, router } = await openContract(`${F28}?registrar=2026-10-17`);
+
+    const modal = within(
+      await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
+    );
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '89.300,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() => {
+      expect(router.state.location.search).not.toContain('registrar');
+    });
+    // Today (18/10) has no price yet: it stays in the calendar.
+    expect(router.state.location.search).toContain('fim=2026-10-18');
+    expect(cells('18/10/2026')).toEqual(['18/10/2026', '—', '—', '—']);
+  });
+
   it('§4.1 rejects a value that is not a pt-BR number, without a request', async () => {
     const { user } = await openContract(`${F28}?registrar=2026-10-17`);
 
@@ -459,8 +476,9 @@ describe('Ativos: período do calendário (§11.2)', () => {
     await waitFor(() => {
       expect(router.state.location.search).not.toContain('registrar');
     });
-    expect(router.state.location.search).toContain('inicio=2026-07-22');
-    expect(router.state.location.search).toContain('fim=2026-08-20');
+    // The window starts on the date, so the days after it (the next pendências) stay in view.
+    expect(router.state.location.search).toContain('inicio=2026-08-20');
+    expect(router.state.location.search).toContain('fim=2026-09-18');
     await waitFor(() => {
       expect(cells('20/08/2026').slice(0, 2)).toEqual(['20/08/2026', '88.000,00']);
     });
@@ -477,7 +495,7 @@ describe('Ativos: período do calendário (§11.2)', () => {
     await waitFor(() => {
       expect(router.state.location.search).not.toContain('registrar');
     });
-    expect(router.state.location.search).toContain('fim=2026-08-20');
+    expect(router.state.location.search).toContain('inicio=2026-08-20');
     expect(screen.getByText('20/08/2026', { selector: 'td' })).toBeInTheDocument();
   });
 

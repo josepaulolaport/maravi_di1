@@ -76,10 +76,31 @@ describe('resolveRange', () => {
     expect(resolveRange({ start: 'x', end: '2026-10-01' }, today, maturity).end).toBe('2026-10-18');
   });
 
-  it('§11.1 without a range, a "registrar" date makes the default window end on it', () => {
+  it('§11.1 without a range, a "registrar" date inside the default window keeps that window', () => {
+    // The days after it, which may be the next missing prices, stay in view (QA 2026-10-19 #7).
+    expect(resolveRange({ register: '2026-10-17' }, today, maturity)).toEqual({
+      start: '2026-09-19',
+      end: '2026-10-18',
+    });
+    expect(resolveRange({ register: '2026-09-19' }, today, maturity)).toEqual({
+      start: '2026-09-19',
+      end: '2026-10-18',
+    });
+  });
+
+  it('§11.1 without a range, an older "registrar" date starts a 30-day window on it', () => {
     expect(resolveRange({ register: '2026-08-20' }, today, maturity)).toEqual({
-      start: '2026-07-22',
-      end: '2026-08-20',
+      start: '2026-08-20',
+      end: '2026-09-18',
+    });
+    expect(resolveRange({ register: '2026-09-18' }, today, maturity)).toEqual({
+      start: '2026-09-18',
+      end: '2026-10-17',
+    });
+    // Of a matured contract, the default window ends on the maturity date (OQ-1).
+    expect(resolveRange({ register: '2026-08-01' }, today, '2026-09-20')).toEqual({
+      start: '2026-08-01',
+      end: '2026-08-30',
     });
     // A future "registrar" date keeps the default window (the API rejects it on save).
     expect(resolveRange({ register: '2026-10-19' }, today, maturity).end).toBe('2026-10-18');
