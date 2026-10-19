@@ -82,6 +82,22 @@ async def test_oq40_a_runs_first_failure_reads_back_in_the_run_and_the_history(
     )
 
 
+async def test_oq40_a_positions_failure_reads_back(
+    engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    service = make_service()
+    run = await _enqueue(session_factory, service)
+    await _set_failure(engine, run.id, "COMPLETED_WITH_ISSUES", date(2026, 10, 4), "POSITIONS")
+
+    async with SqlAlchemyUnitOfWork(session_factory) as uow:
+        stored = await service.get_request(run.id, uow=uow)
+
+    assert (stored.failed_date, stored.failed_chain) == (
+        date(2026, 10, 4),
+        ProcessingScope.POSITIONS,
+    )
+
+
 async def test_oq40_a_failure_of_no_chain_reads_back_without_a_chain(
     engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:

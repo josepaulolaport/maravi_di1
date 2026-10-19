@@ -11,7 +11,10 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
-from di1.modules.processing.application.interfaces.repositories import IssueType
+from di1.modules.processing.application.interfaces.repositories import (
+    IssueType,
+    ProcessingChain,
+)
 from di1.modules.processing.application.services.processing import (
     IssueView,
     PredecessorState,
@@ -47,7 +50,7 @@ class ProcessingRequestOut(BaseModel):
     failed_date: date | None
     """The run's first failure (OQ-40); with ``failed_chain`` it prefills "Solicitar novo
     processamento"."""
-    failed_chain: ProcessingScope | None
+    failed_chain: ProcessingChain | None
     """CASH or POSITIONS; ``None`` with a ``failed_date`` when the failure belonged to no chain."""
 
     @classmethod
@@ -68,7 +71,9 @@ class ProcessingRequestOut(BaseModel):
             finished_at=request.finished_at,
             cancel_requested_at=request.cancel_requested_at,
             failed_date=request.failed_date,
-            failed_chain=request.failed_chain,
+            failed_chain=None
+            if request.failed_chain is None
+            else ProcessingChain(request.failed_chain.value),
         )
 
 

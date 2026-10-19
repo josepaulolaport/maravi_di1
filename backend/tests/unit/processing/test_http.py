@@ -265,3 +265,30 @@ def test_oq40_a_run_exposes_its_first_failure(client: TestClient, harness: Harne
     body = client.get(f"/processing/requests/{created['id']}").json()
 
     assert (body["failed_date"], body["failed_chain"]) == ("2026-10-15", "CASH")
+
+
+def test_oq40_a_failure_of_no_chain_has_a_date_and_no_chain(
+    client: TestClient, harness: Harness
+) -> None:
+    created = client.post("/processing/requests", json=BODY).json()
+    run = harness.requests.rows[UUID(created["id"])]
+    harness.requests.rows[run.id] = replace(
+        run, status=ProcessingStatus.FAILED, failed_date=date(2026, 10, 14), failed_chain=None
+    )
+
+    body = client.get(f"/processing/requests/{created['id']}").json()
+
+    assert (body["failed_date"], body["failed_chain"]) == ("2026-10-14", None)
+
+
+def test_oq40_the_api_never_advertises_all_as_a_failed_chain(client: TestClient) -> None:
+    """interfaces.md "Processing": ``failed_chain`` is CASH or POSITIONS, never ALL; the
+    frontend generates its types from this schema."""
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    field = schemas["ProcessingRequestOut"]["properties"]["failed_chain"]
+    refs = [option.get("$ref") for option in field["anyOf"] if "$ref" in option]
+    enums = [schemas[ref.rsplit("/", 1)[1]]["enum"] for ref in refs] or [
+        option["enum"] for option in field["anyOf"] if "enum" in option
+    ]
+
+    assert enums == [["CASH", "POSITIONS"]]
