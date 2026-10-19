@@ -13,12 +13,11 @@ from pydantic import BaseModel, StringConstraints
 
 from di1.modules.asset.domain.model import (
     AssetClass,
+    FuturesTerms,
     Instrument,
     InstrumentType,
-    InstrumentTypeRef,
     Product,
 )
-from di1.modules.asset.domain.rules import FuturesTerms
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.shared.decimals import to_plain
 
@@ -39,7 +38,7 @@ class InstrumentTypeRefOut(BaseModel):
     name: str
 
     @classmethod
-    def of(cls, instrument_type: InstrumentTypeRef) -> InstrumentTypeRefOut:
+    def of(cls, instrument_type: InstrumentType) -> InstrumentTypeRefOut:
         return cls(id=instrument_type.id, code=instrument_type.code, name=instrument_type.name)
 
 
@@ -132,6 +131,8 @@ class InstrumentOut(BaseModel):
         cls, instrument: Instrument, last_reference: ReferencePriceRecord | None
     ) -> InstrumentOut:
         """``last_reference`` is ``None`` when the instrument has no price (OQ-48)."""
+        if instrument.created_at is None:
+            raise RuntimeError("a stored instrument has created_at")
         return cls(
             id=instrument.id,
             code=instrument.code,

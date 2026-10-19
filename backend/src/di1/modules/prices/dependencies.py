@@ -7,14 +7,10 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.asset.public import AssetReader
-from di1.modules.prices.application.services.price_service import (
-    PreferredPriceReader,
-    PriceService,
-)
+from di1.modules.prices.application.services.price_service import PriceReader, PriceService
 from di1.modules.prices.infrastructure.persistence.repositories import (
     SqlReferencePriceRepository,
 )
-from di1.modules.prices.public import LatestPriceReader, PriceReader
 from di1.modules.pricing.public import PricingService
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
@@ -36,12 +32,6 @@ def price_service(
 
 def price_reader(session: AsyncSession) -> PriceReader:
     """`prices.public.PriceReader` on the caller's session, so a read sees the caller's
-    transaction: Processing's run of a date and Portfolio's reads take each date's reference PU,
-    rate and source from it (OQ-30)."""
-    return PreferredPriceReader(SqlReferencePriceRepository(session))
-
-
-def latest_price_reader(session: AsyncSession) -> LatestPriceReader:
-    """`prices.public.LatestPriceReader` on the caller's session: each asset's latest preferred
-    price, for Asset's ``Instrument.last_reference`` (OQ-48)."""
-    return PreferredPriceReader(SqlReferencePriceRepository(session))
+    transaction: Processing and Portfolio take each date's reference PU from it (OQ-30);
+    Asset HTTP fills ``last_reference`` from ``latest`` (OQ-48)."""
+    return PriceReader(SqlReferencePriceRepository(session))

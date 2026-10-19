@@ -35,7 +35,7 @@ from di1.modules.portfolio.domain.valuation import (
     ValuationStatus,
 )
 from di1.modules.portfolio.presentation.http.router import create_router
-from di1.modules.portfolio.public import PortfolioQueryService
+from di1.modules.portfolio.public import PortfolioService
 from di1.modules.prices.public import PriceSource
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.platform.config import Settings
@@ -271,7 +271,7 @@ def client(
         seeded.instrument_ids["DI1F29"], OCT_15, PriceSource.MANUAL, "80206.1333187932", "0.1045"
     )
 
-    async def provide(request: Request) -> AsyncIterator[PortfolioQueryService]:
+    async def provide(request: Request) -> AsyncIterator[PortfolioService]:
         async with SqlAlchemyUnitOfWork(get_session_factory(request)) as uow:
             yield portfolio_query_service(
                 uow,
@@ -392,29 +392,20 @@ def test_the_pnl_series_has_every_date_with_the_range_sum(client: TestClient) ->
             {
                 "date": "2026-10-14",
                 "daily_pnl": "0.0000000000",
-                "cumulative_pnl": "0.0000000000",
                 "range_cumulative_pnl": "0.0000000000",
-                "pnl_status": "COMPLETE",
                 "status": "PROCESSED",
-                "published_at": PUBLISHED_AT_JSON,
             },
             {
                 "date": "2026-10-15",
                 "daily_pnl": "-8034.1345282660",
-                "cumulative_pnl": "-8034.1345282660",
                 "range_cumulative_pnl": "-8034.1345282660",
-                "pnl_status": "COMPLETE",
                 "status": "PROCESSED",
-                "published_at": PUBLISHED_AT_JSON,
             },
             {
                 "date": "2026-10-16",
                 "daily_pnl": None,
-                "cumulative_pnl": None,
                 "range_cumulative_pnl": "-8034.1345282660",
-                "pnl_status": None,
                 "status": "NOT_PROCESSED",
-                "published_at": None,
             },
         ]
     }

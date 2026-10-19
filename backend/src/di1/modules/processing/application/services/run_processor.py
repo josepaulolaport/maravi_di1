@@ -65,14 +65,14 @@ from uuid import UUID
 from di1.modules.portfolio.public import PortfolioResultsWriter
 from di1.modules.processing.application.interfaces.repositories import (
     DateStatusRepository,
+    IssueRecord,
     ProcessingChain,
 )
 from di1.modules.processing.application.interfaces.run_store import (
     DateStatusRow,
-    NewIssue,
     RunStore,
 )
-from di1.modules.processing.application.services.chain_history import LedgerChainHistory
+from di1.modules.processing.application.services.chain_history import ChainHistory
 from di1.modules.processing.application.services.predecessor import read_predecessor
 from di1.modules.processing.application.services.run_chains import (
     DayReaders,
@@ -403,7 +403,7 @@ class PortfolioRangeProcessor:
 
             outcomes: dict[ProcessingChain, ChainStatus] = {}
             failures: list[ChainFailure] = []
-            issues: list[NewIssue] = []
+            issues: list[IssueRecord] = []
             for chain in alive:
                 other_processed = self._other_chain_processed(chain, alive, outcomes, current)
                 try:
@@ -564,7 +564,7 @@ class PortfolioRangeProcessor:
             previous.day,
             previous.status(chain),
             date_statuses=self._date_statuses,
-            history=LedgerChainHistory(readers.ledger),
+            history=ChainHistory(readers.ledger),
             uow=uow,
         )
         if not allows_run(state):

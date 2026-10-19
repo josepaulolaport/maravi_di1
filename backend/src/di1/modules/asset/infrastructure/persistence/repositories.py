@@ -10,16 +10,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
-from di1.modules.asset.application.interfaces.repository import DuplicateCodeError
+from di1.modules.asset.application.services.repository import DuplicateCodeError
 from di1.modules.asset.domain.model import (
     AssetClass,
-    ClassifiedAssetClass,
+    FuturesTerms,
     Instrument,
     InstrumentType,
-    InstrumentTypeRef,
     Product,
 )
-from di1.modules.asset.domain.rules import FuturesTerms
 from di1.modules.asset.infrastructure.persistence.models import (
     AssetClassRow,
     FuturesRow,
@@ -28,11 +26,10 @@ from di1.modules.asset.infrastructure.persistence.models import (
     ProductRow,
 )
 from di1.modules.asset.infrastructure.persistence.queries import catalogue
-from di1.modules.asset.public import InstrumentDescriptor
 
 
-def _type_ref(row: InstrumentTypeRow) -> InstrumentTypeRef:
-    return InstrumentTypeRef(id=row.id, code=row.code, name=row.name)
+def _type(row: InstrumentTypeRow) -> InstrumentType:
+    return InstrumentType(id=row.id, code=row.code, name=row.name, asset_classes=())
 
 
 def _asset_class(row: AssetClassRow) -> AssetClass:
@@ -50,18 +47,29 @@ def _futures(row: FuturesRow | None) -> FuturesTerms | None:
     )
 
 
-def _instrument(row: InstrumentRow, product_code: str) -> Instrument:
+def _instrument(
+    row: InstrumentRow,
+    product: ProductRow,
+    asset_class: AssetClassRow,
+    instrument_type: InstrumentTypeRow,
+    futures: FuturesRow | None,
+) -> Instrument:
     return Instrument(
         id=row.id,
         code=row.code,
         product_id=row.product_id,
-        product_code=product_code,
+        product_code=product.code,
+        instrument_type=instrument_type.code,
+        asset_class=asset_class.code,
         maturity_date=row.maturity_date,
+        face_value=None if futures is None else futures.face_value,
+        multiplier=None if futures is None else futures.contract_multiplier,
+        settlement_method=None if futures is None else futures.settlement_method,
         created_at=row.created_at,
     )
 
 
-class SqlAlchemyAssetRepository:
+class SqlAssetRepository:
     """Implements `AssetRepository` on the Unit of Work's session."""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -81,27 +89,19 @@ class SqlAlchemyAssetRepository:
             for t in types.values()
         ]
 
-    async def get_instrument_type(self, instrument_type_id: int) -> InstrumentTypeRef | None:
-        row = await self._session.get(InstrumentTypeRow, instrument_type_id)
-        return None if row is None else _type_ref(row)
-
-    async def get_asset_class(self, asset_class_id: int) -> ClassifiedAssetClass | None:
+    async def get_asset_class(
+        self, asset_class_id: int
+    ) -> tuple[AssetClass, InstrumentType] | None:
         found = (
             await self._session.execute(catalogue.asset_class_with_type(asset_class_id))
         ).one_or_none()
         if found is None:
             return None
         class_row, type_row = found
-        return ClassifiedAssetClass(_asset_class(class_row), _type_ref(type_row))
+        return _asset_class(class_row), _type(type_row)
 
     async def _code_taken(self, column: InstrumentedAttribute[str], code: str) -> bool:
         return bool((await self._session.execute(catalogue.code_taken(column, code))).scalar_one())
-
-    async def instrument_type_code_exists(self, code: str) -> bool:
-        return await self._code_taken(InstrumentTypeRow.code, code)
-
-    async def asset_class_code_exists(self, code: str) -> bool:
-        return await self._code_taken(AssetClassRow.code, code)
 
     async def product_code_exists(self, code: str) -> bool:
         return await self._code_taken(ProductRow.code, code)
@@ -118,18 +118,6 @@ class SqlAlchemyAssetRepository:
             if constraint in catalogue.CODE_INDEXES:
                 raise DuplicateCodeError(constraint) from error
             raise
-
-    async def add_instrument_type(self, code: str, name: str) -> InstrumentTypeRef:
-        row = InstrumentTypeRow(code=code, name=name)
-        self._session.add(row)
-        await self._flush()
-        return _type_ref(row)
-
-    async def add_asset_class(self, instrument_type_id: int, code: str, name: str) -> AssetClass:
-        row = AssetClassRow(instrument_type_id=instrument_type_id, code=code, name=name)
-        self._session.add(row)
-        await self._flush()
-        return _asset_class(row)
 
     async def add_product(
         self, asset_class_id: int, code: str, name: str, futures: FuturesTerms | None
@@ -169,7 +157,7 @@ class SqlAlchemyAssetRepository:
                 code=product.code,
                 name=product.name,
                 asset_class=_asset_class(asset_class),
-                instrument_type=_type_ref(instrument_type),
+                instrument_type=_type(instrument_type),
                 instrument_count=count,
                 futures=_futures(futures),
                 created_at=product.created_at,
@@ -186,29 +174,15 @@ class SqlAlchemyAssetRepository:
 
     async def list_instruments(self, product_id: UUID | None) -> Sequence[Instrument]:
         rows = (await self._session.execute(catalogue.instruments(product_id=product_id))).all()
-        return [_instrument(row, product_code) for row, product_code in rows]
+        return [_instrument(*row) for row in rows]
 
     async def get_instrument(self, instrument_id: UUID) -> Instrument | None:
         statement = catalogue.instruments(instrument_id=instrument_id)
         found = (await self._session.execute(statement)).one_or_none()
         return None if found is None else _instrument(*found)
 
-    async def get_descriptors(
-        self, instrument_ids: Collection[UUID]
-    ) -> Mapping[UUID, InstrumentDescriptor]:
-        rows = (await self._session.execute(catalogue.descriptors(instrument_ids))).all()
-        return {
-            instrument.id: InstrumentDescriptor(
-                id=instrument.id,
-                code=instrument.code,
-                product_id=product.id,
-                product_code=product.code,
-                instrument_type=instrument_type.code,
-                asset_class=asset_class.code,
-                maturity_date=instrument.maturity_date,
-                face_value=None if futures is None else futures.face_value,
-                multiplier=None if futures is None else futures.contract_multiplier,
-                settlement_method=None if futures is None else futures.settlement_method,
-            )
-            for instrument, product, asset_class, instrument_type, futures in rows
-        }
+    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
+        rows = (
+            await self._session.execute(catalogue.instruments(instrument_ids=instrument_ids))
+        ).all()
+        return {row[0].id: _instrument(*row) for row in rows}

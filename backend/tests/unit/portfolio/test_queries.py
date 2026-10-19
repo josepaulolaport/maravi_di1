@@ -1,4 +1,4 @@
-"""`PortfolioQueryService`: published data and each date's chain statuses, never recalculated on
+"""`PortfolioService`: published data and each date's chain statuses, never recalculated on
 read (spec §11.4; OQ-23, OQ-27, OQ-28, OQ-30, OQ-31)."""
 
 from __future__ import annotations
@@ -11,13 +11,12 @@ from uuid import UUID
 import pytest
 
 from di1.modules.pnl.public import CalculationCompleteness
-from di1.modules.portfolio.application.interfaces.repository import (
-    PublishedCash,
+from di1.modules.portfolio.application.services.query_service import PortfolioService
+from di1.modules.portfolio.application.services.repository import (
     PublishedPortfolioDay,
     PublishedPosition,
 )
-from di1.modules.portfolio.application.services.query_service import PortfolioQueries
-from di1.modules.portfolio.domain.valuation import ReferenceSource, ValuationStatus
+from di1.modules.portfolio.domain.valuation import ValuationStatus
 from di1.modules.prices.public import PriceSource
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.shared.clock import FixedClock
@@ -29,6 +28,7 @@ from tests.unit.portfolio.fakes import (
     FakePriceReader,
     FakeUnitOfWork,
     InMemoryPortfolioRepository,
+    stored_cash,
 )
 
 TODAY = DAY + timedelta(days=10)
@@ -105,13 +105,13 @@ def queries(
     statuses: FakeDateStatusReader,
     prices: FakePriceReader,
     uow: FakeUnitOfWork,
-) -> PortfolioQueries:
+) -> PortfolioService:
     assets = FakeAssetReader(
         (DI1F27, "DI1F27", DAY - timedelta(days=1)),  # matured yesterday
         (DI1F28, "DI1F28", date(2028, 1, 3)),
         (DI1F29, "DI1F29", date(2029, 1, 2)),
     )
-    return PortfolioQueries(
+    return PortfolioService(
         repository,
         uow=uow,
         assets=assets,
@@ -124,12 +124,12 @@ def queries(
 class TestSummary:
     async def test_a_processed_date_shows_both_chains_and_the_stored_aum(
         self,
-        queries: PortfolioQueries,
+        queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
         uow: FakeUnitOfWork,
     ) -> None:
-        repository.cash[DAY] = PublishedCash(
+        repository.cash[DAY] = stored_cash(
             DAY, Decimal("50000"), Decimal("-950000"), Decimal("1000000"), Decimal("0")
         )
         repository.days[DAY] = _day(DAY, "10", "15")
@@ -158,7 +158,7 @@ class TestSummary:
         assert repository.snapshots == 1  # started once, before any read
 
     async def test_a_date_never_processed_is_all_null_never_zero(
-        self, queries: PortfolioQueries
+        self, queries: PortfolioService
     ) -> None:
         summary = await queries.get_summary(DAY)
 
@@ -173,11 +173,11 @@ class TestSummary:
 
     async def test_cash_alone_has_no_aum(
         self,
-        queries: PortfolioQueries,
+        queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
     ) -> None:
-        repository.cash[DAY] = PublishedCash(
+        repository.cash[DAY] = stored_cash(
             DAY, Decimal("7"), Decimal("0"), Decimal("7"), Decimal("0")
         )
         statuses.statuses[DAY] = _status(DAY, None, ChainStatus.PROCESSED)
@@ -197,7 +197,7 @@ class TestAumNeedsBothChainsProcessed:
     @pytest.fixture(autouse=True)
     def published(self, repository: InMemoryPortfolioRepository) -> None:
         # D processed as ALL: cash 100 + market value 50 → AUM 150 stored.
-        repository.cash[DAY] = PublishedCash(DAY, Decimal("100"), ZERO, Decimal("100"), ZERO)
+        repository.cash[DAY] = stored_cash(DAY, Decimal("100"), ZERO, Decimal("100"), ZERO)
         repository.days[DAY] = replace(
             _day(DAY, "0"), positions_market_value=Decimal("50"), aum=Decimal("150")
         )
@@ -215,7 +215,7 @@ class TestAumNeedsBothChainsProcessed:
     )
     async def test_aum_is_hidden_unless_both_chains_are_processed(
         self,
-        queries: PortfolioQueries,
+        queries: PortfolioService,
         statuses: FakeDateStatusReader,
         positions: ChainStatus | None,
         cash: ChainStatus | None,
@@ -230,7 +230,7 @@ class TestAumNeedsBothChainsProcessed:
 
     @pytest.mark.parametrize("status", [ChainStatus.PROCESSED, ChainStatus.PROCESSED_WITH_ISSUES])
     async def test_aum_shows_when_both_chains_are_processed(
-        self, queries: PortfolioQueries, statuses: FakeDateStatusReader, status: ChainStatus
+        self, queries: PortfolioService, statuses: FakeDateStatusReader, status: ChainStatus
     ) -> None:
         statuses.statuses[DAY] = _status(DAY, status, ChainStatus.PROCESSED)
 
@@ -240,7 +240,7 @@ class TestAumNeedsBothChainsProcessed:
 class TestPositionTable:
     async def test_rows_carry_the_current_preferred_price_and_its_source(
         self,
-        queries: PortfolioQueries,
+        queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
         prices: FakePriceReader,
@@ -261,7 +261,7 @@ class TestPositionTable:
         priced, unpriced = table.items
         assert priced.maturity_date == date(2028, 1, 3)
         assert priced.quantity == 10
-        assert priced.reference_source is ReferenceSource.B3
+        assert priced.reference_source is PriceSource.B3
         assert priced.reference_pu == Decimal("95100")
         assert priced.reference_rate == Decimal("0.0990")
         assert priced.financial_total == Decimal("951000")
@@ -273,7 +273,7 @@ class TestPositionTable:
 
     async def test_a_corrected_price_shows_next_to_the_figures_of_the_last_processing(
         self,
-        queries: PortfolioQueries,
+        queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
         prices: FakePriceReader,
     ) -> None:
@@ -284,12 +284,12 @@ class TestPositionTable:
 
         (row,) = (await queries.get_position_table(DAY)).items
 
-        assert row.reference_source is ReferenceSource.MANUAL
+        assert row.reference_source is PriceSource.MANUAL
         assert row.reference_pu == Decimal("95300")
         assert row.financial_total == Decimal("951000")
 
     async def test_after_maturity_the_reference_pu_is_zero_with_no_source(
-        self, queries: PortfolioQueries, repository: InMemoryPortfolioRepository
+        self, queries: PortfolioService, repository: InMemoryPortfolioRepository
     ) -> None:
         # OQ-1, OQ-30: the PU is 0 by definition after maturity.
         repository.positions[DAY] = (_position(DI1F27, 3, "0"),)
@@ -300,7 +300,7 @@ class TestPositionTable:
         assert row.reference_source is None
         assert row.reference_rate is None
 
-    async def test_a_date_never_processed_has_no_rows(self, queries: PortfolioQueries) -> None:
+    async def test_a_date_never_processed_has_no_rows(self, queries: PortfolioService) -> None:
         table = await queries.get_position_table(DAY)
 
         assert table.status is None
@@ -314,7 +314,7 @@ class TestPnLSeries:
 
     async def test_every_date_is_a_point_and_a_gap_adds_zero(
         self,
-        queries: PortfolioQueries,
+        queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
     ) -> None:
@@ -335,16 +335,14 @@ class TestPnLSeries:
             Decimal("22"),
         ]
         processed = [points[0], points[1], points[3]]
-        assert [p.cumulative_pnl for p in processed] == [Decimal("100")] * 3  # stored, unchanged
         assert all(p.status is ChainStatus.PROCESSED for p in processed)
-        assert all(p.published_at == POSITIONS_AT for p in processed)
         for gap in (points[2], points[4]):
-            assert (gap.status, gap.published_at, gap.pnl_status) == (None, None, None)
-            assert (gap.daily_pnl, gap.cumulative_pnl) == (None, None)
+            assert gap.status is None
+            assert gap.daily_pnl is None
 
     async def test_a_missing_price_day_adds_zero_and_keeps_its_status(
         self,
-        queries: PortfolioQueries,
+        queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
     ) -> None:
@@ -362,13 +360,12 @@ class TestPnLSeries:
             Decimal("15"),
         ]
         assert points[1].daily_pnl is None
-        assert points[1].pnl_status is MISSING
         assert points[1].status is ChainStatus.PROCESSED_WITH_ISSUES
 
     @pytest.mark.parametrize("chain", [ChainStatus.FAILED, ChainStatus.RUNNING])
     async def test_a_failed_or_running_day_shows_its_status_and_adds_zero(
         self,
-        queries: PortfolioQueries,
+        queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
         chain: ChainStatus,
@@ -390,12 +387,11 @@ class TestPnLSeries:
         ]
         stopped = points[1]
         assert stopped.status is chain
-        assert stopped.published_at == POSITIONS_AT
-        assert (stopped.daily_pnl, stopped.cumulative_pnl, stopped.pnl_status) == (None, None, None)
+        assert stopped.daily_pnl is None
 
     async def test_case_27_an_unprocessed_day_adds_zero(
         self,
-        queries: PortfolioQueries,
+        queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
     ) -> None:
@@ -416,7 +412,7 @@ class TestPnLSeries:
 
     async def test_a_range_starting_on_a_gap_sums_from_zero(
         self,
-        queries: PortfolioQueries,
+        queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
     ) -> None:
@@ -431,7 +427,7 @@ class TestPnLSeries:
 
     async def test_a_row_without_a_positions_status_reads_not_processed(
         self,
-        queries: PortfolioQueries,
+        queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
     ) -> None:
@@ -446,7 +442,7 @@ class TestPnLSeries:
         assert point.range_cumulative_pnl == Decimal("0")
 
     async def test_a_start_after_the_end_is_an_invalid_range(
-        self, queries: PortfolioQueries
+        self, queries: PortfolioService
     ) -> None:
         with pytest.raises(DomainError) as raised:
             await queries.get_pnl_series(DAY, DAY - timedelta(days=1))
@@ -463,7 +459,7 @@ class TestFutureDates:
     FUTURE_MESSAGE = "A data não pode ser posterior a hoje."
 
     async def test_a_summary_or_table_after_today_is_rejected_on_date(
-        self, queries: PortfolioQueries
+        self, queries: PortfolioService
     ) -> None:
         for read in (queries.get_summary, queries.get_position_table):
             with pytest.raises(DomainError) as raised:
@@ -475,13 +471,13 @@ class TestFutureDates:
                 "date",
             )
 
-    async def test_today_is_read(self, queries: PortfolioQueries) -> None:
+    async def test_today_is_read(self, queries: PortfolioService) -> None:
         assert (await queries.get_summary(TODAY)).date == TODAY
         assert (await queries.get_position_table(TODAY)).items == ()
         assert (await queries.get_pnl_series(DAY, TODAY))[-1].date == TODAY  # every date (OQ-41)
 
     async def test_a_pnl_series_ending_after_today_is_rejected_on_end_date(
-        self, queries: PortfolioQueries
+        self, queries: PortfolioService
     ) -> None:
         with pytest.raises(DomainError) as raised:
             await queries.get_pnl_series(DAY, TODAY + timedelta(days=1))
@@ -490,7 +486,7 @@ class TestFutureDates:
         assert (detail.code, detail.field) == (ErrorCode.FUTURE_DATE, "end_date")
 
     async def test_a_reversed_range_ending_after_today_reports_both(
-        self, queries: PortfolioQueries
+        self, queries: PortfolioService
     ) -> None:
         with pytest.raises(DomainError) as raised:
             await queries.get_pnl_series(TODAY + timedelta(days=3), TODAY + timedelta(days=2))

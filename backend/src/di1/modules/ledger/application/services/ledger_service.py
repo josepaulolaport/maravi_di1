@@ -13,12 +13,11 @@ from dataclasses import dataclass
 from datetime import date
 from uuid import UUID
 
-from di1.modules.asset.public import AssetReader, InstrumentDescriptor
-from di1.modules.ledger.application.interfaces.repository import LedgerRepository
+from di1.modules.asset.public import AssetReader, Instrument
+from di1.modules.ledger.application.services.repository import LedgerRepository
 from di1.modules.ledger.domain.entries import (
     EntryDraft,
     EntryType,
-    KnownInstrument,
     LedgerEntry,
     entries_to_delete,
     validate_cash_movement,
@@ -76,32 +75,36 @@ class LedgerService:
         repository = self._repository_for(uow)
         today = self._clock.today()
         if draft.type is EntryType.CASH:
-            movement = validate_cash_movement(draft, today=today)
-            entry = await repository.add_cash_movement(movement)
+            amount = validate_cash_movement(draft, today=today)
+            entry = await repository.add_cash_movement(draft, amount=amount)
             await uow.commit()
             return LedgerEntryView(entry, asset_code=None, instrument_type_code=None)
 
-        descriptor = await self._instrument(draft.asset_id)
-        known = KnownInstrument(descriptor.maturity_date) if descriptor is not None else None
-        trade = validate_trade(
-            draft, today=today, instrument=known, validate_quote=validate_trade_quote
+        instrument = await self._instrument(draft.asset_id)
+        typed_value = validate_trade(
+            draft,
+            today=today,
+            known=instrument is not None,
+            maturity_date=None if instrument is None else instrument.maturity_date,
+            validate_quote=validate_trade_quote,
         )
+        assert draft.asset_id is not None and draft.input_kind is not None
         try:
             price = await self._pricing.calculate(
-                trade.asset_id, trade.entry_date, Quote(trade.input_kind, trade.typed_value)
+                draft.asset_id, draft.entry_date, Quote(draft.input_kind, typed_value)
             )
         except DomainError as error:
             raise _as_request_error(error) from error
         # The typed value is stored as typed (OQ-3); only the other one comes from Pricing.
-        typed_pu = trade.input_kind is InputKind.PU
+        typed_pu = draft.input_kind is InputKind.PU
         entry = await repository.add_trade(
-            trade,
-            execution_pu=trade.typed_value if typed_pu else price.pu,
-            execution_rate=price.rate if typed_pu else trade.typed_value,
+            draft,
+            execution_pu=typed_value if typed_pu else price.pu,
+            execution_rate=price.rate if typed_pu else typed_value,
         )
         await uow.commit()
-        assert descriptor is not None
-        return LedgerEntryView(entry, descriptor.code, descriptor.instrument_type)
+        assert instrument is not None
+        return LedgerEntryView(entry, instrument.code, instrument.instrument_type)
 
     async def delete_entries(self, ids: Collection[UUID], *, uow: UnitOfWork) -> None:
         """Delete entries of either type for good, in one transaction, all or nothing (OQ-24;
@@ -155,7 +158,7 @@ class LedgerService:
         )
         return LedgerEntryPage(items=items, next_cursor=next_cursor)
 
-    async def _instrument(self, asset_id: UUID | None) -> InstrumentDescriptor | None:
+    async def _instrument(self, asset_id: UUID | None) -> Instrument | None:
         """The contract, or ``None`` when the request names none or an unknown one: a body field,
         so a validation error on it rather than ``NOT_FOUND``."""
         if asset_id is None:
@@ -167,7 +170,7 @@ def _as_request_error(error: DomainError) -> DomainError:
     """Pricing's refusal, named after the request's fields. An instrument Pricing cannot find is
     a body field, so a validation error on ``asset_id``, never a 404."""
     details = [
-        ErrorDetail(ErrorCode.VALIDATION_ERROR, "Selecione um contrato.", "asset_id")
+        ErrorDetail.validation("Selecione um contrato.", "asset_id")
         if detail.code is ErrorCode.NOT_FOUND
         else ErrorDetail(detail.code, detail.message, TRADE_QUOTE_FIELDS.from_pricing(detail.field))
         for detail in error.errors
@@ -175,7 +178,7 @@ def _as_request_error(error: DomainError) -> DomainError:
     return DomainError(*details, detail=error.detail if len(details) > 1 else None)
 
 
-def _view(entry: LedgerEntry, instruments: Mapping[UUID, InstrumentDescriptor]) -> LedgerEntryView:
+def _view(entry: LedgerEntry, instruments: Mapping[UUID, Instrument]) -> LedgerEntryView:
     if entry.asset_id is None:
         return LedgerEntryView(entry, asset_code=None, instrument_type_code=None)
     # The foreign key guarantees the contract exists.

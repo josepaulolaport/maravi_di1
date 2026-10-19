@@ -8,11 +8,7 @@ import binascii
 from datetime import datetime
 from uuid import UUID
 
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
-
-
-def _invalid_cursor() -> DomainError:
-    return DomainError(ErrorDetail(ErrorCode.VALIDATION_ERROR, "Cursor inválido.", "cursor"))
+from di1.shared.errors import DomainError, ErrorDetail
 
 
 def encode_cursor(created_at: datetime, request_id: UUID) -> str:
@@ -27,7 +23,7 @@ def decode_cursor(cursor: str) -> tuple[datetime, UUID]:
         created_at, request_id = raw.split("|")
         keyset = datetime.fromisoformat(created_at), UUID(request_id)
     except (binascii.Error, UnicodeDecodeError, ValueError):
-        raise _invalid_cursor() from None
+        raise DomainError(ErrorDetail.validation("Cursor inválido.", "cursor")) from None
     if keyset[0].tzinfo is None:
-        raise _invalid_cursor()
+        raise DomainError(ErrorDetail.validation("Cursor inválido.", "cursor"))
     return keyset

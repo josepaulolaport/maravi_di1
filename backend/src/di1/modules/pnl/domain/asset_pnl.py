@@ -15,8 +15,8 @@ from di1.modules.pnl.domain.results import (
     AssetPnLResult,
     CalculationCompleteness,
     MissingReferencePrice,
+    PnLTrade,
 )
-from di1.modules.pnl.domain.trade import PnLTrade
 from di1.modules.pnl.domain.trades_pnl import calculate_trades_pnl
 from di1.shared.decimals import financial_context
 

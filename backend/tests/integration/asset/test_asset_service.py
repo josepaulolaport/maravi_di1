@@ -22,15 +22,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from di1.modules.asset.application.interfaces.repository import DuplicateCodeError
-from di1.modules.asset.application.services.asset_service import AssetService, NewInstrument
-from di1.modules.asset.domain.model import AssetClass, InstrumentType
-from di1.modules.asset.domain.rules import FuturesTerms
-from di1.modules.asset.infrastructure.persistence.repositories import SqlAlchemyAssetRepository
+from di1.modules.asset.application.services.asset_service import AssetService
+from di1.modules.asset.application.services.repository import DuplicateCodeError
+from di1.modules.asset.domain.model import AssetClass, FuturesTerms, InstrumentType
+from di1.modules.asset.infrastructure.persistence.repositories import SqlAssetRepository
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from tests.integration.asset.conftest import DI1_FUTURES, DI1_NAME, Di1Catalogue, Writer
-from tests.integration.asset.latest_prices import FakeLatestPrices, price
 
 
 def _problems(error: pytest.ExceptionInfo[DomainError]) -> list[tuple[ErrorCode, str | None]]:
@@ -76,12 +74,6 @@ class TestHierarchy:
 
         assert [(t.code, t.asset_classes) for t in types] == [("OPTION", ())]
 
-    async def test_an_asset_class_needs_an_existing_type(self, writer: Writer) -> None:
-        with pytest.raises(DomainError) as error:
-            await writer.asset_class(999, "INTEREST_RATE_FUTURE", "Futuros de Taxa de Juros")
-
-        assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "instrument_type_id")]
-
     @pytest.mark.parametrize("asset_class_id", [999, 0, -1, 32768, 10**12])
     async def test_a_product_needs_an_existing_class(
         self, writer: Writer, asset_class_id: int
@@ -91,12 +83,6 @@ class TestHierarchy:
             await writer.product(asset_class_id, "DI1", DI1_NAME, DI1_FUTURES)
 
         assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "asset_class_id")]
-
-    async def test_an_asset_class_type_out_of_range_does_not_exist(self, writer: Writer) -> None:
-        with pytest.raises(DomainError) as error:
-            await writer.asset_class(40000, "INTEREST_RATE_FUTURE", "Juros")
-
-        assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "instrument_type_id")]
 
     @pytest.mark.parametrize("name", ["", "   "])
     async def test_a_product_name_is_not_blank(
@@ -155,20 +141,6 @@ class TestFuturesSpecification:
 
 
 class TestDuplicateCodes:
-    async def test_instrument_types(self, writer: Writer) -> None:
-        await writer.instrument_type("FUTURE", "Futuros")
-
-        with pytest.raises(DomainError) as error:
-            await writer.instrument_type("FUTURE", "Outro")
-
-        assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "code")]
-
-    async def test_asset_classes(self, di1: Di1Catalogue, writer: Writer) -> None:
-        with pytest.raises(DomainError) as error:
-            await writer.asset_class(di1.future_type_id, "INTEREST_RATE_FUTURE", "Outra")
-
-        assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "code")]
-
     @pytest.mark.parametrize("code", ["DI1", "di1", "Di1"])
     async def test_products_case_insensitively(
         self, di1: Di1Catalogue, writer: Writer, code: str
@@ -200,7 +172,7 @@ class TestDuplicateCodes:
         self, di1: Di1Catalogue, reader_session: AsyncSession
     ) -> None:
         # The service checks first; the unique index on upper(code) catches the race after it.
-        repository = SqlAlchemyAssetRepository(reader_session)
+        repository = SqlAssetRepository(reader_session)
 
         with pytest.raises(DuplicateCodeError):
             await repository.add_instrument(di1.di1_id, "di1f27", date(2027, 1, 4))
@@ -208,16 +180,14 @@ class TestDuplicateCodes:
     async def test_a_lost_race_is_a_validation_error_and_writes_nothing(
         self, di1: Di1Catalogue, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
-        class RacingRepository(SqlAlchemyAssetRepository):
+        class RacingRepository(SqlAssetRepository):
             async def instrument_code_exists(self, code: str) -> bool:
                 return False  # the other writer commits between the check and the insert
 
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
             service = AssetService(RacingRepository(uow.session))
             with pytest.raises(DomainError) as error:
-                await service.create_instrument(
-                    NewInstrument(di1.di1_id, "DI1F27", date(2027, 1, 4)), uow=uow
-                )
+                await service.create_instrument(di1.di1_id, "DI1F27", date(2027, 1, 4), uow=uow)
 
         assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "code")]
         assert await _count(session_factory, "instruments") == 4
@@ -236,6 +206,7 @@ class TestInstruments:
             "DI1",
         )
         assert instrument.maturity_date == date(2027, 7, 1)
+        assert instrument.created_at is not None
         assert instrument.created_at.tzinfo is not None
 
     async def test_a_future_needs_a_maturity(
@@ -369,32 +340,3 @@ class TestReads:
         assert instrument.value.errors == (
             ErrorDetail(ErrorCode.NOT_FOUND, "Contrato não encontrado."),
         )
-
-
-class TestLastReferences:
-    """`AssetService.last_references` (OQ-48): one batch read of Prices' latest preferred price."""
-
-    async def test_without_a_reader_no_instrument_has_one(
-        self, di1: Di1Catalogue, service: AssetService
-    ) -> None:
-        # Seeding and writes build the service without Prices.
-        instruments = await service.list_instruments()
-
-        assert await service.last_references(instruments) == {}
-
-    async def test_with_a_reader_only_priced_instruments_have_one(
-        self, di1: Di1Catalogue, reader_session: AsyncSession
-    ) -> None:
-        f28 = di1.instrument_ids["DI1F28"]
-        latest = FakeLatestPrices(
-            {f28: price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995")}
-        )
-        service = AssetService(SqlAlchemyAssetRepository(reader_session), latest)
-
-        references = await service.last_references(await service.list_instruments())
-
-        assert set(references) == {f28}
-        assert references[f28].pu == Decimal("89102.2226533433")
-        assert latest.calls == [frozenset(di1.instrument_ids.values())]
-        assert await service.last_references([]) == {}
-        assert len(latest.calls) == 1

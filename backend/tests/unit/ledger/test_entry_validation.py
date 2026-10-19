@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from datetime import date, time
 from decimal import Decimal
-from functools import partial
 from uuid import UUID
 
 import pytest
@@ -22,9 +21,6 @@ from di1.modules.ledger.application.services.ledger_service import validate_trad
 from di1.modules.ledger.domain.entries import (
     EntryDraft,
     EntryType,
-    KnownInstrument,
-    NewCashMovement,
-    NewTrade,
     validate_cash_movement,
 )
 from di1.modules.ledger.domain.entries import validate_trade as validate_any_trade
@@ -32,11 +28,19 @@ from di1.shared.clock import SAO_PAULO
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
 
-validate_trade = partial(validate_any_trade, validate_quote=validate_trade_quote)
-
 TODAY = date(2026, 10, 18)
 ASSET = UUID("6f1c2a10-0000-4000-8000-0000000000f8")
-DI1F28 = KnownInstrument(maturity_date=date(2028, 1, 3))
+DI1F28 = date(2028, 1, 3)
+
+
+def validate_trade(draft: EntryDraft, *, today: date, instrument: date | None = DI1F28) -> Decimal:
+    return validate_any_trade(
+        draft,
+        today=today,
+        known=instrument is not None,
+        maturity_date=instrument,
+        validate_quote=validate_trade_quote,
+    )
 
 
 def _trade(**overrides: object) -> EntryDraft:
@@ -72,17 +76,10 @@ def _errors(error: pytest.ExceptionInfo[DomainError]) -> set[tuple[ErrorCode, st
 
 
 def test_a_rate_typed_trade_keeps_the_typed_rate() -> None:
-    trade = validate_trade(_trade(), today=TODAY, instrument=DI1F28)
+    typed = validate_trade(_trade(), today=TODAY, instrument=DI1F28)
 
-    assert trade == NewTrade(
-        asset_id=ASSET,
-        entry_date=date(2026, 10, 14),
-        entry_time=time(14, 10),
-        signed_quantity=10,
-        input_kind=InputKind.RATE,
-        typed_value=Decimal("0.10"),
-    )
-    assert str(trade.typed_value) == "0.10"  # as typed, trailing zero kept (OQ-3)
+    assert typed == Decimal("0.10")
+    assert str(typed) == "0.10"  # as typed, trailing zero kept (OQ-3)
 
 
 def test_a_pu_typed_sell_is_negative() -> None:
@@ -97,9 +94,7 @@ def test_a_pu_typed_sell_is_negative() -> None:
         instrument=DI1F28,
     )
 
-    assert trade.signed_quantity == -4
-    assert trade.input_kind is InputKind.PU
-    assert str(trade.typed_value) == "82057.00"
+    assert str(trade) == "82057.00"
 
 
 def test_today_and_weekends_are_accepted() -> None:
@@ -136,8 +131,7 @@ def test_the_quantity_is_a_nonzero_integer_within_the_column(quantity: int | Non
 
 @pytest.mark.parametrize("quantity", [2**31 - 1, -(2**31)])
 def test_the_integer_column_limits_are_accepted(quantity: int) -> None:
-    trade = validate_trade(_trade(signed_quantity=quantity), today=TODAY, instrument=DI1F28)
-    assert trade.signed_quantity == quantity
+    validate_trade(_trade(signed_quantity=quantity), today=TODAY, instrument=DI1F28)
 
 
 def test_the_input_kind_is_required() -> None:
@@ -173,7 +167,7 @@ def test_a_typed_pu_with_more_than_10_places_is_rejected_not_rounded() -> None:
     ten = validate_trade(
         _trade(**typed, execution_pu=Decimal("89006.4625467350")), today=TODAY, instrument=DI1F28
     )
-    assert ten.typed_value == Decimal("89006.4625467350")
+    assert ten == Decimal("89006.4625467350")
 
     with pytest.raises(DomainError) as error:
         validate_trade(
@@ -270,7 +264,7 @@ def test_the_time_is_a_naive_whole_second(entry_time: time) -> None:
 
 # --- maturity (OQ-1) ----------------------------------------------------------------------------
 
-MATURING = KnownInstrument(maturity_date=date(2026, 10, 16))
+MATURING = date(2026, 10, 16)
 
 
 def test_a_trade_on_the_maturity_date_with_a_typed_pu_is_accepted() -> None:
@@ -285,7 +279,7 @@ def test_a_trade_on_the_maturity_date_with_a_typed_pu_is_accepted() -> None:
         instrument=MATURING,
     )
 
-    assert trade.entry_date == MATURING.maturity_date
+    assert trade == Decimal("100000")
 
 
 def test_a_rate_typed_on_the_maturity_date_is_rejected() -> None:
@@ -346,7 +340,7 @@ def test_a_trade_after_the_maturity_date_is_rejected() -> None:
 
 
 def test_a_maturity_after_today_is_exempt_from_the_future_date_rule() -> None:
-    assert DI1F28.maturity_date is not None and DI1F28.maturity_date > TODAY
+    assert DI1F28 > TODAY
     assert validate_trade(_trade(entry_date=TODAY), today=TODAY, instrument=DI1F28)
 
 
@@ -357,10 +351,8 @@ def test_a_deposit_is_positive_and_a_withdrawal_negative() -> None:
     deposit = validate_cash_movement(_cash(), today=TODAY)
     withdrawal = validate_cash_movement(_cash(cash_amount=Decimal("-50000.00")), today=TODAY)
 
-    assert deposit == NewCashMovement(
-        entry_date=date(2026, 10, 14), entry_time=time(9, 0), amount=Decimal("1500000.00")
-    )
-    assert withdrawal.amount == Decimal("-50000.00")
+    assert deposit == Decimal("1500000.00")
+    assert withdrawal == Decimal("-50000.00")
 
 
 @pytest.mark.parametrize("amount", [None, "0", "0.00", "-0"])
@@ -383,8 +375,8 @@ def test_an_amount_with_more_than_2_places_is_rejected() -> None:
 
 def test_the_amount_fits_numeric_20_2() -> None:
     largest = Decimal("999999999999999999.99")
-    assert validate_cash_movement(_cash(cash_amount=largest), today=TODAY).amount == largest
-    assert validate_cash_movement(_cash(cash_amount=-largest), today=TODAY).amount == -largest
+    assert validate_cash_movement(_cash(cash_amount=largest), today=TODAY) == largest
+    assert validate_cash_movement(_cash(cash_amount=-largest), today=TODAY) == -largest
 
     with pytest.raises(DomainError) as error:
         validate_cash_movement(_cash(cash_amount=Decimal("1000000000000000000")), today=TODAY)

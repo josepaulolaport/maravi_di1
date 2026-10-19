@@ -8,11 +8,11 @@ from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.pnl.public import CalculationCompleteness
-from di1.modules.portfolio.application.interfaces.repository import (
-    PublishedCash,
+from di1.modules.portfolio.application.services.repository import (
     PublishedPortfolioDay,
     PublishedPosition,
 )
+from di1.modules.portfolio.domain.cash import CashDay
 from di1.modules.portfolio.domain.valuation import ValuationStatus
 from di1.modules.portfolio.infrastructure.persistence.models import (
     CashBalanceRow,
@@ -52,9 +52,10 @@ def _position(position: PositionRow, metrics: PositionMetricsRow) -> PublishedPo
     )
 
 
-def _cash(row: CashBalanceRow) -> PublishedCash:
-    return PublishedCash(
+def _cash(row: CashBalanceRow) -> CashDay:
+    return CashDay(
         date=row.balance_date,
+        previous_cash_balance=None,
         cash_balance=row.cash_balance,
         trades_cash_flow=row.trades_cash_flow,
         deposits=row.deposits,
@@ -62,7 +63,7 @@ def _cash(row: CashBalanceRow) -> PublishedCash:
     )
 
 
-class SqlAlchemyPortfolioRepository:
+class SqlPortfolioRepository:
     """Implements `PortfolioRepository` on the caller's session; it never commits."""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -126,7 +127,7 @@ class SqlAlchemyPortfolioRepository:
             published.recompute_aum(day.date, other_chain_processed=cash_processed)
         )
 
-    async def upsert_cash_day(self, cash: PublishedCash, *, positions_processed: bool) -> None:
+    async def upsert_cash_day(self, cash: CashDay, *, positions_processed: bool) -> None:
         await self._session.execute(
             published.upsert_cash_balance(
                 {
@@ -142,7 +143,7 @@ class SqlAlchemyPortfolioRepository:
             published.recompute_aum(cash.date, other_chain_processed=positions_processed)
         )
 
-    async def get_cash(self, on: date) -> PublishedCash | None:
+    async def get_cash(self, on: date) -> CashDay | None:
         row = await self._session.scalar(published.cash_balance(on))
         return None if row is None else _cash(row)
 

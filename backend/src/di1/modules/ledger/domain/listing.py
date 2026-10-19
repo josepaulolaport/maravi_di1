@@ -75,9 +75,7 @@ class EntryCursor:
                 raise ValueError("not a cursor this API wrote")
             return cursor
         except (ValueError, binascii.Error, UnicodeDecodeError) as exc:
-            raise DomainError(
-                ErrorDetail(ErrorCode.VALIDATION_ERROR, "Cursor inválido.", "cursor")
-            ) from exc
+            raise DomainError(ErrorDetail.validation("Cursor inválido.", "cursor")) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,13 +135,7 @@ def validate_page_request(
         )
     page_size = DEFAULT_PAGE_SIZE if limit is None else limit
     if not 1 <= page_size <= MAX_PAGE_SIZE:
-        errors.append(
-            ErrorDetail(
-                ErrorCode.VALIDATION_ERROR,
-                f"Use um limite entre 1 e {MAX_PAGE_SIZE}.",
-                "limit",
-            )
-        )
+        errors.append(ErrorDetail.validation(f"Use um limite entre 1 e {MAX_PAGE_SIZE}.", "limit"))
     if errors:
         raise DomainError(*errors)
     return PageRequest(

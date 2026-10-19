@@ -16,10 +16,9 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from di1.modules.asset.public import InstrumentDescriptor
-from di1.modules.ledger.domain.entries import EntryType, LedgerEntry, NewCashMovement, NewTrade
+from di1.modules.asset.public import Instrument
+from di1.modules.ledger.domain.entries import EntryDraft, EntryType, LedgerEntry
 from di1.modules.ledger.domain.listing import ListOrder, PageRequest
-from di1.modules.ledger.public import CashMovementRecord, TradeRecord
 from di1.modules.pricing.public import Price, Quote
 from di1.shared.calendar import DAYS_PER_YEAR, calendar_days
 from di1.shared.clock import SAO_PAULO
@@ -30,8 +29,8 @@ from di1.shared.input_kind import InputKind
 PRODUCT_ID = UUID("6f1c2a10-0000-4000-8000-000000000001")
 
 
-def di1_future(code: str, instrument_id: UUID, maturity: date) -> InstrumentDescriptor:
-    return InstrumentDescriptor(
+def di1_future(code: str, instrument_id: UUID, maturity: date) -> Instrument:
+    return Instrument(
         id=instrument_id,
         code=code,
         product_id=PRODUCT_ID,
@@ -58,21 +57,11 @@ DI1V26 = di1_future("DI1V26", UUID("6f1c2a10-0000-4000-8000-0000000000a1"), date
 class FakeAssets:
     """`AssetReader` over a fixed catalogue."""
 
-    instruments: dict[UUID, InstrumentDescriptor] = field(
+    instruments: dict[UUID, Instrument] = field(
         default_factory=lambda: {i.id: i for i in (DI1F27, DI1F28, DI1F29, DI1V26)}
     )
 
-    async def get_instrument(self, instrument_id: UUID) -> InstrumentDescriptor:
-        try:
-            return self.instruments[instrument_id]
-        except KeyError:
-            raise DomainError(
-                ErrorDetail(ErrorCode.NOT_FOUND, "Contrato não encontrado.")
-            ) from None
-
-    async def get_instruments(
-        self, instrument_ids: Collection[UUID]
-    ) -> Mapping[UUID, InstrumentDescriptor]:
+    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
         return {i: self.instruments[i] for i in instrument_ids if i in self.instruments}
 
 
@@ -88,7 +77,9 @@ class FormulaPricing:
 
     async def calculate(self, instrument_id: UUID, reference_date: date, quote: Quote) -> Price:
         self.calls.append((instrument_id, reference_date, quote))
-        contract = await self.assets.get_instrument(instrument_id)
+        contract = (await self.assets.get_instruments([instrument_id])).get(instrument_id)
+        if contract is None:
+            raise DomainError(ErrorDetail(ErrorCode.NOT_FOUND, "Contrato não encontrado."))
         assert contract.maturity_date is not None and contract.face_value is not None
         days = calendar_days(reference_date, contract.maturity_date)
         if days < 0:
@@ -144,31 +135,31 @@ class InMemoryLedgerRepository:
     now: datetime = datetime(2026, 10, 18, 12, 0, tzinfo=SAO_PAULO)
 
     async def add_trade(
-        self, trade: NewTrade, *, execution_pu: Decimal, execution_rate: Decimal
+        self, draft: EntryDraft, *, execution_pu: Decimal, execution_rate: Decimal
     ) -> LedgerEntry:
         return self._add(
             type=EntryType.TRADE,
-            entry_date=trade.entry_date,
-            entry_time=trade.entry_time,
-            asset_id=trade.asset_id,
-            signed_quantity=trade.signed_quantity,
+            entry_date=draft.entry_date,
+            entry_time=draft.entry_time,
+            asset_id=draft.asset_id,
+            signed_quantity=draft.signed_quantity,
             execution_pu=execution_pu,
             execution_rate=execution_rate,
-            input_kind=trade.input_kind,
+            input_kind=draft.input_kind,
             cash_amount=None,
         )
 
-    async def add_cash_movement(self, movement: NewCashMovement) -> LedgerEntry:
+    async def add_cash_movement(self, draft: EntryDraft, *, amount: Decimal) -> LedgerEntry:
         return self._add(
             type=EntryType.CASH,
-            entry_date=movement.entry_date,
-            entry_time=movement.entry_time,
+            entry_date=draft.entry_date,
+            entry_time=draft.entry_time,
             asset_id=None,
             signed_quantity=None,
             execution_pu=None,
             execution_rate=None,
             input_kind=None,
-            cash_amount=movement.amount,
+            cash_amount=amount,
         )
 
     async def lock_existing(self, ids: Collection[UUID]) -> set[UUID]:
@@ -208,12 +199,10 @@ class InMemoryLedgerRepository:
             rows = [r for r in rows if (r.order_key < after if descending else r.order_key > after)]
         return rows[: request.limit + 1]
 
-    async def get_trades(self, start_date: date, end_date: date) -> Sequence[TradeRecord]:
+    async def get_trades(self, start_date: date, end_date: date) -> Sequence[LedgerEntry]:
         raise NotImplementedError
 
-    async def get_cash_movements(
-        self, start_date: date, end_date: date
-    ) -> Sequence[CashMovementRecord]:
+    async def get_cash_movements(self, start_date: date, end_date: date) -> Sequence[LedgerEntry]:
         raise NotImplementedError
 
     def _active(self, start_date: date, end_date: date) -> list[LedgerEntry]:

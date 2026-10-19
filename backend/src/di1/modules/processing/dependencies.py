@@ -15,7 +15,7 @@ from di1.modules.ledger.public import LedgerReader
 from di1.modules.portfolio.public import PortfolioReader, PortfolioResultsWriter
 from di1.modules.prices.public import PriceReader
 from di1.modules.processing.application.interfaces.doorbell import DOORBELL_MESSAGE_TYPE
-from di1.modules.processing.application.services.chain_history import LedgerChainHistory
+from di1.modules.processing.application.services.chain_history import ChainHistory
 from di1.modules.processing.application.services.processing import ProcessingService
 from di1.modules.processing.application.services.run_chains import DayReaders
 from di1.modules.processing.application.services.run_processor import (
@@ -49,7 +49,7 @@ def make_processing_service(
         requests=SqlRequestRepository(),
         date_statuses=SqlDateStatusRepository(),
         issues=SqlIssueRepository(),
-        chain_history=LedgerChainHistory(ledger),
+        chain_history=ChainHistory(ledger),
         assets=assets,
         clock=clock,
         doorbell=OutboxDoorbell(),

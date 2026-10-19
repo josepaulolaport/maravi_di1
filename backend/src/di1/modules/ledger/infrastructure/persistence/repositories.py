@@ -12,10 +12,9 @@ from uuid import UUID
 from sqlalchemy import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from di1.modules.ledger.domain.entries import EntryType, LedgerEntry, NewCashMovement, NewTrade
+from di1.modules.ledger.domain.entries import EntryDraft, EntryType, LedgerEntry
 from di1.modules.ledger.domain.listing import PageRequest
 from di1.modules.ledger.infrastructure.persistence.queries import entries as queries
-from di1.modules.ledger.public import CashMovementRecord, TradeRecord
 from di1.shared.input_kind import InputKind
 
 
@@ -26,28 +25,30 @@ class SqlLedgerRepository:
         self._session = session
 
     async def add_trade(
-        self, trade: NewTrade, *, execution_pu: Decimal, execution_rate: Decimal
+        self, draft: EntryDraft, *, execution_pu: Decimal, execution_rate: Decimal
     ) -> LedgerEntry:
+        assert draft.asset_id is not None and draft.signed_quantity is not None
+        assert draft.input_kind is not None
         return await self._insert(
             {
                 "type": EntryType.TRADE.value,
-                "entry_date": trade.entry_date,
-                "entry_time": trade.entry_time,
-                "asset_id": trade.asset_id,
-                "signed_quantity": trade.signed_quantity,
+                "entry_date": draft.entry_date,
+                "entry_time": draft.entry_time,
+                "asset_id": draft.asset_id,
+                "signed_quantity": draft.signed_quantity,
                 "execution_pu": execution_pu,
                 "execution_rate": execution_rate,
-                "input_kind": trade.input_kind.value,
+                "input_kind": draft.input_kind.value,
             }
         )
 
-    async def add_cash_movement(self, movement: NewCashMovement) -> LedgerEntry:
+    async def add_cash_movement(self, draft: EntryDraft, *, amount: Decimal) -> LedgerEntry:
         return await self._insert(
             {
                 "type": EntryType.CASH.value,
-                "entry_date": movement.entry_date,
-                "entry_time": movement.entry_time,
-                "cash_amount": movement.amount,
+                "entry_date": draft.entry_date,
+                "entry_time": draft.entry_time,
+                "cash_amount": amount,
             }
         )
 
@@ -67,19 +68,17 @@ class SqlLedgerRepository:
         result = await self._session.execute(queries.page(request, matching_asset_ids))
         return [_entry(row) for row in result]
 
-    async def get_trades(self, start_date: date, end_date: date) -> Sequence[TradeRecord]:
+    async def get_trades(self, start_date: date, end_date: date) -> Sequence[LedgerEntry]:
         result = await self._session.execute(
             queries.entries_of_type(EntryType.TRADE, start_date, end_date)
         )
-        return [_trade_record(row) for row in result]
+        return [_entry(row) for row in result]
 
-    async def get_cash_movements(
-        self, start_date: date, end_date: date
-    ) -> Sequence[CashMovementRecord]:
+    async def get_cash_movements(self, start_date: date, end_date: date) -> Sequence[LedgerEntry]:
         result = await self._session.execute(
             queries.entries_of_type(EntryType.CASH, start_date, end_date)
         )
-        return [_cash_record(row) for row in result]
+        return [_entry(row) for row in result]
 
     async def has_entries_on_or_before(self, day: date, *, entry_type: str | None = None) -> bool:
         """Processing's zero-state check (OQ-31, OQ-37), asked only when the chain has no status
@@ -114,30 +113,4 @@ def _entry(row: Row[Any]) -> LedgerEntry:
         execution_rate=row.execution_rate,
         input_kind=InputKind(row.input_kind) if row.input_kind is not None else None,
         cash_amount=row.cash_amount,
-    )
-
-
-def _trade_record(row: Row[Any]) -> TradeRecord:
-    return TradeRecord(
-        id=row.id,
-        asset_id=row.asset_id,
-        trade_date=row.entry_date,
-        trade_time=row.entry_time,
-        seq=row.seq,
-        signed_quantity=row.signed_quantity,
-        execution_pu=row.execution_pu,
-        execution_rate=row.execution_rate,
-        input_kind=InputKind(row.input_kind),
-        created_at=row.created_at,
-    )
-
-
-def _cash_record(row: Row[Any]) -> CashMovementRecord:
-    return CashMovementRecord(
-        id=row.id,
-        movement_date=row.entry_date,
-        movement_time=row.entry_time,
-        seq=row.seq,
-        amount=row.cash_amount,
-        created_at=row.created_at,
     )

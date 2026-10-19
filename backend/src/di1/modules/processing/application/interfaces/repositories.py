@@ -38,14 +38,14 @@ def status_of(status: DateStatus, chain: ProcessingChain) -> ChainStatus | None:
 
 @dataclass(frozen=True, slots=True)
 class IssueRecord:
-    """One row of ``processing.issues``; ``message`` and ``created_at`` stay internal."""
+    """One Pendência. ``id`` and ``request_id`` are set once it is stored."""
 
-    id: UUID
-    request_id: UUID
     issue_type: IssueType
     asset_id: UUID | None
     affected_date: date
     required_price_date: date | None
+    id: UUID | None = None
+    request_id: UUID | None = None
 
 
 class DateStatusRepository(Protocol):

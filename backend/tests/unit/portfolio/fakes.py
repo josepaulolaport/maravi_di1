@@ -15,23 +15,43 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from di1.modules.asset.public import InstrumentDescriptor
-from di1.modules.portfolio.application.interfaces.repository import (
-    PublishedCash,
+from di1.modules.asset.public import Instrument
+from di1.modules.portfolio.application.services.repository import (
     PublishedPortfolioDay,
     PublishedPosition,
 )
+from di1.modules.portfolio.domain.cash import CashDay
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.modules.processing.public import DateStatus
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.input_kind import InputKind
+
+ZERO = Decimal("0")
+
+
+def stored_cash(
+    on: date,
+    balance: Decimal,
+    trades: Decimal = ZERO,
+    deposits: Decimal = ZERO,
+    withdrawals: Decimal = ZERO,
+) -> CashDay:
+    """A published ``cash_balances`` row: no previous balance on the stored shape."""
+    return CashDay(
+        date=on,
+        previous_cash_balance=None,
+        trades_cash_flow=trades,
+        deposits=deposits,
+        withdrawals=withdrawals,
+        cash_balance=balance,
+    )
 
 
 class InMemoryPortfolioRepository:
     def __init__(self) -> None:
         self.days: dict[date, PublishedPortfolioDay] = {}
         self.positions: dict[date, tuple[PublishedPosition, ...]] = {}
-        self.cash: dict[date, PublishedCash] = {}
+        self.cash: dict[date, CashDay] = {}
         self.snapshots = 0
 
     async def start_read_snapshot(self) -> None:
@@ -48,14 +68,14 @@ class InMemoryPortfolioRepository:
         self.days[day.date] = replace(day, aum=aum)
         self.positions[day.date] = tuple(sorted(positions, key=lambda p: p.asset_id))
 
-    async def upsert_cash_day(self, cash: PublishedCash, *, positions_processed: bool) -> None:
+    async def upsert_cash_day(self, cash: CashDay, *, positions_processed: bool) -> None:
         self.cash[cash.date] = cash
         day = self.days.get(cash.date)
         if day is not None:
             aum = self._aum(cash.date, day.positions_market_value) if positions_processed else None
             self.days[cash.date] = replace(day, aum=aum)
 
-    async def get_cash(self, on: date) -> PublishedCash | None:
+    async def get_cash(self, on: date) -> CashDay | None:
         return self.cash.get(on)
 
     async def get_portfolio_day(self, on: date) -> PublishedPortfolioDay | None:
@@ -117,21 +137,26 @@ class FakePriceReader:
             updated_at=stamp,
         )
 
-    async def get_preferred(
-        self, asset_id: UUID, reference_date: date
-    ) -> ReferencePriceRecord | None:
-        return self.prices.get((asset_id, reference_date))
-
-    async def get_preferred_many(
+    async def get(
         self, asset_ids: Collection[UUID], dates: Collection[date]
     ) -> Mapping[tuple[UUID, date], ReferencePriceRecord]:
         return {k: v for k, v in self.prices.items() if k[0] in asset_ids and k[1] in dates}
+
+    async def latest(self, asset_ids: Collection[UUID]) -> Mapping[UUID, ReferencePriceRecord]:
+        latest: dict[UUID, ReferencePriceRecord] = {}
+        for (asset_id, _day), record in self.prices.items():
+            if asset_id not in asset_ids:
+                continue
+            current = latest.get(asset_id)
+            if current is None or record.reference_date > current.reference_date:
+                latest[asset_id] = record
+        return latest
 
 
 class FakeAssetReader:
     def __init__(self, *instruments: tuple[UUID, str, date | None]) -> None:
         self.instruments = {
-            asset_id: InstrumentDescriptor(
+            asset_id: Instrument(
                 id=asset_id,
                 code=code,
                 product_id=UUID(int=0),
@@ -146,10 +171,5 @@ class FakeAssetReader:
             for asset_id, code, maturity in instruments
         }
 
-    async def get_instrument(self, instrument_id: UUID) -> InstrumentDescriptor:
-        return self.instruments[instrument_id]
-
-    async def get_instruments(
-        self, instrument_ids: Collection[UUID]
-    ) -> Mapping[UUID, InstrumentDescriptor]:
+    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
         return {i: d for i, d in self.instruments.items() if i in instrument_ids}

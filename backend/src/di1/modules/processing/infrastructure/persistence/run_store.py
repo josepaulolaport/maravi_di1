@@ -11,9 +11,9 @@ from uuid import UUID
 
 from sqlalchemy import Row
 
+from di1.modules.processing.application.interfaces.repositories import IssueRecord
 from di1.modules.processing.application.interfaces.run_store import (
     DateStatusRow,
-    NewIssue,
 )
 from di1.modules.processing.infrastructure.persistence.errors import is_transient
 from di1.modules.processing.infrastructure.persistence.queries import runs as sql
@@ -153,7 +153,7 @@ class SqlRunStore:
         )
 
     async def replace_issues(
-        self, request_id: UUID, day: date, issues: Sequence[NewIssue], *, uow: UnitOfWork
+        self, request_id: UUID, day: date, issues: Sequence[IssueRecord], *, uow: UnitOfWork
     ) -> None:
         await uow.session.execute(sql.DELETE_ISSUES_OF_DATE, {"day": day})
         if not issues:

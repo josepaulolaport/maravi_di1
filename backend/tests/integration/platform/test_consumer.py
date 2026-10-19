@@ -69,6 +69,14 @@ async def _deliver(consumer: MessageConsumer, delivery: _FakeDelivery) -> None:
     await consumer.handle(cast(AbstractIncomingMessage, delivery))
 
 
+async def wait_idle(runner: AfterAckRunner) -> None:
+    while True:
+        running = runner._running
+        if running is None or running.done():
+            return
+        await asyncio.wait({running})
+
+
 # Ordering of the acknowledgement, checked delivery by delivery (no broker needed).
 
 
@@ -393,7 +401,7 @@ async def test_the_work_after_the_ack_runs_once_the_message_is_acked(
     handler = _ClaimThenRun(delivery)
 
     await _deliver(_consumer_with(session_factory, handler, runner), delivery)
-    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+    await asyncio.wait_for(wait_idle(runner), timeout=5)
 
     assert delivery.settled == [("ack", [envelope.message_id])]
     assert handler.ran == [(envelope.message_id, ["ack"])]
@@ -430,7 +438,7 @@ async def test_a_failure_after_the_ack_is_logged_and_the_message_stays_acked(
     await _deliver(
         _consumer_with(session_factory, _ClaimThenRun(delivery, fails=True), runner), delivery
     )
-    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+    await asyncio.wait_for(wait_idle(runner), timeout=5)
 
     assert delivery.settled == [("ack", [envelope.message_id])]
     assert (
@@ -449,7 +457,7 @@ async def test_a_duplicate_does_not_run_the_work_after_the_ack(
 
     for _ in range(2):
         await _deliver(consumer, _FakeDelivery(envelope.to_json(), engine))
-    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+    await asyncio.wait_for(wait_idle(runner), timeout=5)
 
     assert [message_id for message_id, _ in handler.ran] == [envelope.message_id]
 
@@ -478,7 +486,7 @@ async def test_a_delivery_during_a_run_is_acked_at_once_and_its_run_waits(
 
     assert handler.hold is not None
     handler.hold.set()
-    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+    await asyncio.wait_for(wait_idle(runner), timeout=5)
     assert [message_id for message_id, _ in handler.ran] == [first.message_id, second.message_id]
 
 
@@ -525,6 +533,6 @@ async def test_the_work_after_the_ack_runs_even_when_the_ack_fails(
         _consumer_with(session_factory, handler, runner),
         _AckFails(envelope.to_json(), engine),
     )
-    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+    await asyncio.wait_for(wait_idle(runner), timeout=5)
 
     assert [message_id for message_id, _ in handler.ran] == [envelope.message_id]

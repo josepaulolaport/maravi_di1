@@ -41,7 +41,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 - **Reference prices:**
   - **Exact date only. No carry-forward**, weekends included.
   - When both sources exist, MANUAL wins over B3.
-  - There is one row per (asset, date, source) and no revisions (OQ-25): a correction updates it in place, a removal deletes it.
+  - There is one row per (asset, date, source) and no revisions (OQ-25): a later set of the same key deletes the current row and inserts the new one; a removal deletes it.
   - Prices live only in the price table (OQ-30): the Carteira shows each date's reference PU, rate and source from the current preferred price, and `position_metrics` stores no PU or source. D's position P&L uses the D−1 PU from the price table. A price changed after its date was processed marks nothing (OQ-31): the processed dates keep their status until the user reprocesses them.
 - **Accounting:**
   - Starting state: zero cash, zero positions, zero P&L.
@@ -78,7 +78,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - Cancellation is cooperative.
   - Exactly one processing worker (OQ-45): one `worker` service, plus the outbox relay, prefetch 1. No lease, no claim-token fencing, no recovery cap (OQ-43 reversed; `RECOVERY_EXHAUSTED` retired). Delivery is still at-least-once; the doorbell carries no data, so a duplicate is harmless and the worker may ACK it on receipt (OQ-46). `requests.claim_token`, `lease_expires_at` and `attempt_count` are unused.
   - No staging (OQ-23): each date is published in its own transaction, which locks the `date_status` rows of D−1 and D. A write during a run only saves its fact; the run never stops for it (OQ-31).
-  - `processing.date_status` is the only source of each date's processing status (OQ-23, OQ-31), per chain: no row or NULL = Não processado, `PROCESSED` Processado, `PROCESSED_WITH_ISSUES` Processado com pendências, `RUNNING` Processando, `FAILED` Erro. There is no `STALE`. `cash_processed_at` and `portfolio_processed_at` record when a run last committed each chain for the date (NULL when never processed); every read exposes them, and the UI shows "Processado em dd/mm/aaaa hh:mm". There are no dirty markers and no revision counters.
+  - `processing.date_status` is the only source of each date's processing status (OQ-23, OQ-31), per chain: no row or NULL = Não processado, `PROCESSED` Processado, `PROCESSED_WITH_ISSUES` Processado com pendências, `RUNNING` Processando, `FAILED` Erro. There is no `STALE`. `cash_processed_at` and `portfolio_processed_at` record when a run last committed each chain for the date (NULL when never processed); the summary and the positions table expose them, and the UI shows "Processado em dd/mm/aaaa hh:mm" (the P&L series does not carry the processing time, OQ-49). There are no dirty markers and no revision counters.
   - Eight run statuses; there is no `SUPERSEDED`. A failure at D sets D `FAILED` and ends the run `FAILED`, except on an ALL run where one chain fails: the run then ends `COMPLETED_WITH_ISSUES`, and `FAILED` only if both fail; `COMPLETED_WITH_ISSUES` and `CANCELLED` may carry `error_code`/`error_message` (OQ-36). The run stores its first failure as `failed_date` and `failed_chain`; a `COMPLETED_WITH_ISSUES` run where a chain failed offers "Solicitar novo processamento" with that chain's scope from `failed_date` to the original end (OQ-40). A cancel commits the current date and ends `CANCELLED`. Later dates are never touched. Recovery happens only at worker start (OQ-45): the run left `RUNNING` has its `RUNNING` dates restored from `*_previous` first (OQ-26), then resumes after `requests.progress_date`, or ends `CANCELLED` if `cancel_requested_at` is set; then the worker drains the `QUEUED` requests (OQ-46).
 - **Ledger entries are never edited.** Trades and cash movements are one ledger entry (`ledger.entries`, OQ-24). They are deleted only by an explicit user action (OQ-32): a real `DELETE`, without a reason, all or nothing, with no audit trail; an unknown or already-deleted id answers 404 and nothing is deleted.
 - **Dates and validation** (OQ-7, OQ-13, OQ-14):
@@ -108,7 +108,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 - Docker Compose runs the API, PostgreSQL, RabbitMQ, the worker and the outbox relay; there is no dispatcher (OQ-46).
 
 **Modular monolith:** the modules are `asset`, `pricing`, `ledger`, `prices`, `portfolio`, `pnl` and `processing`; `platform` holds the shared technical infrastructure. The layout is in `docs/maravi_implementation_plan.md` §1:
-- `backend/src/di1/modules/<m>/{public.py, domain/, application/services/, application/interfaces/, infrastructure/, presentation/http/, presentation/messaging/}`
+- `backend/src/di1/modules/<m>/{public.py, domain/, application/services/, application/interfaces/ when the module has several persistence ports (processing), infrastructure/, presentation/http/, presentation/messaging/}`
 - `infrastructure/` holds persistence and any other outbound adapter. A module's RabbitMQ consumers and handlers live in `presentation/messaging/`; shared RabbitMQ infrastructure lives in `platform/messaging/`; business processing logic stays in `application/`.
 - `composition/`, `workers/`, `platform/`
 

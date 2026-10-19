@@ -16,8 +16,8 @@ from di1.modules.pnl.domain.results import (
     AssetPnLResult,
     CalculationCompleteness,
     MissingReferencePrice,
+    PnLTrade,
 )
-from di1.modules.pnl.domain.trade import PnLTrade
 
 D = Decimal
 

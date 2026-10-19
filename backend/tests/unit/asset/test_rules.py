@@ -17,8 +17,8 @@ from decimal import Decimal
 
 import pytest
 
+from di1.modules.asset.domain.model import FuturesTerms
 from di1.modules.asset.domain.rules import (
-    FuturesTerms,
     normalize_instrument_code,
     normalize_product_code,
     validate_catalogue_code,

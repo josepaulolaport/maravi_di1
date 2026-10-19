@@ -88,10 +88,10 @@ async def test_the_reader_returns_active_entries_of_each_type_in_order(
     assert outside not in {t.id for t in trades}
     assert [m.id for m in movements] == [withdrawal, deposit]
     first = trades[1]
-    assert (first.trade_date, first.trade_time, first.signed_quantity) == (day, time(10), -3)
+    assert (first.entry_date, first.entry_time, first.signed_quantity) == (day, time(10), -3)
     assert first.input_kind is InputKind.RATE
-    assert movements[0].amount == Decimal("-1.00")
-    assert movements[0].movement_time == time(8, 0)
+    assert movements[0].cash_amount == Decimal("-1.00")
+    assert movements[0].entry_time == time(8, 0)
 
 
 async def test_has_entries_on_or_before_checks_dates_and_type(

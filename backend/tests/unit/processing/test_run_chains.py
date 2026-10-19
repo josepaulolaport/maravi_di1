@@ -17,8 +17,7 @@ from di1.modules.portfolio.public import (
     PreviousPositionsDay,
     ValuationStatus,
 )
-from di1.modules.processing.application.interfaces.repositories import IssueType
-from di1.modules.processing.application.interfaces.run_store import NewIssue
+from di1.modules.processing.application.interfaces.repositories import IssueRecord, IssueType
 from di1.modules.processing.application.services.run_chains import (
     ChainDataError,
     process_cash_day,
@@ -42,7 +41,7 @@ def world() -> World:
 
 async def positions(
     w: World, day: date, *, zero_state: bool, other: bool = False
-) -> tuple[list[NewIssue], RecordingWriter]:
+) -> tuple[list[IssueRecord], RecordingWriter]:
     writer = RecordingWriter()
     issues = await process_positions_day(
         day,
@@ -166,7 +165,7 @@ async def test_a_missing_price_on_d_is_an_issue_and_leaves_the_figures_null() ->
 
     issues, writer = await positions(w, D2, zero_state=False)
 
-    assert issues == [NewIssue(IssueType.MISSING_REFERENCE_PRICE, F29, D2, D2)]
+    assert issues == [IssueRecord(IssueType.MISSING_REFERENCE_PRICE, F29, D2, D2)]
     written = writer.positions[0]
     assert written.day.positions[0].quantity == 10  # the quantity is still computed
     assert written.valuation.status is ValuationStatus.MISSING
@@ -183,7 +182,7 @@ async def test_a_missing_price_on_d_minus_1_is_an_issue_for_that_date() -> None:
 
     issues, writer = await positions(w, D2, zero_state=False)
 
-    assert issues == [NewIssue(IssueType.MISSING_REFERENCE_PRICE, F29, D2, D1)]
+    assert issues == [IssueRecord(IssueType.MISSING_REFERENCE_PRICE, F29, D2, D1)]
     assert writer.positions[0].valuation.positions_market_value == Decimal("952000")
     assert writer.positions[0].asset_pnl[F29].position_pnl is None
 
@@ -213,7 +212,7 @@ async def test_an_open_position_after_maturity_is_worth_zero_and_raises_an_issue
 
     issues, writer = await positions(w, D2, zero_state=False)
 
-    assert issues == [NewIssue(IssueType.EXPIRED_OPEN_POSITION, F29, D2, None)]
+    assert issues == [IssueRecord(IssueType.EXPIRED_OPEN_POSITION, F29, D2, None)]
     written = writer.positions[0]
     assert written.valuation.positions_market_value == 0
     # position_pnl = Q × (0 − PU_maturity) (spec §7.4)

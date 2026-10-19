@@ -40,6 +40,10 @@ class ErrorDetail:
     message: str
     field: str | None = None
 
+    @classmethod
+    def validation(cls, message: str, field: str | None = None) -> ErrorDetail:
+        return cls(ErrorCode.VALIDATION_ERROR, message, field)
+
 
 class DomainError(Exception):
     """A business rule refused the operation. Raised by domain and application code.

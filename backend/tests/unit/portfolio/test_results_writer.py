@@ -11,12 +11,11 @@ from uuid import UUID
 import pytest
 
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
-from di1.modules.portfolio.application.interfaces.repository import (
-    PublishedCash,
+from di1.modules.portfolio.application.services.repository import (
     PublishedPortfolioDay,
     PublishedPosition,
 )
-from di1.modules.portfolio.application.services.results_writer import ResultsWriter
+from di1.modules.portfolio.application.services.results_writer import PortfolioResultsWriter
 from di1.modules.portfolio.domain.cash import CashDay
 from di1.modules.portfolio.domain.positions import PositionDay, PositionsDay
 from di1.modules.portfolio.domain.trade import Trade
@@ -84,12 +83,12 @@ def repository() -> InMemoryPortfolioRepository:
 
 
 @pytest.fixture
-def writer(repository: InMemoryPortfolioRepository) -> ResultsWriter:
-    return ResultsWriter(lambda uow: repository)
+def writer(repository: InMemoryPortfolioRepository) -> PortfolioResultsWriter:
+    return PortfolioResultsWriter(lambda uow: repository)
 
 
 async def test_a_positions_day_maps_onto_the_published_rows(
-    writer: ResultsWriter, repository: InMemoryPortfolioRepository
+    writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     await writer.write_positions_day(
         _positions(DI1F27),
@@ -128,7 +127,7 @@ async def test_a_positions_day_maps_onto_the_published_rows(
 
 
 async def test_the_valuation_aum_is_ignored_and_recomputed_from_the_published_cash(
-    writer: ResultsWriter, repository: InMemoryPortfolioRepository
+    writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     # OQ-21, OQ-28: AUM = cash + market value of the date: 49000 + 951000.
     cash = CashDay(
@@ -148,7 +147,7 @@ async def test_the_valuation_aum_is_ignored_and_recomputed_from_the_published_ca
 
 
 async def test_a_missing_market_value_is_stored_missing(
-    writer: ResultsWriter, repository: InMemoryPortfolioRepository
+    writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     await writer.write_positions_day(
         _positions(DI1F27),
@@ -164,7 +163,7 @@ async def test_a_missing_market_value_is_stored_missing(
 
 
 async def test_a_cash_day_maps_onto_its_row(
-    writer: ResultsWriter, repository: InMemoryPortfolioRepository
+    writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     cash = CashDay(
         DAY, Decimal("10"), Decimal("-5"), Decimal("100.25"), Decimal("0.25"), Decimal("105")
@@ -172,17 +171,11 @@ async def test_a_cash_day_maps_onto_its_row(
 
     await writer.write_cash_day(cash, uow=FakeUnitOfWork(), other_chain_processed=True)
 
-    assert repository.cash[DAY] == PublishedCash(
-        date=DAY,
-        cash_balance=Decimal("105"),
-        trades_cash_flow=Decimal("-5"),
-        deposits=Decimal("100.25"),
-        withdrawals=Decimal("0.25"),
-    )
+    assert repository.cash[DAY] == cash
 
 
 async def test_a_day_with_no_expected_asset_writes_only_the_portfolio_row(
-    writer: ResultsWriter, repository: InMemoryPortfolioRepository
+    writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     # OQ-22 item 5: every position closed earlier; market value 0, P&L 0, cumulative carried.
     carried = PortfolioPnLResult(
@@ -215,7 +208,7 @@ async def test_a_day_with_no_expected_asset_writes_only_the_portfolio_row(
     ],
 )
 async def test_the_three_inputs_must_cover_the_same_assets(
-    writer: ResultsWriter,
+    writer: PortfolioResultsWriter,
     positions: tuple[UUID, ...],
     valued: tuple[UUID, ...],
     with_pnl: tuple[UUID, ...],
@@ -231,7 +224,7 @@ async def test_the_three_inputs_must_cover_the_same_assets(
         )
 
 
-async def test_the_valuation_must_be_of_the_same_date(writer: ResultsWriter) -> None:
+async def test_the_valuation_must_be_of_the_same_date(writer: PortfolioResultsWriter) -> None:
     other_day = replace(_valuation(DI1F27), date=DAY.replace(day=5))
     with pytest.raises(ValueError):
         await writer.write_positions_day(
@@ -249,7 +242,7 @@ async def test_the_valuation_must_be_of_the_same_date(writer: ResultsWriter) -> 
     [(None, ValuationStatus.COMPLETE), ("0", ValuationStatus.MISSING)],
 )
 async def test_a_market_value_must_match_its_status(
-    writer: ResultsWriter, market_value: str | None, status: ValuationStatus
+    writer: PortfolioResultsWriter, market_value: str | None, status: ValuationStatus
 ) -> None:
     # Unavailable data is never stored as complete, nor a figure as missing (spec §8.3).
     inconsistent = replace(
@@ -276,7 +269,9 @@ class TestOtherChainProcessed:
         DAY, Decimal("0"), Decimal("0"), Decimal("49000"), Decimal("0"), Decimal("49000")
     )
 
-    async def _positions_day(self, writer: ResultsWriter, other_chain_processed: bool) -> None:
+    async def _positions_day(
+        self, writer: PortfolioResultsWriter, other_chain_processed: bool
+    ) -> None:
         await writer.write_positions_day(
             _positions(DI1F27),
             _valuation(DI1F27),
@@ -287,7 +282,7 @@ class TestOtherChainProcessed:
         )
 
     async def test_positions_with_unprocessed_cash_write_a_null_aum(
-        self, writer: ResultsWriter, repository: InMemoryPortfolioRepository
+        self, writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
     ) -> None:
         # Cash rows of D exist (e.g. kept from before) but D's cash chain is FAILED.
         await writer.write_cash_day(self.CASH, uow=FakeUnitOfWork(), other_chain_processed=False)
@@ -296,7 +291,7 @@ class TestOtherChainProcessed:
         assert repository.days[DAY].aum is None
 
     async def test_positions_with_processed_cash_write_cash_plus_market_value(
-        self, writer: ResultsWriter, repository: InMemoryPortfolioRepository
+        self, writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
     ) -> None:
         await writer.write_cash_day(self.CASH, uow=FakeUnitOfWork(), other_chain_processed=False)
         await self._positions_day(writer, other_chain_processed=True)
@@ -304,7 +299,7 @@ class TestOtherChainProcessed:
         assert repository.days[DAY].aum == Decimal("1000000")  # 49000 + 951000
 
     async def test_cash_with_unprocessed_positions_writes_a_null_aum(
-        self, writer: ResultsWriter, repository: InMemoryPortfolioRepository
+        self, writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
     ) -> None:
         await self._positions_day(writer, other_chain_processed=True)
         await writer.write_cash_day(self.CASH, uow=FakeUnitOfWork(), other_chain_processed=False)
@@ -312,7 +307,7 @@ class TestOtherChainProcessed:
         assert repository.days[DAY].aum is None
 
     async def test_cash_with_processed_positions_writes_cash_plus_market_value(
-        self, writer: ResultsWriter, repository: InMemoryPortfolioRepository
+        self, writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
     ) -> None:
         await self._positions_day(writer, other_chain_processed=False)
         await writer.write_cash_day(self.CASH, uow=FakeUnitOfWork(), other_chain_processed=True)
@@ -320,7 +315,7 @@ class TestOtherChainProcessed:
         assert repository.days[DAY].aum == Decimal("1000000")
 
     async def test_an_all_run_writes_aum_on_its_second_call(
-        self, writer: ResultsWriter, repository: InMemoryPortfolioRepository
+        self, writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
     ) -> None:
         # OQ-38, OQ-40: ALL writes positions first, passed False, then cash, passed the positions
         # outcome; AUM is set by the second call.
@@ -345,7 +340,7 @@ ZERO_PNL = PortfolioPnLResult(Decimal("0"), Decimal("0"), Decimal("0"), Decimal(
     ],
 )
 async def test_a_day_with_no_expected_asset_has_zero_value_and_zero_pnl(
-    writer: ResultsWriter, market_value: str | None, pnl: PortfolioPnLResult
+    writer: PortfolioResultsWriter, market_value: str | None, pnl: PortfolioPnLResult
 ) -> None:
     # OQ-22 item 5: with no expected asset the market value is 0 and position, trades and daily
     # P&L are exactly 0 (reviewer m4); anything else cannot come from an empty day.

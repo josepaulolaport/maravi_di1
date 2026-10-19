@@ -10,40 +10,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal
 from typing import Final, Protocol
 
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
+from di1.shared.quotes import Quote, QuoteRule
 
 SOURCE_PRIORITY: Final = ("MANUAL", "B3")
 """The preferred source first (spec §5). Values of `prices.public.PriceSource`."""
-
-
-class QuoteRule(Protocol):
-    """The validation of a typed quote: the typed value, or ``None``, and every problem found
-    (``pricing.public.QuoteValidator``, whose field names this module's requests use)."""
-
-    def __call__(
-        self,
-        kind: InputKind,
-        *,
-        pu: Decimal | None,
-        rate: Decimal | None,
-        reference_date: date,
-        maturity_date: date | None,
-    ) -> tuple[Decimal | None, Sequence[ErrorDetail]]: ...
-
-
-@dataclass(frozen=True, slots=True)
-class TypedQuote:
-    """The value the user typed, the single authoritative input."""
-
-    kind: InputKind
-    value: Decimal
 
 
 def validate_reference_price(
@@ -55,7 +32,7 @@ def validate_reference_price(
     pu: Decimal | None,
     rate: Decimal | None,
     validate_quote: QuoteRule,
-) -> TypedQuote:
+) -> Quote:
     """The typed quote of a reference price, or `DomainError` with every problem found."""
     errors: list[ErrorDetail] = []
     if reference_date > today:
@@ -71,7 +48,7 @@ def validate_reference_price(
     if errors:
         raise DomainError(*errors)
     assert value is not None  # the quote rule reported a missing value
-    return TypedQuote(input_kind, value)
+    return Quote(input_kind, value)
 
 
 class SourcedObservation(Protocol):

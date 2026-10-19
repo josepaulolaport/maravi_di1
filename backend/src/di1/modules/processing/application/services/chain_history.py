@@ -9,8 +9,8 @@ from di1.modules.ledger.public import EntryType, LedgerReader
 from di1.modules.processing.application.interfaces.repositories import ProcessingChain
 
 
-class LedgerChainHistory:
-    """Satisfies `ChainHistory` through the Ledger's existence read (OQ-37)."""
+class ChainHistory:
+    """`ChainHistory` through the Ledger's existence read (OQ-37)."""
 
     def __init__(self, ledger: LedgerReader) -> None:
         self._ledger = ledger

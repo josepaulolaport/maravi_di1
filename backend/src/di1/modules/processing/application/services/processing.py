@@ -231,20 +231,24 @@ class ProcessingService:
         issues = deduplicate(await self._issues.list_current(uow=uow))
         asset_ids = {issue.asset_id for issue in issues if issue.asset_id is not None}
         assets = await self._assets.get_instruments(asset_ids) if asset_ids else {}
-        return [
-            IssueView(
-                id=issue.id,
-                issue_type=issue.issue_type,
-                asset_id=issue.asset_id,
-                asset_code=assets[issue.asset_id].code
-                if issue.asset_id is not None and issue.asset_id in assets
-                else None,
-                affected_date=issue.affected_date,
-                required_price_date=issue.required_price_date,
-                request_id=issue.request_id,
+        views: list[IssueView] = []
+        for issue in issues:
+            if issue.id is None or issue.request_id is None:
+                raise RuntimeError("a stored Pendência has an id")
+            views.append(
+                IssueView(
+                    id=issue.id,
+                    issue_type=issue.issue_type,
+                    asset_id=issue.asset_id,
+                    asset_code=assets[issue.asset_id].code
+                    if issue.asset_id is not None and issue.asset_id in assets
+                    else None,
+                    affected_date=issue.affected_date,
+                    required_price_date=issue.required_price_date,
+                    request_id=issue.request_id,
+                )
             )
-            for issue in issues
-        ]
+        return views
 
     async def _predecessor_state(
         self, chain: ProcessingChain, day: date, uow: UnitOfWork

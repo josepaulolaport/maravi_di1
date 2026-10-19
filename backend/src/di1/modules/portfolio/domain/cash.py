@@ -38,7 +38,7 @@ class CashDay:
     """One day of cash. ``trades_cash_flow`` is ``−Σ(signed_qty × execution_PU)``."""
 
     date: date
-    previous_cash_balance: Decimal
+    previous_cash_balance: Decimal | None
     trades_cash_flow: Decimal
     deposits: Decimal
     withdrawals: Decimal

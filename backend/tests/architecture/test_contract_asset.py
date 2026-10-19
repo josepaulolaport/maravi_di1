@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
+import typing
+from collections.abc import Collection, Mapping
 from datetime import date
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
-from di1.modules.asset.public import InstrumentDescriptor
+from di1.modules.asset.public import AssetReader, Instrument
 
 
 def test_a_descriptor_carries_the_di1_specification() -> None:
-    descriptor = InstrumentDescriptor(
+    descriptor = Instrument(
         id=uuid4(),
         code="DI1F27",
         product_id=uuid4(),
@@ -28,3 +31,12 @@ def test_a_descriptor_carries_the_di1_specification() -> None:
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         descriptor.code = "DI1N27"  # type: ignore[misc]
+
+
+def test_asset_reader_is_a_batch_lookup() -> None:
+    signature = inspect.signature(AssetReader.get_instruments)
+    assert list(signature.parameters) == ["self", "instrument_ids"]
+    hints = typing.get_type_hints(AssetReader.get_instruments)
+    assert hints["instrument_ids"] == Collection[UUID]
+    assert hints["return"] == Mapping[UUID, Instrument]
+    assert not hasattr(AssetReader, "get_instrument")

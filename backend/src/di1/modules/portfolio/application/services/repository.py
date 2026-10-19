@@ -13,6 +13,7 @@ from typing import Protocol
 from uuid import UUID
 
 from di1.modules.pnl.public import CalculationCompleteness
+from di1.modules.portfolio.domain.cash import CashDay
 from di1.modules.portfolio.domain.valuation import ValuationStatus
 
 
@@ -48,17 +49,6 @@ class PublishedPortfolioDay:
     pnl_status: CalculationCompleteness
 
 
-@dataclass(frozen=True, slots=True)
-class PublishedCash:
-    """A ``cash_balances`` row."""
-
-    date: date
-    cash_balance: Decimal
-    trades_cash_flow: Decimal
-    deposits: Decimal
-    withdrawals: Decimal
-
-
 class PortfolioRepository(Protocol):
     async def start_read_snapshot(self) -> None:
         """Make the rest of the transaction one read-only snapshot (REPEATABLE READ), so every
@@ -78,13 +68,13 @@ class PortfolioRepository(Protocol):
         chain is not processed (OQ-38)."""
         ...
 
-    async def upsert_cash_day(self, cash: PublishedCash, *, positions_processed: bool) -> None:
+    async def upsert_cash_day(self, cash: CashDay, *, positions_processed: bool) -> None:
         """Insert or replace ``cash.date``'s ``cash_balances`` row and recompute that date's AUM
         when its ``portfolio_metrics`` row exists: ``NULL`` when the date's positions chain is
-        not processed (OQ-38)."""
+        not processed (OQ-38). A published row has no previous balance (``None``)."""
         ...
 
-    async def get_cash(self, on: date) -> PublishedCash | None: ...
+    async def get_cash(self, on: date) -> CashDay | None: ...
 
     async def get_portfolio_day(self, on: date) -> PublishedPortfolioDay | None: ...
 

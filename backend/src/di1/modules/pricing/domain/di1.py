@@ -26,7 +26,7 @@ from datetime import date
 from decimal import Decimal, Overflow
 from typing import NoReturn
 
-from di1.modules.pricing.domain.futures.model import (
+from di1.modules.pricing.domain.model import (
     FuturesTerms,
     InputKind,
     Price,
@@ -101,7 +101,9 @@ class QuoteValidator:
         elif kind is InputKind.RATE and reference_date == maturity_date:
             # No rate is typed on the maturity date: one message says so. A missing or invalid
             # rate, or "informe apenas a taxa" for a PU sent too, would contradict it.
-            return None, (_invalid("Na data de vencimento informe o PU.", self.fields.rate),)
+            return None, (
+                ErrorDetail.validation("Na data de vencimento informe o PU.", self.fields.rate),
+            )
         if kind is InputKind.PU:
             typed, other = pu, rate
             typed_field, other_field = self.fields.pu, self.fields.rate
@@ -115,17 +117,19 @@ class QuoteValidator:
                 RATE_PLACES,
             )
         if other is not None:
-            errors.append(_invalid(only, other_field))
+            errors.append(ErrorDetail.validation(only, other_field))
         if typed is None:
-            errors.append(_invalid(missing, typed_field))
+            errors.append(ErrorDetail.validation(missing, typed_field))
         elif not typed.is_finite():
-            errors.append(_invalid("Informe um número válido.", typed_field))
+            errors.append(ErrorDetail.validation("Informe um número válido.", typed_field))
         elif not fits_places(typed, places):
-            errors.append(_invalid(f"Use no máximo {places} casas decimais.", typed_field))
+            errors.append(
+                ErrorDetail.validation(f"Use no máximo {places} casas decimais.", typed_field)
+            )
         elif kind is InputKind.PU and typed <= 0:
-            errors.append(_invalid("O PU deve ser maior que zero.", typed_field))
+            errors.append(ErrorDetail.validation("O PU deve ser maior que zero.", typed_field))
         elif kind is InputKind.RATE and typed <= -1:
-            errors.append(_invalid("A taxa deve ser maior que −100%.", typed_field))
+            errors.append(ErrorDetail.validation("A taxa deve ser maior que −100%.", typed_field))
         return (None if errors else typed), tuple(errors)
 
 
@@ -160,12 +164,8 @@ class DI1Calculator:
         return Price(pu=pu, rate=rate, input_kind=quote.kind)
 
 
-def _invalid(message: str, field: str) -> ErrorDetail:
-    return ErrorDetail(ErrorCode.VALIDATION_ERROR, message, field)
-
-
 def _refuse(message: str, field: str) -> NoReturn:
-    raise DomainError(_invalid(message, field))
+    raise DomainError(ErrorDetail.validation(message, field))
 
 
 _PU_ROUNDS_TO_ZERO = "A taxa resulta em um PU que arredonda para zero."

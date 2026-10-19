@@ -9,26 +9,7 @@ from decimal import Decimal
 
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind as InputKind  # one definition, shared (W0.3b)
-
-
-@dataclass(frozen=True, slots=True)
-class Quote:
-    """What was typed: a rate or a PU, the single authoritative input."""
-
-    kind: InputKind
-    value: Decimal
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.value, Decimal):
-            raise TypeError(f"a quote must be a Decimal, got {type(self.value).__name__}")
-
-    @classmethod
-    def rate(cls, rate: Decimal) -> Quote:
-        return cls(InputKind.RATE, rate)
-
-    @classmethod
-    def pu(cls, pu: Decimal) -> Quote:
-        return cls(InputKind.PU, pu)
+from di1.shared.quotes import Quote as Quote
 
 
 @dataclass(frozen=True, slots=True)

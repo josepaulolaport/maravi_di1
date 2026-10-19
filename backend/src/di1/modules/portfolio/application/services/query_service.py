@@ -1,4 +1,4 @@
-"""`PortfolioQueryService` (portfolio/public.py): the Carteira and Lançamentos reads.
+"""`PortfolioService` (portfolio/public.py): the Carteira and Lançamentos reads.
 
 Published data only, never recalculated on read (spec §11.4). Each date's chain statuses and
 processing times come from Processing's ``DateStatusReader`` on the same Unit of Work as the
@@ -14,12 +14,12 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from di1.modules.asset.public import AssetReader
-from di1.modules.portfolio.application.interfaces.repository import (
+from di1.modules.portfolio.application.services.repository import (
     PortfolioRepository,
     PublishedPosition,
 )
 from di1.modules.portfolio.domain.maturity import is_past_maturity, reference_pu_on
-from di1.modules.portfolio.domain.valuation import ReferenceSource
+from di1.modules.portfolio.domain.valuation import PriceSource
 from di1.modules.portfolio.public import (
     CashSummaryView,
     PnLPointView,
@@ -41,8 +41,8 @@ PROCESSED = frozenset({ChainStatus.PROCESSED, ChainStatus.PROCESSED_WITH_ISSUES}
 and a P&L point's daily figures (OQ-41 item 4)."""
 
 
-class PortfolioQueries:
-    """Implements `di1.modules.portfolio.public.PortfolioQueryService` on one Unit of Work."""
+class PortfolioService:
+    """Public `PortfolioService` on one Unit of Work."""
 
     def __init__(
         self,
@@ -99,7 +99,7 @@ class PortfolioQueries:
         published = await self._repository.get_positions(on)
         asset_ids = [p.asset_id for p in published]
         instruments = await self._assets.get_instruments(asset_ids)
-        prices = await self._prices.get_preferred_many(asset_ids, [on]) if asset_ids else {}
+        prices = await self._prices.get(asset_ids, [on]) if asset_ids else {}
         rows = []
         for p in published:
             instrument = instruments[p.asset_id]
@@ -107,7 +107,7 @@ class PortfolioQueries:
             # After maturity no price is read: the PU is 0 by definition, with no source (OQ-1).
             price = None if is_past_maturity(on, maturity) else prices.get((p.asset_id, on))
             pu = reference_pu_on(on, maturity, None if price is None else price.pu)
-            source = None if price is None else ReferenceSource(price.source.value)
+            source = None if price is None else price.source
             rate = None if price is None else price.rate
             rows.append(_row(p, instrument.code, maturity, source, pu, rate))
         return PositionTableView(
@@ -151,11 +151,8 @@ class PortfolioQueries:
                 PnLPointView(
                     date=current,
                     daily_pnl=None if day is None else day.daily_pnl,
-                    cumulative_pnl=None if day is None else day.cumulative_pnl,
                     range_cumulative_pnl=running,
-                    pnl_status=None if day is None else day.pnl_status,
                     status=chain,
-                    published_at=None if status is None else status.portfolio_processed_at,
                 )
             )
         return tuple(points)
@@ -189,7 +186,7 @@ def _row(
     p: PublishedPosition,
     code: str,
     maturity: date | None,
-    source: ReferenceSource | None,
+    source: PriceSource | None,
     pu: Decimal | None,
     rate: Decimal | None,
 ) -> PositionRowView:

@@ -16,7 +16,7 @@ from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from di1.modules.asset.public import InstrumentDescriptor
+from di1.modules.asset.public import Instrument
 from di1.modules.prices.application.services.price_service import PriceService
 from di1.modules.prices.infrastructure.persistence.repositories import (
     SqlReferencePriceRepository,
@@ -76,7 +76,7 @@ def assets() -> FakeAssets:
     fake = FakeAssets()
     for instrument_id, (code, maturity) in INSTRUMENTS.items():
         fake.add(
-            InstrumentDescriptor(
+            Instrument(
                 id=instrument_id,
                 code=code,
                 product_id=PRODUCT,

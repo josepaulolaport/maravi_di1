@@ -63,7 +63,7 @@ async def test_a_di1_contract_is_priced_from_the_catalogue(
     catalogue, _, session = catalogue_and_session
     # DI1F28 matures on 03/01/2028: 365 calendar days from 03/01/2027, so 100000 / 1.1.
     price = await service_on(session).calculate(
-        catalogue.instrument_ids["DI1F28"], date(2027, 1, 3), Quote.rate(Decimal("0.10"))
+        catalogue.instrument_ids["DI1F28"], date(2027, 1, 3), Quote(InputKind.RATE, Decimal("0.10"))
     )
 
     assert price == Price(
@@ -77,7 +77,9 @@ async def test_on_the_catalogue_maturity_date_the_rate_is_zero(
     catalogue, _, session = catalogue_and_session
 
     price = await service_on(session).calculate(
-        catalogue.instrument_ids["DI1F27"], date(2027, 1, 4), Quote.pu(Decimal("99998.5"))
+        catalogue.instrument_ids["DI1F27"],
+        date(2027, 1, 4),
+        Quote(InputKind.PU, Decimal("99998.5")),
     )
 
     assert (price.pu, price.rate) == (Decimal("99998.5"), Decimal("0.000000000000"))
@@ -90,7 +92,9 @@ async def test_after_the_catalogue_maturity_the_contract_is_matured(
 
     with pytest.raises(DomainError) as caught:
         await service_on(session).calculate(
-            catalogue.instrument_ids["DI1F27"], date(2027, 1, 5), Quote.pu(Decimal("99998.5"))
+            catalogue.instrument_ids["DI1F27"],
+            date(2027, 1, 5),
+            Quote(InputKind.PU, Decimal("99998.5")),
         )
 
     assert caught.value.code is ErrorCode.CONTRACT_MATURED
@@ -102,7 +106,9 @@ async def test_an_unknown_instrument_is_not_found(
     _, _, session = catalogue_and_session
 
     with pytest.raises(DomainError) as caught:
-        await service_on(session).calculate(uuid4(), date(2027, 1, 3), Quote.rate(Decimal("0.1")))
+        await service_on(session).calculate(
+            uuid4(), date(2027, 1, 3), Quote(InputKind.RATE, Decimal("0.1"))
+        )
 
     assert caught.value.code is ErrorCode.NOT_FOUND
 
@@ -118,7 +124,7 @@ async def test_an_instrument_that_is_not_a_future_is_refused(
 
     with pytest.raises(DomainError) as caught:
         await service_on(session).calculate(
-            instrument_id, date(2027, 1, 3), Quote.rate(Decimal("0.1"))
+            instrument_id, date(2027, 1, 3), Quote(InputKind.RATE, Decimal("0.1"))
         )
 
     assert (caught.value.code, caught.value.errors[0].field) == (

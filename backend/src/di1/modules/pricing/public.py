@@ -14,9 +14,10 @@ from datetime import date
 from typing import Protocol
 from uuid import UUID
 
-from di1.modules.pricing.domain.futures.di1 import QuoteFields, QuoteValidator
-from di1.modules.pricing.domain.futures.model import Price, Quote
+from di1.modules.pricing.domain.di1 import QuoteFields, QuoteValidator
+from di1.modules.pricing.domain.model import Price
 from di1.shared.input_kind import InputKind
+from di1.shared.quotes import Quote
 
 __all__ = ["InputKind", "Price", "PricingService", "Quote", "QuoteFields", "QuoteValidator"]
 

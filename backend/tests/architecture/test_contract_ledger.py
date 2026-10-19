@@ -12,36 +12,44 @@ from uuid import uuid4
 import pytest
 
 from di1.modules.ledger.domain import entries as domain_entries
-from di1.modules.ledger.public import CashMovementRecord, EntryType, LedgerReader, TradeRecord
+from di1.modules.ledger.public import EntryType, LedgerEntry, LedgerReader
 from di1.shared.clock import SAO_PAULO
 from di1.shared.input_kind import InputKind
 
 CREATED = datetime(2026, 10, 16, 18, 0, tzinfo=SAO_PAULO)
 
 
-def _trade(trade_date: date, trade_time: time, seq: int) -> TradeRecord:
-    return TradeRecord(
+def _trade(entry_date: date, entry_time: time, seq: int) -> LedgerEntry:
+    return LedgerEntry(
         id=uuid4(),
-        asset_id=uuid4(),
-        trade_date=trade_date,
-        trade_time=trade_time,
+        type=EntryType.TRADE,
+        entry_date=entry_date,
+        entry_time=entry_time,
         seq=seq,
+        created_at=CREATED,
+        asset_id=uuid4(),
         signed_quantity=-10,
         execution_pu=Decimal("98765.4321000000"),
         execution_rate=Decimal("0.135000000000"),
         input_kind=InputKind.RATE,
-        created_at=CREATED,
+        cash_amount=None,
     )
 
 
-def _cash(movement_date: date, movement_time: time, seq: int) -> CashMovementRecord:
-    return CashMovementRecord(
+def _cash(entry_date: date, entry_time: time, seq: int) -> LedgerEntry:
+    return LedgerEntry(
         id=uuid4(),
-        movement_date=movement_date,
-        movement_time=movement_time,
+        type=EntryType.CASH,
+        entry_date=entry_date,
+        entry_time=entry_time,
         seq=seq,
-        amount=Decimal("-2500.50"),
         created_at=CREATED,
+        asset_id=None,
+        signed_quantity=None,
+        execution_pu=None,
+        execution_rate=None,
+        input_kind=None,
+        cash_amount=Decimal("-2500.50"),
     )
 
 
@@ -64,7 +72,7 @@ def test_trades_and_cash_share_one_order() -> None:
     withdrawal = _cash(date(2026, 10, 1), time(10, 0), 6)
     deposit = _cash(date(2026, 10, 1), time(9, 0), 8)
 
-    entries: list[TradeRecord | CashMovementRecord] = [trade, withdrawal, deposit]
+    entries = [trade, withdrawal, deposit]
     ordered = sorted(entries, key=lambda entry: entry.order_key)
 
     assert ordered == [deposit, withdrawal, trade]
@@ -77,7 +85,7 @@ def test_records_are_frozen() -> None:
     with pytest.raises(dataclasses.FrozenInstanceError):
         trade.signed_quantity = 5  # type: ignore[misc]
     with pytest.raises(dataclasses.FrozenInstanceError):
-        movement.amount = Decimal("1")  # type: ignore[misc]
+        movement.cash_amount = Decimal("1")  # type: ignore[misc]
 
 
 def test_the_public_entry_type_is_ledger_domain_one() -> None:

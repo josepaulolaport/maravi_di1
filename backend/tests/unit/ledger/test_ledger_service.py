@@ -92,7 +92,9 @@ async def test_a_rate_typed_trade_gets_its_pu_from_pricing(harness: Harness) -> 
     assert entry.input_kind is InputKind.RATE
     assert entry.cash_effect == Decimal("-890064.6254673500")
     assert (view.asset_code, view.instrument_type_code) == ("DI1F28", "FUTURE")
-    assert harness.pricing.calls == [(DI1F28.id, date(2026, 10, 14), Quote.rate(Decimal("0.10")))]
+    assert harness.pricing.calls == [
+        (DI1F28.id, date(2026, 10, 14), Quote(InputKind.RATE, Decimal("0.10")))
+    ]
 
 
 async def test_a_pu_typed_trade_gets_its_rate_from_pricing(harness: Harness) -> None:

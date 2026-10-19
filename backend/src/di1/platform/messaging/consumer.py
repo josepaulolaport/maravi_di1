@@ -134,11 +134,6 @@ class AfterAckRunner:
                 self._drop_waiting()
                 self.failed.set()
 
-    async def wait_idle(self) -> None:
-        """Return once no work is running or waiting."""
-        while self._running is not None and not self._running.done():
-            await asyncio.wait({self._running})
-
     async def stop(self, *, timeout_seconds: float = 5.0) -> None:
         """Drop the waiting work and cancel the work in progress, waiting for it at most
         ``timeout_seconds``. Work submitted afterwards is dropped."""

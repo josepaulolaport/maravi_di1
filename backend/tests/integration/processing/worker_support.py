@@ -22,7 +22,7 @@ from di1.modules.portfolio.public import (
     PositionsDay,
     PreviousPositionsDay,
 )
-from di1.modules.processing.application.services.chain_history import LedgerChainHistory
+from di1.modules.processing.application.services.chain_history import ChainHistory
 from di1.modules.processing.application.services.processing import ProcessingPreview
 from di1.modules.processing.application.services.run_chains import DayReaders
 from di1.modules.processing.application.services.run_processor import (
@@ -142,7 +142,7 @@ class Worker:
         self.uow_factory = unit_of_work_factory(session_factory)
         self.store = FlakyRunStore(self.clock)
         # The preview reads the same Ledger as the run, so the two can be compared.
-        self.service = make_service(clock=self.clock, history=LedgerChainHistory(self.world.ledger))
+        self.service = make_service(clock=self.clock, history=ChainHistory(self.world.ledger))
         self.processor = PortfolioRangeProcessor(
             uow_factory=self.uow_factory,
             store=self.store,

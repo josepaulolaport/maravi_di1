@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from di1.modules.pnl.domain.trade import PnLTrade
+from di1.modules.pnl.domain.results import PnLTrade
 from di1.modules.pnl.domain.trades_pnl import calculate_trades_pnl
 
 D = Decimal

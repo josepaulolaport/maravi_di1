@@ -15,7 +15,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from di1.modules.asset.public import AssetReader
-from di1.modules.ledger.public import CashMovementRecord, LedgerReader, TradeRecord
+from di1.modules.ledger.public import LedgerEntry, LedgerReader
 from di1.modules.pnl.public import (
     AssetPnLCalculator,
     AssetPnLResult,
@@ -37,8 +37,7 @@ from di1.modules.portfolio.public import (
     reference_pu_on,
 )
 from di1.modules.prices.public import PriceReader
-from di1.modules.processing.application.interfaces.repositories import IssueType
-from di1.modules.processing.application.interfaces.run_store import NewIssue
+from di1.modules.processing.application.interfaces.repositories import IssueRecord, IssueType
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.decimals import financial_context
 
@@ -66,12 +65,14 @@ class ChainDataError(RuntimeError):
     processed D−1 with no published rows, or a traded asset that does not exist."""
 
 
-def trade_of(record: TradeRecord) -> Trade:
+def trade_of(record: LedgerEntry) -> Trade:
     """Ledger's trade as the portfolio chains read it (interfaces.md "Portfolio")."""
+    assert record.asset_id is not None and record.signed_quantity is not None
+    assert record.execution_pu is not None and record.execution_rate is not None
     return Trade(
         asset_id=record.asset_id,
-        trade_date=record.trade_date,
-        trade_time=record.trade_time,
+        trade_date=record.entry_date,
+        trade_time=record.entry_time,
         seq=record.seq,
         signed_quantity=record.signed_quantity,
         execution_pu=record.execution_pu,
@@ -79,16 +80,17 @@ def trade_of(record: TradeRecord) -> Trade:
     )
 
 
-def cash_totals(movements: Sequence[CashMovementRecord]) -> tuple[Decimal, Decimal]:
+def cash_totals(movements: Sequence[LedgerEntry]) -> tuple[Decimal, Decimal]:
     """The day's deposits and withdrawals, both as positive totals (OQ-24: an amount is signed,
     positive for an aporte, negative for a retirada)."""
     deposits = withdrawals = ZERO
     with financial_context():
         for movement in movements:
-            if movement.amount > 0:
-                deposits += movement.amount
+            assert movement.cash_amount is not None
+            if movement.cash_amount > 0:
+                deposits += movement.cash_amount
             else:
-                withdrawals -= movement.amount
+                withdrawals -= movement.cash_amount
     return deposits, withdrawals
 
 
@@ -124,7 +126,7 @@ async def process_positions_day(
     writer: PortfolioResultsWriter,
     uow: UnitOfWork,
     other_chain_processed: bool,
-) -> list[NewIssue]:
+) -> list[IssueRecord]:
     """Positions, valuation and P&L of D for every expected asset (OQ-10), written through the
     writer; returns D's Pendências: a missing exact-date reference price (D, or D−1 when Q[D−1]
     ≠ 0, OQ-4) and an open position after maturity (OQ-1)."""
@@ -142,9 +144,7 @@ async def process_positions_day(
 
     asset_ids = [p.asset_id for p in positions_day.positions]
     maturities = await _maturities(readers.assets, asset_ids)
-    prices = (
-        await readers.prices.get_preferred_many(asset_ids, {previous_day, day}) if asset_ids else {}
-    )
+    prices = await readers.prices.get(asset_ids, {previous_day, day}) if asset_ids else {}
 
     def reference_pu(asset_id: UUID, on: date) -> Decimal | None:
         price = prices.get((asset_id, on))
@@ -152,7 +152,7 @@ async def process_positions_day(
 
     valuation_inputs: list[AssetValuationInput] = []
     asset_pnl: dict[UUID, AssetPnLResult] = {}
-    issues: list[NewIssue] = []
+    issues: list[IssueRecord] = []
     for position in positions_day.positions:
         asset_id, maturity = position.asset_id, maturities[position.asset_id]
         current = None if is_past_maturity(day, maturity) else prices.get((asset_id, day))
@@ -176,11 +176,11 @@ async def process_positions_day(
             for missing in result.missing_prices
         }
         issues.extend(
-            NewIssue(IssueType.MISSING_REFERENCE_PRICE, asset_id, day, required)
+            IssueRecord(IssueType.MISSING_REFERENCE_PRICE, asset_id, day, required)
             for required in sorted(needed)
         )
         if is_past_maturity(day, maturity) and position.quantity != 0:
-            issues.append(NewIssue(IssueType.EXPIRED_OPEN_POSITION, asset_id, day, None))
+            issues.append(IssueRecord(IssueType.EXPIRED_OPEN_POSITION, asset_id, day, None))
 
     valuation = ValuationCalculator().calculate_day(day, valuation_inputs)
     pnl = PortfolioPnLCalculator().aggregate(set(asset_ids), asset_pnl, previous_cumulative)

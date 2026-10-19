@@ -1,5 +1,5 @@
-"""An in-memory `prices.public.LatestPriceReader` for the Asset tests (OQ-48). It answers from a
-fixed mapping and records each call, so a test can check that a listing reads once, in batch."""
+"""In-memory `prices.public.PriceReader` for Asset HTTP tests (OQ-48). Answers ``latest`` from a
+mapping and records each call so a listing can be shown to read once."""
 
 from __future__ import annotations
 
@@ -35,15 +35,18 @@ def price(
 
 
 @dataclass
-class FakeLatestPrices:
-    """Each asset's latest preferred price, as lane D's reader would choose it."""
+class FakePriceReader:
+    """``latest`` only; exact-date ``get`` is unused by Asset HTTP."""
 
-    latest: dict[UUID, ReferencePriceRecord] = field(default_factory=dict)
+    by_asset: dict[UUID, ReferencePriceRecord] = field(default_factory=dict)
     calls: list[frozenset[UUID]] = field(default_factory=list)
 
-    async def get_latest_preferred_many(
-        self, asset_ids: Collection[UUID]
-    ) -> Mapping[UUID, ReferencePriceRecord]:
+    async def get(
+        self, asset_ids: Collection[UUID], dates: Collection[date]
+    ) -> Mapping[tuple[UUID, date], ReferencePriceRecord]:
+        raise AssertionError("Asset HTTP does not read a price for given dates")
+
+    async def latest(self, asset_ids: Collection[UUID]) -> Mapping[UUID, ReferencePriceRecord]:
         asked = frozenset(asset_ids)
         self.calls.append(asked)
-        return {asset_id: p for asset_id, p in self.latest.items() if asset_id in asked}
+        return {asset_id: p for asset_id, p in self.by_asset.items() if asset_id in asked}

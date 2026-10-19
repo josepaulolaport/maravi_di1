@@ -12,8 +12,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from decimal import Decimal
 
-from di1.modules.pnl.domain.results import unsigned_zero
-from di1.modules.pnl.domain.trade import PnLTrade
+from di1.modules.pnl.domain.results import PnLTrade, unsigned_zero
 from di1.shared.decimals import financial_context
 
 

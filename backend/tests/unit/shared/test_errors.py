@@ -63,6 +63,13 @@ def test_an_explicit_detail_is_kept() -> None:
     assert error.detail == "Intervalo inválido."
 
 
+def test_validation_is_a_validation_error() -> None:
+    assert ErrorDetail.validation("Valor inválido.", "quantity") == ErrorDetail(
+        ErrorCode.VALIDATION_ERROR, "Valor inválido.", "quantity"
+    )
+    assert ErrorDetail.validation("JSON inválido.").field is None
+
+
 def test_a_field_is_optional() -> None:
     assert ErrorDetail(ErrorCode.JOB_NOT_CANCELLABLE, "O processamento já terminou.").field is None
 

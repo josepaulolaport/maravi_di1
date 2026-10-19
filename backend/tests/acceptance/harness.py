@@ -8,7 +8,7 @@ They read Ledger, Prices and Asset through the in-memory readers of the processi
 the exact-date price rule (spec §5), the reference PU of 0 after maturity (spec §7.4, OQ-1) and the
 per-asset P&L then aggregation (spec §8) are production's, not a copy.
 
-The writer stands in for Portfolio's ``ResultsWriter`` and repository: it keeps each date's
+The writer stands in for Portfolio's ``PortfolioResultsWriter`` and repository: it keeps each date's
 published chains and recomputes the date's AUM the way the repository's SQL does (cash + market
 value, null when either side is or when the other chain is not processed; OQ-21, OQ-38). The SQL
 itself is proven in phase 2.
@@ -25,9 +25,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, time, timedelta
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from di1.modules.ledger.public import TradeRecord
 from di1.modules.pnl.public import AssetPnLResult, PortfolioPnLResult
 from di1.modules.portfolio.public import (
     AssetValuation,
@@ -39,21 +38,22 @@ from di1.modules.portfolio.public import (
     PreviousPositionsDay,
     Trade,
 )
-from di1.modules.processing.application.interfaces.run_store import NewIssue
+from di1.modules.processing.application.interfaces.repositories import IssueRecord
 from di1.modules.processing.application.services.run_chains import (
     DayReaders,
     process_cash_day,
     process_positions_day,
 )
 from di1.shared.decimals import financial_context
-from di1.shared.input_kind import InputKind
 from tests.unit.processing.fakes import FakeUnitOfWork
 from tests.unit.processing.run_fakes import (
-    CREATED,
     FakeInstruments,
     FakeLedger,
     FakePrices,
     cash_movement,
+)
+from tests.unit.processing.run_fakes import (
+    trade as ledger_trade,
 )
 
 ONE_DAY = timedelta(days=1)
@@ -113,7 +113,7 @@ class PositionsResult:
     valuation: PortfolioValuation
     asset_pnl: Mapping[UUID, AssetPnLResult]
     pnl: PortfolioPnLResult
-    issues: Sequence[NewIssue]
+    issues: Sequence[IssueRecord]
     aum: Decimal | None
 
     @property
@@ -170,7 +170,7 @@ class _Published:
 
     positions: dict[date, _PositionsWrite] = field(default_factory=dict)
     cash: dict[date, CashDay] = field(default_factory=dict)
-    issues: dict[date, list[NewIssue]] = field(default_factory=dict)
+    issues: dict[date, list[IssueRecord]] = field(default_factory=dict)
     aum: dict[date, Decimal | None] = field(default_factory=dict)
 
     async def write_positions_day(
@@ -269,26 +269,24 @@ def _publish(
 
 
 def _ledger(facts: Facts) -> FakeLedger:
-    ledger = FakeLedger(trades=[_record(t) for t in facts.trades])
+    ledger = FakeLedger(
+        trades=[
+            ledger_trade(
+                t.asset_id,
+                t.trade_date,
+                t.signed_quantity,
+                str(t.execution_pu),
+                str(t.execution_rate),
+                seq=t.seq,
+                at=t.trade_time,
+            )
+            for t in facts.trades
+        ]
+    )
     for amounts, sign in ((facts.deposits, ""), (facts.withdrawals, "-")):
         for on, amount in amounts.items():
             ledger.movements.append(cash_movement(on, f"{sign}{amount}", seq=len(ledger.movements)))
     return ledger
-
-
-def _record(t: Trade) -> TradeRecord:
-    return TradeRecord(
-        id=uuid4(),
-        asset_id=t.asset_id,
-        trade_date=t.trade_date,
-        trade_time=t.trade_time,
-        seq=t.seq,
-        signed_quantity=t.signed_quantity,
-        execution_pu=t.execution_pu,
-        execution_rate=t.execution_rate,
-        input_kind=InputKind.PU,
-        created_at=CREATED,
-    )
 
 
 def _prices(facts: Facts) -> FakePrices:

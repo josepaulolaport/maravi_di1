@@ -270,7 +270,7 @@ def test_the_pnl_chart_adds_zero_for_days_without_pnl(desk: Desk, di1f28: str) -
     before = points[:24]  # 15/12 to 07/01
     assert {p["status"] for p in before} == {"NOT_PROCESSED"}
     assert {p["range_cumulative_pnl"] for p in before} == {Decimal(0)}
-    assert all(p["daily_pnl"] is None and p["published_at"] is None for p in before)
+    assert all(p["daily_pnl"] is None for p in before)
     by_day = {date.fromisoformat(p["date"]): p for p in points}
     assert [
         (by_day[d]["status"], by_day[d]["daily_pnl"], by_day[d]["range_cumulative_pnl"])
@@ -283,8 +283,8 @@ def test_the_pnl_chart_adds_zero_for_days_without_pnl(desk: Desk, di1f28: str) -
         ("NOT_PROCESSED", None, Decimal(400)),
         ("FAILED", None, Decimal(400)),
     ]
-    # The cumulative P&L since inception stays unavailable from the first gap.
-    assert [by_day[d]["cumulative_pnl"] for d in (FRI, SAT, SUN, MON)] == [
+    # The stored cumulative P&L stays unavailable from the first gap, on the summary (OQ-49).
+    assert [desk.portfolio_pnl(d)["cumulative_pnl"] for d in (FRI, SAT, SUN, MON)] == [
         Decimal(200),
         None,
         None,

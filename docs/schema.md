@@ -7,7 +7,7 @@
 - Exactly **one portfolio**, so no `portfolio_id` or persistent `portfolio` business entity.
 - Seven code modules: `asset`, `ledger`, `pricing`, `prices`, `portfolio`, `pnl`, `processing`. Database schemas only where tables exist; `pricing` and `pnl` are calculation-oriented.
 - Calendar-day accounting and P&L processing; DI1 simplified **DC/365** calculation. No automatic weekend/holiday price carry-forward. Price lookup is **exact date**.
-- `prices` owns reference observations from `MANUAL` and `B3`; `MANUAL` takes precedence, then `B3`. Each source has at most one observation per asset and date; a correction updates it in place and a removal deletes it (OQ-25).
+- `prices` owns reference observations from `MANUAL` and `B3`; `MANUAL` takes precedence, then `B3`. Each source has at most one observation per asset and date; a later set of the same key deletes the current row and inserts the new one, and a removal deletes it (OQ-25, OQ-26).
 - `ledger` alone owns execution prices, in immutable entries: one table, `ledger.entries`, holds trades and cash movements (OQ-24). Prices do not flow from trades into reference prices.
 - `portfolio.positions` stores signed quantities. `portfolio.position_metrics` stores open-position average entry PU/rate, signed position market value (`financial_total`), and asset P&L components. `portfolio.portfolio_metrics` stores signed positions' total market value, AUM, portfolio P&L and completeness. `portfolio.cash_balances` stores the cash chain: each day's balance, trades cash flow, deposits and withdrawals (OQ-21).
 - **AUM = cash_balances.cash_balance + portfolio_metrics.positions_market_value** for the same date, under the agreed simplified accounting model; no gross/net exposure fields and no duplicate `total_equity` column. Cash and positions are two separately processable chains (OQ-21).
@@ -25,7 +25,7 @@
 | asset | `futures` | `product_id` | shared futures face value, multiplier, settlement method |
 | asset | `instruments` | `id` | dated/maturing contract, e.g. DI1F27 |
 | ledger | `entries` | `id` | trades and cash movements (`type` TRADE or CASH), ordered by `(entry_date, entry_time, seq)`; a delete removes the row (OQ-24, OQ-32) |
-| prices | `reference_prices` | `id` | one per `(asset, date, source)`, corrected in place, removed by deletion (OQ-25) |
+| prices | `reference_prices` | `id` | one per `(asset, date, source)`; a later set replaces the row with a new id; removal deletes (OQ-25, OQ-26) |
 | portfolio | `positions` | `(asset_id, position_date)` | daily closing position quantity |
 | portfolio | `position_metrics` | `(asset_id, metric_date)` | daily asset accounting/valuation/P&L results |
 | portfolio | `portfolio_metrics` | `metric_date` | daily market value, AUM and portfolio P&L |
@@ -42,7 +42,7 @@
 1. Cross-schema foreign keys **are allowed**. They protect persisted IDs but do not authorize writing another module's tables through another module's services.
 2. Instrument/product codes are unique case-insensitively; instrument codes and trade values are validated.
 3. Ledger entries are never edited: repository methods must not permit economic modification. A delete is a hard `DELETE`, all or nothing for a multi-delete, with no reason and no audit trail of the deleted rows (OQ-24, OQ-32). This is **not** DB-enforced immutability against privileged direct SQL writes.
-4. `reference_prices` has one row per `(asset_id, reference_date, source)`, without revisions: a correction updates it in place, a removal deletes it (OQ-25). Active source selection is a domain/read rule (`MANUAL > B3`) and does not delete lower-priority source observations.
+4. `reference_prices` has one row per `(asset_id, reference_date, source)`, without revisions: a later set of the same key deletes the current row and inserts the new one (new id); a removal deletes it (OQ-25, OQ-26). Active source selection is a domain/read rule (`MANUAL > B3`) and does not delete lower-priority source observations.
 5. `position_metrics` stores no reference price: the reference PU, rate and source of a date are read from `prices.reference_prices` (current preferred: MANUAL, else B3, exact date). A published day keeps its computed `financial_total` and P&L, so after a price change the screen shows the current price next to the last processed figures until the user processes the date again (OQ-30, OQ-31).
 6. The tables use PostgreSQL `NUMERIC` to preserve Python `Decimal` financial arithmetic. Precision (OQ-3): 34-digit context, `ROUND_HALF_UP`; calculated PU stored with 10 dp and calculated rate with 12 dp; typed values with more decimals are rejected; money stored exact and rounded to 2 dp only in the UI. Bounds are only the CHECKs below (OQ-14).
 7. Missing valuation may yield `NULL` market value, daily P&L and AUM, **not zero**. Cash, quantities and average costs remain available. Zero closing quantity has zero closing market value, but same-day trades may still require a reference PU for Trades P&L.

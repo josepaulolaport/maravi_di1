@@ -26,11 +26,11 @@ from di1.modules.portfolio.presentation.http.schemas import (
     PortfolioPositionsOut,
     PortfolioSummaryOut,
 )
-from di1.modules.portfolio.public import PortfolioQueryService
+from di1.modules.portfolio.public import PortfolioService
 
 
 def create_router(
-    get_query_service: Callable[..., AsyncIterator[PortfolioQueryService]],
+    get_query_service: Callable[..., AsyncIterator[PortfolioService]],
 ) -> APIRouter:
     """The Portfolio routes, each on the query service that ``get_query_service`` provides."""
     # A plain default, not ``Annotated``: with postponed annotations FastAPI resolves an
@@ -42,14 +42,14 @@ def create_router(
     @router.get("/summary")
     async def get_summary(
         on: date = date_query,
-        service: PortfolioQueryService = service_dependency,
+        service: PortfolioService = service_dependency,
     ) -> PortfolioSummaryOut:
         return PortfolioSummaryOut.of(await service.get_summary(on))
 
     @router.get("/positions")
     async def get_positions(
         on: date = date_query,
-        service: PortfolioQueryService = service_dependency,
+        service: PortfolioService = service_dependency,
     ) -> PortfolioPositionsOut:
         return PortfolioPositionsOut.of(await service.get_position_table(on))
 
@@ -57,7 +57,7 @@ def create_router(
     async def get_pnl(
         start_date: date,
         end_date: date,
-        service: PortfolioQueryService = service_dependency,
+        service: PortfolioService = service_dependency,
     ) -> PnlSeriesOut:
         points = await service.get_pnl_series(start_date, end_date)
         return PnlSeriesOut(items=[PnlPointOut.of(p) for p in points])

@@ -16,16 +16,11 @@ from alembic.config import Config
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from di1.modules.asset.application.services.asset_service import (
-    AssetService,
-    NewAssetClass,
-    NewInstrument,
-    NewInstrumentType,
-    NewProduct,
-)
+from di1.modules.asset.application.services.asset_service import AssetService
 from di1.modules.asset.dependencies import asset_service
-from di1.modules.asset.domain.rules import FuturesTerms
-from di1.modules.asset.infrastructure.persistence.repositories import SqlAlchemyAssetRepository
+from di1.modules.asset.domain.model import FuturesTerms
+from di1.modules.asset.infrastructure.persistence.models import AssetClassRow, InstrumentTypeRow
+from di1.modules.asset.infrastructure.persistence.repositories import SqlAssetRepository
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
@@ -101,32 +96,35 @@ class Writer:
 
     async def instrument_type(self, code: str, name: str) -> int:
         async with self.uow() as uow:
-            return (
-                await asset_service(uow).create_instrument_type(
-                    NewInstrumentType(code, name), uow=uow
-                )
-            ).id
+            row = InstrumentTypeRow(code=code, name=name)
+            uow.session.add(row)
+            await uow.session.flush()
+            type_id = row.id
+            await uow.commit()
+            return type_id
 
     async def asset_class(self, instrument_type_id: int, code: str, name: str) -> int:
         async with self.uow() as uow:
-            created = await asset_service(uow).create_asset_class(
-                NewAssetClass(instrument_type_id, code, name), uow=uow
-            )
-            return created.id
+            row = AssetClassRow(instrument_type_id=instrument_type_id, code=code, name=name)
+            uow.session.add(row)
+            await uow.session.flush()
+            class_id = row.id
+            await uow.commit()
+            return class_id
 
     async def product(
         self, asset_class_id: int, code: str, name: str, futures: FuturesTerms | None
     ) -> UUID:
         async with self.uow() as uow:
             created = await asset_service(uow).create_product(
-                NewProduct(asset_class_id, code, name, futures), uow=uow
+                asset_class_id, code, name, futures, uow=uow
             )
             return created.id
 
     async def instrument(self, product_id: UUID, code: str, maturity: date | None) -> UUID:
         async with self.uow() as uow:
             created = await asset_service(uow).create_instrument(
-                NewInstrument(product_id, code, maturity), uow=uow
+                product_id, code, maturity, uow=uow
             )
             return created.id
 
@@ -164,4 +162,4 @@ async def reader_session(
 @pytest.fixture
 def service(reader_session: AsyncSession) -> AssetService:
     """A read-only service on its own session."""
-    return AssetService(SqlAlchemyAssetRepository(reader_session))
+    return AssetService(SqlAssetRepository(reader_session))

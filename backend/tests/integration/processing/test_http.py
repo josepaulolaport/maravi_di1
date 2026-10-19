@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from di1.composition.errors import install_problem_handlers
-from di1.modules.ledger.public import CashMovementRecord, EntryType, TradeRecord
+from di1.modules.ledger.public import EntryType, LedgerEntry
 from di1.modules.processing.dependencies import make_processing_service
 from di1.modules.processing.presentation.http.router import create_router
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
@@ -24,12 +24,10 @@ BODY = {"start_date": "2026-10-14", "end_date": "2026-10-16", "scope": "ALL"}
 class _NoEntries:
     """A `LedgerReader` with an empty ledger: every chain is in its zero state."""
 
-    async def get_trades(self, start_date: date, end_date: date) -> list[TradeRecord]:
+    async def get_trades(self, start_date: date, end_date: date) -> list[LedgerEntry]:
         return []
 
-    async def get_cash_movements(
-        self, start_date: date, end_date: date
-    ) -> list[CashMovementRecord]:
+    async def get_cash_movements(self, start_date: date, end_date: date) -> list[LedgerEntry]:
         return []
 
     async def has_entries_on_or_before(

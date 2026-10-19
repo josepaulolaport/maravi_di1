@@ -13,7 +13,6 @@ from uuid import UUID, uuid4
 import pytest
 
 from di1.modules.prices.public import (
-    LatestPriceReader,
     PriceReader,
     PriceSource,
     ReferencePriceRecord,
@@ -43,11 +42,20 @@ def test_a_reference_price_is_frozen() -> None:
         record.pu = Decimal("1")  # type: ignore[misc]
 
 
-def test_the_latest_price_read_is_its_own_narrow_contract() -> None:
-    # OQ-48: Asset fills Instrument.last_reference from this read; PriceReader stays unchanged.
-    signature = inspect.signature(LatestPriceReader.get_latest_preferred_many)
-    assert list(signature.parameters) == ["self", "asset_ids"]
-    hints = typing.get_type_hints(LatestPriceReader.get_latest_preferred_many)
-    assert hints["asset_ids"] == Collection[UUID]
-    assert hints["return"] == Mapping[UUID, ReferencePriceRecord]
+def test_price_reader_is_exact_dates_and_latest() -> None:
+    get = inspect.signature(PriceReader.get)
+    assert list(get.parameters) == ["self", "asset_ids", "dates"]
+    get_hints = typing.get_type_hints(PriceReader.get)
+    assert get_hints["asset_ids"] == Collection[UUID]
+    assert get_hints["dates"] == Collection[date]
+    assert get_hints["return"] == Mapping[tuple[UUID, date], ReferencePriceRecord]
+
+    latest = inspect.signature(PriceReader.latest)
+    assert list(latest.parameters) == ["self", "asset_ids"]
+    latest_hints = typing.get_type_hints(PriceReader.latest)
+    assert latest_hints["asset_ids"] == Collection[UUID]
+    assert latest_hints["return"] == Mapping[UUID, ReferencePriceRecord]
+
+    assert not hasattr(PriceReader, "get_preferred")
+    assert not hasattr(PriceReader, "get_preferred_many")
     assert not hasattr(PriceReader, "get_latest_preferred_many")

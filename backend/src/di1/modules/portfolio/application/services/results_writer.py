@@ -7,9 +7,8 @@ from collections.abc import Callable, Mapping
 from uuid import UUID
 
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
-from di1.modules.portfolio.application.interfaces.repository import (
+from di1.modules.portfolio.application.services.repository import (
     PortfolioRepository,
-    PublishedCash,
     PublishedPortfolioDay,
     PublishedPosition,
 )
@@ -19,8 +18,8 @@ from di1.modules.portfolio.domain.valuation import PortfolioValuation, Valuation
 from di1.platform.database.unit_of_work import UnitOfWork
 
 
-class ResultsWriter:
-    """Implements `di1.modules.portfolio.public.PortfolioResultsWriter`.
+class PortfolioResultsWriter:
+    """Public `PortfolioResultsWriter`.
 
     ``repository_for`` builds the repository on the caller's Unit of Work, so the rows land in
     Processing's transaction for the date. ``other_chain_processed`` is Processing's answer
@@ -95,12 +94,5 @@ class ResultsWriter:
         self, day: CashDay, *, uow: UnitOfWork, other_chain_processed: bool
     ) -> None:
         await self._repository_for(uow).upsert_cash_day(
-            PublishedCash(
-                date=day.date,
-                cash_balance=day.cash_balance,
-                trades_cash_flow=day.trades_cash_flow,
-                deposits=day.deposits,
-                withdrawals=day.withdrawals,
-            ),
-            positions_processed=other_chain_processed,
+            day, positions_processed=other_chain_processed
         )

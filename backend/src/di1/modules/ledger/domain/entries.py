@@ -19,17 +19,17 @@ client keys its messages on (frontend contract ``ledger.ts``).
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import StrEnum
-from typing import Protocol
 from uuid import UUID
 
 from di1.shared.decimals import financial_context, fits_places
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
+from di1.shared.quotes import QuoteRule
 
 CASH_PLACES = 2
 """Decimal places of a cash amount: ``cash_amount NUMERIC(20,2)`` (OQ-3, OQ-24)."""
@@ -64,49 +64,6 @@ class EntryDraft:
     execution_pu: Decimal | None = None
     execution_rate: Decimal | None = None
     cash_amount: Decimal | None = None
-
-
-class QuoteRule(Protocol):
-    """The validation of a typed quote, reported on this module's request fields: the typed
-    value, or ``None``, and every problem found (``pricing.public.QuoteValidator``)."""
-
-    def __call__(
-        self,
-        kind: InputKind,
-        *,
-        pu: Decimal | None,
-        rate: Decimal | None,
-        reference_date: date,
-        maturity_date: date | None,
-    ) -> tuple[Decimal | None, Sequence[ErrorDetail]]: ...
-
-
-@dataclass(frozen=True, slots=True)
-class KnownInstrument:
-    """What validation needs to know about an existing contract."""
-
-    maturity_date: date | None
-
-
-@dataclass(frozen=True, slots=True)
-class NewTrade:
-    """A valid trade, before pricing: ``typed_value`` is the PU or the rate, as typed."""
-
-    asset_id: UUID
-    entry_date: date
-    entry_time: time
-    signed_quantity: int
-    input_kind: InputKind
-    typed_value: Decimal
-
-
-@dataclass(frozen=True, slots=True)
-class NewCashMovement:
-    """A valid aporte (positive ``amount``) or retirada (negative)."""
-
-    entry_date: date
-    entry_time: time
-    amount: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,54 +107,49 @@ def validate_trade(
     draft: EntryDraft,
     *,
     today: date,
-    instrument: KnownInstrument | None,
+    known: bool,
+    maturity_date: date | None,
     validate_quote: QuoteRule,
-) -> NewTrade:
-    """The trade a draft describes; ``instrument`` is ``None`` when ``draft.asset_id`` names no
-    contract. Raises `DomainError` with every problem found, the quote's included."""
+) -> Decimal:
+    """The typed quote of a valid TRADE draft, or `DomainError` with every problem found.
+    ``known`` is whether ``draft.asset_id`` names a contract."""
     if draft.type is not EntryType.TRADE:
         raise ValueError(f"validate_trade expects a TRADE draft, got {draft.type}")
     errors = _date_errors(draft.entry_date, today) + _time_errors(draft.entry_time)
-    if draft.asset_id is None or instrument is None:
-        errors.append(_invalid("Selecione um contrato.", "asset_id"))
+    if draft.asset_id is None or not known:
+        errors.append(ErrorDetail.validation("Selecione um contrato.", "asset_id"))
     if (
         draft.signed_quantity is None
         or draft.signed_quantity == 0
         or not _INTEGER_MIN <= draft.signed_quantity <= _INTEGER_MAX
     ):
         errors.append(
-            _invalid("A quantidade deve ser um inteiro diferente de zero.", "signed_quantity")
+            ErrorDetail.validation(
+                "A quantidade deve ser um inteiro diferente de zero.", "signed_quantity"
+            )
         )
     if draft.cash_amount is not None:
-        errors.append(_invalid("Uma operação não tem valor de caixa.", "cash_amount"))
+        errors.append(ErrorDetail.validation("Uma operação não tem valor de caixa.", "cash_amount"))
     typed_value = None
     if draft.input_kind is None:
-        errors.append(_invalid("Informe o PU ou a taxa.", "input_kind"))
+        errors.append(ErrorDetail.validation("Informe o PU ou a taxa.", "input_kind"))
     else:
         typed_value, quote_errors = validate_quote(
             draft.input_kind,
             pu=draft.execution_pu,
             rate=draft.execution_rate,
             reference_date=draft.entry_date,
-            maturity_date=None if instrument is None else instrument.maturity_date,
+            maturity_date=maturity_date if known else None,
         )
         errors.extend(quote_errors)
     if errors:
         raise DomainError(*errors)
 
-    assert draft.asset_id is not None and draft.signed_quantity is not None
-    assert draft.input_kind is not None and typed_value is not None
-    return NewTrade(
-        asset_id=draft.asset_id,
-        entry_date=draft.entry_date,
-        entry_time=draft.entry_time,
-        signed_quantity=draft.signed_quantity,
-        input_kind=draft.input_kind,
-        typed_value=typed_value,
-    )
+    assert typed_value is not None
+    return typed_value
 
 
-def validate_cash_movement(draft: EntryDraft, *, today: date) -> NewCashMovement:
+def validate_cash_movement(draft: EntryDraft, *, today: date) -> Decimal:
     """The aporte or retirada a draft describes. Raises `DomainError` with every input error."""
     if draft.type is not EntryType.CASH:
         raise ValueError(f"validate_cash_movement expects a CASH draft, got {draft.type}")
@@ -211,20 +163,20 @@ def validate_cash_movement(draft: EntryDraft, *, today: date) -> NewCashMovement
         ("execution_rate", draft.execution_rate),
     ):
         if value is not None:
-            errors.append(_invalid(not_cash, field))
+            errors.append(ErrorDetail.validation(not_cash, field))
     amount = draft.cash_amount
     if amount is None:
-        errors.append(_invalid("Informe o valor.", "cash_amount"))
+        errors.append(ErrorDetail.validation("Informe o valor.", "cash_amount"))
     elif not fits_places(amount, CASH_PLACES):
         errors.append(_places_error(CASH_PLACES, "cash_amount"))
     elif amount.is_zero():
-        errors.append(_invalid("O valor deve ser diferente de zero.", "cash_amount"))
+        errors.append(ErrorDetail.validation("O valor deve ser diferente de zero.", "cash_amount"))
     elif abs(amount) >= _CASH_LIMIT:
-        errors.append(_invalid("O valor excede o limite permitido.", "cash_amount"))
+        errors.append(ErrorDetail.validation("O valor excede o limite permitido.", "cash_amount"))
     if errors:
         raise DomainError(*errors)
     assert amount is not None
-    return NewCashMovement(entry_date=draft.entry_date, entry_time=draft.entry_time, amount=amount)
+    return amount
 
 
 def entries_to_delete(
@@ -234,7 +186,7 @@ def entries_to_delete(
     All or nothing (OQ-24): an id that names no entry, including one already deleted, raises
     ``NOT_FOUND`` and nothing is deleted. Deletion is for good (user, 2026-10-19)."""
     if not requested_ids:
-        raise DomainError(_invalid("Selecione ao menos um lançamento.", "ids"))
+        raise DomainError(ErrorDetail.validation("Selecione ao menos um lançamento.", "ids"))
     if any(entry_id not in existing_ids for entry_id in requested_ids):
         raise DomainError(ErrorDetail(ErrorCode.NOT_FOUND, "Lançamento não encontrado."))
     return tuple(dict.fromkeys(requested_ids))
@@ -250,13 +202,9 @@ def _time_errors(entry_time: time) -> list[ErrorDetail]:
     # São Paulo wall time in whole seconds: the keyset cursor carries HH:MM:SS (OQ-26 item 1),
     # so a stored fraction or offset would make pages skip or repeat entries.
     if entry_time.microsecond or entry_time.tzinfo is not None:
-        return [_invalid("Informe a hora em horas, minutos e segundos.", "time")]
+        return [ErrorDetail.validation("Informe a hora em horas, minutos e segundos.", "time")]
     return []
 
 
 def _places_error(places: int, field: str) -> ErrorDetail:
-    return _invalid(f"Use no máximo {places} casas decimais.", field)
-
-
-def _invalid(message: str, field: str) -> ErrorDetail:
-    return ErrorDetail(ErrorCode.VALIDATION_ERROR, message, field)
+    return ErrorDetail.validation(f"Use no máximo {places} casas decimais.", field)

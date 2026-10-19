@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from di1.modules.portfolio.application.interfaces.repository import PortfolioRepository
+from di1.modules.portfolio.application.services.repository import PortfolioRepository
 from di1.modules.portfolio.domain.cash import CashBalance
 from di1.modules.portfolio.domain.errors import AccountingError
 from di1.modules.portfolio.domain.positions import OpenPosition, PositionState
@@ -15,8 +15,8 @@ from di1.modules.portfolio.public import PreviousPositionsDay
 ONE_DAY = timedelta(days=1)
 
 
-class PreviousDayReader:
-    """Implements `di1.modules.portfolio.public.PortfolioReader` on the caller's session."""
+class PortfolioReader:
+    """Public `PortfolioReader` on the caller's session."""
 
     def __init__(self, repository: PortfolioRepository) -> None:
         self._repository = repository

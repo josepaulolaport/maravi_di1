@@ -10,7 +10,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from di1.modules.asset.public import InstrumentDescriptor
+from di1.modules.asset.public import Instrument
 from di1.modules.processing.application.interfaces.repositories import (
     IssueRecord,
     ProcessingChain,
@@ -128,16 +128,11 @@ class FakeChainHistory:
 class FakeAssets:
     codes: dict[UUID, str] = field(default_factory=dict)
 
-    async def get_instrument(self, instrument_id: UUID) -> InstrumentDescriptor:
-        return self._descriptor(instrument_id)
-
-    async def get_instruments(
-        self, instrument_ids: Collection[UUID]
-    ) -> Mapping[UUID, InstrumentDescriptor]:
+    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
         return {i: self._descriptor(i) for i in instrument_ids if i in self.codes}
 
-    def _descriptor(self, instrument_id: UUID) -> InstrumentDescriptor:
-        return InstrumentDescriptor(
+    def _descriptor(self, instrument_id: UUID) -> Instrument:
+        return Instrument(
             id=instrument_id,
             code=self.codes[instrument_id],
             product_id=UUID(int=1),

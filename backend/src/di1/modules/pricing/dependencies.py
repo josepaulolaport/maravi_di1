@@ -5,11 +5,10 @@ for Ledger and Prices: from its providers (HTTP) and plain factories (workers), 
 from __future__ import annotations
 
 from di1.modules.asset.public import AssetReader
-from di1.modules.pricing.application.services.pricing_service import InstrumentPricingService
-from di1.modules.pricing.domain.futures.di1 import DI1Calculator
-from di1.modules.pricing.public import PricingService
+from di1.modules.pricing.application.services.pricing_service import PricingService
+from di1.modules.pricing.domain.di1 import DI1Calculator
 
 
 def pricing_service(asset_reader: AssetReader) -> PricingService:
     """`PricingService` over ``asset_reader``; the calculator is stateless and pure."""
-    return InstrumentPricingService(asset_reader, DI1Calculator())
+    return PricingService(asset_reader, DI1Calculator())

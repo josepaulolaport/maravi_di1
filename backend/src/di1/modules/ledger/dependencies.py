@@ -7,8 +7,8 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.asset.public import AssetReader
-from di1.modules.ledger.application.interfaces.repository import LedgerRepository
 from di1.modules.ledger.application.services.ledger_service import LedgerService
+from di1.modules.ledger.application.services.repository import LedgerRepository
 from di1.modules.ledger.infrastructure.persistence.repositories import SqlLedgerRepository
 from di1.modules.ledger.public import LedgerReader
 from di1.modules.pricing.public import PricingService

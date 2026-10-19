@@ -1,97 +1,37 @@
-"""The Asset catalogue: browse type → class → product → instrument, and register them (spec §3,
-§11.2; interfaces.md "Asset").
-
-Reads serve the Ativos screen. Writes validate the whole request, report every problem at once
-(all 422 ``VALIDATION_ERROR``), save and commit the Unit of Work once. An id named inside a request
-body that does not exist is a ``VALIDATION_ERROR`` on its field; ``NOT_FOUND`` is only for the
-resource of the URL (user, 2026-10-19). Instrument types, asset classes and products have no HTTP
-route: they are registered by seeding (lane X), through this same service.
-"""
+"""Asset catalogue: type → class → product → instrument (spec §3, §11.2)."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Awaitable, Sequence
 from datetime import date
 from uuid import UUID
 
-from di1.modules.asset.application.interfaces.repository import (
+from di1.modules.asset.application.services.repository import (
     AssetRepository,
     DuplicateCodeError,
 )
 from di1.modules.asset.domain.model import (
-    AssetClass,
+    FuturesTerms,
     Instrument,
     InstrumentType,
-    InstrumentTypeRef,
     Product,
 )
 from di1.modules.asset.domain.rules import (
-    ASSET_CLASS_CODE_LENGTH,
-    ASSET_CLASS_NAME_LENGTH,
-    INSTRUMENT_TYPE_CODE_LENGTH,
-    INSTRUMENT_TYPE_NAME_LENGTH,
     PRODUCT_NAME_LENGTH,
     SMALLINT_MAX,
-    FuturesTerms,
     has_nul,
     normalize_instrument_code,
     normalize_product_code,
-    validate_catalogue_code,
     validate_futures_for_type,
     validate_maturity,
     validate_name,
 )
 from di1.modules.asset.domain.search import matches
-from di1.modules.prices.public import LatestPriceReader, ReferencePriceRecord
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True, slots=True)
-class NewInstrumentType:
-    code: str
-    name: str
-
-
-@dataclass(frozen=True, slots=True)
-class NewAssetClass:
-    instrument_type_id: int
-    code: str
-    name: str
-
-
-@dataclass(frozen=True, slots=True)
-class NewProduct:
-    asset_class_id: int
-    code: str
-    name: str
-    futures: FuturesTerms | None
-
-
-@dataclass(frozen=True, slots=True)
-class NewInstrument:
-    product_id: UUID
-    code: str
-    maturity_date: date | None
-
-
-def _invalid(message: str, field: str) -> ErrorDetail:
-    return ErrorDetail(ErrorCode.VALIDATION_ERROR, message, field)
-
-
-def _raise_if(errors: Sequence[ErrorDetail]) -> None:
-    if errors:
-        raise DomainError(*errors)
-
-
-def _is_smallint(value: int) -> bool:
-    """Catalogue ids are SMALLINT identities: anything else names no row (and PostgreSQL would
-    refuse to compare it)."""
-    return 1 <= value <= SMALLINT_MAX
 
 
 async def _insert[T](insert: Awaitable[T], duplicate: ErrorDetail) -> T:
@@ -104,13 +44,8 @@ async def _insert[T](insert: Awaitable[T], duplicate: ErrorDetail) -> T:
 
 
 class AssetService:
-    def __init__(
-        self, repository: AssetRepository, latest_prices: LatestPriceReader | None = None
-    ) -> None:
-        """``latest_prices`` serves `last_references`; without it (seeding, writes) no
-        instrument has one."""
+    def __init__(self, repository: AssetRepository) -> None:
         self._repository = repository
-        self._latest_prices = latest_prices
 
     # Reads (Ativos screen, spec §11.2)
 
@@ -138,16 +73,6 @@ class AssetService:
         instruments = await self._repository.list_instruments(product_id)
         return [i for i in instruments if matches((i.code,), search)]
 
-    async def last_references(
-        self, instruments: Sequence[Instrument]
-    ) -> Mapping[UUID, ReferencePriceRecord]:
-        """Each instrument's latest preferred reference price, MANUAL before B3, to be shown with
-        its own date (OQ-48, OQ-19 item 5); one read for all of them. Instruments without a price
-        are absent."""
-        if self._latest_prices is None or not instruments:
-            return {}
-        return await self._latest_prices.get_latest_preferred_many([i.id for i in instruments])
-
     async def get_instrument(self, instrument_id: UUID) -> Instrument:
         instrument = await self._repository.get_instrument(instrument_id)
         if instrument is None:
@@ -156,71 +81,39 @@ class AssetService:
 
     # Writes
 
-    async def create_instrument_type(
-        self, request: NewInstrumentType, *, uow: UnitOfWork
-    ) -> InstrumentTypeRef:
-        errors = [
-            *validate_catalogue_code(request.code, max_length=INSTRUMENT_TYPE_CODE_LENGTH),
-            *validate_name(request.name, max_length=INSTRUMENT_TYPE_NAME_LENGTH),
-        ]
-        duplicate = _invalid("Já existe um tipo de instrumento com este código.", "code")
-        if not errors and await self._repository.instrument_type_code_exists(request.code):
-            errors.append(duplicate)
-        _raise_if(errors)
-        created = await _insert(
-            self._repository.add_instrument_type(request.code, request.name), duplicate
-        )
-        await uow.commit()
-        logger.info("instrument type %s created", created.code)
-        return created
-
-    async def create_asset_class(self, request: NewAssetClass, *, uow: UnitOfWork) -> AssetClass:
-        errors = [
-            *validate_catalogue_code(request.code, max_length=ASSET_CLASS_CODE_LENGTH),
-            *validate_name(request.name, max_length=ASSET_CLASS_NAME_LENGTH),
-        ]
-        type_id = request.instrument_type_id
-        if not _is_smallint(type_id) or await self._repository.get_instrument_type(type_id) is None:
-            errors.append(_invalid("Tipo de instrumento não encontrado.", "instrument_type_id"))
-        duplicate = _invalid("Já existe uma classe de ativo com este código.", "code")
-        if not errors and await self._repository.asset_class_code_exists(request.code):
-            errors.append(duplicate)
-        _raise_if(errors)
-        created = await _insert(
-            self._repository.add_asset_class(
-                request.instrument_type_id, request.code, request.name
-            ),
-            duplicate,
-        )
-        await uow.commit()
-        logger.info("asset class %s created", created.code)
-        return created
-
-    async def create_product(self, request: NewProduct, *, uow: UnitOfWork) -> Product:
-        code, code_errors = normalize_product_code(request.code)
+    async def create_product(
+        self,
+        asset_class_id: int,
+        code: str,
+        name: str,
+        futures: FuturesTerms | None,
+        *,
+        uow: UnitOfWork,
+    ) -> Product:
+        code, code_errors = normalize_product_code(code)
         errors = [
             *code_errors,
-            *validate_name(request.name, max_length=PRODUCT_NAME_LENGTH, non_blank=True),
+            *validate_name(name, max_length=PRODUCT_NAME_LENGTH, non_blank=True),
         ]
         classified = (
-            await self._repository.get_asset_class(request.asset_class_id)
-            if _is_smallint(request.asset_class_id)
+            await self._repository.get_asset_class(asset_class_id)
+            if 1 <= asset_class_id <= SMALLINT_MAX
             else None
         )
         if classified is None:
-            errors.append(_invalid("Classe de ativo não encontrada.", "asset_class_id"))
-        else:
-            errors.extend(
-                validate_futures_for_type(classified.instrument_type.code, request.futures)
+            errors.append(
+                ErrorDetail.validation("Classe de ativo não encontrada.", "asset_class_id")
             )
-        duplicate = _invalid("Já existe um produto com este código.", "code")
+        else:
+            _asset_class, instrument_type = classified
+            errors.extend(validate_futures_for_type(instrument_type.code, futures))
+        duplicate = ErrorDetail.validation("Já existe um produto com este código.", "code")
         if not errors and await self._repository.product_code_exists(code):
             errors.append(duplicate)
-        _raise_if(errors)
+        if errors:
+            raise DomainError(*errors)
         product_id = await _insert(
-            self._repository.add_product(
-                request.asset_class_id, code, request.name, request.futures
-            ),
+            self._repository.add_product(asset_class_id, code, name, futures),
             duplicate,
         )
         product = await self.get_product(product_id)
@@ -228,20 +121,23 @@ class AssetService:
         logger.info("product %s created", product.code)
         return product
 
-    async def create_instrument(self, request: NewInstrument, *, uow: UnitOfWork) -> Instrument:
-        code, code_errors = normalize_instrument_code(request.code)
+    async def create_instrument(
+        self, product_id: UUID, code: str, maturity_date: date | None, *, uow: UnitOfWork
+    ) -> Instrument:
+        code, code_errors = normalize_instrument_code(code)
         errors = list(code_errors)
-        product = await self._repository.get_product(request.product_id)
+        product = await self._repository.get_product(product_id)
         if product is None:
-            errors.append(_invalid("Produto não encontrado.", "product_id"))
+            errors.append(ErrorDetail.validation("Produto não encontrado.", "product_id"))
         else:
-            errors.extend(validate_maturity(product.instrument_type.code, request.maturity_date))
-        duplicate = _invalid("Já existe um contrato com este código.", "code")
+            errors.extend(validate_maturity(product.instrument_type.code, maturity_date))
+        duplicate = ErrorDetail.validation("Já existe um contrato com este código.", "code")
         if not code_errors and await self._repository.instrument_code_exists(code):
             errors.append(duplicate)
-        _raise_if(errors)
+        if errors:
+            raise DomainError(*errors)
         instrument_id = await _insert(
-            self._repository.add_instrument(request.product_id, code, request.maturity_date),
+            self._repository.add_instrument(product_id, code, maturity_date),
             duplicate,
         )
         instrument = await self.get_instrument(instrument_id)

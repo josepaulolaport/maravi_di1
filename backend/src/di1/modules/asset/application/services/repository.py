@@ -10,14 +10,11 @@ from uuid import UUID
 
 from di1.modules.asset.domain.model import (
     AssetClass,
-    ClassifiedAssetClass,
+    FuturesTerms,
     Instrument,
     InstrumentType,
-    InstrumentTypeRef,
     Product,
 )
-from di1.modules.asset.domain.rules import FuturesTerms
-from di1.modules.asset.public import InstrumentDescriptor
 
 
 class DuplicateCodeError(Exception):
@@ -30,27 +27,15 @@ class AssetRepository(Protocol):
         """Every type with its classes, ordered by code."""
         ...
 
-    async def get_instrument_type(self, instrument_type_id: int) -> InstrumentTypeRef | None: ...
+    async def get_asset_class(
+        self, asset_class_id: int
+    ) -> tuple[AssetClass, InstrumentType] | None: ...
 
-    async def get_asset_class(self, asset_class_id: int) -> ClassifiedAssetClass | None: ...
-
-    async def instrument_type_code_exists(self, code: str) -> bool:
-        """Case-insensitively, like every code check below."""
+    async def product_code_exists(self, code: str) -> bool:
+        """Case-insensitively, like ``instrument_code_exists``."""
         ...
-
-    async def asset_class_code_exists(self, code: str) -> bool: ...
-
-    async def product_code_exists(self, code: str) -> bool: ...
 
     async def instrument_code_exists(self, code: str) -> bool: ...
-
-    async def add_instrument_type(self, code: str, name: str) -> InstrumentTypeRef:
-        """Raises `DuplicateCodeError` when the code is taken."""
-        ...
-
-    async def add_asset_class(self, instrument_type_id: int, code: str, name: str) -> AssetClass:
-        """Raises `DuplicateCodeError` when the code is taken."""
-        ...
 
     async def add_product(
         self, asset_class_id: int, code: str, name: str, futures: FuturesTerms | None
@@ -74,8 +59,6 @@ class AssetRepository(Protocol):
 
     async def get_instrument(self, instrument_id: UUID) -> Instrument | None: ...
 
-    async def get_descriptors(
-        self, instrument_ids: Collection[UUID]
-    ) -> Mapping[UUID, InstrumentDescriptor]:
-        """The descriptors of the instruments that exist among ``instrument_ids``."""
+    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
+        """The instruments that exist among ``instrument_ids``."""
         ...

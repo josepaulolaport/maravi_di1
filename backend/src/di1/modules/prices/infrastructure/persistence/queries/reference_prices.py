@@ -13,7 +13,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Executable, delete, func, select, update
+from sqlalchemy import Executable, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from di1.modules.prices.infrastructure.persistence.models import ReferencePriceModel
@@ -60,17 +60,6 @@ def replace_price(
             "updated_at": func.now(),
         },
     ).returning(*_COLUMNS)
-
-
-def update_price(
-    price_id: UUID, *, input_kind: str, pu: Decimal, rate: Decimal | None
-) -> Executable:
-    return (
-        update(ReferencePriceModel)
-        .where(ReferencePriceModel.id == price_id)
-        .values(input_kind=input_kind, pu=pu, rate=rate, updated_at=func.now())
-        .returning(*_COLUMNS)
-    )
 
 
 def select_price(price_id: UUID) -> Executable:

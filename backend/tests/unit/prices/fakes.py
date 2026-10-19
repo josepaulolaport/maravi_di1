@@ -3,28 +3,26 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from di1.modules.asset.public import InstrumentDescriptor
-from di1.modules.prices.application.interfaces.ports import NewReferencePrice
-from di1.modules.prices.public import ReferencePriceRecord
+from di1.modules.asset.public import Instrument
+from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.modules.pricing.public import Price, Quote
 from di1.shared.clock import SAO_PAULO
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 
 CALCULATED_PU = Decimal("89006.4625467350")
 CALCULATED_RATE = Decimal("0.100000000000")
 
 
-def instrument(maturity_date: date | None = date(2028, 1, 3)) -> InstrumentDescriptor:
+def instrument(maturity_date: date | None = date(2028, 1, 3)) -> Instrument:
     product_id = uuid4()
-    return InstrumentDescriptor(
+    return Instrument(
         id=uuid4(),
         code="DI1F28",
         product_id=product_id,
@@ -40,20 +38,13 @@ def instrument(maturity_date: date | None = date(2028, 1, 3)) -> InstrumentDescr
 
 @dataclass
 class FakeAssets:
-    instruments: dict[UUID, InstrumentDescriptor] = field(default_factory=dict)
+    instruments: dict[UUID, Instrument] = field(default_factory=dict)
 
-    def add(self, descriptor: InstrumentDescriptor) -> InstrumentDescriptor:
+    def add(self, descriptor: Instrument) -> Instrument:
         self.instruments[descriptor.id] = descriptor
         return descriptor
 
-    async def get_instrument(self, instrument_id: UUID) -> InstrumentDescriptor:
-        if instrument_id not in self.instruments:
-            raise DomainError(ErrorDetail(ErrorCode.NOT_FOUND, "Contrato não encontrado."))
-        return self.instruments[instrument_id]
-
-    async def get_instruments(
-        self, instrument_ids: Collection[UUID]
-    ) -> Mapping[UUID, InstrumentDescriptor]:
+    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
         return {i: self.instruments[i] for i in instrument_ids if i in self.instruments}
 
 
@@ -99,38 +90,36 @@ class InMemoryRepository:
         self.ticks += 1
         return datetime(2026, 10, 19, 10, 0, tzinfo=SAO_PAULO) + timedelta(minutes=self.ticks)
 
-    async def replace(self, price: NewReferencePrice) -> ReferencePriceRecord:
+    async def replace(
+        self,
+        *,
+        asset_id: UUID,
+        reference_date: date,
+        source: PriceSource,
+        input_kind: InputKind,
+        pu: Decimal,
+        rate: Decimal | None,
+    ) -> ReferencePriceRecord:
         for key, row in list(self.rows.items()):
             if (row.asset_id, row.reference_date, row.source) == (
-                price.asset_id,
-                price.reference_date,
-                price.source,
+                asset_id,
+                reference_date,
+                source,
             ):
                 del self.rows[key]
         now = self._now()
         record = ReferencePriceRecord(
             id=uuid4(),
-            asset_id=price.asset_id,
-            reference_date=price.reference_date,
-            source=price.source,
-            input_kind=price.input_kind,
-            pu=price.pu,
-            rate=price.rate,
+            asset_id=asset_id,
+            reference_date=reference_date,
+            source=source,
+            input_kind=input_kind,
+            pu=pu,
+            rate=rate,
             created_at=now,
             updated_at=now,
         )
         self.rows[record.id] = record
-        return record
-
-    async def update(
-        self, price_id: UUID, input_kind: InputKind, pu: Decimal, rate: Decimal | None
-    ) -> ReferencePriceRecord | None:
-        if price_id not in self.rows:
-            return None
-        record = replace(
-            self.rows[price_id], input_kind=input_kind, pu=pu, rate=rate, updated_at=self._now()
-        )
-        self.rows[price_id] = record
         return record
 
     async def get(self, price_id: UUID) -> ReferencePriceRecord | None:

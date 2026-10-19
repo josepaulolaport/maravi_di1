@@ -9,8 +9,8 @@ from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from di1.modules.asset.public import InstrumentDescriptor
-from di1.modules.ledger.public import CashMovementRecord, EntryType, TradeRecord
+from di1.modules.asset.public import Instrument
+from di1.modules.ledger.public import EntryType, LedgerEntry
 from di1.modules.pnl.public import AssetPnLResult, PortfolioPnLResult
 from di1.modules.portfolio.public import (
     CashBalance,
@@ -28,57 +28,70 @@ CREATED = datetime(2026, 10, 1, tzinfo=UTC)
 
 
 def trade(
-    asset_id: UUID, day: date, quantity: int, pu: str, *, seq: int = 1, at: time = time(10)
-) -> TradeRecord:
-    return TradeRecord(
+    asset_id: UUID,
+    day: date,
+    quantity: int,
+    pu: str,
+    rate: str = "0.1",
+    *,
+    seq: int = 1,
+    at: time = time(10),
+) -> LedgerEntry:
+    return LedgerEntry(
         id=uuid4(),
-        asset_id=asset_id,
-        trade_date=day,
-        trade_time=at,
+        type=EntryType.TRADE,
+        entry_date=day,
+        entry_time=at,
         seq=seq,
+        created_at=CREATED,
+        asset_id=asset_id,
         signed_quantity=quantity,
         execution_pu=Decimal(pu),
-        execution_rate=Decimal("0.1"),
+        execution_rate=Decimal(rate),
         input_kind=InputKind.PU,
-        created_at=CREATED,
+        cash_amount=None,
     )
 
 
-def cash_movement(day: date, amount: str, *, seq: int = 1) -> CashMovementRecord:
-    return CashMovementRecord(
+def cash_movement(day: date, amount: str, *, seq: int = 1) -> LedgerEntry:
+    return LedgerEntry(
         id=uuid4(),
-        movement_date=day,
-        movement_time=time(9),
+        type=EntryType.CASH,
+        entry_date=day,
+        entry_time=time(9),
         seq=seq,
-        amount=Decimal(amount),
         created_at=CREATED,
+        asset_id=None,
+        signed_quantity=None,
+        execution_pu=None,
+        execution_rate=None,
+        input_kind=None,
+        cash_amount=Decimal(amount),
     )
 
 
 @dataclass
 class FakeLedger:
-    trades: list[TradeRecord] = field(default_factory=list)
-    movements: list[CashMovementRecord] = field(default_factory=list)
+    trades: list[LedgerEntry] = field(default_factory=list)
+    movements: list[LedgerEntry] = field(default_factory=list)
     asked: list[tuple[date, EntryType | None]] = field(default_factory=list)
 
-    async def get_trades(self, start_date: date, end_date: date) -> Sequence[TradeRecord]:
-        found = [t for t in self.trades if start_date <= t.trade_date <= end_date]
+    async def get_trades(self, start_date: date, end_date: date) -> Sequence[LedgerEntry]:
+        found = [t for t in self.trades if start_date <= t.entry_date <= end_date]
         return sorted(found, key=lambda t: t.order_key)
 
-    async def get_cash_movements(
-        self, start_date: date, end_date: date
-    ) -> Sequence[CashMovementRecord]:
-        found = [m for m in self.movements if start_date <= m.movement_date <= end_date]
+    async def get_cash_movements(self, start_date: date, end_date: date) -> Sequence[LedgerEntry]:
+        found = [m for m in self.movements if start_date <= m.entry_date <= end_date]
         return sorted(found, key=lambda m: m.order_key)
 
     async def has_entries_on_or_before(
         self, day: date, *, entry_type: EntryType | None = None
     ) -> bool:
         self.asked.append((day, entry_type))
-        trades = any(t.trade_date <= day for t in self.trades)
+        trades = any(t.entry_date <= day for t in self.trades)
         if entry_type is EntryType.TRADE:
             return trades
-        return trades or any(m.movement_date <= day for m in self.movements)
+        return trades or any(m.entry_date <= day for m in self.movements)
 
 
 @dataclass
@@ -90,14 +103,7 @@ class FakePrices:
     ) -> None:
         self.pus[(asset_id, day)] = (pu, source)
 
-    async def get_preferred(
-        self, asset_id: UUID, reference_date: date
-    ) -> ReferencePriceRecord | None:
-        return (await self.get_preferred_many([asset_id], [reference_date])).get(
-            (asset_id, reference_date)
-        )
-
-    async def get_preferred_many(
+    async def get(
         self, asset_ids: Collection[UUID], dates: Collection[date]
     ) -> Mapping[tuple[UUID, date], ReferencePriceRecord]:
         found: dict[tuple[UUID, date], ReferencePriceRecord] = {}
@@ -116,21 +122,37 @@ class FakePrices:
                 )
         return found
 
+    async def latest(self, asset_ids: Collection[UUID]) -> Mapping[UUID, ReferencePriceRecord]:
+        latest: dict[UUID, ReferencePriceRecord] = {}
+        for key, (pu, source) in self.pus.items():
+            if key[0] not in asset_ids:
+                continue
+            record = ReferencePriceRecord(
+                id=uuid4(),
+                asset_id=key[0],
+                reference_date=key[1],
+                source=source,
+                input_kind=InputKind.PU,
+                pu=Decimal(pu),
+                rate=None,
+                created_at=CREATED,
+                updated_at=CREATED,
+            )
+            current = latest.get(key[0])
+            if current is None or record.reference_date > current.reference_date:
+                latest[key[0]] = record
+        return latest
+
 
 @dataclass
 class FakeInstruments:
     maturities: dict[UUID, date] = field(default_factory=dict)
 
-    async def get_instrument(self, instrument_id: UUID) -> InstrumentDescriptor:
-        return self._descriptor(instrument_id)
-
-    async def get_instruments(
-        self, instrument_ids: Collection[UUID]
-    ) -> Mapping[UUID, InstrumentDescriptor]:
+    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
         return {i: self._descriptor(i) for i in instrument_ids if i in self.maturities}
 
-    def _descriptor(self, instrument_id: UUID) -> InstrumentDescriptor:
-        return InstrumentDescriptor(
+    def _descriptor(self, instrument_id: UUID) -> Instrument:
+        return Instrument(
             id=instrument_id,
             code=f"DI1-{instrument_id.int % 1000}",
             product_id=UUID(int=1),

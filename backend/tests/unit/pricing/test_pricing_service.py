@@ -17,12 +17,12 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from di1.modules.asset.public import AssetReader, InstrumentDescriptor
+from di1.modules.asset.public import AssetReader, Instrument
 from di1.modules.pricing.dependencies import pricing_service
 from di1.modules.pricing.public import InputKind, Price, PricingService, Quote
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 
-DI1F28 = InstrumentDescriptor(
+DI1F28 = Instrument(
     id=uuid4(),
     code="DI1F28",
     product_id=uuid4(),
@@ -38,26 +38,16 @@ ONE_YEAR_BEFORE = date(2027, 1, 1)  # 365 calendar days to DI1F28's maturity
 
 
 class FakeAssetReader:
-    """`AssetReader` over a fixed set of instruments; unknown ids are NOT_FOUND, like Asset's."""
+    """`AssetReader` over a fixed set of instruments; unknown ids are absent."""
 
-    def __init__(self, *instruments: InstrumentDescriptor) -> None:
+    def __init__(self, *instruments: Instrument) -> None:
         self._instruments = {instrument.id: instrument for instrument in instruments}
 
-    async def get_instrument(self, instrument_id: UUID) -> InstrumentDescriptor:
-        try:
-            return self._instruments[instrument_id]
-        except KeyError:
-            raise DomainError(
-                ErrorDetail(ErrorCode.NOT_FOUND, "Contrato não encontrado.")
-            ) from None
-
-    async def get_instruments(
-        self, instrument_ids: Collection[UUID]
-    ) -> Mapping[UUID, InstrumentDescriptor]:
+    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
         return {i: self._instruments[i] for i in instrument_ids if i in self._instruments}
 
 
-def service_for(*instruments: InstrumentDescriptor) -> PricingService:
+def service_for(*instruments: Instrument) -> PricingService:
     reader: AssetReader = FakeAssetReader(*instruments)
     return pricing_service(reader)
 
@@ -70,7 +60,7 @@ def refusal(caught: pytest.ExceptionInfo[DomainError]) -> ErrorDetail:
 async def test_the_challenge_example_prices_from_the_instrument() -> None:
     # DI1F28 at 10% a.a. on 01/01/2027: 100000 / 1.1 (desafio §5; spec §15 D4).
     price = await service_for(DI1F28).calculate(
-        DI1F28.id, ONE_YEAR_BEFORE, Quote.rate(Decimal("0.10"))
+        DI1F28.id, ONE_YEAR_BEFORE, Quote(InputKind.RATE, Decimal("0.10"))
     )
 
     assert price == Price(
@@ -80,7 +70,7 @@ async def test_the_challenge_example_prices_from_the_instrument() -> None:
 
 async def test_a_typed_pu_gives_the_rate() -> None:
     price = await service_for(DI1F28).calculate(
-        DI1F28.id, ONE_YEAR_BEFORE, Quote.pu(Decimal("90909.0909090909"))
+        DI1F28.id, ONE_YEAR_BEFORE, Quote(InputKind.PU, Decimal("90909.0909090909"))
     )
 
     assert price == Price(
@@ -93,7 +83,7 @@ async def test_the_face_value_comes_from_the_instrument() -> None:
     small = replace(DI1F28, id=uuid4(), face_value=Decimal("1000"))
 
     price = await service_for(small).calculate(
-        small.id, ONE_YEAR_BEFORE, Quote.rate(Decimal("0.10"))
+        small.id, ONE_YEAR_BEFORE, Quote(InputKind.RATE, Decimal("0.10"))
     )
 
     assert price.pu == Decimal("909.0909090909")
@@ -104,7 +94,7 @@ async def test_the_maturity_comes_from_the_instrument() -> None:
     longer = replace(DI1F28, id=uuid4(), maturity_date=date(2031, 1, 1))
 
     price = await service_for(longer).calculate(
-        longer.id, date(2029, 1, 1), Quote.rate(Decimal("0.10"))
+        longer.id, date(2029, 1, 1), Quote(InputKind.RATE, Decimal("0.10"))
     )
 
     assert price.pu == Decimal("82644.6280991736")
@@ -115,7 +105,7 @@ async def test_the_multiplier_is_not_applied() -> None:
     tenfold = replace(DI1F28, id=uuid4(), multiplier=Decimal("10"))
 
     price = await service_for(tenfold).calculate(
-        tenfold.id, ONE_YEAR_BEFORE, Quote.rate(Decimal("0.10"))
+        tenfold.id, ONE_YEAR_BEFORE, Quote(InputKind.RATE, Decimal("0.10"))
     )
 
     assert price.pu == Decimal("90909.0909090909")
@@ -125,7 +115,7 @@ async def test_the_product_code_is_case_insensitive() -> None:
     lower = replace(DI1F28, id=uuid4(), product_code="di1")
 
     price = await service_for(lower).calculate(
-        lower.id, ONE_YEAR_BEFORE, Quote.rate(Decimal("0.10"))
+        lower.id, ONE_YEAR_BEFORE, Quote(InputKind.RATE, Decimal("0.10"))
     )
 
     assert price.pu == Decimal("90909.0909090909")
@@ -133,7 +123,7 @@ async def test_the_product_code_is_case_insensitive() -> None:
 
 async def test_on_the_maturity_date_the_pu_is_typed_and_the_rate_is_zero() -> None:
     price = await service_for(DI1F28).calculate(
-        DI1F28.id, date(2028, 1, 1), Quote.pu(Decimal("99990.12"))
+        DI1F28.id, date(2028, 1, 1), Quote(InputKind.PU, Decimal("99990.12"))
     )
 
     assert price == Price(
@@ -143,7 +133,9 @@ async def test_on_the_maturity_date_the_pu_is_typed_and_the_rate_is_zero() -> No
 
 async def test_after_the_maturity_date_the_contract_is_matured() -> None:
     with pytest.raises(DomainError) as caught:
-        await service_for(DI1F28).calculate(DI1F28.id, date(2028, 1, 2), Quote.pu(Decimal("99990")))
+        await service_for(DI1F28).calculate(
+            DI1F28.id, date(2028, 1, 2), Quote(InputKind.PU, Decimal("99990"))
+        )
 
     assert refusal(caught).code is ErrorCode.CONTRACT_MATURED
 
@@ -151,7 +143,7 @@ async def test_after_the_maturity_date_the_contract_is_matured() -> None:
 async def test_a_typed_value_with_too_many_decimals_is_rejected() -> None:
     with pytest.raises(DomainError) as caught:
         await service_for(DI1F28).calculate(
-            DI1F28.id, ONE_YEAR_BEFORE, Quote.rate(Decimal("0.1000000000001"))
+            DI1F28.id, ONE_YEAR_BEFORE, Quote(InputKind.RATE, Decimal("0.1000000000001"))
         )
 
     assert refusal(caught) == ErrorDetail(
@@ -161,7 +153,9 @@ async def test_a_typed_value_with_too_many_decimals_is_rejected() -> None:
 
 async def test_an_unknown_instrument_is_not_found() -> None:
     with pytest.raises(DomainError) as caught:
-        await service_for(DI1F28).calculate(uuid4(), ONE_YEAR_BEFORE, Quote.rate(Decimal("0.10")))
+        await service_for(DI1F28).calculate(
+            uuid4(), ONE_YEAR_BEFORE, Quote(InputKind.RATE, Decimal("0.10"))
+        )
 
     assert refusal(caught) == ErrorDetail(ErrorCode.NOT_FOUND, "Contrato não encontrado.")
 
@@ -187,7 +181,9 @@ async def test_an_instrument_that_is_not_a_future_is_refused() -> None:
     )
 
     with pytest.raises(DomainError) as caught:
-        await service_for(option).calculate(option.id, ONE_YEAR_BEFORE, Quote.rate(Decimal("0.10")))
+        await service_for(option).calculate(
+            option.id, ONE_YEAR_BEFORE, Quote(InputKind.RATE, Decimal("0.10"))
+        )
 
     assert refusal(caught) == NOT_PRICEABLE
 
@@ -197,7 +193,9 @@ async def test_a_future_of_another_product_is_refused() -> None:
     dap = replace(DI1F28, id=uuid4(), code="DAPK28", product_code="DAP")
 
     with pytest.raises(DomainError) as caught:
-        await service_for(dap).calculate(dap.id, ONE_YEAR_BEFORE, Quote.rate(Decimal("0.10")))
+        await service_for(dap).calculate(
+            dap.id, ONE_YEAR_BEFORE, Quote(InputKind.RATE, Decimal("0.10"))
+        )
 
     assert refusal(caught) == NOT_PRICEABLE
 
@@ -211,11 +209,11 @@ async def test_a_future_of_another_product_is_refused() -> None:
     ids=["no_maturity", "no_face_value"],
 )
 async def test_a_di1_instrument_without_its_terms_is_refused(
-    incomplete: InstrumentDescriptor,
+    incomplete: Instrument,
 ) -> None:
     with pytest.raises(DomainError) as caught:
         await service_for(incomplete).calculate(
-            incomplete.id, ONE_YEAR_BEFORE, Quote.rate(Decimal("0.10"))
+            incomplete.id, ONE_YEAR_BEFORE, Quote(InputKind.RATE, Decimal("0.10"))
         )
 
     assert refusal(caught) == NOT_PRICEABLE

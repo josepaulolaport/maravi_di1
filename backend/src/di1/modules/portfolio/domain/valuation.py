@@ -18,12 +18,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from enum import Enum, StrEnum
+from enum import Enum
 from uuid import UUID
 
 from di1.modules.portfolio.domain.errors import AccountingError
 from di1.modules.portfolio.domain.maturity import is_past_maturity, reference_pu_on
 from di1.shared.decimals import financial_context
+from di1.shared.quotes import PriceSource as PriceSource
 
 ZERO = Decimal("0")
 
@@ -34,14 +35,6 @@ class ValuationStatus(Enum):
     COMPLETE = "COMPLETE"
     MISSING = "MISSING"
     NOT_REQUIRED = "NOT_REQUIRED"  # a flat position: worth 0 with or without a price
-
-
-class ReferenceSource(StrEnum):
-    """The source of a reference PU, shown by the position table. Same values as Prices'
-    ``PriceSource``; Portfolio's application layer maps one onto the other."""
-
-    MANUAL = "MANUAL"
-    B3 = "B3"
 
 
 @dataclass(frozen=True)

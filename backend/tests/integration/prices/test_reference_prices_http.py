@@ -11,6 +11,7 @@ from uuid import UUID
 
 import psycopg
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
@@ -89,10 +90,12 @@ def api(migrated_database_url: str, assets: FakeAssets) -> Iterator[Api]:
     _seed(migrated_database_url)
     app = create_app(Settings(database_url=SecretStr(migrated_database_url)))
 
-    def service(uow: UnitOfWork) -> PriceService:
+    uow_dependency = Depends(composition_unit_of_work)
+
+    def service(uow: UnitOfWork = uow_dependency) -> PriceService:
         return price_service(uow, assets=assets, pricing=FakePricing(), clock=FixedClock(TODAY))
 
-    app.include_router(create_router(composition_unit_of_work, service))
+    app.include_router(create_router(service, composition_unit_of_work))
     with TestClient(app) as client:
         yield Api(client, migrated_database_url)
 

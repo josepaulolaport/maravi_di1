@@ -76,12 +76,18 @@ def products(
 
 
 def instruments(
-    *, product_id: UUID | None = None, instrument_id: UUID | None = None
-) -> Select[InstrumentRow, str]:
-    """Instruments with their product code, by maturity (undated last), then code and id."""
+    *,
+    product_id: UUID | None = None,
+    instrument_id: UUID | None = None,
+    instrument_ids: Collection[UUID] | None = None,
+) -> Select[InstrumentRow, ProductRow, AssetClassRow, InstrumentTypeRow, FuturesRow]:
+    """Instruments with product, class, type and futures, by maturity (undated last), then code."""
     statement = (
-        select(InstrumentRow, ProductRow.code)
+        select(InstrumentRow, ProductRow, AssetClassRow, InstrumentTypeRow, FuturesRow)
         .join(ProductRow, ProductRow.id == InstrumentRow.product_id)
+        .join(AssetClassRow, AssetClassRow.id == ProductRow.asset_class_id)
+        .join(InstrumentTypeRow, InstrumentTypeRow.id == AssetClassRow.instrument_type_id)
+        .outerjoin(FuturesRow, FuturesRow.product_id == ProductRow.id)
         .order_by(
             InstrumentRow.maturity_date.asc().nulls_last(), InstrumentRow.code, InstrumentRow.id
         )
@@ -90,18 +96,6 @@ def instruments(
         statement = statement.where(InstrumentRow.product_id == product_id)
     if instrument_id is not None:
         statement = statement.where(InstrumentRow.id == instrument_id)
+    if instrument_ids is not None:
+        statement = statement.where(InstrumentRow.id.in_(list(instrument_ids)))
     return statement
-
-
-def descriptors(
-    instrument_ids: Collection[UUID],
-) -> Select[InstrumentRow, ProductRow, AssetClassRow, InstrumentTypeRow, FuturesRow]:
-    """What `InstrumentDescriptor` needs, for the given instruments."""
-    return (
-        select(InstrumentRow, ProductRow, AssetClassRow, InstrumentTypeRow, FuturesRow)
-        .join(ProductRow, ProductRow.id == InstrumentRow.product_id)
-        .join(AssetClassRow, AssetClassRow.id == ProductRow.asset_class_id)
-        .join(InstrumentTypeRow, InstrumentTypeRow.id == AssetClassRow.instrument_type_id)
-        .outerjoin(FuturesRow, FuturesRow.product_id == ProductRow.id)
-        .where(InstrumentRow.id.in_(list(instrument_ids)))
-    )

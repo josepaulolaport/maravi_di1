@@ -18,7 +18,6 @@ from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, Port
 from di1.modules.portfolio.dependencies import (
     portfolio_query_service,
     portfolio_reader,
-    portfolio_repository,
     results_writer,
 )
 from di1.modules.portfolio.domain.cash import CashDay
@@ -29,6 +28,7 @@ from di1.modules.portfolio.domain.valuation import (
     PortfolioValuation,
     ValuationStatus,
 )
+from di1.modules.portfolio.infrastructure.persistence.repositories import SqlPortfolioRepository
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.clock import FixedClock
@@ -163,7 +163,7 @@ async def test_a_positions_day_reads_back_exactly(
     )
 
     async with session_factory() as session:
-        repository = portfolio_repository(session)
+        repository = SqlPortfolioRepository(session)
         rows = {p.asset_id: p for p in await repository.get_positions(D)}
         day = await repository.get_portfolio_day(D)
 
@@ -343,8 +343,8 @@ async def test_rewriting_a_date_deletes_assets_no_longer_expected(
     await publish.positions(D, both[:1], "1", _portfolio_pnl("0", "0"))
 
     async with session_factory() as session:
-        rows = await portfolio_repository(session).get_positions(D)
-        day = await portfolio_repository(session).get_portfolio_day(D)
+        rows = await SqlPortfolioRepository(session).get_positions(D)
+        day = await SqlPortfolioRepository(session).get_portfolio_day(D)
 
     assert [r.asset_id for r in rows] == [f28]
     assert day is not None and day.positions_market_value == Decimal("1")
@@ -368,7 +368,7 @@ async def test_a_flat_position_is_worth_zero_not_null(
     )
 
     async with session_factory() as session:
-        (row,) = await portfolio_repository(session).get_positions(D)
+        (row,) = await SqlPortfolioRepository(session).get_positions(D)
 
     assert row.quantity == 0
     assert row.average_entry_pu is None
@@ -396,7 +396,7 @@ async def test_reads_never_mix_dates(
         )
 
     async with session_factory() as session:
-        repository = portfolio_repository(session)
+        repository = SqlPortfolioRepository(session)
         (row,) = await repository.get_positions(D)
         days = await repository.get_portfolio_days(D, D + timedelta(days=1))
 
@@ -413,7 +413,7 @@ async def test_a_day_with_no_expected_asset_is_published_and_read_back(
 
     async with session_factory() as session:
         previous = await portfolio_reader(session).get_previous_positions(D + timedelta(days=1))
-        assert await portfolio_repository(session).get_positions(D) == []
+        assert await SqlPortfolioRepository(session).get_positions(D) == []
 
     assert previous is not None
     assert previous.state.positions == ()
@@ -467,12 +467,12 @@ async def test_the_writer_never_commits(
         )
 
     async with session_factory() as session:
-        assert await portfolio_repository(session).get_cash(D) is None
+        assert await SqlPortfolioRepository(session).get_cash(D) is None
 
 
 async def _aum(session_factory: async_sessionmaker[AsyncSession], on: date) -> Decimal | None:
     async with session_factory() as session:
-        day = await portfolio_repository(session).get_portfolio_day(on)
+        day = await SqlPortfolioRepository(session).get_portfolio_day(on)
     assert day is not None
     return day.aum
 
@@ -538,7 +538,7 @@ async def test_a_position_closed_on_d_leaves_d_plus_one_with_no_asset(
     await publish.positions(next_day, [], "0", _portfolio_pnl("0", "3"))
 
     async with session_factory() as session:
-        repository = portfolio_repository(session)
+        repository = SqlPortfolioRepository(session)
         day = await repository.get_portfolio_day(next_day)
         assert await repository.get_positions(next_day) == []
     assert day is not None

@@ -26,6 +26,15 @@ class MissingReferencePrice(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class PnLTrade:
+    """Buys positive, sells negative (schema ``INTEGER``), at the execution PU. The application
+    layer maps Ledger's trade record to it."""
+
+    signed_quantity: int
+    execution_pu: Decimal
+
+
+@dataclass(frozen=True, slots=True)
 class AssetPnLResult:
     """One asset on one day. ``daily_pnl`` is set only when both components are."""
 

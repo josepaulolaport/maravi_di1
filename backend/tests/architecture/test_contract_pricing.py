@@ -17,8 +17,8 @@ def test_input_kind_is_the_shared_one() -> None:
 
 
 def test_a_quote_records_what_was_typed() -> None:
-    assert Quote.pu(Decimal("90000")).kind == InputKind.PU
-    assert Quote.rate(Decimal("0.1")).kind == InputKind.RATE
+    assert Quote(InputKind.PU, Decimal("90000")).kind == InputKind.PU
+    assert Quote(InputKind.RATE, Decimal("0.1")).kind == InputKind.RATE
 
 
 def test_a_price_is_a_frozen_complete_pair() -> None:

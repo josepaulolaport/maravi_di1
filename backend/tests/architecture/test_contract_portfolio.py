@@ -8,12 +8,11 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import typing
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 import pytest
 
-from di1.modules.pnl.public import CalculationCompleteness
 from di1.modules.portfolio.public import (
     CashSummaryView,
     PnLPointView,
@@ -131,23 +130,19 @@ def test_the_previous_day_carries_no_reference_pus() -> None:
     assert _fields(PreviousPositionsDay) == ["state", "cumulative_pnl"]
 
 
-def test_each_pnl_point_carries_the_range_sum_and_the_positions_processing_time() -> None:
-    # OQ-31 item 8: positions chain only; the chart sums daily P&L from the start date.
+def test_each_pnl_point_carries_the_range_sum_and_the_positions_status() -> None:
+    # OQ-49: the chart reads the range sum, the day's daily P&L and the positions status.
     assert _fields(PnLPointView) == [
         "date",
         "daily_pnl",
-        "cumulative_pnl",
         "range_cumulative_pnl",
-        "pnl_status",
         "status",
-        "published_at",
     ]
 
 
 def test_every_day_of_the_range_is_a_point_and_the_range_sum_never_breaks() -> None:
     # OQ-41: an unprocessed day is a point with no status; a missing day counts as 0.
     hints = typing.get_type_hints(PnLPointView)
+    assert hints["daily_pnl"] == Decimal | None
     assert hints["range_cumulative_pnl"] is Decimal
     assert hints["status"] == ChainStatus | None
-    assert hints["published_at"] == datetime | None
-    assert hints["pnl_status"] == CalculationCompleteness | None

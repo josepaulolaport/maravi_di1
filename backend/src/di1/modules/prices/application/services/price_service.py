@@ -1,9 +1,4 @@
-"""`PriceService`: reference prices are set, corrected and removed here, and read by date
-(spec §5; interfaces.md "Prices"; OQ-25, OQ-26, OQ-30, OQ-31).
-
-A write only saves the price and commits once: it calls no Processing contract, marks nothing
-and never enqueues processing (OQ-31). The PU or rate not typed is calculated by Pricing.
-"""
+"""Reference prices: set (replace same key), remove, read by date (spec §5; OQ-25, OQ-26)."""
 
 from __future__ import annotations
 
@@ -16,8 +11,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from di1.modules.asset.public import AssetReader
-from di1.modules.prices.application.interfaces.ports import (
-    NewReferencePrice,
+from di1.modules.prices.application.services.repository import (
     ReferencePriceRepository,
     RepositoryFactory,
 )
@@ -34,20 +28,8 @@ logger = logging.getLogger(__name__)
 _validate_quote = QuoteValidator()
 """Pricing's one quote validation; the price request's fields already use Pricing's names."""
 
-_UNKNOWN_ASSET = ErrorDetail(ErrorCode.VALIDATION_ERROR, "Selecione um contrato.", "asset_id")
+_UNKNOWN_ASSET = ErrorDetail.validation("Selecione um contrato.", "asset_id")
 _PRICE_NOT_FOUND = ErrorDetail(ErrorCode.NOT_FOUND, "Preço de referência não encontrado.")
-
-
-@dataclass(frozen=True, slots=True)
-class SetReferencePrice:
-    """A price typed as a PU or as a rate; the other value is calculated."""
-
-    asset_id: UUID
-    reference_date: date
-    input_kind: InputKind
-    pu: Decimal | None
-    rate: Decimal | None
-    source: PriceSource = PriceSource.MANUAL
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,23 +57,27 @@ class PriceService:
         self._clock = clock
 
     async def set_reference_price(
-        self, request: SetReferencePrice, *, uow: UnitOfWork
+        self,
+        asset_id: UUID,
+        reference_date: date,
+        input_kind: InputKind,
+        pu: Decimal | None,
+        rate: Decimal | None,
+        *,
+        source: PriceSource = PriceSource.MANUAL,
+        uow: UnitOfWork,
     ) -> ReferencePriceRecord:
         """Save the price of (asset, date, source); one already there is replaced, with a new
         id (OQ-26 item 7)."""
-        pu, rate = await self._priced(
-            request.asset_id, request.reference_date, request.input_kind, request.pu, request.rate
-        )
+        priced_pu, priced_rate = await self._priced(asset_id, reference_date, input_kind, pu, rate)
         repository = self._repositories(uow)
         record = await repository.replace(
-            NewReferencePrice(
-                asset_id=request.asset_id,
-                reference_date=request.reference_date,
-                source=request.source,
-                input_kind=request.input_kind,
-                pu=pu,
-                rate=rate,
-            )
+            asset_id=asset_id,
+            reference_date=reference_date,
+            source=source,
+            input_kind=input_kind,
+            pu=priced_pu,
+            rate=priced_rate,
         )
         await uow.commit()
         logger.info(
@@ -100,30 +86,6 @@ class PriceService:
             record.reference_date,
             record.source,
         )
-        return record
-
-    async def correct_reference_price(
-        self,
-        price_id: UUID,
-        *,
-        input_kind: InputKind,
-        pu: Decimal | None,
-        rate: Decimal | None,
-        uow: UnitOfWork,
-    ) -> ReferencePriceRecord:
-        """Change the values of a price in place: same id, same asset, date and source (OQ-25)."""
-        repository = self._repositories(uow)
-        current = await repository.get(price_id)
-        if current is None:
-            raise DomainError(_PRICE_NOT_FOUND)
-        new_pu, new_rate = await self._priced(
-            current.asset_id, current.reference_date, input_kind, pu, rate
-        )
-        record = await repository.update(price_id, input_kind, new_pu, new_rate)
-        if record is None:  # deleted after the read above
-            raise DomainError(_PRICE_NOT_FOUND)
-        await uow.commit()
-        logger.info("reference price %s corrected", record.id)
         return record
 
     async def remove_reference_price(self, price_id: UUID, *, uow: UnitOfWork) -> None:
@@ -203,21 +165,13 @@ class PriceService:
         return price.pu, price.rate
 
 
-class PreferredPriceReader:
-    """`prices.public.PriceReader` and `prices.public.LatestPriceReader` over the repository of
-    one session: MANUAL before B3, in one query for any number of assets."""
+class PriceReader:
+    """Public `PriceReader`: winning MANUAL/B3 price on the caller's session."""
 
     def __init__(self, repository: ReferencePriceRepository) -> None:
         self._repository = repository
 
-    async def get_preferred(
-        self, asset_id: UUID, reference_date: date
-    ) -> ReferencePriceRecord | None:
-        return (await self.get_preferred_many([asset_id], [reference_date])).get(
-            (asset_id, reference_date)
-        )
-
-    async def get_preferred_many(
+    async def get(
         self, asset_ids: Collection[UUID], dates: Collection[date]
     ) -> Mapping[tuple[UUID, date], ReferencePriceRecord]:
         if not asset_ids or not dates:
@@ -226,19 +180,16 @@ class PreferredPriceReader:
         by_pair: defaultdict[tuple[UUID, date], list[ReferencePriceRecord]] = defaultdict(list)
         for observation in observations:
             by_pair[(observation.asset_id, observation.reference_date)].append(observation)
-        preferred = {pair: choose_preferred(found) for pair, found in by_pair.items()}
-        return {pair: record for pair, record in preferred.items() if record is not None}
+        winning = {pair: choose_preferred(found) for pair, found in by_pair.items()}
+        return {pair: record for pair, record in winning.items() if record is not None}
 
-    async def get_latest_preferred_many(
-        self, asset_ids: Collection[UUID]
-    ) -> Mapping[UUID, ReferencePriceRecord]:
-        """For each asset, the preferred price of the latest date that has one, for
-        ``Instrument.last_reference`` (OQ-48); assets without a price are absent."""
+    async def latest(self, asset_ids: Collection[UUID]) -> Mapping[UUID, ReferencePriceRecord]:
+        """Winning price of the latest date that has one, for ``last_reference`` (OQ-48)."""
         if not asset_ids:
             return {}
         observations = await self._repository.find_on_latest_date(asset_ids)
         by_asset: defaultdict[UUID, list[ReferencePriceRecord]] = defaultdict(list)
         for observation in observations:
             by_asset[observation.asset_id].append(observation)
-        preferred = {asset_id: choose_preferred(found) for asset_id, found in by_asset.items()}
-        return {asset_id: record for asset_id, record in preferred.items() if record is not None}
+        winning = {asset_id: choose_preferred(found) for asset_id, found in by_asset.items()}
+        return {asset_id: record for asset_id, record in winning.items() if record is not None}

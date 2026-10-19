@@ -15,7 +15,7 @@ from typing import Protocol
 from uuid import UUID
 
 from di1.modules.processing.application.interfaces.repositories import (
-    IssueType,
+    IssueRecord,
     ProcessingChain,
 )
 from di1.modules.processing.public import ChainStatus, ProcessingRequest
@@ -82,16 +82,6 @@ class DateStatusRow:
         return self.cash is None and self.portfolio is None
 
 
-@dataclass(frozen=True, slots=True)
-class NewIssue:
-    """One Pendência of a date of the positions chain (OQ-31)."""
-
-    issue_type: IssueType
-    asset_id: UUID
-    affected_date: date
-    required_price_date: date | None
-
-
 class RunStore(Protocol):
     def is_transient(self, error: Exception) -> bool:
         """Whether ``error``, raised by a call of this store or by its Unit of Work, may clear on
@@ -138,7 +128,7 @@ class RunStore(Protocol):
         ...
 
     async def replace_issues(
-        self, request_id: UUID, day: date, issues: Sequence[NewIssue], *, uow: UnitOfWork
+        self, request_id: UUID, day: date, issues: Sequence[IssueRecord], *, uow: UnitOfWork
     ) -> None:
         """Deletes every issue of ``day`` and writes ``issues`` (OQ-26 item 5)."""
         ...

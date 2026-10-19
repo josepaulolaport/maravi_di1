@@ -11,11 +11,10 @@ from decimal import Decimal
 import pytest
 
 from di1.modules.prices.domain.reference_price import (
-    TypedQuote,
     choose_preferred,
     validate_reference_price,
 )
-from di1.modules.pricing.public import QuoteValidator
+from di1.modules.pricing.public import Quote, QuoteValidator
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 
@@ -31,7 +30,7 @@ def _validate(
     pu: Decimal | None = Decimal("89250.3147019396"),
     rate: Decimal | None = None,
     maturity_date: date | None = MATURITY,
-) -> TypedQuote:
+) -> Quote:
     return validate_reference_price(
         today=TODAY,
         maturity_date=maturity_date,
@@ -49,12 +48,12 @@ def _errors(excinfo: pytest.ExceptionInfo[DomainError]) -> tuple[ErrorDetail, ..
 
 class TestValidReferencePrices:
     def test_a_typed_pu_is_the_quote(self) -> None:
-        assert _validate() == TypedQuote(InputKind.PU, Decimal("89250.3147019396"))
+        assert _validate() == Quote(InputKind.PU, Decimal("89250.3147019396"))
 
     def test_a_typed_rate_is_the_quote(self) -> None:
         quote = _validate(input_kind=InputKind.RATE, pu=None, rate=Decimal("0.0980"))
 
-        assert quote == TypedQuote(InputKind.RATE, Decimal("0.0980"))
+        assert quote == Quote(InputKind.RATE, Decimal("0.0980"))
 
     def test_today_is_accepted(self) -> None:
         assert _validate(reference_date=TODAY).kind is InputKind.PU
@@ -66,7 +65,7 @@ class TestValidReferencePrices:
     def test_the_maturity_date_accepts_a_typed_pu(self) -> None:
         quote = _validate(reference_date=MATURED_ON, pu=Decimal("100000"), maturity_date=MATURED_ON)
 
-        assert quote == TypedQuote(InputKind.PU, Decimal("100000"))
+        assert quote == Quote(InputKind.PU, Decimal("100000"))
 
     def test_a_future_maturity_is_not_a_future_date(self) -> None:
         # Only the reference date is checked against today; the maturity is exempt (OQ-14).

@@ -49,6 +49,14 @@ def _delay(headers: dict[str, object]) -> float:
     return _consumer().retry_delay(cast(AbstractIncomingMessage, _Delivery(headers)))
 
 
+async def wait_idle(runner: AfterAckRunner) -> None:
+    while True:
+        running = runner._running
+        if running is None or running.done():
+            return
+        await asyncio.wait({running})
+
+
 @pytest.mark.parametrize(
     ("headers", "expected"),
     [
@@ -93,7 +101,7 @@ async def test_work_submitted_after_the_runner_stopped_never_runs(
     await runner.stop()
     runner.submit(work, "late work")
     await asyncio.sleep(0.05)
-    await runner.wait_idle()
+    await wait_idle(runner)
 
     assert ran == []
     assert "late work dropped: the worker is stopping" in caplog.text
@@ -112,7 +120,7 @@ async def test_the_runner_runs_its_work_in_order() -> None:
 
     for n in range(3):
         runner.submit(work(n), f"work {n}")
-    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+    await asyncio.wait_for(wait_idle(runner), timeout=5)
 
     assert ran == [0, 1, 2]
 
@@ -135,7 +143,7 @@ async def test_a_failing_work_stops_the_runner_and_drops_the_waiting_work(
     runner.submit(fails, "failing work")
     runner.submit(later, "waiting work")
     await asyncio.wait_for(runner.failed.wait(), timeout=5)
-    await runner.wait_idle()
+    await wait_idle(runner)
     runner.submit(later, "late work")
     await asyncio.sleep(0.05)
 

@@ -1,7 +1,7 @@
 """Portfolio's input view of a trade (ports and adapters).
 
 Ledger owns trades. ``Trade`` holds only what the positions and cash chains read; Portfolio's
-application layer maps Ledger's public ``TradeRecord`` onto it.
+application layer maps Ledger's public ``LedgerEntry`` onto it.
 """
 
 from __future__ import annotations

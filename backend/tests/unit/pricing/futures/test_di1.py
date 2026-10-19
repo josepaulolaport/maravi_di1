@@ -22,8 +22,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from di1.modules.pricing.domain.futures.di1 import DI1Calculator
-from di1.modules.pricing.domain.futures.model import (
+from di1.modules.pricing.domain.di1 import DI1Calculator
+from di1.modules.pricing.domain.model import (
     FuturesTerms,
     InputKind,
     Price,
@@ -58,7 +58,7 @@ def refusal(caught: pytest.ExceptionInfo[DomainError]) -> ErrorDetail:
 
 def test_challenge_example_rate_10_percent_365_days_gives_the_challenge_pu() -> None:
     # DI1F28 bought on 01/01/2027 at 10% a.a., maturity 01/01/2028: 365 calendar days.
-    result = price(date(2027, 1, 1), Quote.rate(Decimal("0.10")))
+    result = price(date(2027, 1, 1), Quote(InputKind.RATE, Decimal("0.10")))
 
     assert result.pu == Decimal("90909.0909090909")
     assert result.rate == Decimal("0.10")
@@ -66,7 +66,7 @@ def test_challenge_example_rate_10_percent_365_days_gives_the_challenge_pu() -> 
 
 
 def test_challenge_pu_back_to_the_rate_is_10_percent() -> None:
-    result = price(date(2027, 1, 1), Quote.pu(Decimal("90909.0909090909")))
+    result = price(date(2027, 1, 1), Quote(InputKind.PU, Decimal("90909.0909090909")))
 
     assert result.rate == Decimal("0.100000000000")
     assert result.pu == Decimal("90909.0909090909")
@@ -87,21 +87,21 @@ def test_challenge_pu_back_to_the_rate_is_10_percent() -> None:
     ],
 )
 def test_pu_from_rate(rate: str, days: int, pu: str) -> None:
-    result = price(days_before_maturity(days), Quote.rate(Decimal(rate)))
+    result = price(days_before_maturity(days), Quote(InputKind.RATE, Decimal(rate)))
 
     assert result.pu == Decimal(pu)
     assert result.rate == Decimal(rate)  # the typed value is kept as typed
 
 
 def test_calculated_pu_has_exactly_10_places() -> None:
-    result = price(days_before_maturity(100), Quote.rate(Decimal("0")))
+    result = price(days_before_maturity(100), Quote(InputKind.RATE, Decimal("0")))
 
     assert result.pu.as_tuple().exponent == -10
 
 
 def test_face_value_is_the_numerator() -> None:
     # 1000 / 1.1 = 909.090909090909…
-    result = price(date(2027, 1, 1), Quote.rate(Decimal("0.10")), face=Decimal("1000"))
+    result = price(date(2027, 1, 1), Quote(InputKind.RATE, Decimal("0.10")), face=Decimal("1000"))
 
     assert result.pu == Decimal("909.0909090909")
 
@@ -119,7 +119,7 @@ def test_face_value_is_the_numerator() -> None:
     ],
 )
 def test_rate_from_pu(pu: str, days: int, rate: str) -> None:
-    result = price(days_before_maturity(days), Quote.pu(Decimal(pu)))
+    result = price(days_before_maturity(days), Quote(InputKind.PU, Decimal(pu)))
 
     assert result.rate == Decimal(rate)
     assert result.rate.as_tuple().exponent == -12
@@ -132,7 +132,7 @@ def test_rate_from_pu(pu: str, days: int, rate: str) -> None:
 def test_days_to_maturity_are_calendar_days() -> None:
     # The day count itself is tested in tests/unit/shared/test_calendar.py.
     # Thursday 30/12/2027 → Saturday 01/01/2028, through the year-end holiday: 2 days.
-    result = price(date(2027, 12, 30), Quote.rate(Decimal("0.10")))
+    result = price(date(2027, 12, 30), Quote(InputKind.RATE, Decimal("0.10")))
 
     assert abs(result.pu - oracle_pu(Decimal("0.10"), 2, FACE)) <= Decimal("1E-10")
 
@@ -141,7 +141,7 @@ def test_leap_year_uses_366_days_over_365() -> None:
     result = calculator.calculate(
         FuturesTerms(date(2029, 1, 1), FACE),
         date(2028, 1, 1),
-        Quote.rate(Decimal("0.10")),
+        Quote(InputKind.RATE, Decimal("0.10")),
     )
 
     assert result.pu < Decimal("90909.0909090909")  # one more day of discount
@@ -152,7 +152,7 @@ def test_leap_year_uses_366_days_over_365() -> None:
 
 
 def test_on_maturity_the_pu_is_typed_and_the_rate_is_zero() -> None:
-    result = price(MATURITY, Quote.pu(Decimal("99987.6543")))
+    result = price(MATURITY, Quote(InputKind.PU, Decimal("99987.6543")))
 
     assert result.pu == Decimal("99987.6543")
     assert result.rate == Decimal("0.000000000000")
@@ -161,14 +161,14 @@ def test_on_maturity_the_pu_is_typed_and_the_rate_is_zero() -> None:
 
 def test_on_maturity_a_typed_rate_is_rejected() -> None:
     with pytest.raises(DomainError) as caught:
-        price(MATURITY, Quote.rate(Decimal("0.10")))
+        price(MATURITY, Quote(InputKind.RATE, Decimal("0.10")))
 
     assert refusal(caught) == invalid("Na data de vencimento informe o PU.", "rate")
 
 
 @pytest.mark.parametrize(
     "quote",
-    [Quote.rate(Decimal("0.10")), Quote.pu(Decimal("90000"))],
+    [Quote(InputKind.RATE, Decimal("0.10")), Quote(InputKind.PU, Decimal("90000"))],
 )
 def test_a_reference_date_after_maturity_is_rejected(quote: Quote) -> None:
     with pytest.raises(DomainError) as caught:
@@ -183,7 +183,7 @@ def test_a_reference_date_after_maturity_is_rejected(quote: Quote) -> None:
 
 def test_one_day_before_maturity_prices_normally() -> None:
     # 100000 / 1.1^(1/365): close to face, below it.
-    result = price(days_before_maturity(1), Quote.rate(Decimal("0.10")))
+    result = price(days_before_maturity(1), Quote(InputKind.RATE, Decimal("0.10")))
 
     assert Decimal("99970") < result.pu < FACE
     assert abs(result.pu - oracle_pu(Decimal("0.10"), 1, FACE)) <= Decimal("1E-10")
@@ -195,7 +195,7 @@ def test_one_day_before_maturity_prices_normally() -> None:
 @pytest.mark.parametrize("pu", ["0", "-1", "-90909.09"])
 def test_nonpositive_pu_is_rejected(pu: str) -> None:
     with pytest.raises(DomainError) as caught:
-        price(date(2027, 1, 1), Quote.pu(Decimal(pu)))
+        price(date(2027, 1, 1), Quote(InputKind.PU, Decimal(pu)))
 
     assert refusal(caught) == invalid("O PU deve ser maior que zero.", "pu")
 
@@ -203,14 +203,14 @@ def test_nonpositive_pu_is_rejected(pu: str) -> None:
 @pytest.mark.parametrize("rate", ["-1", "-1.5", "-100"])
 def test_rate_at_or_below_minus_one_is_rejected(rate: str) -> None:
     with pytest.raises(DomainError) as caught:
-        price(date(2027, 1, 1), Quote.rate(Decimal(rate)))
+        price(date(2027, 1, 1), Quote(InputKind.RATE, Decimal(rate)))
 
     assert refusal(caught) == invalid("A taxa deve ser maior que −100%.", "rate")
 
 
 def test_a_rate_just_above_minus_one_is_accepted() -> None:
     # 100000 / 0.000000000001 = 1E+17 over exactly one year.
-    result = price(date(2027, 1, 1), Quote.rate(Decimal("-0.999999999999")))
+    result = price(date(2027, 1, 1), Quote(InputKind.RATE, Decimal("-0.999999999999")))
 
     assert result.pu == Decimal("100000000000000000.0000000000")
 
@@ -218,7 +218,7 @@ def test_a_rate_just_above_minus_one_is_accepted() -> None:
 @pytest.mark.parametrize("face", ["0", "-100000", "NaN"])
 def test_nonpositive_face_value_is_rejected(face: str) -> None:
     with pytest.raises(DomainError) as caught:
-        price(date(2027, 1, 1), Quote.rate(Decimal("0.10")), face=Decimal(face))
+        price(date(2027, 1, 1), Quote(InputKind.RATE, Decimal("0.10")), face=Decimal(face))
 
     assert refusal(caught) == invalid("O valor de face deve ser maior que zero.", "face_value")
 
@@ -229,7 +229,7 @@ PU_ROUNDS_TO_ZERO = invalid("A taxa resulta em um PU que arredonda para zero.", 
 def test_a_pu_that_would_be_stored_as_zero_is_rejected() -> None:
     # 100000 / (1E+20)^10 rounds to 0 at 10 places, which the schema forbids (PU > 0).
     with pytest.raises(DomainError) as caught:
-        price(days_before_maturity(3650), Quote.rate(Decimal("100000000000000000000")))
+        price(days_before_maturity(3650), Quote(InputKind.RATE, Decimal("100000000000000000000")))
 
     assert refusal(caught) == PU_ROUNDS_TO_ZERO
 
@@ -237,7 +237,7 @@ def test_a_pu_that_would_be_stored_as_zero_is_rejected() -> None:
 def test_a_discount_factor_beyond_the_context_range_gives_a_zero_pu() -> None:
     # (1E+100000)^10 overflows the context (Emax 999999): the PU is ~0, rejected like above.
     with pytest.raises(DomainError) as caught:
-        price(days_before_maturity(3650), Quote.rate(Decimal("1E+100000")))
+        price(days_before_maturity(3650), Quote(InputKind.RATE, Decimal("1E+100000")))
 
     assert refusal(caught) == PU_ROUNDS_TO_ZERO
 
@@ -247,7 +247,7 @@ def test_a_pu_beyond_the_context_range_is_rejected_as_out_of_range() -> None:
     with pytest.raises(DomainError) as caught:
         price(
             days_before_maturity(366),
-            Quote.rate(Decimal("-0.999999999999")),
+            Quote(InputKind.RATE, Decimal("-0.999999999999")),
             face=Decimal("1E+999990"),
         )
 
@@ -257,7 +257,11 @@ def test_a_pu_beyond_the_context_range_is_rejected_as_out_of_range() -> None:
 def test_a_rate_beyond_the_context_range_is_rejected() -> None:
     # (1E+5000 / 1E-10)^365 = 1E+1828650 overflows the context (Emax 999999).
     with pytest.raises(DomainError) as caught:
-        price(days_before_maturity(1), Quote.pu(Decimal("0.0000000001")), face=Decimal("1E+5000"))
+        price(
+            days_before_maturity(1),
+            Quote(InputKind.PU, Decimal("0.0000000001")),
+            face=Decimal("1E+5000"),
+        )
 
     assert refusal(caught) == invalid("O PU resulta em uma taxa fora do limite de cálculo.", "pu")
 
@@ -265,7 +269,7 @@ def test_a_rate_beyond_the_context_range_is_rejected() -> None:
 def test_a_rate_that_would_be_stored_as_minus_one_is_rejected() -> None:
     # (100000 / 1E+10)^365 − 1 = 1E-1825 − 1 rounds to −1 at 12 places (schema: rate > −1).
     with pytest.raises(DomainError) as caught:
-        price(days_before_maturity(1), Quote.pu(Decimal("10000000000")))
+        price(days_before_maturity(1), Quote(InputKind.PU, Decimal("10000000000")))
 
     assert refusal(caught) == invalid("O PU resulta em uma taxa que arredonda para −100%.", "pu")
 
@@ -276,13 +280,13 @@ def test_a_rate_that_would_be_stored_as_minus_one_is_rejected() -> None:
 @pytest.mark.parametrize("rate", ["0.1000000000001", "0.1000000000000", "0.0000000000005"])
 def test_typed_rate_with_more_than_12_places_is_rejected(rate: str) -> None:
     with pytest.raises(DomainError) as caught:
-        price(date(2027, 1, 1), Quote.rate(Decimal(rate)))
+        price(date(2027, 1, 1), Quote(InputKind.RATE, Decimal(rate)))
 
     assert refusal(caught) == invalid("Use no máximo 12 casas decimais.", "rate")
 
 
 def test_typed_rate_with_12_places_is_accepted() -> None:
-    result = price(date(2027, 1, 1), Quote.rate(Decimal("0.100000000000")))
+    result = price(date(2027, 1, 1), Quote(InputKind.RATE, Decimal("0.100000000000")))
 
     assert result.pu == Decimal("90909.0909090909")
 
@@ -290,7 +294,7 @@ def test_typed_rate_with_12_places_is_accepted() -> None:
 @pytest.mark.parametrize("pu", ["90909.09090909091", "90909.09090909090"])
 def test_typed_pu_with_more_than_10_places_is_rejected(pu: str) -> None:
     with pytest.raises(DomainError) as caught:
-        price(date(2027, 1, 1), Quote.pu(Decimal(pu)))
+        price(date(2027, 1, 1), Quote(InputKind.PU, Decimal(pu)))
 
     assert refusal(caught) == invalid("Use no máximo 10 casas decimais.", "pu")
 
@@ -298,9 +302,9 @@ def test_typed_pu_with_more_than_10_places_is_rejected(pu: str) -> None:
 @pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "sNaN"])
 def test_non_finite_inputs_are_rejected(value: str) -> None:
     with pytest.raises(DomainError) as pu_caught:
-        price(date(2027, 1, 1), Quote.pu(Decimal(value)))
+        price(date(2027, 1, 1), Quote(InputKind.PU, Decimal(value)))
     with pytest.raises(DomainError) as rate_caught:
-        price(date(2027, 1, 1), Quote.rate(Decimal(value)))
+        price(date(2027, 1, 1), Quote(InputKind.RATE, Decimal(value)))
 
     assert refusal(pu_caught) == invalid("Informe um número válido.", "pu")
     assert refusal(rate_caught) == invalid("Informe um número válido.", "rate")
@@ -314,16 +318,11 @@ def test_a_float_input_is_refused() -> None:
         Quote(kind=InputKind.RATE, value=0.10)  # type: ignore[arg-type]
 
 
-def test_the_input_names_its_kind() -> None:
-    assert Quote.rate(Decimal("0.1")) == Quote(InputKind.RATE, Decimal("0.1"))
-    assert Quote.pu(Decimal("1")) == Quote(InputKind.PU, Decimal("1"))
-
-
 def test_results_do_not_depend_on_the_callers_decimal_context() -> None:
     with localcontext() as context:
         context.prec = 5
         context.rounding = "ROUND_DOWN"
-        result = price(date(2027, 1, 1), Quote.rate(Decimal("0.10")))
+        result = price(date(2027, 1, 1), Quote(InputKind.RATE, Decimal("0.10")))
 
     assert result.pu == Decimal("90909.0909090909")
 
@@ -354,14 +353,14 @@ days = st.integers(min_value=1, max_value=3650)
 
 @given(rate=rates, d=days)
 def test_pu_matches_the_oracle_to_the_stored_place(rate: Decimal, d: int) -> None:
-    result = price(days_before_maturity(d), Quote.rate(rate))
+    result = price(days_before_maturity(d), Quote(InputKind.RATE, rate))
 
     assert abs(result.pu - oracle_pu(rate, d, FACE)) <= Decimal("0.5E-10") + Decimal("1E-20")
 
 
 @given(pu=pus, d=days)
 def test_rate_matches_the_oracle_to_the_stored_place(pu: Decimal, d: int) -> None:
-    result = price(days_before_maturity(d), Quote.pu(pu))
+    result = price(days_before_maturity(d), Quote(InputKind.PU, pu))
     expected = oracle_rate(pu, d, FACE)
 
     # Half a unit at 12 places, plus the 34-significant-digit context (OQ-3): the rounded base and
@@ -377,8 +376,8 @@ def test_rate_matches_the_oracle_to_the_stored_place(pu: Decimal, d: int) -> Non
 
 @given(rate=rates, d=days)
 def test_rate_to_pu_to_rate_round_trip(rate: Decimal, d: int) -> None:
-    pu = price(days_before_maturity(d), Quote.rate(rate)).pu
-    back = price(days_before_maturity(d), Quote.pu(pu)).rate
+    pu = price(days_before_maturity(d), Quote(InputKind.RATE, rate)).pu
+    back = price(days_before_maturity(d), Quote(InputKind.PU, pu)).rate
 
     # PU stored to 10 places moves the rate by at most (365/d)·(1 + rate)·(0.5E-10 / PU) to first
     # order; storing the rate adds half a unit at 12 places.
@@ -388,8 +387,8 @@ def test_rate_to_pu_to_rate_round_trip(rate: Decimal, d: int) -> None:
 
 @given(pu=pus, d=days)
 def test_pu_to_rate_to_pu_round_trip(pu: Decimal, d: int) -> None:
-    rate = price(days_before_maturity(d), Quote.pu(pu)).rate
-    back = price(days_before_maturity(d), Quote.rate(rate)).pu
+    rate = price(days_before_maturity(d), Quote(InputKind.PU, pu)).rate
+    back = price(days_before_maturity(d), Quote(InputKind.RATE, rate)).pu
 
     # The rate stored to 12 places moves the PU by at most PU·(d/365)·0.5E-12/(1 + rate) to first
     # order; storing the PU adds half a unit at 10 places.
