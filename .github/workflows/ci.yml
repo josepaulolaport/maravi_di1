@@ -43,7 +43,7 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
-              - 'docs/schema.sql' # tests/architecture/test_migration_sql.py reads it
+              - 'docs/schema.sql' # tests/integration/test_migrations_match_schema.py compares the migrations with it
               - 'scripts/**'
               - 'Makefile'
               - '.github/workflows/**'
