@@ -167,13 +167,16 @@ export const ledgerHandlers = [
     return problem(422, [fieldError('VALIDATION_ERROR', 'Informe o tipo do lançamento.', 'type')]);
   }),
 
-  // All or nothing: if any id is unknown nothing is deleted (§6.1 "operação atômica").
+  // A permanent delete, all or nothing (OQ-32): an unknown or already-deleted id is 404 and
+  // nothing is deleted; a repeated id counts once; an empty list is 422 on `ids`.
   http.post(url('/ledger/entries/deletions'), async ({ request }) => {
     await latency();
     const body = await readJson(request);
-    const ids = Array.isArray(body.ids) ? (body.ids as string[]) : [];
+    const ids = [...new Set(Array.isArray(body.ids) ? (body.ids as string[]) : [])];
     if (ids.length === 0) {
-      return problem(422, [fieldError('VALIDATION_ERROR', 'Selecione ao menos um lançamento.')]);
+      return problem(422, [
+        fieldError('VALIDATION_ERROR', 'Selecione ao menos um lançamento.', 'ids'),
+      ]);
     }
     const found = ids.map((id) => db.entries.find((e) => e.id === id));
     if (found.some((entry) => entry === undefined)) return notFound('Lançamento');

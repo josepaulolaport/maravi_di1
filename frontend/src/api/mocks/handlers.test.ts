@@ -463,6 +463,37 @@ describe('mock ledger validation', () => {
     expect((await ledgerApi.listEntries(range)).items).toHaveLength(3);
   });
 
+  it('OQ-32 an empty ids list is 422 VALIDATION_ERROR on ids', async () => {
+    const problem = await problemOf(ledgerApi.deleteEntries({ ids: [] }));
+
+    expect(problem.status).toBe(422);
+    expect(problem.errors?.[0]).toMatchObject({ code: 'VALIDATION_ERROR', field: 'ids' });
+  });
+
+  it('OQ-32 a repeated id counts once: {ids: [X, X]} deletes X and succeeds', async () => {
+    const range = { start_date: '2026-10-01', end_date: '2026-10-18' };
+    const id = '7a000000-0000-4000-8000-000000000003';
+
+    await ledgerApi.deleteEntries({ ids: [id, id] });
+
+    const ids = (await ledgerApi.listEntries(range)).items.map((e) => e.id);
+    expect(ids).not.toContain(id);
+    expect(ids).toHaveLength(4);
+  });
+
+  it('OQ-32 the deletion is permanent: an already-deleted id answers 404 and nothing is deleted', async () => {
+    const range = { start_date: '2026-10-01', end_date: '2026-10-18' };
+    const gone = '7a000000-0000-4000-8000-000000000003';
+    const kept = '7c000000-0000-4000-8000-000000000002';
+    await ledgerApi.deleteEntries({ ids: [gone] });
+
+    const problem = await problemOf(ledgerApi.deleteEntries({ ids: [kept, gone] }));
+
+    expect(problem.status).toBe(404);
+    expect(problem.errors?.[0]?.code).toBe('NOT_FOUND');
+    expect((await ledgerApi.listEntries(range)).items.map((e) => e.id)).toContain(kept);
+  });
+
   it('§6.2 a cash entry needs a time and a non-zero amount with at most 2 places', async () => {
     const problem = await problemOf(
       ledgerApi.createEntry({ type: 'CASH', date: '2026-10-17', time: '', cash_amount: '0' }),
