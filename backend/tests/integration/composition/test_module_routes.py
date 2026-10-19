@@ -175,6 +175,29 @@ def test_prices_sets_a_reference_price_priced_by_pricing(client: TestClient) -> 
     assert len(listed.json()["items"]) == 1
 
 
+def test_asset_shows_each_contracts_latest_reference_price(client: TestClient) -> None:
+    """OQ-48: ``last_reference`` is the latest preferred price, read from Prices on the request's
+    session. DI1F28 at 10% a.a. on 15/10/2026: 445 calendar days to 03/01/2028, so spec §4.1 gives
+    100000 / 1.10^(445/365) = 89029.7072854500 at 10 dp (OQ-3)."""
+    asset_id = _create_di1f28(client)
+    assert client.get(f"/api/instruments/{asset_id}").json()["last_reference"] is None
+    for day in ("2026-10-14", "2026-10-15"):
+        body = {"asset_id": asset_id, "reference_date": day, "input_kind": "RATE", "rate": "0.10"}
+        assert client.post("/api/reference-prices", json=body).status_code == 201
+
+    listed = client.get("/api/instruments", params={"search": "f28"}).json()["items"]
+    one = client.get(f"/api/instruments/{asset_id}").json()
+
+    expected = {
+        "reference_date": "2026-10-15",
+        "pu": "89029.7072854500",
+        "rate": "0.10",
+        "source": "MANUAL",
+    }
+    assert [item["last_reference"] for item in listed] == [expected]
+    assert one["last_reference"] == expected
+
+
 def test_prices_reads_today_from_the_app_clock(client: TestClient) -> None:
     asset_id = _create_di1f28(client)
     body = {"asset_id": asset_id, "reference_date": "2026-10-19", "input_kind": "RATE"}

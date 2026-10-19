@@ -11,6 +11,7 @@ from fastapi import APIRouter, FastAPI
 
 from di1.composition.dependencies import (
     build_price_service,
+    get_latest_prices,
     get_ledger_service,
     get_portfolio_query_service,
     get_processing_service,
@@ -34,7 +35,7 @@ API_PREFIX = "/api"
 def include_routers(app: FastAPI) -> None:
     """Include the module routers; ``main.create_app`` calls this once."""
     api = APIRouter(prefix=API_PREFIX)
-    api.include_router(create_asset_router(get_unit_of_work))
+    api.include_router(create_asset_router(get_unit_of_work, get_latest_prices))
     api.include_router(
         create_ledger_router(get_service=get_ledger_service, get_unit_of_work=get_unit_of_work)
     )
