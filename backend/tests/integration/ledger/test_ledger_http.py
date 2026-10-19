@@ -271,6 +271,19 @@ def test_an_empty_deletion_is_a_validation_error(client: TestClient) -> None:
     assert_problem(response, 422, ("VALIDATION_ERROR", "ids"))
 
 
+def test_a_repeated_id_counts_once(client: TestClient) -> None:
+    # OQ-32 item 5: {ids: [X, X]} deletes X and succeeds, with no false 404.
+    created = record_fixtures(client)
+    entry_id = created[4]["id"]
+
+    response = client.post("/ledger/entries/deletions", json={"ids": [entry_id, entry_id]})
+
+    assert response.status_code == 204, response.text
+    listed = client.get("/ledger/entries", params=RANGE).json()["items"]
+    assert entry_id not in {item["id"] for item in listed}
+    assert len(listed) == 4
+
+
 # --- errors -------------------------------------------------------------------------------------
 
 
