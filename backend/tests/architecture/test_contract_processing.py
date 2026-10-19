@@ -51,6 +51,8 @@ def test_a_request_is_frozen_and_covers_exactly_its_range() -> None:
         error_code=None,
         error_message=None,
         updated_at=datetime(2026, 10, 16, 18, 0, tzinfo=SAO_PAULO),
+        failed_date=None,
+        failed_chain=None,
     )
 
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -85,3 +87,10 @@ def test_a_date_status_holds_both_chains_and_their_processing_times() -> None:
 
     assert (status.portfolio, status.cash) == (ChainStatus.PROCESSED_WITH_ISSUES, None)
     assert (status.portfolio_processed_at, status.cash_processed_at) == (processed_at, None)
+
+
+def test_a_request_records_its_first_failure() -> None:
+    # OQ-40: the retry of a COMPLETED_WITH_ISSUES run is prefilled from these.
+    fields = [field.name for field in dataclasses.fields(ProcessingRequest)]
+
+    assert fields[-2:] == ["failed_date", "failed_chain"]

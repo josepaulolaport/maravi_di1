@@ -103,3 +103,11 @@ class ProcessingRequest:
     error_code: str | None
     error_message: str | None
     updated_at: datetime
+    failed_date: date | None
+    """The date of the run's first failure (OQ-40); ``None`` if the run never failed."""
+    failed_chain: ProcessingScope | None
+    """The chain that failed first, ``CASH`` or ``POSITIONS`` (never ``ALL``); ``None`` with a
+    ``failed_date`` when the failure belonged to no chain (lease lost, lock timeout, the AUM
+    recompute), which fails the date for every chain and the run. "Solicitar novo processamento"
+    on ``COMPLETED_WITH_ISSUES`` is prefilled with this chain's scope from ``failed_date`` to
+    ``end_date``."""
