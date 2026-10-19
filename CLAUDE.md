@@ -63,6 +63,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 - **Missing price:**
   - Quantity, average cost and cash are still computed.
   - The dependent figures are `null`, never zero.
+    - Sole exception (OQ-41): the Carteira chart's running sum `range_cumulative_pnl`, where a date adds 0 unless its positions status is `PROCESSED`/`PROCESSED_WITH_ISSUES` and its `daily_pnl` is not null.
   - The portfolio total is not complete if any expected asset is missing. An asset is expected on D when Q[D−1] ≠ 0 or it trades on D (OQ-10).
   - When Q[D−1] = 0, `position_pnl` = 0 exactly (OQ-4).
   - The cumulative P&L stays unavailable from the first gap onward.

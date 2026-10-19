@@ -141,11 +141,16 @@ CREATE TABLE processing.requests (
     claim_token UUID,
     lease_expires_at TIMESTAMPTZ,
     attempt_count INTEGER NOT NULL DEFAULT 0,
+    failed_date DATE,                  -- the run's first failure (OQ-40)
+    failed_chain VARCHAR(16),          -- CASH | POSITIONS; NULL with failed_date: a failure of no chain
     CONSTRAINT requests_scope_check CHECK (scope IN ('CASH','POSITIONS','ALL')),
     CONSTRAINT requests_dates_ordered CHECK (start_date <= end_date),
     CONSTRAINT requests_status_check CHECK (status IN ('QUEUED','DISPATCHED','RUNNING','CANCELLING','COMPLETED','COMPLETED_WITH_ISSUES','CANCELLED','FAILED')),
     CONSTRAINT requests_progress_in_range CHECK (progress_date IS NULL OR progress_date BETWEEN start_date AND end_date),
-    CONSTRAINT requests_attempts_nonnegative CHECK (attempt_count >= 0)
+    CONSTRAINT requests_attempts_nonnegative CHECK (attempt_count >= 0),
+    CONSTRAINT requests_failed_chain_check CHECK (failed_chain IS NULL OR failed_chain IN ('CASH','POSITIONS')),
+    CONSTRAINT requests_failed_chain_needs_date CHECK (failed_chain IS NULL OR failed_date IS NOT NULL),
+    CONSTRAINT requests_failed_date_in_range CHECK (failed_date IS NULL OR failed_date BETWEEN start_date AND end_date)
 );
 CREATE INDEX requests_queue_idx ON processing.requests (created_at, id) WHERE status = 'QUEUED';
 CREATE INDEX requests_recent_idx ON processing.requests (created_at DESC);

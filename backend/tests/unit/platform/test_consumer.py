@@ -6,6 +6,7 @@ interfaces.md "Transaction boundaries" 7 (retries for transient failures only); 
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -15,7 +16,7 @@ from pydantic import SecretStr
 
 from di1.platform.config import BrokerSettings
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
-from di1.platform.messaging.consumer import MessageConsumer
+from di1.platform.messaging.consumer import AfterAck, AfterAckRunner, MessageConsumer
 from di1.platform.messaging.envelope import Envelope
 
 SETTINGS = BrokerSettings(
@@ -75,3 +76,41 @@ def test_the_consumer_name_must_fit_the_inbox_column(name: str) -> None:
 
 def test_a_name_of_128_characters_is_accepted() -> None:
     _consumer("x" * 128)
+
+
+async def test_work_submitted_after_the_runner_stopped_never_runs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A delivery that outlived the worker's shutdown commits its claim late: its run must not
+    start while the connection and the engine close. The lease recovers it."""
+    runner = AfterAckRunner()
+    ran: list[str] = []
+
+    async def work() -> None:
+        ran.append("ran")
+
+    await runner.stop()
+    runner.submit(work, "late work")
+    await asyncio.sleep(0.05)
+    await runner.wait_idle()
+
+    assert ran == []
+    assert "late work dropped: the worker is stopping" in caplog.text
+
+
+async def test_the_runner_runs_its_work_in_order() -> None:
+    runner = AfterAckRunner()
+    ran: list[int] = []
+
+    def work(n: int) -> AfterAck:
+        async def run() -> None:
+            await asyncio.sleep(0.01 * (3 - n))
+            ran.append(n)
+
+        return run
+
+    for n in range(3):
+        runner.submit(work(n), f"work {n}")
+    await asyncio.wait_for(runner.wait_idle(), timeout=5)
+
+    assert ran == [0, 1, 2]
