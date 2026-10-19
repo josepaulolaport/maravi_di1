@@ -1,9 +1,8 @@
-"""`LedgerService`: a write saves the fact and invalidates by type in the same Unit of Work, then
-commits once; it never enqueues processing.
+"""`LedgerService`: a write saves the fact in one Unit of Work and commits once; it touches
+nothing else (user decision 2026-10-19: staleness removed from the project).
 
-Rules: spec §6, §6.1, §6.2, §10.4; interfaces "Ledger" and "Transaction boundaries" 1; OQ-21 and
-OQ-23 (a trade marks cash and positions, a cash movement only cash); OQ-24 (batch soft delete,
-all or nothing, one ``deletion_batch_id``, each chain once from its earliest date); OQ-1, OQ-3
+Rules: spec §6, §6.1, §6.2; interfaces "Ledger"; OQ-24 (batch soft delete, all or nothing, one
+``deletion_batch_id``); OQ-1, OQ-3
 (PU ↔ rate through Pricing, the typed value kept as typed). Golden execution prices are the MSW
 fixtures (frontend/src/api/mocks/fixtures.ts at 57b4df0), computed offline with DC/365.
 """
@@ -23,7 +22,6 @@ from di1.modules.ledger.domain.listing import ListOrder
 from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
-from tests.fakes.processing import CashMovementsChanged, RecordingInvalidator, TradesChanged
 from tests.unit.ledger.fakes import (
     DI1F28,
     DI1F29,
@@ -40,13 +38,11 @@ class Harness:
     def __init__(self) -> None:
         self.assets = FakeAssets()
         self.pricer = CalculatorPricer(self.assets)
-        self.invalidator = RecordingInvalidator()
         self.repository = InMemoryLedgerRepository()
         self.service = LedgerService(
             clock=FixedClock(TODAY),
             assets=self.assets,
             pricer=self.pricer,
-            invalidator=self.invalidator,
             repository_for=lambda _uow: self.repository,
         )
 
@@ -134,25 +130,22 @@ async def test_a_sell_at_a_typed_rate_matches_the_golden_fixture(harness: Harnes
     assert view.entry.cash_effect == Decimal("356408.8906133732")
 
 
-async def test_a_trade_invalidates_cash_and_positions_in_the_same_uow_then_commits(
-    harness: Harness,
-) -> None:
+async def test_a_trade_is_saved_and_committed_once(harness: Harness) -> None:
     uow = FakeUnitOfWork()
 
-    await harness.service.create_entry(buy_rate(), uow=uow)
+    view = await harness.service.create_entry(buy_rate(), uow=uow)
 
-    assert harness.invalidator.calls == [TradesChanged(date(2026, 10, 14), uow)]
+    assert harness.repository.rows == [view.entry]
     assert uow.commits == 1
 
 
-async def test_a_cash_movement_invalidates_only_cash(harness: Harness) -> None:
+async def test_a_cash_movement_is_saved_without_pricing(harness: Harness) -> None:
     uow = FakeUnitOfWork()
 
     view = await harness.service.create_entry(deposit(), uow=uow)
 
     assert view.entry.cash_amount == Decimal("1500000.00")
     assert view.asset_code is None
-    assert harness.invalidator.calls == [CashMovementsChanged(date(2026, 10, 14), uow)]
     assert harness.pricer.calls == []
     assert uow.commits == 1
 
@@ -195,7 +188,6 @@ async def test_an_unknown_contract_is_a_validation_error_and_writes_nothing(
     assert error.value.code is ErrorCode.VALIDATION_ERROR
     assert error.value.errors[0].field == "asset_id"
     assert harness.repository.rows == []
-    assert harness.invalidator.calls == []
     assert uow.commits == 0
 
 
@@ -207,7 +199,6 @@ async def test_a_future_entry_writes_nothing(harness: Harness) -> None:
 
     assert error.value.code is ErrorCode.FUTURE_DATE
     assert harness.repository.rows == []
-    assert harness.invalidator.calls == []
     assert uow.commits == 0
 
 
@@ -218,14 +209,13 @@ async def test_a_pricing_refusal_writes_nothing(harness: Harness) -> None:
         await harness.service.create_entry(buy_rate(execution_rate=Decimal("1E+40")), uow=uow)
 
     assert harness.repository.rows == []
-    assert harness.invalidator.calls == []
     assert uow.commits == 0
 
 
 # --- delete -------------------------------------------------------------------------------------
 
 
-async def test_a_mixed_batch_shares_one_batch_id_and_invalidates_each_chain_once(
+async def test_a_mixed_batch_shares_one_batch_id(
     harness: Harness,
 ) -> None:
     cash = await harness.service.create_entry(deposit(), uow=FakeUnitOfWork())
@@ -235,7 +225,6 @@ async def test_a_mixed_batch_shares_one_batch_id_and_invalidates_each_chain_once
     other = await harness.service.create_entry(
         buy_rate(entry_date=date(2026, 10, 17)), uow=FakeUnitOfWork()
     )
-    harness.invalidator.calls.clear()
     uow = FakeUnitOfWork()
 
     await harness.service.delete_entries([other.entry.id, cash.entry.id, sell.entry.id], uow=uow)
@@ -243,19 +232,11 @@ async def test_a_mixed_batch_shares_one_batch_id_and_invalidates_each_chain_once
     batches = harness.repository.batches
     assert set(batches) == {other.entry.id, cash.entry.id, sell.entry.id}
     assert len(set(batches.values())) == 1
-    # The earlier date first: the invalidator locks date_status rows from its date upwards, so
-    # the transaction takes them in ascending date order, like a run does (interfaces.md
-    # "Transaction boundaries" 1); the other order could deadlock with it.
-    assert harness.invalidator.calls == [
-        CashMovementsChanged(date(2026, 10, 14), uow),
-        TradesChanged(date(2026, 10, 16), uow),
-    ]
     assert uow.commits == 1
 
 
-async def test_an_unknown_id_deletes_nothing_and_invalidates_nothing(harness: Harness) -> None:
+async def test_an_unknown_id_deletes_nothing(harness: Harness) -> None:
     kept = await harness.service.create_entry(deposit(), uow=FakeUnitOfWork())
-    harness.invalidator.calls.clear()
     uow = FakeUnitOfWork()
 
     with pytest.raises(DomainError) as error:
@@ -263,7 +244,6 @@ async def test_an_unknown_id_deletes_nothing_and_invalidates_nothing(harness: Ha
 
     assert error.value.code is ErrorCode.NOT_FOUND
     assert not harness.repository.rows[0].is_deleted
-    assert harness.invalidator.calls == []
     assert uow.commits == 0
 
 
@@ -271,12 +251,10 @@ async def test_deleting_again_changes_nothing(harness: Harness) -> None:
     entry = await harness.service.create_entry(deposit(), uow=FakeUnitOfWork())
     await harness.service.delete_entries([entry.entry.id], uow=FakeUnitOfWork())
     first_batch = harness.repository.batches[entry.entry.id]
-    harness.invalidator.calls.clear()
 
     await harness.service.delete_entries([entry.entry.id], uow=FakeUnitOfWork())
 
     assert harness.repository.batches[entry.entry.id] == first_batch
-    assert harness.invalidator.calls == []
 
 
 # --- list ---------------------------------------------------------------------------------------
@@ -348,4 +326,3 @@ async def test_the_list_writes_nothing(harness: Harness) -> None:
         uow=uow,
     )
     assert uow.commits == 0
-    assert harness.invalidator.calls == []

@@ -1,9 +1,8 @@
 """Ledger's writes and its list read (interfaces.md "Ledger", "Transaction boundaries" 1).
 
-A write validates, saves the fact and marks the dependent results stale through
-`FinancialResultInvalidator` in the same Unit of Work, then commits once. It never enqueues
-processing (OQ-23). The invalidation follows the type (OQ-21, OQ-24): a trade marks cash and
-positions (``trades_changed``), a cash movement only cash (``cash_movements_changed``).
+A write validates, saves the fact in one Unit of Work and commits once. It touches nothing
+else: no processing state and no job (user decision 2026-10-19, staleness removed from the
+project; processing runs only when the user requests it).
 """
 
 from __future__ import annotations
@@ -23,12 +22,11 @@ from di1.modules.ledger.domain.entries import (
     EntryType,
     KnownInstrument,
     LedgerEntry,
-    plan_deletion,
+    entries_to_delete,
     validate_cash_movement,
     validate_trade,
 )
 from di1.modules.ledger.domain.listing import EntryCursor, ListOrder, validate_page_request
-from di1.modules.processing.public import FinancialResultInvalidator
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
 from di1.shared.input_kind import InputKind
@@ -59,13 +57,11 @@ class LedgerService:
         clock: Clock,
         assets: AssetReader,
         pricer: ExecutionPricer,
-        invalidator: FinancialResultInvalidator,
         repository_for: Callable[[UnitOfWork], LedgerRepository],
     ) -> None:
         self._clock = clock
         self._assets = assets
         self._pricer = pricer
-        self._invalidator = invalidator
         self._repository_for = repository_for
 
     async def create_entry(self, draft: EntryDraft, *, uow: UnitOfWork) -> LedgerEntryView:
@@ -76,7 +72,6 @@ class LedgerService:
         if draft.type is EntryType.CASH:
             movement = validate_cash_movement(draft, today=today)
             entry = await repository.add_cash_movement(movement)
-            await self._invalidator.cash_movements_changed(entry.entry_date, uow=uow)
             await uow.commit()
             return LedgerEntryView(entry, asset_code=None, instrument_type_code=None)
 
@@ -93,7 +88,6 @@ class LedgerService:
             execution_pu=trade.typed_value if typed_pu else price.pu,
             execution_rate=price.rate if typed_pu else trade.typed_value,
         )
-        await self._invalidator.trades_changed(entry.entry_date, uow=uow)
         await uow.commit()
         assert descriptor is not None
         return LedgerEntryView(entry, descriptor.code, descriptor.instrument_type)
@@ -104,18 +98,11 @@ class LedgerService:
         an entry already deleted stays as it was."""
         repository = self._repository_for(uow)
         found = await repository.lock_entries(ids)
-        plan = plan_deletion(ids, found)
-        if plan.entry_ids:
+        to_delete = entries_to_delete(ids, found)
+        if to_delete:
             batch_id = uuid.uuid4()
-            await repository.soft_delete(plan.entry_ids, deletion_batch_id=batch_id)
-            # Cash, when present in the plan, is dated before every trade: invalidating it first
-            # takes the date_status locks in ascending date order, as a run does, so the two
-            # never deadlock (interfaces.md "Transaction boundaries" 1).
-            if plan.cash_movements_from is not None:
-                await self._invalidator.cash_movements_changed(plan.cash_movements_from, uow=uow)
-            if plan.trades_from is not None:
-                await self._invalidator.trades_changed(plan.trades_from, uow=uow)
-            logger.info("deleted %d ledger entries, batch %s", len(plan.entry_ids), batch_id)
+            await repository.soft_delete(to_delete, deletion_batch_id=batch_id)
+            logger.info("deleted %d ledger entries, batch %s", len(to_delete), batch_id)
         await uow.commit()
 
     async def list_entries(

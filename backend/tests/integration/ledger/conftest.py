@@ -19,7 +19,6 @@ from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.shared.clock import FixedClock
-from tests.fakes.processing import RecordingInvalidator
 from tests.integration.databases import fresh_database_url
 from tests.integration.ledger.support import TODAY, seed_contracts
 from tests.unit.ledger.fakes import CalculatorPricer, FakeAssets
@@ -58,16 +57,10 @@ def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
 
 
 @pytest.fixture
-def invalidator() -> RecordingInvalidator:
-    return RecordingInvalidator()
-
-
-@pytest.fixture
-def service(invalidator: RecordingInvalidator) -> LedgerService:
+def service() -> LedgerService:
     assets = FakeAssets()
     return create_ledger_service(
         clock=FixedClock(TODAY),
         assets=assets,
         pricer=CalculatorPricer(assets),
-        invalidator=invalidator,
     )

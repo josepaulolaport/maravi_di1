@@ -21,7 +21,6 @@ from di1.composition.errors import install_problem_handlers
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.presentation.http.router import create_ledger_router
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
-from tests.fakes.processing import RecordingInvalidator
 from tests.unit.ledger.fakes import DI1F28, DI1F29, DI1V26
 
 PROBLEM_JSON = "application/problem+json"
@@ -391,10 +390,7 @@ def test_the_range_is_required(client: TestClient) -> None:
     )
 
 
-def test_a_rejected_write_leaves_nothing(
-    client: TestClient, invalidator: RecordingInvalidator
-) -> None:
+def test_a_rejected_write_leaves_nothing(client: TestClient) -> None:
     client.post("/ledger/entries", json={**FIXTURE_REQUESTS[0], "date": "2026-10-19"})
 
     assert client.get("/ledger/entries", params=RANGE).json()["items"] == []
-    assert invalidator.calls == []

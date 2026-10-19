@@ -135,17 +135,6 @@ class LedgerEntry:
             return _ZERO - self.signed_quantity * self.execution_pu
 
 
-@dataclass(frozen=True, slots=True)
-class DeletionPlan:
-    """What a batch soft delete changes: the entries still active among those requested, and
-    the date each chain is stale from (``None`` when the batch does not touch it, or when the
-    other call already covers it)."""
-
-    entry_ids: tuple[UUID, ...]
-    trades_from: date | None
-    cash_movements_from: date | None
-
-
 def validate_trade(
     draft: EntryDraft, *, today: date, instrument: KnownInstrument | None
 ) -> NewTrade:
@@ -221,35 +210,21 @@ def validate_cash_movement(draft: EntryDraft, *, today: date) -> NewCashMovement
     return NewCashMovement(entry_date=draft.entry_date, entry_time=draft.entry_time, amount=amount)
 
 
-def plan_deletion(requested_ids: Collection[UUID], found: Sequence[LedgerEntry]) -> DeletionPlan:
-    """The batch soft delete of ``requested_ids``, given the entries found for them (deleted or
-    not). All or nothing: an id that names no entry raises ``NOT_FOUND`` and nothing is deleted.
-    An entry already deleted keeps its deletion and invalidates nothing (idempotent).
-
-    Each chain is invalidated from its earliest date (OQ-24): positions from the earliest trade
-    (``trades_changed`` marks cash too); cash from the earliest entry of either type, so a
-    separate ``cash_movements_changed`` is needed only for cash dated before every trade. Then
-    the cash dates from the earliest trade on are marked by both calls: with the invalidator's
-    two methods that repeat cannot be avoided, and marking STALE twice changes nothing.
-    """
+def entries_to_delete(
+    requested_ids: Collection[UUID], found: Sequence[LedgerEntry]
+) -> tuple[UUID, ...]:
+    """The entries a batch soft delete of ``requested_ids`` marks deleted, given the entries
+    found for them (deleted or not), each once. All or nothing (OQ-24): an id that names no
+    entry raises ``NOT_FOUND`` and nothing is deleted. An entry already deleted keeps its first
+    deletion (idempotent)."""
     if not requested_ids:
         raise DomainError(_invalid("Selecione ao menos um lançamento.", "ids"))
     by_id = {entry.id: entry for entry in found}
     if any(entry_id not in by_id for entry_id in requested_ids):
         raise DomainError(ErrorDetail(ErrorCode.NOT_FOUND, "Lançamento não encontrado."))
 
-    active = [by_id[entry_id] for entry_id in dict.fromkeys(requested_ids)]
-    active = [entry for entry in active if not entry.is_deleted]
-    trade_dates = [e.entry_date for e in active if e.type is EntryType.TRADE]
-    cash_dates = [e.entry_date for e in active if e.type is EntryType.CASH]
-    trades_from = min(trade_dates, default=None)
-    cash_from = min(cash_dates, default=None)
-    if cash_from is not None and trades_from is not None and cash_from >= trades_from:
-        cash_from = None
-    return DeletionPlan(
-        entry_ids=tuple(entry.id for entry in active),
-        trades_from=trades_from,
-        cash_movements_from=cash_from,
+    return tuple(
+        entry_id for entry_id in dict.fromkeys(requested_ids) if not by_id[entry_id].is_deleted
     )
 
 
