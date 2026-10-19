@@ -14,11 +14,10 @@ import { ConfirmProcessingModal } from './ConfirmProcessingModal';
 import { HistoryTable } from './HistoryTable';
 import { JobDetailsModal } from './JobDetailsModal';
 import { isValidRange } from '@/shared/processing/RangeFields';
-import { ReplaceDialog } from './ReplaceDialog';
 import { nextDate } from '../jobStatus';
 import { RequestCard } from './RequestCard';
 
-type Dialog = { kind: 'details' | 'cancel' | 'replace'; jobId: string } | null;
+type Dialog = { kind: 'details' | 'cancel'; jobId: string } | null;
 
 interface ProcessingTabProps {
   requests: ReturnType<typeof useProcessingRequests>;
@@ -92,7 +91,6 @@ export function ProcessingTab({
         onSearchChange={onSearchChange}
         onDetails={open('details')}
         onCancel={open('cancel')}
-        onReplace={open('replace')}
         onRequestAgain={requestAgain}
       />
       <ConfirmProcessingModal
@@ -108,11 +106,9 @@ export function ProcessingTab({
         job={jobFor('details')}
         onClose={close}
         onCancel={open('cancel')}
-        onReplace={open('replace')}
         onRequestAgain={requestAgain}
       />
       <CancelDialog job={jobFor('cancel')} onClose={close} />
-      <ReplaceDialog job={jobFor('replace')} onClose={close} today={today} />
     </Stack>
   );
 }

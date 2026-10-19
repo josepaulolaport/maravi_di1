@@ -1,6 +1,6 @@
 import { processCashDraft, processDraft } from './processingDraft';
 
-// The Lançamentos "Processar" prefills (user, 2026-10-18; OQ-21 draft, P19 dropped): the whole
+// The Lançamentos "Processar" prefills (user, 2026-10-18; OQ-21, P19 dropped): the whole
 // period with Tudo; "Processar caixa" from the first of Caixa D−1 / D0 that is behind.
 
 describe('Processar prefill (OQ-21)', () => {

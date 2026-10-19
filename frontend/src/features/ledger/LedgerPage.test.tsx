@@ -193,13 +193,15 @@ describe('Lançamentos (§11.3)', () => {
           return undefined;
         }),
       );
-      const { user } = await openLedger();
+      const { user, router } = await openLedger();
       const header = screen.getByRole('columnheader', { name: 'Data e hora' });
       expect(header).toHaveAttribute('aria-sort', 'descending');
 
       await user.click(within(header).getByRole('button'));
 
       expect(header).toHaveAttribute('aria-sort', 'ascending');
+      // The order is in the URL, so the view can be linked (`?ordem=asc`).
+      expect(router.state.location.search).toContain('ordem=asc');
       // The order is the backend's: the screen asks for it, it never sorts the rows itself.
       await waitFor(() => {
         expect(orders).toEqual(['desc', 'asc']);
@@ -354,7 +356,7 @@ describe('Lançamentos (§11.3)', () => {
   });
 
   describe('cash strip (OQ-19 item 3)', () => {
-    it('§11.3 OQ-21 shows the published cash of the range end and the day before, with its own freshness', async () => {
+    it('§11.3 OQ-21 shows the published cash of the range end and the day before, with its processing time', async () => {
       await openLedger();
 
       const before = within(screen.getByRole('group', { name: 'Caixa D−1' }));
@@ -363,23 +365,32 @@ describe('Lançamentos (§11.3)', () => {
       expect(await before.findByText('R$ 199.650,37')).toBeInTheDocument();
       expect(end.getByText('16/10/2026')).toBeInTheDocument();
       expect(await end.findByText('R$ 506.059,27')).toBeInTheDocument();
-      // The 16/10 price correction makes positions stale, never the cash (OQ-21).
-      expect(before.queryByText('Desatualizado')).not.toBeInTheDocument();
-      expect(end.queryByText('Desatualizado')).not.toBeInTheDocument();
+      // A processed date carries no badge, only its processing time (OQ-31).
+      for (const group of [before, end]) {
+        expect(group.getByText('Processado em 16/10/2026 18:40')).toBeInTheDocument();
+        expect(group.queryByText(/^(Processado|Erro|Não processado)$/)).not.toBeInTheDocument();
+      }
       expect(screen.queryByRole('button', { name: 'Processar caixa' })).not.toBeInTheDocument();
     });
 
-    it('OQ-21 a deposit marks the cash stale and offers "Processar caixa" from that day, scope Caixa', async () => {
+    it('OQ-31 a deposit on a processed date changes no status and offers nothing to process', async () => {
       await ledgerApi.createEntry({
         type: 'CASH',
         date: '2026-10-15',
         time: '12:00:00',
         cash_amount: '1000.00',
       });
-      const { user } = await openLedger();
+      await openLedger();
 
       const end = within(screen.getByRole('group', { name: 'Caixa D0' }));
-      expect(await end.findByText('Desatualizado')).toBeInTheDocument();
+      expect(await end.findByText('R$ 506.059,27')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Processar caixa' })).not.toBeInTheDocument();
+    });
+
+    it('OQ-23 "Processar caixa" from a failed Caixa D−1 covers D−1 to D0, scope Caixa', async () => {
+      setStatus('2026-10-15', 'CASH', 'FAILED');
+      const { user } = await openLedger();
+
       await user.click(await screen.findByRole('button', { name: 'Processar caixa' }));
 
       const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
@@ -426,18 +437,22 @@ describe('Lançamentos (§11.3)', () => {
     expect(end.getByText('—')).toBeInTheDocument();
   });
 
-  it('§10.4 a write refreshes the strip: Caixa D0 turns stale', async () => {
+  it('OQ-31 a write keeps the strip as processed: the figure stays until reprocessed', async () => {
     const { user } = await openLedger('/lancamentos?inicio=2026-10-14&fim=2026-10-15');
     const end = within(screen.getByRole('group', { name: 'Caixa D0' }));
     expect(await end.findByText('R$ 199.650,37')).toBeInTheDocument();
-    expect(end.queryByText('Desatualizado')).not.toBeInTheDocument();
 
     const modal = await openNew(user, 'Aporte');
     await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
     await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
     await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
-    expect(await end.findByText('Desatualizado')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(modal.queryByRole('button', { name: 'Registrar aporte' })).not.toBeInTheDocument();
+    });
+    expect(end.getByText('R$ 199.650,37')).toBeInTheDocument();
+    expect(end.queryByText(/^(Erro|Não processado)$/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Processar caixa' })).not.toBeInTheDocument();
   });
 
   describe('Compra / Venda (§6.1)', () => {
@@ -488,7 +503,7 @@ describe('Lançamentos (§11.3)', () => {
         target: { value: '17:05' },
       });
       await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '2');
-      await user.click(modal.getByRole('radio', { name: 'Taxa a.a. (%)' }));
+      await user.click(modal.getByRole('radio', { name: 'Taxa a.a.' }));
       await user.type(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,45');
       await user.click(modal.getByRole('button', { name: 'Registrar venda' }));
 
@@ -591,7 +606,7 @@ describe('Lançamentos (§11.3)', () => {
       await chooseContract(user, modal, 'DI1F29');
       await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
       await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.click(modal.getByRole('radio', { name: 'Taxa a.a. (%)' }));
+      await user.click(modal.getByRole('radio', { name: 'Taxa a.a.' }));
       // 10,12345678901% = 0.1012345678901: 13 places, one more than OQ-3 allows.
       await user.type(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,12345678901');
       await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
@@ -871,7 +886,7 @@ describe('Lançamentos (§11.3)', () => {
     });
   });
 
-  describe('Processar (OQ-21 draft, user 2026-10-18)', () => {
+  describe('Processar (OQ-21, user 2026-10-18)', () => {
     async function openProcessar(user: ReturnType<typeof renderApp>['user']) {
       await user.click(screen.getByRole('button', { name: 'Processar' }));
       return within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
@@ -897,12 +912,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§11.3 "Processar caixa" starts at Caixa D0 when only D0 is behind', async () => {
-      await ledgerApi.createEntry({
-        type: 'CASH',
-        date: '2026-10-16',
-        time: '12:00:00',
-        cash_amount: '-10.00',
-      });
+      setStatus('2026-10-16', 'CASH', 'FAILED');
       const { user } = await openLedger();
 
       await user.click(await screen.findByRole('button', { name: 'Processar caixa' }));

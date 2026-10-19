@@ -1,11 +1,14 @@
-import { Paper, Skeleton, Stack, Tabs, Text, TextInput, Title } from '@mantine/core';
-import { IconSearch } from '@tabler/icons-react';
+import { Paper, Stack, Tabs, Text } from '@mantine/core';
 import { useSearchParams } from 'react-router';
 
+import { PageTitle } from '@/shared/ui/PageTitle';
+import { SearchInput } from '@/shared/ui/SearchInput';
+import { useInstrumentTypes } from '@/shared/queries';
+import { Loading } from '@/shared/ui/Loading';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
 import { ProductsTable } from './components/ProductsTable';
-import { useInstrumentTypes, useProducts, useSearchParam } from './hooks/useAssets';
+import { useProducts, useSearchParam } from './hooks/useAssets';
 
 /**
  * Ativos catalogue (spec §11.2, design 2:2): instrument types as tabs, then the products of the
@@ -15,7 +18,7 @@ import { useInstrumentTypes, useProducts, useSearchParam } from './hooks/useAsse
 export function AssetsPage() {
   const types = useInstrumentTypes();
   const [params, setParams] = useSearchParams();
-  const [text, setSearch, search] = useSearchParam();
+  const [search, setSearch] = useSearchParam();
 
   const items = types.data?.items ?? [];
   const requested = params.get('tipo');
@@ -35,13 +38,11 @@ export function AssetsPage() {
 
   return (
     <Stack gap="md">
-      <Title order={1} size="h2" fw={500}>
-        Ativos
-      </Title>
+      <PageTitle>Ativos</PageTitle>
       {types.isError ? (
         <ErrorState error={types.error} onRetry={() => void types.refetch()} />
       ) : types.isPending ? (
-        <Skeleton h={240} role="status" aria-label="Carregando catálogo" />
+        <Loading label="Carregando catálogo" h={240} />
       ) : items.length === 0 ? (
         <Text size="sm" c="dimmed">
           Nenhum tipo de instrumento cadastrado.
@@ -59,20 +60,17 @@ export function AssetsPage() {
             <Tabs.Panel key={type.code} value={type.code} pt="md">
               {type.code === selected && (
                 <Paper>
-                  <TextInput
-                    aria-label="Buscar produtos"
+                  <SearchInput
+                    label="Buscar produtos"
                     placeholder="Buscar por código, produto ou classe..."
-                    leftSection={<IconSearch size={16} stroke={1.5} />}
-                    value={text}
-                    onChange={(event) => {
-                      setSearch(event.currentTarget.value);
-                    }}
+                    value={search}
+                    onChange={setSearch}
                     m="md"
                   />
                   {products.isError ? (
                     <ErrorState error={products.error} onRetry={() => void products.refetch()} />
                   ) : products.isPending ? (
-                    <Skeleton h={120} m="md" role="status" aria-label="Carregando produtos" />
+                    <Loading label="Carregando produtos" h={120} m="md" />
                   ) : (
                     <ProductsTable products={products.data.items} />
                   )}

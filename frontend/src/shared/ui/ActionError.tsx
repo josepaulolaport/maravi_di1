@@ -1,7 +1,5 @@
-import { Alert, Stack, Text } from '@mantine/core';
-import { IconAlertTriangle } from '@tabler/icons-react';
-
-import { problemMessages } from '@/shared/ui/problemMessages';
+import { MessageAlert } from './MessageAlert';
+import { problemMessages } from './problemMessages';
 
 /**
  * A failed action in a modal (OQ-15): its problem+json messages (`problemMessages`), except
@@ -14,17 +12,5 @@ export function ActionError({
   error: unknown;
   shownOnFields?: readonly string[];
 }) {
-  const messages = problemMessages(error, shownOnFields);
-  if (messages.length === 0) return null;
-  return (
-    <Alert role="alert" color="red" variant="light" icon={<IconAlertTriangle size={18} />}>
-      <Stack gap={4}>
-        {messages.map((message) => (
-          <Text key={message} size="sm">
-            {message}
-          </Text>
-        ))}
-      </Stack>
-    </Alert>
-  );
+  return <MessageAlert messages={problemMessages(error, shownOnFields)} />;
 }

@@ -8,22 +8,22 @@ export type CompletenessStatus = 'COMPLETE' | 'MISSING';
 export type AssetValuationStatus = CompletenessStatus | 'NOT_REQUIRED';
 
 /**
- * The status of one chain on one date (OQ-23, `processing.date_status`), the only source of
- * freshness; every portfolio read and both badges use it:
- * - FRESH (Atualizado) and FRESH_WITH_ISSUES (Atualizado com pendências: a missing price or an
- *   expired open position);
- * - STALE (Desatualizado): an input changed after publication, or the day before was not
- *   current when it was processed; the figures are still shown, flagged (§8.3);
+ * The processing status of one chain on one date (OQ-23, OQ-31; `processing.date_status`).
+ * There is no staleness: a write never changes it, and processed figures stay as they are until
+ * the user processes again (spec §15).
+ * - PROCESSED (Processado) and PROCESSED_WITH_ISSUES (Processado com pendências: a missing price
+ *   or an expired open position);
  * - RUNNING (Processando): a run is processing the date now;
- * - FAILED (Erro): the last attempt failed; the date keeps its previously published data;
- * - NOT_PROCESSED (Não processado): no status yet.
+ * - FAILED (Erro): the last attempt failed (e.g. the day before was not processed); the date
+ *   keeps its previously published data, if any;
+ * - NOT_PROCESSED (Não processado): never processed.
  */
-export type Freshness =
-  'FRESH' | 'FRESH_WITH_ISSUES' | 'STALE' | 'RUNNING' | 'FAILED' | 'NOT_PROCESSED';
+export type DateStatus =
+  'PROCESSED' | 'PROCESSED_WITH_ISSUES' | 'RUNNING' | 'FAILED' | 'NOT_PROCESSED';
 
-/** The cash chain of a date (OQ-21 draft): `portfolio.cash_balances`. */
+/** The cash chain of a date (OQ-21): `portfolio.cash_balances`. */
 export interface CashSummary {
-  status: Freshness;
+  status: DateStatus;
   /** `null` when not processed. */
   balance: Decimal | null;
   /**
@@ -36,12 +36,14 @@ export interface CashSummary {
   deposits: Decimal | null;
   /** Sum of the day's retiradas, always ≥ 0 and subtracted: balance = previous + trades_cash_flow + deposits − withdrawals. */
   withdrawals: Decimal | null;
+  /** When the cash chain was last processed for the date (`cash_processed_at`, OQ-31); `null` if never. */
   published_at: IsoDateTime | null;
 }
 
-/** The positions chain of a date (OQ-21 draft): valuation and P&L, `portfolio_metrics`. */
+/** The positions chain of a date (OQ-21): valuation and P&L, `portfolio_metrics`. */
 export interface PositionsSummary {
-  status: Freshness;
+  status: DateStatus;
+  /** When the positions chain was last processed for the date (`portfolio_processed_at`, OQ-31). */
   published_at: IsoDateTime | null;
   /** Σ signed market value (§8.2). */
   market_value: Decimal | null;
@@ -54,7 +56,7 @@ export interface PositionsSummary {
   pnl_status: CompletenessStatus | null;
 }
 
-/** `GET /portfolio/summary?date=` (OQ-21 draft shape). */
+/** `GET /portfolio/summary?date=` (OQ-21). */
 export interface PortfolioSummary {
   date: IsoDate;
   cash: CashSummary;
@@ -77,9 +79,9 @@ export interface PositionRow {
   average_entry_pu: Decimal | null;
   average_entry_rate: Decimal | null;
   /**
-   * The reference PU this publication used and its source (OQ-25): stored on the published
-   * row, so the day stays traceable after the price is corrected or removed. Null when there
-   * is no price or the date is after maturity.
+   * The date's current preferred reference price, read from the price table (OQ-30): MANUAL,
+   * else B3, exact date; after maturity the PU is 0. After a correction it shows the new price
+   * next to figures computed with the old one, until the date is processed again.
    */
   reference_source: PriceSource | null;
   reference_pu: Decimal | null;
@@ -95,11 +97,11 @@ export interface PositionRow {
 
 /**
  * `GET /portfolio/positions?date=` — rows and totals come from the same publication, with the
- * positions chain's freshness (OQ-21 draft). Not processed: no rows, no publication time.
+ * positions chain's status and processing time (OQ-21, OQ-31). Not processed: no rows, no publication time.
  */
 export interface PortfolioPositions {
   date: IsoDate;
-  status: Freshness;
+  status: DateStatus;
   published_at: IsoDateTime | null;
   items: PositionRow[];
 }
@@ -108,8 +110,17 @@ export interface PortfolioPositions {
 export interface PnlPoint {
   date: IsoDate;
   daily_pnl: Decimal | null;
+  /** Since inception, as stored (the KPI). */
   cumulative_pnl: Decimal | null;
+  /**
+   * Σ daily P&L from the requested `start_date` to this date, the start's own included, summed
+   * by the backend on each request (OQ-31 item 8): what the Carteira chart draws. `null` from
+   * the first date in the range whose daily P&L is missing or that has no published day.
+   */
+  range_cumulative_pnl: Decimal | null;
   pnl_status: CompletenessStatus;
   /** The date's positions status; only published days are listed, so never NOT_PROCESSED. */
-  status: Freshness;
+  status: DateStatus;
+  /** When the positions chain was last processed for the date (OQ-31). */
+  published_at: IsoDateTime | null;
 }

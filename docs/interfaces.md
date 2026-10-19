@@ -101,6 +101,8 @@ Pure domain calculators (`portfolio/domain/`, frozen dataclasses). Two independe
 
 ## HTTP endpoints
 
+Every module route below is served under the `/api` prefix (FastAPI `prefix="/api"`, matching the frontend's `API_BASE`), e.g. `GET /api/instruments`; the paths below omit it. `/health` stays at the root, outside `/api`, for Compose and load-balancer probes.
+
 Paginated lists take `?limit=&cursor=` and return `{items, next_cursor}`, with keyset cursors: `(entry_date, entry_time, seq)` for ledger entries and `(created_at, id)` for processing requests (OQ-26). `limit` defaults to 50 and is allowed from 1 to 200; anything else is 422 `VALIDATION_ERROR` on `limit`, "Use um limite entre 1 e 200." (OQ-37).
 
 - `GET /health` (and `HEAD`): `200 {"status": "ok"}` when PostgreSQL answers `SELECT 1` within a short timeout (2 s); otherwise `503` problem+json ("Serviço indisponível", "O banco de dados não está acessível."), nothing of the error in the body. Served by `composition/health.py`; the app is built by `di1.main:create_app` (uvicorn `--factory`).

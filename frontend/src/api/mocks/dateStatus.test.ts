@@ -2,12 +2,13 @@ import type { ProcessingRequest, ProcessingScope } from '../contract';
 import { ledgerApi, portfolioApi, processingApi } from '../endpoints';
 import { IDS } from './fixtures';
 
-// OQ-23 and OQ-26 (docs/open-questions.md, PR #43): a run processes its dates in calendar order
-// and publishes each one in its own step; every date has one status per chain (Atualizado,
-// Atualizado com pendências, Desatualizado, Processando, Erro, Não processado), and a write
-// marks the dates that have a status stale from its date. The fake worker advances one step
-// per read of a job: dispatch, then one date per read. Fixture scenario: 14–16/10 published for
-// both chains; cash fresh; positions fresh on 14 and 15, stale on 16 (price corrected).
+// OQ-23, OQ-26 and OQ-31 (docs/open-questions.md): a run processes its dates in calendar order
+// and publishes each one in its own step; every date has one processing status per chain
+// (Processado, Processado com pendências, Processando, Erro, Não processado) and a processing
+// time. There is no staleness: a write never changes a status. Each date needs its day before
+// processed (or the chain's zero state), or the run fails there. The fake worker advances one
+// step per read of a job: dispatch, then one date per read. Fixture scenario: 14–16/10 processed
+// for both chains; positions on 16/10 with issues (DI1F29 has no price); 17–18/10 never.
 
 const FINAL = ['COMPLETED', 'COMPLETED_WITH_ISSUES', 'CANCELLED', 'FAILED'];
 
@@ -62,14 +63,14 @@ describe('OQ-23 the run (eight statuses, per-date progress)', () => {
     expect(await polls(job, 2)).toMatchObject({ status: 'RUNNING', progress_date: null });
     expect(await status('2026-10-14')).toMatchObject({ cash: 'RUNNING', positions: 'RUNNING' });
     expect(await polls(job, 1)).toMatchObject({ status: 'RUNNING', progress_date: '2026-10-14' });
-    expect(await status('2026-10-14')).toEqual({ cash: 'FRESH', positions: 'FRESH' });
+    expect(await status('2026-10-14')).toEqual({ cash: 'PROCESSED', positions: 'PROCESSED' });
     expect(await status('2026-10-15')).toMatchObject({ cash: 'RUNNING', positions: 'RUNNING' });
 
     expect(await finish(job)).toMatchObject({
       status: 'COMPLETED',
       progress_date: '2026-10-15',
     });
-    expect(await status('2026-10-15')).toEqual({ cash: 'FRESH', positions: 'FRESH' });
+    expect(await status('2026-10-15')).toEqual({ cash: 'PROCESSED', positions: 'PROCESSED' });
   });
 
   it('OQ-23 a cancel keeps the dates committed, the current one included; later dates are untouched', async () => {
@@ -79,8 +80,8 @@ describe('OQ-23 the run (eight statuses, per-date progress)', () => {
     await processingApi.cancel(job.id);
 
     expect(await finish(job)).toMatchObject({ status: 'CANCELLED', progress_date: '2026-10-15' });
-    expect((await status('2026-10-15')).positions).toBe('FRESH');
-    expect((await status('2026-10-16')).positions).toBe('STALE');
+    expect((await status('2026-10-15')).positions).toBe('PROCESSED');
+    expect((await status('2026-10-16')).positions).toBe('PROCESSED_WITH_ISSUES');
   });
 
   it.each<[ProcessingScope, string, string]>([
@@ -109,13 +110,13 @@ describe('OQ-23 the run (eight statuses, per-date progress)', () => {
       progress_date: '2026-10-14',
       error_code: 'MOCK_INPUTS_CHANGED',
     });
-    expect((await status('2026-10-14')).cash).toBe('FRESH');
+    expect((await status('2026-10-14')).cash).toBe('PROCESSED');
     expect((await status('2026-10-15')).cash).toBe('FAILED');
-    expect((await status('2026-10-16')).cash).toBe('STALE');
+    expect((await status('2026-10-16')).cash).toBe('PROCESSED');
   });
 
-  it('OQ-23 a run ends COMPLETED_WITH_ISSUES when a date it wrote is stale or has issues', async () => {
-    // 17/10 follows a stale 16/10 for positions: it is written STALE.
+  it('OQ-23 a run ends COMPLETED_WITH_ISSUES when a date it wrote has issues', async () => {
+    // 17/10 has no prices at all: its positions are processed with issues; its cash has none.
     expect((await finish(await enqueue('2026-10-17', '2026-10-17', 'POSITIONS'))).status).toBe(
       'COMPLETED_WITH_ISSUES',
     );
@@ -135,26 +136,72 @@ describe('OQ-23 the run (eight statuses, per-date progress)', () => {
 });
 
 describe('OQ-23 the status of a date, per chain', () => {
-  it('OQ-23 a date after a stale one is written STALE, with a STALE_PREDECESSOR issue on that date', async () => {
-    await finish(await enqueue('2026-10-17', '2026-10-18', 'POSITIONS'));
+  it.each<[ProcessingScope, string]>([
+    ['POSITIONS', 'POSITIONS_PREDECESSOR_MISSING'],
+    ['CASH', 'CASH_PREDECESSOR_MISSING'],
+    // Both chains fail: the positions code (OQ-31 item 7).
+    ['ALL', 'POSITIONS_PREDECESSOR_MISSING'],
+  ])(
+    'OQ-31 a %s run whose day before is not processed fails on its first date (%s)',
+    async (scope, code) => {
+      const job = await finish(await enqueue('2026-10-18', '2026-10-18', scope));
 
-    expect((await status('2026-10-17')).positions).toBe('STALE');
-    expect((await status('2026-10-18')).positions).toBe('STALE');
-    const stale = (await processingApi.listIssues()).items.filter(
-      (issue) => issue.issue_type === 'STALE_PREDECESSOR',
-    );
-    expect(stale.map((issue) => [issue.affected_date, issue.chain]).sort()).toEqual([
-      ['2026-10-17', 'POSITIONS'],
-      ['2026-10-18', 'POSITIONS'],
-    ]);
+      expect(job).toMatchObject({
+        status: 'FAILED',
+        progress_date: null,
+        error_code: code,
+        error_message: 'Dia anterior não processado',
+      });
+      const after = await status('2026-10-18');
+      expect(after.positions).toBe(scope === 'CASH' ? 'NOT_PROCESSED' : 'FAILED');
+      expect(after.cash).toBe(scope === 'POSITIONS' ? 'NOT_PROCESSED' : 'FAILED');
+      expect(
+        (await processingApi.listIssues()).items.map((issue) => issue.issue_type),
+      ).not.toContain('STALE_PREDECESSOR');
+    },
+  );
+
+  it('OQ-31 in an ALL run only the failing chain reads Erro; the other keeps its status', async () => {
+    await finish(await enqueue('2026-10-17', '2026-10-17', 'CASH'));
+
+    const job = await finish(await enqueue('2026-10-18', '2026-10-18', 'ALL'));
+
+    expect(job.error_code).toBe('POSITIONS_PREDECESSOR_MISSING');
+    expect(await status('2026-10-18')).toEqual({ cash: 'NOT_PROCESSED', positions: 'FAILED' });
   });
 
-  it('OQ-23 a date after a fresh one with a missing price reads Atualizado com pendências', async () => {
+  it('OQ-31 a failed day before counts as not processed', async () => {
+    // The fake cannot compute 17/10 after a deposit dated then: that date reads Erro.
+    await deposit('2026-10-17');
+    await finish(await enqueue('2026-10-17', '2026-10-17', 'CASH'));
+
+    const preview = await processingApi.preview({
+      start_date: '2026-10-18',
+      end_date: '2026-10-18',
+      scope: 'CASH',
+    });
+    const job = await finish(await enqueue('2026-10-18', '2026-10-18', 'CASH'));
+
+    expect(preview.predecessor.cash).toBe('FAILED');
+    expect(job.error_code).toBe('CASH_PREDECESSOR_MISSING');
+  });
+
+  it('OQ-31 a processed chain carries its own processing time', async () => {
+    const before = await portfolioApi.getSummary('2026-10-15');
+
+    await finish(await enqueue('2026-10-15', '2026-10-15', 'CASH'));
+    const after = await portfolioApi.getSummary('2026-10-15');
+
+    expect(after.cash.published_at).not.toBe(before.cash.published_at);
+    expect(after.positions.published_at).toBe(before.positions.published_at);
+  });
+
+  it('OQ-23 a date after a processed one with a missing price reads Processado com pendências', async () => {
     await finish(await enqueue('2026-10-16', '2026-10-16', 'POSITIONS'));
 
     expect(await status('2026-10-16')).toEqual({
-      cash: 'FRESH',
-      positions: 'FRESH_WITH_ISSUES',
+      cash: 'PROCESSED',
+      positions: 'PROCESSED_WITH_ISSUES',
     });
   });
 
@@ -170,14 +217,13 @@ describe('OQ-23 the status of a date, per chain', () => {
     expect(missing[0]?.request_id).toBe(second.id);
   });
 
-  it('OQ-23 a write marks stale only the dates that have a status, from its date', async () => {
+  it("OQ-31 a write never changes a date's status: processed figures stay until reprocessed", async () => {
+    const before = await portfolioApi.getSummary('2026-10-15');
+
     await deposit('2026-10-15');
 
-    expect((await status('2026-10-14')).cash).toBe('FRESH');
-    expect((await status('2026-10-15')).cash).toBe('STALE');
-    expect((await status('2026-10-16')).cash).toBe('STALE');
-    expect((await status('2026-10-17')).cash).toBe('NOT_PROCESSED');
-    expect((await status('2026-10-15')).positions).toBe('FRESH');
+    expect(await portfolioApi.getSummary('2026-10-15')).toEqual(before);
+    expect((await status('2026-10-16')).cash).toBe('PROCESSED');
   });
 
   it("OQ-26 the preview reports start−1's chain status, or the zero state per chain", async () => {
@@ -199,7 +245,7 @@ describe('OQ-23 the status of a date, per chain', () => {
       scope: 'ALL',
     });
 
-    expect(after.predecessor).toEqual({ cash: 'FRESH', positions: 'STALE' });
+    expect(after.predecessor).toEqual({ cash: 'PROCESSED', positions: 'PROCESSED_WITH_ISSUES' });
     expect(first.predecessor).toEqual({ cash: 'ZERO_STATE', positions: 'ZERO_STATE' });
     expect(afterDeposit.predecessor).toEqual({ cash: 'NOT_PROCESSED', positions: 'ZERO_STATE' });
   });
@@ -212,7 +258,7 @@ describe('OQ-23 the status of a date, per chain', () => {
     expect(noPositions.aum).toBeNull();
   });
 
-  it('OQ-23 a trade on a processed date makes both chains stale there', async () => {
+  it('OQ-31 a trade on a processed date leaves both chains as they were', async () => {
     await ledgerApi.createEntry({
       type: 'TRADE',
       asset_id: IDS.di1f28,
@@ -223,6 +269,6 @@ describe('OQ-23 the status of a date, per chain', () => {
       execution_pu: '89000.00',
     });
 
-    expect(await status('2026-10-15')).toEqual({ cash: 'STALE', positions: 'STALE' });
+    expect(await status('2026-10-15')).toEqual({ cash: 'PROCESSED', positions: 'PROCESSED' });
   });
 });

@@ -6,7 +6,8 @@ at import time::
     uvicorn di1.main:create_app --factory
 
 The lifespan creates the process's one engine and session factory (platform) and disposes of the
-engine at shutdown. Every error answers RFC 9457 problem+json (``composition.errors``).
+engine at shutdown. The app's clock (OQ-14) is the system clock unless a test passes a fixed one.
+Every error answers RFC 9457 problem+json (``composition.errors``).
 """
 
 from __future__ import annotations
@@ -19,18 +20,24 @@ from fastapi import FastAPI
 from di1.composition.errors import install_problem_handlers
 from di1.composition.health import router as health_router
 from di1.composition.routers import include_routers
+from di1.platform.clock import SystemClock
 from di1.platform.config import Settings, get_settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
+from di1.shared.clock import Clock
 
 HEALTH_TIMEOUT_SECONDS = 2.0
 """How long ``/health`` waits for PostgreSQL (connection and ``SELECT 1``) before answering 503."""
 
 
 def create_app(
-    settings: Settings | None = None, *, health_timeout: float = HEALTH_TIMEOUT_SECONDS
+    settings: Settings | None = None,
+    *,
+    clock: Clock | None = None,
+    health_timeout: float = HEALTH_TIMEOUT_SECONDS,
 ) -> FastAPI:
-    """The app; ``settings`` defaults to the environment, read when the app starts."""
+    """The app; ``settings`` defaults to the environment, read when the app starts, and
+    ``clock`` to `SystemClock`."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -43,6 +50,7 @@ def create_app(
             await engine.dispose()
 
     app = FastAPI(title="Maravi DI1 Backoffice", lifespan=lifespan)
+    app.state.clock = clock if clock is not None else SystemClock()
     app.state.health_timeout = health_timeout
     install_problem_handlers(app)
     app.include_router(health_router)

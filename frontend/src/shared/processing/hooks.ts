@@ -6,7 +6,7 @@ import { queryRoots } from '@/api/queryRoots';
 
 // Requesting a processing (§10.1), shared by Central de Controle and Lançamentos.
 
-export const processingRequestKeys = {
+const processingRequestKeys = {
   preview: (range: ProcessingRangeRequest) =>
     [...queryRoots.processing, 'preview', range.start_date, range.end_date, range.scope] as const,
 };
