@@ -86,7 +86,11 @@ function pnlSeries(start: string, end: string): PnlPoint[] {
     items.push({
       date,
       status,
-      published_at: db.published.summaries.get(date)?.published_at ?? null,
+      // A FAILED or RUNNING day keeps its stored processing time; a day never processed has none.
+      published_at:
+        status === 'NOT_PROCESSED'
+          ? null
+          : (db.published.summaries.get(date)?.published_at ?? null),
       pnl_status: point?.pnl_status ?? null,
       daily_pnl: point?.daily_pnl ?? null,
       cumulative_pnl: point?.cumulative_pnl ?? null,

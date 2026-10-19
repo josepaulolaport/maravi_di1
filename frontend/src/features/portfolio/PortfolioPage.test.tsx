@@ -588,9 +588,7 @@ describe('Carteira (§11.4)', () => {
     server.use(http.get(url('/portfolio/pnl'), () => HttpResponse.json({ items: [] })));
     await openCarteira('2026-10-15');
 
-    expect(
-      await screen.findByText('Sem histórico completo para exibir no período selecionado.'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Sem dados para o período selecionado.')).toBeInTheDocument();
   });
 
   it('OQ-41 item 5 notes that incomplete days add zero when the period has any', async () => {
@@ -599,7 +597,7 @@ describe('Carteira (§11.4)', () => {
 
     const card = within(screen.getByRole('region', { name: 'P&L acumulado' }));
     expect(await card.findByText(INCOMPLETE_NOTE)).toBeInTheDocument();
-    expect(card.queryByText(/Sem histórico completo/)).not.toBeInTheDocument();
+    expect(card.queryByText('Sem dados para o período selecionado.')).not.toBeInTheDocument();
   });
 
   it('OQ-41 item 5 shows no note when every day of the period is complete', async () => {

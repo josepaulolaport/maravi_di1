@@ -241,6 +241,21 @@ describe('OQ-21 positions and the P&L series use the same status as the summary'
     ]);
   });
 
+  it('OQ-41 item 2 a date with no status has no processing time, even over an older published row', async () => {
+    setStatus('2026-10-15', 'POSITIONS', null);
+
+    const { items } = await portfolioApi.getPnlSeries({
+      start_date: '2026-10-15',
+      end_date: '2026-10-15',
+    });
+
+    expect(items[0]).toMatchObject({
+      status: 'NOT_PROCESSED',
+      published_at: null,
+      daily_pnl: null,
+    });
+  });
+
   it.each(['FAILED', 'RUNNING'] as const)(
     'OQ-41 item 4 a %s day shows its status with no P&L and adds 0, even over an older published row',
     async (status) => {

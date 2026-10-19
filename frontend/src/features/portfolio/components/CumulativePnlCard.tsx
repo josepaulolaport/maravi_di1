@@ -115,7 +115,7 @@ export function CumulativePnlCard({
           />
         ) : (
           <Text size="sm" c="dimmed">
-            Sem histórico completo para exibir no período selecionado.
+            Sem dados para o período selecionado.
           </Text>
         ))}
       <Text size="xs" c="dimmed" mt="xs">
