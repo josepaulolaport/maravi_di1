@@ -137,8 +137,11 @@ CREATE UNIQUE INDEX reference_prices_current_uq ON prices.reference_prices (asse
 CREATE INDEX reference_prices_date_active_idx ON prices.reference_prices (reference_date, asset_id) WHERE superseded_at IS NULL;
 
 -- PROCESSING: user-requested jobs, singleton coordination, per-date issues.
+-- Cash and positions are separate chains (OQ-21): a request processes one scope, and revisions
+-- and dirty markers are kept per input and per chain.
 CREATE TABLE processing.requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scope VARCHAR(16) NOT NULL,
     requested_start_date DATE NOT NULL,
     requested_end_date DATE NOT NULL,
     effective_start_date DATE,
@@ -152,13 +155,15 @@ CREATE TABLE processing.requests (
     processed_days INTEGER NOT NULL DEFAULT 0,
     total_days INTEGER,
     progress_date DATE,
-    ledger_revision_at_start BIGINT,
+    trades_revision_at_start BIGINT,
+    cash_movements_revision_at_start BIGINT,
     prices_revision_at_start BIGINT,
     claim_token UUID,
     lease_expires_at TIMESTAMPTZ,
     attempt_count INTEGER NOT NULL DEFAULT 0,
     error_code VARCHAR(64),
     error_message TEXT,
+    CONSTRAINT requests_scope_check CHECK (scope IN ('CASH','POSITIONS','ALL')),
     CONSTRAINT requests_dates_ordered CHECK (requested_start_date <= requested_end_date),
     CONSTRAINT requests_effective_dates_ordered CHECK (effective_start_date IS NULL OR effective_end_date IS NULL OR effective_start_date <= effective_end_date),
     CONSTRAINT requests_status_check CHECK (status IN ('QUEUED','DISPATCHED','RUNNING','CANCELLING','COMPLETED','COMPLETED_WITH_ISSUES','CANCELLED','FAILED','SUPERSEDED')),
@@ -171,9 +176,11 @@ CREATE INDEX requests_active_idx ON processing.requests (status) WHERE status IN
 
 CREATE TABLE processing.calculation_state (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
-    ledger_revision BIGINT NOT NULL DEFAULT 0 CHECK (ledger_revision >= 0),
+    trades_revision BIGINT NOT NULL DEFAULT 0 CHECK (trades_revision >= 0),
+    cash_movements_revision BIGINT NOT NULL DEFAULT 0 CHECK (cash_movements_revision >= 0),
     prices_revision BIGINT NOT NULL DEFAULT 0 CHECK (prices_revision >= 0),
-    accounting_dirty_from DATE,
+    cash_dirty_from DATE,
+    positions_dirty_from DATE,
     valuation_dirty_from DATE,
     active_request_id UUID REFERENCES processing.requests(id) ON DELETE SET NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -232,9 +239,11 @@ CREATE TABLE portfolio.position_metrics (
 );
 CREATE INDEX position_metrics_date_idx ON portfolio.position_metrics (metric_date, asset_id);
 
+-- aum = cash_balances.cash_balance + positions_market_value for the same date. The two live in
+-- different tables (OQ-21), so this is a publish invariant: whichever scope publishes recomputes
+-- aum for its days in the same transaction. A row can only check that aum needs a market value.
 CREATE TABLE portfolio.portfolio_metrics (
     metric_date DATE PRIMARY KEY,
-    cash_balance NUMERIC NOT NULL,
     positions_market_value NUMERIC,
     aum NUMERIC,
     position_pnl NUMERIC,
@@ -246,7 +255,7 @@ CREATE TABLE portfolio.portfolio_metrics (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT portfolio_metrics_valuation_status CHECK (valuation_status IN ('COMPLETE','MISSING')),
     CONSTRAINT portfolio_metrics_pnl_status CHECK (pnl_status IN ('COMPLETE','MISSING')),
-    CONSTRAINT portfolio_metrics_aum_consistency CHECK (aum IS NULL OR (positions_market_value IS NOT NULL AND aum = cash_balance + positions_market_value)),
+    CONSTRAINT portfolio_metrics_aum_needs_market_value CHECK (aum IS NULL OR positions_market_value IS NOT NULL),
     CONSTRAINT portfolio_metrics_daily_pnl_parts CHECK (daily_pnl IS NULL OR (position_pnl IS NOT NULL AND trades_pnl IS NOT NULL AND daily_pnl = position_pnl + trades_pnl)),
     CONSTRAINT portfolio_metrics_missing_valuation_null CHECK (valuation_status <> 'MISSING' OR (positions_market_value IS NULL AND aum IS NULL))
 );
@@ -281,7 +290,6 @@ CREATE TABLE portfolio.staged_position_metrics (
 CREATE TABLE portfolio.staged_portfolio_metrics (
     request_id UUID NOT NULL REFERENCES processing.requests(id) ON DELETE CASCADE,
     metric_date DATE NOT NULL,
-    cash_balance NUMERIC NOT NULL,
     positions_market_value NUMERIC,
     aum NUMERIC,
     position_pnl NUMERIC,
@@ -291,6 +299,30 @@ CREATE TABLE portfolio.staged_portfolio_metrics (
     valuation_status VARCHAR(16) NOT NULL CHECK (valuation_status IN ('COMPLETE','MISSING')),
     pnl_status VARCHAR(16) NOT NULL CHECK (pnl_status IN ('COMPLETE','MISSING')),
     PRIMARY KEY(request_id, metric_date)
+);
+
+-- The cash chain (OQ-21), one row per processed calendar day:
+--   cash_balance[D] = cash_balance[D-1] + trades_cash_flow[D] + deposits[D] - withdrawals[D]
+--   trades_cash_flow[D] = -sum(signed_quantity * execution_pu) over the day's active trades
+-- Owned by Portfolio, like the other published and staged tables (OQ-8).
+CREATE TABLE portfolio.cash_balances (
+    balance_date DATE PRIMARY KEY,
+    cash_balance NUMERIC NOT NULL,
+    trades_cash_flow NUMERIC NOT NULL,
+    deposits NUMERIC NOT NULL,
+    withdrawals NUMERIC NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT cash_balances_movements_nonnegative CHECK (deposits >= 0 AND withdrawals >= 0)
+);
+CREATE TABLE portfolio.staged_cash_balances (
+    request_id UUID NOT NULL REFERENCES processing.requests(id) ON DELETE CASCADE,
+    balance_date DATE NOT NULL,
+    cash_balance NUMERIC NOT NULL,
+    trades_cash_flow NUMERIC NOT NULL,
+    deposits NUMERIC NOT NULL,
+    withdrawals NUMERIC NOT NULL,
+    CONSTRAINT staged_cash_balances_movements_nonnegative CHECK (deposits >= 0 AND withdrawals >= 0),
+    PRIMARY KEY(request_id, balance_date)
 );
 
 -- PLATFORM: durable command/event delivery and consumer idempotency.

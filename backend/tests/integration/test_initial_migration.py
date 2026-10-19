@@ -1,8 +1,8 @@
-"""The initial Alembic revision creates exactly the schema of `docs/schema.sql` (plan §3, Wave 0).
+"""Upgrade to head creates the schema of `docs/schema.sql`; downgrade to base removes it (plan §3).
 
-- The SQL the revision runs is `docs/schema.sql` without its own `BEGIN;`/`COMMIT;` (checked by
-  `tests/architecture/test_migration_sql.py`, which needs no database).
-- Upgrade to head on a fresh PostgreSQL 16 database creates the six schemas and 19 tables, with
+- 0001 + 0002 build exactly what `docs/schema.sql` builds (checked column by column in
+  `test_cash_chain_migration.py`).
+- Upgrade to head on a fresh PostgreSQL 16 database creates the six schemas and 21 tables, with
   the singleton `processing.calculation_state` row. Downgrade to base removes them, and a second
   upgrade works again.
 - Downgrade refuses to drop a database that holds business data unless ``-x allow_data_loss=true``
@@ -38,7 +38,8 @@ TABLES = {
     "processing.requests", "processing.calculation_state", "processing.issues",
     "portfolio.positions", "portfolio.position_metrics", "portfolio.portfolio_metrics",
     "portfolio.staged_positions", "portfolio.staged_position_metrics",
-    "portfolio.staged_portfolio_metrics", "platform.outbox_messages", "platform.inbox_messages",
+    "portfolio.staged_portfolio_metrics", "portfolio.cash_balances",
+    "portfolio.staged_cash_balances", "platform.outbox_messages", "platform.inbox_messages",
 }  # fmt: skip
 
 
