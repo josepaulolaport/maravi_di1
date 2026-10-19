@@ -94,13 +94,12 @@ export const priceHandlers = [
     const typed = (kind === 'PU' ? body.pu : body.rate) as string;
     const { pu, rate } = fakePricing(kind, typed, days);
 
-    // A correction overwrites the MANUAL price in place: no revisions (user, 2026-10-18).
-    const existing = sourcesOf(instrument.id, date).find((p) => p.source === 'MANUAL');
+    // Adding a price deletes the current MANUAL one and inserts the new row, with a new id
+    // (OQ-26 item 7); this is how Corrigir works. No revisions (OQ-25).
+    db.referencePrices = db.referencePrices.filter(
+      (p) => !(p.asset_id === instrument.id && p.reference_date === date && p.source === 'MANUAL'),
+    );
     markDirty('price', date);
-    if (existing) {
-      Object.assign(existing, { input_kind: kind, pu, rate });
-      return HttpResponse.json(existing, { status: 200 });
-    }
     const created: ReferencePrice = {
       id: newId(),
       asset_id: instrument.id,

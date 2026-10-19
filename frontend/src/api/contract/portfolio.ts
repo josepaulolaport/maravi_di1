@@ -74,9 +74,11 @@ export interface PositionRow {
   quantity: number;
   average_entry_pu: Decimal | null;
   average_entry_rate: Decimal | null;
-  /** The price used (§5). Null when missing or after maturity. */
-  reference_price_id: string | null;
-  /** Proposal: source and rate of that observation, read through `reference_price_id`. */
+  /**
+   * The reference PU this publication used and its source (OQ-25): stored on the published
+   * row, so the day stays traceable after the price is corrected or removed. Null when there
+   * is no price or the date is after maturity.
+   */
   reference_source: PriceSource | null;
   reference_pu: Decimal | null;
   reference_rate: Decimal | null;

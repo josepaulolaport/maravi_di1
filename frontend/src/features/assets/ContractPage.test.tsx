@@ -126,7 +126,7 @@ describe('Ativos: contrato (§11.2)', () => {
     expect(screen.queryByRole('menuitem', { name: 'Ver revisões' })).not.toBeInTheDocument();
   });
 
-  it('§5 a correction overwrites the price and is shown at once', async () => {
+  it('§5 OQ-26 a correction replaces the price and is shown at once', async () => {
     const { user } = await openContract();
 
     await rowAction(user, '16/10/2026', 'Corrigir');

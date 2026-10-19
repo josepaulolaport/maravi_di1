@@ -3,8 +3,8 @@ import type { Decimal, InputKind, IsoDate, IsoDateTime } from './common';
 // Prices (spec §5, schema `prices.reference_prices`). Contract page (§11.2, OQ-19 item 6).
 //
 // No revisions (user, 2026-10-18: "drop the revision. we will not be needing it anymore"):
-// there is one price per (asset, date, source); a correction overwrites it in place and a
-// removal deletes it. This deviates from spec §5 and is recorded by lane X.
+// there is one price per (asset, date, source); adding a price replaces the current one and a
+// removal deletes it (OQ-25, OQ-26 item 7).
 
 /** MANUAL wins over B3 for the same asset and date (§5). */
 export type PriceSource = 'MANUAL' | 'B3';
@@ -34,9 +34,9 @@ export interface ReferencePriceDay {
 }
 
 /**
- * `POST /reference-prices`: records the MANUAL price of an asset and date. If one exists it is
- * overwritten in place (same id, 200); otherwise it is created (201). Either way the dependent
- * results go stale (§10.4).
+ * `POST /reference-prices`: records the MANUAL price of an asset and date (201). An existing
+ * one for the same asset, date and source is deleted first, so the price gets a new id
+ * (OQ-26 item 7); Corrigir works this way. The dependent results go stale (§10.4).
  */
 export type SetReferencePriceRequest = {
   asset_id: string;

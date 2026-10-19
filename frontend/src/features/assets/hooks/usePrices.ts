@@ -21,7 +21,7 @@ export function useReferencePriceDays(assetId: string, start: IsoDate, end: IsoD
 }
 
 /**
- * Records the MANUAL price of a date; a correction is the same call and overwrites it.
+ * Records the MANUAL price of a date; a correction is the same call and replaces it (OQ-26).
  * The write marks results stale and starts no processing (§10.1), so only the views refresh.
  */
 export function useSetReferencePrice() {

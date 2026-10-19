@@ -25,7 +25,7 @@ import type {
 //   16/10  Venda 4 DI1F28 a 9,95% a.a.; retirada 50.000,00
 //          A job started at 17:20 is SUPERSEDED: the withdrawal was recorded at 17:30, mid-run.
 //          No DI1F29 price  → Pendência, P&L incomplete (null), job COMPLETED_WITH_ISSUES.
-//          DI1F28 price corrected after publication (overwritten) → 16/10 is stale.
+//          DI1F28 price corrected after publication (replaced) → 16/10 is stale.
 //   17/10, 18/10  not processed (weekend; no prices).
 
 /** The day the fixtures' story is told from. The fake backend follows the real clock; tests pin it here. */
@@ -199,7 +199,7 @@ export const referencePrices: ReferencePrice[] = [
   price(5, IDS.di1f28, '2026-10-09', 'MANUAL', '88910.3037976557', '0.0998'),
   price(6, IDS.di1f28, '2026-10-14', 'MANUAL', '89006.4625467350', '0.10'),
   price(7, IDS.di1f28, '2026-10-15', 'B3', '89128.4824345118', '0.0990'),
-  // Corrected on 17/10 from 89.200,9008841512 (9,85%), after 16/10 was published: overwritten.
+  // Corrected on 17/10 from 89.200,9008841512 (9,85%), after 16/10 was published: replaced.
   price(
     8,
     IDS.di1f28,
@@ -337,7 +337,6 @@ export const positions: PublishedPositions[] = [
         quantity: 10,
         average_entry_pu: '89006.4625467350',
         average_entry_rate: '0.10',
-        reference_price_id: PRICE_IDS.f28_1014,
         reference_source: 'MANUAL',
         reference_pu: '89006.4625467350',
         reference_rate: '0.10',
@@ -362,7 +361,6 @@ export const positions: PublishedPositions[] = [
         quantity: 10,
         average_entry_pu: '89006.4625467350',
         average_entry_rate: '0.10',
-        reference_price_id: PRICE_IDS.f28_1015,
         reference_source: 'B3',
         reference_pu: '89128.4824345118',
         reference_rate: '0.0990',
@@ -380,7 +378,6 @@ export const positions: PublishedPositions[] = [
         quantity: 5,
         average_entry_pu: '82057.00',
         average_entry_rate: '0.093203413834',
-        reference_price_id: PRICE_IDS.f29_1015,
         reference_source: 'MANUAL',
         reference_pu: '80206.1333187932',
         reference_rate: '0.1045',
@@ -406,7 +403,6 @@ export const positions: PublishedPositions[] = [
         quantity: 6,
         average_entry_pu: '89006.4625467350',
         average_entry_rate: '0.10',
-        reference_price_id: PRICE_IDS.f28_1016,
         reference_source: 'MANUAL',
         reference_pu: '89200.9008841512',
         reference_rate: '0.0985',
@@ -425,7 +421,6 @@ export const positions: PublishedPositions[] = [
         quantity: 5,
         average_entry_pu: '82057.00',
         average_entry_rate: '0.093203413834',
-        reference_price_id: null,
         reference_source: null,
         reference_pu: null,
         reference_rate: null,
@@ -480,7 +475,6 @@ function unpricedRow(
     maturity_date: maturity,
     quantity,
     ...averages,
-    reference_price_id: null,
     reference_source: null,
     reference_pu: null,
     reference_rate: null,
@@ -564,7 +558,6 @@ export const recalculatedDays: Record<string, RecalculatedDay> = {
           maturity_date: '2028-01-03',
           quantity: 6,
           ...DI1F28_AVERAGES,
-          reference_price_id: PRICE_IDS.f28_1016,
           reference_source: 'MANUAL',
           reference_pu: '89250.3147019396',
           reference_rate: '0.0980',

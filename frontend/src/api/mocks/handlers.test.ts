@@ -180,7 +180,7 @@ describe('mock reference prices', () => {
     expect(items[0]?.sources.map((p) => p.source).sort()).toEqual(['B3', 'MANUAL']);
   });
 
-  it('§5 a correction overwrites the MANUAL price in place (no revisions) and marks the date stale', async () => {
+  it('OQ-26 adding a price replaces the current MANUAL one: the old row goes, a new id comes', async () => {
     const corrected = await pricesApi.setReferencePrice({
       asset_id: IDS.di1f28,
       reference_date: '2026-10-16',
@@ -195,9 +195,11 @@ describe('mock reference prices', () => {
       })
     ).items;
 
-    expect(corrected).toMatchObject({ id: PRICE_IDS.f28_1016, source: 'MANUAL', pu: '89260.00' });
+    expect(corrected).toMatchObject({ source: 'MANUAL', pu: '89260.00' });
+    expect(corrected.id).not.toBe(PRICE_IDS.f28_1016);
     expect(corrected).not.toHaveProperty('revision');
     expect(day?.sources.filter((p) => p.source === 'MANUAL')).toEqual([corrected]);
+    expect((await problemOf(pricesApi.removeReferencePrice(PRICE_IDS.f28_1016))).status).toBe(404);
     expect(await chainStatus('2026-10-16')).toEqual({ cash: 'FRESH', positions: 'STALE' });
   });
 
@@ -647,7 +649,6 @@ describe('mock publication (a finished job publishes the precomputed results of 
       quantity: 6,
       average_entry_pu: '89006.4625467350',
       average_entry_rate: '0.10',
-      reference_price_id: PRICE_IDS.f28_1016,
       reference_source: 'MANUAL',
       reference_pu: '89250.3147019396',
       reference_rate: '0.0980',
@@ -794,9 +795,10 @@ describe('mock publication (a finished job publishes the precomputed results of 
     const summary = flat(await portfolioApi.getSummary('2026-10-16'));
     expect(summary).toMatchObject({ stale: false, trades_pnl: '-592.3681943852' });
     const rows = published(await portfolioApi.getPositions('2026-10-16')).items;
-    expect(rows.find((r) => r.asset_code === 'DI1F28')?.reference_price_id).toBe(
-      PRICE_IDS.f28_1016,
-    );
+    // OQ-25: the republished row keeps the PU it used (the corrected one) and its source.
+    const row = rows.find((r) => r.asset_code === 'DI1F28');
+    expect(row).toMatchObject({ reference_source: 'MANUAL', reference_pu: '89250.3147019396' });
+    expect(row).not.toHaveProperty('reference_price_id');
   });
 
   it('§10.4 republishes 14/10 and 15/10 with their published figures unchanged', async () => {
