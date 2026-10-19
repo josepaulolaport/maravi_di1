@@ -13,6 +13,8 @@ cd "$(dirname "$0")/.."
 export DI1_API_PORT="${DI1_E2E_API_PORT:-18000}"
 export DI1_WEB_PORT="${DI1_E2E_WEB_PORT:-18080}"
 export DI1_RABBITMQ_MANAGEMENT_PORT="${DI1_E2E_RABBITMQ_MANAGEMENT_PORT:-25672}"
+# The challenge checks need an empty ledger: the demo service skips its data.
+export DI1_DEMO=0
 project=di1-e2e
 compose=(docker compose -p "$project")
 
