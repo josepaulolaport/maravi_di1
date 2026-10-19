@@ -28,9 +28,9 @@ You are a senior React and TypeScript engineer with a financial-product eye. You
 
 1. **Wave 1:** scaffold, then the draft API contract in `src/api/` (typed responses and MSW fixtures from the spec and the Figma; every invented field listed in the PR as a contract proposal), then build every screen against the MSW fixtures:
    - Ativos, Lançamentos, Carteira, and Central de Controle (Pendências, Processamentos);
-   - the stale and incomplete chips;
+   - the incomplete chips and the per-chain date statuses with "Processado em dd/mm/aaaa hh:mm" (OQ-31);
    - every job status;
-   - cancel, and cancel and replace;
+   - cancel (no cancel and replace, OQ-30);
    - the exact-range preview and the day progress (x / y dias), and "Solicitar novo processamento" with the original range (OQ-20).
 
    Done means the screens show the full flows with mock adapters.
