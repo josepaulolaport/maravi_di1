@@ -1,6 +1,6 @@
-# Local stack (plan §0): PostgreSQL 16, RabbitMQ 4.1, the one-shot migration and catalogue seed,
-# the API, the outbox relay, the one processing worker and the web UI. `docker compose up --build`; the UI answers on
-# http://localhost:8080, the API on http://127.0.0.1:8000 (/health, /api/...), the RabbitMQ
+# Local stack (plan §0): PostgreSQL 16, RabbitMQ 4.1, the one-shot migration, catalogue seed and
+# demo data, the API, the outbox relay, the one processing worker and the web UI.
+# `docker compose up --build`; the UI answers on http://localhost:8080, the API on http://127.0.0.1:8000 (/health, /api/...), the RabbitMQ
 # management UI on http://127.0.0.1:15672.
 #
 # The credentials are local development defaults; override them with the DI1_* variables. Each
@@ -119,6 +119,24 @@ services:
       retries: 12
     restart: unless-stopped
 
+  # Demo data (scripts/seed_demo.py): two weeks of DI1 contracts, ledger entries and reference
+  # prices, dated relative to the first `up`, written through the API once it is healthy. On a
+  # non-empty ledger it adds nothing and exits 0, so later `up`s are no-ops; it queues no
+  # processing. DI1_DEMO=0 turns it off (make e2e does, to keep its ledger empty).
+  demo:
+    <<: *backend
+    command: ["python", "/demo/seed_demo.py", "--api", "http://api:8000"]
+    environment:
+      DI1_DEMO: ${DI1_DEMO:-1}
+    volumes:
+      - ./scripts/seed_demo.py:/demo/seed_demo.py:ro
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    restart: "no"
+
   outbox-relay:
     <<: *backend
     command: ["python", "-m", "di1.workers.outbox_relay"]
@@ -157,6 +175,9 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      # Also waits for the one-shot demo step, so `up --wait` treats its exit 0 as done.
+      demo:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 5s

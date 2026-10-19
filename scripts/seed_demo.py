@@ -1,25 +1,26 @@
-"""Opt-in demo data (`make demo`): two weeks of DI1 history, through the HTTP API.
+"""Demo data: two weeks of DI1 history, written through the HTTP API on the first `compose up`.
 
-From today − 14 to today (São Paulo), on a stack with the seeded catalogue and an empty ledger:
-three contracts (DI1F27, DI1F28, DI1F29), deposits, a withdrawal, trades and MANUAL reference
-prices, all written through the API, so every pricing and validation rule applies. It queues no
-processing and writes no positions or P&L: the user processes today − 14 .. today in the Central de
-Controle and checks the figures.
+The Compose `demo` service runs it after the API is up (`DI1_DEMO=0` turns it off; `make e2e` does,
+to keep its ledger empty). On an empty ledger it writes, from today − 14 to today (São Paulo), so
+dates are relative to the first `up`: three January DI1 contracts (the next three years, e.g.
+DI1F27, DI1F28, DI1F29 in 2026), deposits, a withdrawal, trades and MANUAL reference prices, all
+through the API, so every pricing and validation rule applies. On a non-empty ledger it adds
+nothing and exits 0 ("already loaded"), so every later `up` is a no-op. It queues no processing
+and writes no positions or P&L: the user processes today − 14 .. today in the Central de Controle.
 
 The trades exercise the accounting rules (spec §7): buys typed as a rate and as a PU, a partial
 sale (the average PU stays), a sale that crosses zero into a short, two trades of one contract on
 one day ordered by entry_time (a buy, then a sale), and, as in the challenge example, a 200.000
-deposit and a buy of 1 DI1F28 at 10% (the contract does not mature in 365 days, so the challenge's
-figures do not appear; `make e2e` reproduces them). Prices
-are typed as a rate for every calendar day, weekends included, from each contract's first trade,
-with one deliberate gap (DI1F29 on today − 5), so processing shows a Pendência and ends
+deposit and a buy of 1 contract at 10% (the contract does not mature in 365 days, so the
+challenge's figures do not appear; `make e2e` reproduces them). Prices are typed as a rate for
+every calendar day, weekends included, from each contract's first trade, with one deliberate gap
+(the longest contract on today − 5), so processing shows a Pendência and ends
 COMPLETED_WITH_ISSUES.
 
 A PU-typed trade sends a round PU near the market. The script derives it from the DC/365 formula
 only to pick a plausible typed value; the API stores the typed PU and computes the rate itself.
 
-Refuses to run when the ledger already has an entry, or when a DI1F2x contract exists with another
-maturity. Standard library only.
+Fails when one of its contract codes exists with another maturity. Standard library only.
 
     python3 scripts/seed_demo.py --api http://127.0.0.1:8000
 """
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -50,15 +52,36 @@ class Contract:
     base_rate: Decimal  # the reference rate the daily prices drift around
 
 
-CONTRACTS = (
-    Contract("DI1F27", date(2027, 1, 4), Decimal("0.1450")),
-    Contract("DI1F28", date(2028, 1, 3), Decimal("0.1000")),
-    Contract("DI1F29", date(2029, 1, 2), Decimal("0.1350")),
-)
-GAP = ("DI1F29", 5)  # no reference price for this contract on today − 5
+BASE_RATES = (Decimal("0.1450"), Decimal("0.1000"), Decimal("0.1350"))
+GAP_OFFSET = 5  # the longest contract has no reference price on today − 5
+
+
+def first_business_day_of_january(year: int) -> date:
+    """1 January is a holiday; the first weekday after it (other holidays ignored)."""
+    day = date(year, 1, 2)
+    while day.weekday() >= 5:
+        day += timedelta(days=1)
+    return day
+
+
+def contracts(today: date) -> tuple[Contract, Contract, Contract]:
+    """The January contracts of the next three years: always after today."""
+    short, middle, long = (
+        Contract(
+            f"DI1F{(today.year + n) % 100:02d}",
+            first_business_day_of_january(today.year + n),
+            BASE_RATES[n - 1],
+        )
+        for n in (1, 2, 3)
+    )
+    return short, middle, long
 
 
 class DemoError(Exception):
+    pass
+
+
+class AlreadyLoadedError(Exception):
     pass
 
 
@@ -99,15 +122,14 @@ def demo(api: str) -> None:
         """today − offset."""
         return today - timedelta(days=offset)
 
-    for contract in CONTRACTS:
-        if contract.maturity <= today:
-            raise DemoError(f"{contract.code} matures on {contract.maturity}, not after today")
+    short, middle, long = contracts(today)
+    all_contracts = (short, middle, long)
 
     existing = call(
         api, "GET", f"/api/ledger/entries?start_date=1900-01-01&end_date={today}&limit=1"
     )
     if existing["items"]:
-        raise DemoError("the ledger already has entries; run it on a fresh stack (down -v, up)")
+        raise AlreadyLoadedError
 
     products = call(api, "GET", "/api/products?instrument_type=FUTURE")["items"]
     product = next((p for p in products if p["code"] == "DI1"), None)
@@ -117,9 +139,9 @@ def demo(api: str) -> None:
     # Reuse a contract left by an interrupted run (the ledger is still empty), else create it.
     listed = call(api, "GET", f"/api/instruments?product_id={product['id']}")["items"]
     ids: dict[str, str] = {i["code"]: i["id"] for i in listed}
-    by_code = {c.code: c for c in CONTRACTS}
+    by_code = {c.code: c for c in all_contracts}
     say(f"Demo data from {start} to {today} (São Paulo)")
-    for contract in CONTRACTS:
+    for contract in all_contracts:
         if contract.code in ids:
             found = next(i for i in listed if i["code"] == contract.code)
             if found["maturity_date"] != contract.maturity.isoformat():
@@ -182,24 +204,25 @@ def demo(api: str) -> None:
 
     say("Ledger:")
     cash(14, "09:00", "1000000", "opening deposit")
-    trade(14, "10:00", "DI1F27", 4, "buy, typed as a rate", rate="0.1450")
-    trade(14, "11:00", "DI1F29", 3, "buy, typed as a PU", pu_near="0.1350")
-    trade(12, "10:30", "DI1F27", 2, "buy more, typed as a PU (new average)", pu_near="0.1460")
+    s, m, lg = short.code, middle.code, long.code
+    trade(14, "10:00", s, 4, "buy, typed as a rate", rate="0.1450")
+    trade(14, "11:00", lg, 3, "buy, typed as a PU", pu_near="0.1350")
+    trade(12, "10:30", s, 2, "buy more, typed as a PU (new average)", pu_near="0.1460")
     cash(10, "09:00", "200000", "deposit, as in the challenge example")
-    trade(10, "10:00", "DI1F28", 1, "buy 1 at 10%, as in the challenge example", rate="0.10")
-    trade(8, "10:15", "DI1F27", -3, "partial sale (average kept)", rate="0.1445")
-    trade(8, "11:00", "DI1F29", 2, "buy: 3 → 5, new average", rate="0.1352")
-    trade(8, "14:30", "DI1F29", -1, "same contract, same day, later time: 5 → 4", rate="0.1355")
+    trade(10, "10:00", m, 1, "buy 1 at 10%, as in the challenge example", rate="0.10")
+    trade(8, "10:15", s, -3, "partial sale (average kept)", rate="0.1445")
+    trade(8, "11:00", lg, 2, "buy: 3 → 5, new average", rate="0.1352")
+    trade(8, "14:30", lg, -1, "same contract, same day, later time: 5 → 4", rate="0.1355")
     cash(6, "09:00", "300000", "second deposit")
-    trade(4, "11:00", "DI1F29", -7, "sale crossing zero: 4 → −3 (short)", pu_near="0.1348")
+    trade(4, "11:00", lg, -7, "sale crossing zero: 4 → −3 (short)", pu_near="0.1348")
     cash(2, "16:00", "-150000", "withdrawal")
 
-    first_trade = {"DI1F27": 14, "DI1F28": 10, "DI1F29": 14}
+    first_trade = {s: 14, m: 10, lg: 14}
     say("Reference prices (MANUAL, typed as a rate, every calendar day):")
-    for contract in CONTRACTS:
+    for contract in all_contracts:
         written = 0
         for offset in range(first_trade[contract.code], -1, -1):
-            if (contract.code, offset) == GAP:
+            if contract is long and offset == GAP_OFFSET:
                 continue
             call(
                 api,
@@ -214,10 +237,10 @@ def demo(api: str) -> None:
             )
             written += 1
         say(f"  {contract.code}: {written} prices, {day(first_trade[contract.code])} to {today}")
-    say(f"  deliberate gap: {GAP[0]} has no price on {day(GAP[1])}")
+    say(f"  deliberate gap: {lg} has no price on {day(GAP_OFFSET)}")
     say(
         f"Nothing was processed. Central de Controle → Processamentos: process Tudo from {start}"
-        f" to {today}; expect Concluído com pendências (the {GAP[0]} gap on {day(GAP[1])})."
+        f" to {today}; expect Concluído com pendências (the {lg} gap on {day(GAP_OFFSET)})."
     )
 
 
@@ -225,8 +248,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--api", default="http://127.0.0.1:8000", help="API base URL")
     args = parser.parse_args()
+    if os.environ.get("DI1_DEMO", "1") == "0":
+        say("DEMO DATA SKIPPED (DI1_DEMO=0)")
+        return 0
     try:
         demo(args.api.rstrip("/"))
+    except AlreadyLoadedError:
+        say("DEMO DATA ALREADY LOADED: the ledger has entries; nothing added")
+        return 0
     except (DemoError, urllib.error.URLError, TimeoutError, ValueError) as error:
         say(f"DEMO DATA NOT CREATED: {error}", error=True)
         return 1

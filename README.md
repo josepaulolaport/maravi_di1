@@ -26,7 +26,7 @@ messages of `origin/main..HEAD`.
 ## Run the application
 
 ```bash
-docker compose up --build -d   # PostgreSQL 16, RabbitMQ, migrations, seed, API, outbox relay, worker, web
+docker compose up --build -d   # PostgreSQL 16, RabbitMQ, migrations, seed, API, demo data, relay, worker, web
 ```
 
 On every `up`, after the migrations, the one-shot `seed` service applies
@@ -92,29 +92,28 @@ The same steps can be done by hand in the UI. The exact example dated 01/01/2027
 automated acceptance tests with a fixed clock (`backend/tests/acceptance/`,
 `backend/tests/integration/acceptance/`).
 
-## Demo data (opt-in)
+## Demo data
 
-```bash
-make demo   # after docker compose up, on an empty ledger: two weeks of history through the API
-```
+`docker compose up` loads two weeks of demo history: after the API is healthy, the one-shot `demo`
+service runs `scripts/seed_demo.py`, which writes through the HTTP API (so every validation and
+pricing rule applies). The dates are relative to the **first** `up`: data written on day X is dated
+X − 14 to X (São Paulo). Every later `up` finds a non-empty ledger and adds nothing ("already
+loaded"); `docker compose down -v` and `up` load a fresh copy dated from that day. `DI1_DEMO=0`
+turns it off (`make e2e` does, to keep its ledger empty).
 
-`scripts/seed_demo.py` writes, through the HTTP API (so every validation and pricing rule applies),
-dates from today − 14 to today (São Paulo):
-
-- contracts DI1F27, DI1F28 and DI1F29 (maturities 04/01/2027, 03/01/2028, 02/01/2029);
-- an opening deposit of 1.000.000, a second deposit, a withdrawal and, as in the challenge example,
+- Three contracts: the January DI1 of each of the next three years (DI1F27, DI1F28 and DI1F29 when
+  loaded in 2026, maturing 04/01/2027, 03/01/2028 and 02/01/2029).
+- An opening deposit of 1.000.000, a second deposit, a withdrawal and, as in the challenge example,
   a deposit of 200.000 with a buy of 1 DI1F28 at 10% (DI1F28 does not mature in 365 days, so the
-  challenge's figures are those of `make e2e`, not these);
-- trades typed as a rate and as a PU, a partial sale, a sale that crosses zero into a short, and a
-  buy and a sale of DI1F29 on one day, applied in time order;
+  challenge's figures are those of `make e2e`, not these).
+- Trades typed as a rate and as a PU, a partial sale, a sale that crosses zero into a short, and a
+  buy and a sale of the longest contract on one day, applied in time order.
 - MANUAL reference prices typed as a rate for every calendar day, weekends included, with **one
-  deliberate gap**: DI1F29 on today − 5.
+  deliberate gap**: the longest contract (DI1F29) on X − 5.
 
-It processes nothing. Open Central de Controle → Processamentos and process Tudo from today − 14 to
-today: the run ends "Concluído com pendências", with a missing-price Pendência for DI1F29, and from
-that date the cumulative P&L is unavailable. `make demo` refuses to run when the ledger already
-has an entry; start again with `docker compose down -v` and `up`. With the API on another port, set
-`DI1_API_PORT`.
+Nothing is processed. Open Central de Controle → Processamentos and process Tudo from X − 14 to
+X: the run ends "Concluído com pendências", with a missing-price Pendência for the gap, and from
+that date the cumulative P&L is unavailable. `docker compose logs demo` lists everything it wrote.
 
 ## Interpretations, additions and deviations (spec §15)
 

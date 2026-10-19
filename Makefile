@@ -6,7 +6,6 @@
 #   make test      Alembic head and migration smoke, then pytest with coverage against PostgreSQL 16
 #                  (a throwaway container unless TEST_DATABASE_URL is set) (+ frontend tests)
 #   make seed      catalogue (FUTURE, INTEREST_RATE_FUTURE, the DI1 product) into the running stack, again
-#   make demo      opt-in demo data, today − 14 .. today, through the API (scripts/seed_demo.py)
 #   make e2e       the challenge example end to end on a throwaway Compose stack (scripts/e2e.sh)
 #
 # Every recipe fails on the first failing command; nothing is silenced. Recipes avoid pipes:
@@ -19,10 +18,10 @@ SHELL := bash
 FRONTEND_MISSING := echo "make: frontend/package.json not found: no frontend scaffold yet, nothing to run"
 
 .PHONY: help install install-backend install-frontend lint lint-backend lint-frontend \
-	test test-backend test-frontend lint-commits seed demo e2e
+	test test-backend test-frontend lint-commits seed e2e
 
 help:
-	@echo "make install | make lint | make test | make seed | make demo | make e2e"
+	@echo "make install | make lint | make test | make seed | make e2e"
 	@echo "split: {install,lint,test}-{backend,frontend}; make lint-commits [BASE=origin/main] [HEAD_REF=HEAD]"
 
 install: install-backend install-frontend
@@ -59,9 +58,6 @@ lint-commits:
 
 seed:
 	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -q -U "$${DI1_DB_USER:-di1}" -d "$${DI1_DB_NAME:-di1}" < scripts/seed_catalogue.sql
-
-demo:
-	python3 scripts/seed_demo.py --api "http://127.0.0.1:$${DI1_API_PORT:-8000}"
 
 e2e:
 	scripts/e2e.sh
