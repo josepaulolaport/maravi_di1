@@ -81,14 +81,19 @@ class SqlLedgerRepository:
         )
         return [_cash_record(row) for row in result]
 
-    async def has_entries_on_or_before(
-        self, day: date, *, entry_type: EntryType | None = None
-    ) -> bool:
+    async def has_entries_on_or_before(self, day: date, *, entry_type: str | None = None) -> bool:
         """Processing's zero-state check (OQ-31, OQ-37), only for the edge case of a chain's
         first processed day: D−1 has no status and nothing is processed before it. Every other day
         is decided by ``processing.date_status`` alone. Positions ask for trades, cash for any
-        type."""
-        return bool(await self._session.scalar(queries.any_on_or_before(day, entry_type)))
+        type.
+
+        ``entry_type`` is typed ``str``: any ``StrEnum`` of the entry types fits, Ledger's domain
+        one and ``ledger.public.EntryType`` alike, so this satisfies `LedgerReader` whichever
+        enum the contract names (the domain may not import ``public.py``). It is normalised to
+        Ledger's enum first: anything but ``TRADE`` or ``CASH`` raises ``ValueError`` rather than
+        reading as "no entries", which would start a chain from zero."""
+        kind = EntryType(entry_type) if entry_type is not None else None
+        return bool(await self._session.scalar(queries.any_on_or_before(day, kind)))
 
     async def _insert(self, values: dict[str, Any]) -> LedgerEntry:
         result = await self._session.execute(queries.insert_entry(values))

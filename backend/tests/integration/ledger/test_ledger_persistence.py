@@ -14,6 +14,7 @@ import asyncio
 from collections.abc import Collection
 from datetime import date, time
 from decimal import Decimal
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 import pytest
@@ -97,7 +98,7 @@ async def test_has_entries_on_or_before_checks_dates_and_type(
     service: LedgerService, session_factory: Sessions
 ) -> None:
     # Processing's zero-state check (OQ-31, OQ-37): positions ask for trades, cash for any type.
-    async def has(day: date, entry_type: EntryType | None = None) -> bool:
+    async def has(day: date, entry_type: str | None = None) -> bool:
         async with session_factory() as session:
             # Through the repository until #54 declares it on LedgerReader.
             return await SqlLedgerRepository(session).has_entries_on_or_before(
@@ -116,6 +117,24 @@ async def test_has_entries_on_or_before_checks_dates_and_type(
     assert not await has(date(2026, 10, 15), EntryType.TRADE)
     assert await has(date(2026, 10, 16), EntryType.TRADE)
     assert await has(TODAY)
+
+    class PublicEntryType(StrEnum):  # ledger/public.py's own enum (PR #54): same values
+        TRADE = "TRADE"
+        CASH = "CASH"
+
+    async with session_factory() as session:
+        repository = SqlLedgerRepository(session)
+        assert not await repository.has_entries_on_or_before(
+            date(2026, 10, 15), entry_type=PublicEntryType.TRADE
+        )
+        assert await repository.has_entries_on_or_before(
+            date(2026, 10, 14), entry_type=PublicEntryType.CASH
+        )
+        assert await repository.has_entries_on_or_before(date(2026, 10, 14), entry_type="CASH")
+        # A typo must not read as "nothing there", which would start a chain from zero.
+        for unknown in ("trade", "TRADES", ""):
+            with pytest.raises(ValueError):
+                await repository.has_entries_on_or_before(TODAY, entry_type=unknown)
 
 
 async def test_trades_and_cash_of_one_date_follow_time_then_seq(
