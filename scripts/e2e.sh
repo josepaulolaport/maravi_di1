@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # make e2e: start a throwaway Compose stack (project di1-e2e, its own volumes and ports, so a dev
-# stack on the default ports is never touched), seed the catalogue roots, run the challenge
-# example end to end (scripts/e2e_smoke.py), then remove the stack and its volumes.
+# stack on the default ports is never touched), whose `seed` service seeds the catalogue and the
+# DI1 product; apply the seed again (`make seed`'s step, which must change nothing), run the
+# challenge example end to end (scripts/e2e_smoke.py), then remove the stack and its volumes.
 # It also checks that the web container serves the UI and forwards the API.
 # Ports: DI1_E2E_API_PORT (default 18000), DI1_E2E_WEB_PORT (18080) and
 # DI1_E2E_RABBITMQ_MANAGEMENT_PORT (25672).

@@ -1,5 +1,5 @@
-# Local stack (plan §0): PostgreSQL 16, RabbitMQ 4.1, the one-shot migration, the API, the outbox
-# relay, the one processing worker and the web UI. `docker compose up --build`; the UI answers on
+# Local stack (plan §0): PostgreSQL 16, RabbitMQ 4.1, the one-shot migration and catalogue seed,
+# the API, the outbox relay, the one processing worker and the web UI. `docker compose up --build`; the UI answers on
 # http://localhost:8080, the API on http://127.0.0.1:8000 (/health, /api/...), the RabbitMQ
 # management UI on http://127.0.0.1:15672.
 #
@@ -70,6 +70,34 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # Seeds the catalogue the UI cannot create (scripts/seed_catalogue.sql: FUTURE, its
+  # INTEREST_RATE_FUTURE class and the DI1 product), idempotently, on every `up` after the
+  # migrations, so a fresh stack can create contracts and trade at once. psql from the postgres
+  # image; the backend image has no client.
+  seed:
+    image: postgres:16
+    command:
+      - psql
+      - -v
+      - ON_ERROR_STOP=1
+      - -q
+      - -h
+      - postgres
+      - -U
+      - ${DI1_DB_USER:-di1}
+      - -d
+      - ${DI1_DB_NAME:-di1}
+      - -f
+      - /seed/seed_catalogue.sql
+    environment:
+      PGPASSWORD: ${DI1_DB_PASSWORD:-di1}
+    volumes:
+      - ./scripts/seed_catalogue.sql:/seed/seed_catalogue.sql:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
   api:
     <<: *backend
     command: ["uvicorn", "di1.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
@@ -78,7 +106,7 @@ services:
     ports:
       - "127.0.0.1:${DI1_API_PORT:-8000}:8000"
     depends_on:
-      migrate:
+      seed:
         condition: service_completed_successfully
     healthcheck:
       test:
