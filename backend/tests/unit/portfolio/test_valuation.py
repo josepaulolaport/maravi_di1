@@ -16,6 +16,7 @@ from di1.modules.portfolio.domain.cash import CashBalance, CashCalculator
 from di1.modules.portfolio.domain.errors import AccountingError
 from di1.modules.portfolio.domain.valuation import (
     AssetValuationInput,
+    ReferenceSource,
     ValuationCalculator,
     ValuationStatus,
 )
@@ -24,7 +25,6 @@ from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28
 VALUATION = ValuationCalculator()
 FAR_MATURITY = date(2028, 1, 1)
 ZERO = Decimal("0")
-PRICE_ID = UUID("00000000-0000-0000-0000-0000000000aa")
 
 
 def _asset(
@@ -39,7 +39,7 @@ def _asset(
         quantity=quantity,
         maturity_date=maturity,
         reference_pu=None if reference_pu is None else Decimal(reference_pu),
-        reference_price_id=None if reference_pu is None else PRICE_ID,
+        reference_source=None if reference_pu is None else ReferenceSource.MANUAL,
     )
 
 
@@ -196,42 +196,53 @@ def test_a_deposit_moves_aum_but_not_the_market_value() -> None:
     assert after.positions_market_value == before.positions_market_value == Decimal("95000")
 
 
-def test_the_reference_price_used_is_traceable_to_its_observation() -> None:
-    # CLAUDE.md §2 / OQ-9: the price used is traceable to its revision (position_metrics row).
-    price_id = PRICE_ID
+@pytest.mark.parametrize("source", [ReferenceSource.MANUAL, ReferenceSource.B3])
+def test_the_reference_price_used_keeps_its_source(source: ReferenceSource) -> None:
+    # OQ-9, OQ-25: position_metrics stores the reference_pu used and its reference_source.
     priced = AssetValuationInput(
         asset_id=DI1F27,
         quantity=1,
         maturity_date=FAR_MATURITY,
         reference_pu=Decimal("95000"),
-        reference_price_id=price_id,
+        reference_source=source,
     )
-    expired = _asset(1, None, maturity=DAY - timedelta(days=1))
 
     result = VALUATION.calculate_day(DAY, [priced], ZERO)
-    after_maturity = VALUATION.calculate_day(DAY, [expired], ZERO)
 
-    assert result.assets[0].reference_price_id == price_id
-    assert after_maturity.assets[0].reference_price_id is None  # 0 by definition, no observation
+    assert result.assets[0].reference_pu == Decimal("95000")
+    assert result.assets[0].reference_source is source
 
 
-def test_a_price_id_without_a_price_is_rejected() -> None:
+def test_no_source_is_kept_without_a_price_or_after_maturity() -> None:
+    # OQ-25: reference_source is NULL with no price or after maturity (PU 0 by definition, OQ-1).
+    missing = VALUATION.calculate_day(DAY, [_asset(1, None)], ZERO)
+    expired = VALUATION.calculate_day(
+        DAY, [_asset(1, None, maturity=DAY - timedelta(days=1))], ZERO
+    )
+
+    assert missing.assets[0].reference_source is None
+    assert expired.assets[0].reference_pu == Decimal("0")
+    assert expired.assets[0].reference_source is None
+
+
+def test_a_source_without_a_price_is_rejected() -> None:
     with pytest.raises(AccountingError):
         AssetValuationInput(
             asset_id=DI1F27,
             quantity=1,
             maturity_date=FAR_MATURITY,
             reference_pu=None,
-            reference_price_id=UUID("00000000-0000-0000-0000-0000000000aa"),
+            reference_source=ReferenceSource.B3,
         )
 
 
-def test_a_reference_pu_without_its_observation_id_is_rejected() -> None:
-    # The price used must be traceable to its revision (OQ-9): an observed PU always has an id.
+def test_a_reference_pu_without_its_source_is_rejected() -> None:
+    # OQ-9, OQ-25: a PU and its source go together or not at all.
     with pytest.raises(AccountingError):
         AssetValuationInput(
             asset_id=DI1F27,
             quantity=1,
             maturity_date=FAR_MATURITY,
             reference_pu=Decimal("95000"),
+            reference_source=None,
         )

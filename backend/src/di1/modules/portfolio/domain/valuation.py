@@ -5,7 +5,7 @@
     aum[D]                     = cash_balance[D] + positions_market_value[D]
 
 Pure: it takes the day's closing quantities, the exact-date reference PUs chosen by the caller
-(with the observation each came from, for traceability), the maturities and the cash balance.
+(with the source each came from, for traceability), the maturities and the cash balance.
 A missing required price leaves the dependent figures null, never zero: the portfolio total is
 not complete if any expected asset is missing. A flat position is worth zero without a price.
 After maturity the reference PU is 0 by definition and no price is accepted (OQ-1). The
@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from enum import Enum
+from enum import Enum, StrEnum
 from uuid import UUID
 
 from di1.modules.portfolio.domain.errors import AccountingError
@@ -35,34 +35,41 @@ class ValuationStatus(Enum):
     NOT_REQUIRED = "NOT_REQUIRED"  # a flat position: worth 0 with or without a price
 
 
+class ReferenceSource(StrEnum):
+    """The source of a reference PU. Same values as Prices' ``PriceSource``; Portfolio's
+    application layer maps one onto the other (the domain imports no other module)."""
+
+    MANUAL = "MANUAL"
+    B3 = "B3"
+
+
 @dataclass(frozen=True)
 class AssetValuationInput:
     """One expected asset on the valuation date: its closing quantity, its maturity and the
-    exact-date reference PU, ``None`` when there is no observation. ``reference_price_id`` is the
-    observation (revision) the PU came from, so the price used stays traceable (OQ-9): a PU and
-    its id are given together or not at all. The 0 PU after maturity is not an observation and
-    is set by the calculator, not passed in."""
+    exact-date reference PU, ``None`` when there is no price, with its source (MANUAL or B3) so
+    the price used stays traceable (OQ-9, OQ-25): a PU and its source are given together or not at
+    all. Past maturity the caller passes neither; the calculator sets the PU to 0 (OQ-1)."""
 
     asset_id: UUID
     quantity: int
     maturity_date: date
     reference_pu: Decimal | None
-    reference_price_id: UUID | None = None
+    reference_source: ReferenceSource | None
 
     def __post_init__(self) -> None:
-        if (self.reference_price_id is None) != (self.reference_pu is None):
-            raise AccountingError("a reference PU and its observation id go together")
+        if (self.reference_source is None) != (self.reference_pu is None):
+            raise AccountingError("a reference PU and its source go together")
 
 
 @dataclass(frozen=True)
 class AssetValuation:
-    """``reference_pu`` is the PU used: the observation's, 0 after maturity, or ``None`` when
+    """``reference_pu`` is the PU used: the reference price's, 0 after maturity, or ``None`` when
     there is none (MISSING, or a flat position without a price, NOT_REQUIRED).
-    ``reference_price_id`` is the observation it came from; ``None`` after maturity."""
+    ``reference_source`` is its source; ``None`` without a price and after maturity."""
 
     asset_id: UUID
     reference_pu: Decimal | None
-    reference_price_id: UUID | None
+    reference_source: ReferenceSource | None
     financial_total: Decimal | None
     status: ValuationStatus
 
@@ -114,7 +121,7 @@ class ValuationCalculator:
 
 
 def _value(asset: AssetValuationInput, on: date) -> AssetValuation:
-    reference_pu, price_id = asset.reference_pu, asset.reference_price_id
+    reference_pu, source = asset.reference_pu, asset.reference_source
     if on > asset.maturity_date:
         if reference_pu is not None:
             raise AccountingError(
@@ -123,12 +130,12 @@ def _value(asset: AssetValuationInput, on: date) -> AssetValuation:
         reference_pu = ZERO
     if asset.quantity == 0:
         return AssetValuation(
-            asset.asset_id, reference_pu, price_id, ZERO, ValuationStatus.NOT_REQUIRED
+            asset.asset_id, reference_pu, source, ZERO, ValuationStatus.NOT_REQUIRED
         )
     if reference_pu is None:
         return AssetValuation(asset.asset_id, None, None, None, ValuationStatus.MISSING)
     # 0 + Q × PU: a short position at a zero PU must not yield a negative zero.
     financial_total = ZERO + asset.quantity * reference_pu
     return AssetValuation(
-        asset.asset_id, reference_pu, price_id, financial_total, ValuationStatus.COMPLETE
+        asset.asset_id, reference_pu, source, financial_total, ValuationStatus.COMPLETE
     )
