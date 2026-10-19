@@ -1,5 +1,5 @@
-import { ActionIcon, Table, Text } from '@mantine/core';
-import { IconChevronRight } from '@tabler/icons-react';
+import { ActionIcon, Group, Menu, Table, Text } from '@mantine/core';
+import { IconChevronRight, IconDots } from '@tabler/icons-react';
 import { Link } from 'react-router';
 
 import type { Instrument } from '@/api/contract';
@@ -10,7 +10,19 @@ import { formatDate, formatPu, formatRate, UNAVAILABLE } from '@/shared/format';
  * A product's contracts (§11.2). The PU and rate are the latest reference observation, always
  * shown with its own date, never as today's price (§5, OQ-19 item 5); none reads "—".
  */
-export function ContractsTable({ instruments }: { instruments: Instrument[] }) {
+interface ContractsTableProps {
+  instruments: Instrument[];
+  /** "Registrar preço" from a row's menu (user, 2026-10-19). */
+  onRegisterPrice: (instrument: Instrument) => void;
+  /** "Remover preço" from a row's menu (user, 2026-10-19). */
+  onRemovePrice: (instrument: Instrument) => void;
+}
+
+export function ContractsTable({
+  instruments,
+  onRegisterPrice,
+  onRemovePrice,
+}: ContractsTableProps) {
   if (instruments.length === 0) {
     return (
       <Text size="sm" c="dimmed" px="md">
@@ -28,7 +40,7 @@ export function ContractsTable({ instruments }: { instruments: Instrument[] }) {
             <Table.Th ta="right">Último PU</Table.Th>
             <Table.Th ta="right">Taxa a.a.</Table.Th>
             <Table.Th>Data ref.</Table.Th>
-            <Table.Th w={48} />
+            <Table.Th w={88} />
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -46,15 +58,45 @@ export function ContractsTable({ instruments }: { instruments: Instrument[] }) {
                 <Table.Td ta="right">{last ? formatRate(last.rate) : UNAVAILABLE}</Table.Td>
                 <Table.Td>{last ? formatDate(last.reference_date) : UNAVAILABLE}</Table.Td>
                 <Table.Td>
-                  <ActionIcon
-                    component={Link}
-                    to={assetLinks.contract(instrument.id)}
-                    variant="subtle"
-                    color="gray"
-                    aria-label={`Abrir contrato ${instrument.code}`}
-                  >
-                    <IconChevronRight size={16} stroke={1.5} />
-                  </ActionIcon>
+                  <Group gap={4} wrap="nowrap" justify="flex-end">
+                    <Menu position="bottom-end" withinPortal>
+                      <Menu.Target>
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          aria-label={`Ações de ${instrument.code}`}
+                        >
+                          <IconDots size={16} stroke={1.5} />
+                        </ActionIcon>
+                      </Menu.Target>
+                      <Menu.Dropdown>
+                        <Menu.Item
+                          onClick={() => {
+                            onRegisterPrice(instrument);
+                          }}
+                        >
+                          Registrar preço
+                        </Menu.Item>
+                        <Menu.Item
+                          color="red"
+                          onClick={() => {
+                            onRemovePrice(instrument);
+                          }}
+                        >
+                          Remover preço
+                        </Menu.Item>
+                      </Menu.Dropdown>
+                    </Menu>
+                    <ActionIcon
+                      component={Link}
+                      to={assetLinks.contract(instrument.id)}
+                      variant="subtle"
+                      color="gray"
+                      aria-label={`Abrir contrato ${instrument.code}`}
+                    >
+                      <IconChevronRight size={16} stroke={1.5} />
+                    </ActionIcon>
+                  </Group>
                 </Table.Td>
               </Table.Tr>
             );

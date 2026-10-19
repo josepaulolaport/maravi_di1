@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
 import type { Instrument, LastReference } from '@/api/contract';
-import { IDS, instruments, products } from '@/test/msw/fixtures';
+import { IDS, instruments, PRICES, products } from '@/test/msw/fixtures';
 import { fieldError, problem, url } from '@/test/msw/handlers';
 import { server } from '@/test/msw/server';
 import { renderApp } from '@/test/render';
@@ -216,5 +216,154 @@ describe('Ativos: produto (§11.2)', () => {
     renderApp(`/ativos/produtos/${IDS.di1}`);
 
     expect(await screen.findByText('Nenhum contrato encontrado.')).toBeInTheDocument();
+  });
+});
+
+/** Records the body of every price save, then lets the default handler answer it. */
+function recordSaves() {
+  const bodies: unknown[] = [];
+  server.use(
+    http.post(url('/reference-prices'), async ({ request }) => {
+      bodies.push(await request.clone().json());
+      return undefined;
+    }),
+  );
+  return bodies;
+}
+
+async function rowMenu(user: ReturnType<typeof renderApp>['user'], code: string, item: string) {
+  await user.click(contractRow(code).getByRole('button', { name: `Ações de ${code}` }));
+  await user.click(await screen.findByRole('menuitem', { name: item }));
+}
+
+const priceDialog = async () =>
+  within(await screen.findByRole('dialog', { name: 'Registrar preço de referência' }));
+
+describe('Ativos: preços na lista de contratos (§11.2, §5; user, 2026-10-19)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-18T12:00:00-03:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('§11.2 "Registrar preço" above the list asks for the contract, then saves its price', async () => {
+    const saves = recordSaves();
+    const { user, router } = await openProduct();
+
+    await user.click(screen.getByRole('button', { name: 'Registrar preço' }));
+    const modal = await priceDialog();
+    expect(modal.getByRole('combobox', { name: 'Contrato' })).toHaveValue('');
+    expect(modal.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('18/10/2026');
+    await user.click(modal.getByRole('combobox', { name: 'Contrato' }));
+    await user.click(await screen.findByRole('option', { name: 'DI1F29', hidden: true }));
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '80.300,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('dialog', { name: 'Registrar preço de referência' }),
+      ).not.toBeInTheDocument();
+    });
+    expect(saves).toEqual([
+      { asset_id: IDS.di1f29, reference_date: '2026-10-18', input_kind: 'PU', pu: '80300.00' },
+    ]);
+    expect(router.state.location.pathname).toBe(`/ativos/produtos/${IDS.di1}`);
+  });
+
+  it('§11.2 asks for the contract before any request', async () => {
+    const saves = recordSaves();
+    const { user } = await openProduct();
+
+    await user.click(screen.getByRole('button', { name: 'Registrar preço' }));
+    const modal = await priceDialog();
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '80.300,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
+
+    expect(await modal.findByText('Selecione o contrato.')).toBeInTheDocument();
+    expect(saves).toEqual([]);
+  });
+
+  it('OQ-15 shows the API field errors on their fields, as on the contract page', async () => {
+    server.use(
+      http.post(url('/reference-prices'), () =>
+        problem(422, [
+          fieldError('CONTRACT_MATURED', 'O contrato já venceu nesta data.', 'reference_date'),
+        ]),
+      ),
+    );
+    const { user } = await openProduct();
+
+    await rowMenu(user, 'DI1F27', 'Registrar preço');
+    const modal = await priceDialog();
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '99.000,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
+
+    expect(await modal.findByText('O contrato já venceu nesta data.')).toBeInTheDocument();
+  });
+
+  it('§11.2 each row has a menu; "Registrar preço" opens the form with that contract, without leaving', async () => {
+    const saves = recordSaves();
+    const { user, router } = await openProduct();
+
+    await user.click(contractRow('DI1F28').getByRole('button', { name: 'Ações de DI1F28' }));
+    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
+      'Registrar preço',
+      'Remover preço',
+    ]);
+    await user.click(screen.getByRole('menuitem', { name: 'Registrar preço' }));
+    const modal = await priceDialog();
+    expect(modal.getByRole('combobox', { name: 'Contrato' })).toHaveValue('DI1F28');
+    expect(router.state.location.pathname).toBe(`/ativos/produtos/${IDS.di1}`);
+
+    await user.click(modal.getByRole('radio', { name: 'Taxa a.a.' }));
+    await user.type(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '9,85');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => {
+      expect(saves).toEqual([
+        { asset_id: IDS.di1f28, reference_date: '2026-10-18', input_kind: 'RATE', rate: '0.0985' },
+      ]);
+    });
+  });
+
+  it('§5 "Remover preço" picks a date, then lists its sources to remove', async () => {
+    const deleted: string[] = [];
+    server.use(
+      http.delete(url('/reference-prices/:id'), ({ params }) => {
+        deleted.push(params.id as string);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const { user } = await openProduct();
+
+    await rowMenu(user, 'DI1F28', 'Remover preço');
+    const pick = within(await screen.findByRole('dialog', { name: 'Remover preço de referência' }));
+    expect(pick.getByRole('textbox', { name: 'Contrato' })).toHaveValue('DI1F28');
+    await user.type(pick.getByRole('textbox', { name: 'Data de referência' }), '16/10/2026');
+    await user.click(pick.getByRole('button', { name: 'Continuar' }));
+
+    const remove = within(
+      await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
+    );
+    expect(await remove.findByText('Preços de 16/10/2026:')).toBeInTheDocument();
+    expect(remove.getByRole('checkbox', { name: /^Manual:/ })).toBeChecked();
+    expect(remove.getByRole('checkbox', { name: /^B3:/ })).not.toBeChecked();
+    await user.click(remove.getByRole('button', { name: 'Remover' }));
+
+    await waitFor(() => {
+      expect(deleted).toEqual([PRICES.f28_1016_manual.id]);
+    });
+  });
+
+  it('§5 "Remover preço" on a date without a price says so', async () => {
+    const { user } = await openProduct();
+
+    await rowMenu(user, 'DI1F28', 'Remover preço');
+    const pick = within(await screen.findByRole('dialog', { name: 'Remover preço de referência' }));
+    await user.type(pick.getByRole('textbox', { name: 'Data de referência' }), '17/10/2026');
+    await user.click(pick.getByRole('button', { name: 'Continuar' }));
+
+    expect(await pick.findByText('Nenhum preço registrado nesta data.')).toBeInTheDocument();
   });
 });
