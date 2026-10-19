@@ -44,6 +44,11 @@ class ProcessingRequestOut(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     cancel_requested_at: datetime | None
+    failed_date: date | None
+    """The run's first failure (OQ-40); with ``failed_chain`` it prefills "Solicitar novo
+    processamento"."""
+    failed_chain: ProcessingScope | None
+    """CASH or POSITIONS; ``None`` with a ``failed_date`` when the failure belonged to no chain."""
 
     @classmethod
     def of(cls, request: ProcessingRequest) -> ProcessingRequestOut:
@@ -62,6 +67,8 @@ class ProcessingRequestOut(BaseModel):
             started_at=request.started_at,
             finished_at=request.finished_at,
             cancel_requested_at=request.cancel_requested_at,
+            failed_date=request.failed_date,
+            failed_chain=request.failed_chain,
         )
 
 

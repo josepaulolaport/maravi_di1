@@ -25,6 +25,8 @@ COLUMNS = (
     RequestModel.error_code,
     RequestModel.error_message,
     RequestModel.updated_at,
+    RequestModel.failed_date,
+    RequestModel.failed_chain,
 )
 """What a `ProcessingRequest` exposes: the claim token and the lease stay inside."""
 

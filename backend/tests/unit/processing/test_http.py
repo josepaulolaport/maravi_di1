@@ -5,6 +5,7 @@ instants, problem+json errors (spec §12, OQ-15, OQ-26 item 8)."""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
 from datetime import date, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -19,12 +20,12 @@ from di1.modules.processing.application.interfaces.repositories import (
     IssueType,
 )
 from di1.modules.processing.presentation.http.router import create_router
-from di1.modules.processing.public import ChainStatus
+from di1.modules.processing.public import ChainStatus, ProcessingScope, ProcessingStatus
 from di1.platform.database.unit_of_work import UnitOfWork
 from tests.unit.processing.fakes import FakeUnitOfWork, Harness, date_status
 
 # The keys of the fixtures' objects (fixtures.ts `job(...)`, `issues`; processing.ts), with
-# OQ-31 applied: an issue has no `chain`.
+# OQ-31 applied: an issue has no `chain`; OQ-40: a run carries `failed_date` and `failed_chain`.
 REQUEST_KEYS = {
     "id",
     "scope",
@@ -40,6 +41,8 @@ REQUEST_KEYS = {
     "started_at",
     "finished_at",
     "cancel_requested_at",
+    "failed_date",
+    "failed_chain",
 }
 PREVIEW_KEYS = {
     "start_date",
@@ -110,6 +113,7 @@ def test_post_request_answers_201_with_the_queued_run(client: TestClient) -> Non
         "status": "QUEUED",
     }
     assert body["progress_date"] is None
+    assert (body["failed_date"], body["failed_chain"]) == (None, None)
     assert body["dispatched_at"] is None
 
 
@@ -246,3 +250,18 @@ def test_get_issues_matches_the_fixture(client: TestClient, harness: Harness) ->
         ]
     }
     assert set(response.json()["items"][0]) == ISSUE_KEYS
+
+
+def test_oq40_a_run_exposes_its_first_failure(client: TestClient, harness: Harness) -> None:
+    created = client.post("/processing/requests", json=BODY).json()
+    run = harness.requests.rows[UUID(created["id"])]
+    harness.requests.rows[run.id] = replace(
+        run,
+        status=ProcessingStatus.COMPLETED_WITH_ISSUES,
+        failed_date=date(2026, 10, 15),
+        failed_chain=ProcessingScope.CASH,
+    )
+
+    body = client.get(f"/processing/requests/{created['id']}").json()
+
+    assert (body["failed_date"], body["failed_chain"]) == ("2026-10-15", "CASH")

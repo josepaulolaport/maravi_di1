@@ -51,6 +51,72 @@ async def _set_status(engine: AsyncEngine, request_id: UUID, status: str) -> Non
         )
 
 
+async def _set_failure(
+    engine: AsyncEngine, request_id: UUID, status: str, failed_date: date, chain: str | None
+) -> None:
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE processing.requests SET status = :s, failed_date = :d, failed_chain = :c"
+                " WHERE id = :id"
+            ),
+            {"s": status, "d": failed_date, "c": chain, "id": request_id},
+        )
+
+
+async def test_oq40_a_runs_first_failure_reads_back_in_the_run_and_the_history(
+    engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    service = make_service()
+    run = await _enqueue(session_factory, service)
+    await _set_failure(engine, run.id, "COMPLETED_WITH_ISSUES", date(2026, 10, 3), "CASH")
+
+    async with SqlAlchemyUnitOfWork(session_factory) as uow:
+        stored = await service.get_request(run.id, uow=uow)
+        page = await service.list_requests(10, None, uow=uow)
+
+    assert (stored.failed_date, stored.failed_chain) == (date(2026, 10, 3), ProcessingScope.CASH)
+    assert (page.items[0].failed_date, page.items[0].failed_chain) == (
+        date(2026, 10, 3),
+        ProcessingScope.CASH,
+    )
+
+
+async def test_oq40_a_failure_of_no_chain_reads_back_without_a_chain(
+    engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    service = make_service()
+    run = await _enqueue(session_factory, service)
+    await _set_failure(engine, run.id, "FAILED", date(2026, 10, 2), None)
+
+    async with SqlAlchemyUnitOfWork(session_factory) as uow:
+        stored = await service.get_request(run.id, uow=uow)
+
+    assert (stored.failed_date, stored.failed_chain) == (date(2026, 10, 2), None)
+
+
+async def test_oq40_cancelling_a_running_run_keeps_its_first_failure(
+    engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """The cancel reads the run, changes its status and writes it back: the worker's
+    failed_date and failed_chain must survive (OQ-40 item 6)."""
+    service = make_service()
+    run = await _enqueue(session_factory, service)
+    await _set_failure(engine, run.id, "RUNNING", date(2026, 10, 2), "CASH")
+
+    async with SqlAlchemyUnitOfWork(session_factory) as uow:
+        flagged = await service.request_cancel(run.id, uow=uow)
+    async with engine.connect() as connection:
+        row = (
+            await connection.execute(
+                text("SELECT status, failed_date, failed_chain FROM processing.requests"),
+            )
+        ).one()
+
+    assert flagged.status is ProcessingStatus.CANCELLING
+    assert tuple(row) == ("CANCELLING", date(2026, 10, 2), "CASH")
+
+
 async def test_an_enqueued_run_reads_back_as_stored(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
