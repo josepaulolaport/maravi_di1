@@ -26,7 +26,7 @@ backend/
       infrastructure/<adapter>/          # other outbound adapters, when needed
       presentation/http/{router.py, schemas.py}
       presentation/messaging/            # this module's RabbitMQ consumers and handlers
-    workers/{main.py, dispatcher.py, outbox_relay.py}   # lane H
+    workers/{main.py, outbox_relay.py}   # lane H; no dispatcher (OQ-46)
   tests/{unit/<module>/, integration/, architecture/, e2e/}
   tests/acceptance/                  # spec §13 phase 1, pure; acceptance-tests session
   tests/integration/acceptance/      # spec §13 phase 2; acceptance-tests session
@@ -77,7 +77,7 @@ Create only the files and packages that are used. Initially only Processing has 
 ## Tests
 
 - Calculators and accounting are written test first (skill `tdd`), from the cases in spec §13 and the formulas in spec §4, §7 and §8.
-- Integration tests run against PostgreSQL 16, in your worktree's own database. Concurrency, outbox and dispatch tests use real connections.
+- Integration tests run against PostgreSQL 16, in your worktree's own database. Concurrency, outbox and queue-take tests use real connections.
 - `tests/architecture/` enforces the module boundaries. The full rule list is in `tests/architecture/boundaries.py`:
   - only `public.py` is imported across modules, and also by `workers/`. A module's `__init__.py` imports nothing;
   - `domain/` uses only the standard library, `di1.shared` and its own domain. It imports no side-effect module (filesystem, network, database, environment, process, concurrency, logging, OS entropy) and calls no clock, random-id, I/O builtin or hidden-generator function. Only seeded or injected random generators are allowed;

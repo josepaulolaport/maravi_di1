@@ -26,7 +26,7 @@ messages of `origin/main..HEAD`.
 ## Run the application
 
 ```bash
-docker compose up --build -d   # PostgreSQL 16, RabbitMQ, migrations, API, outbox relay, worker, dispatcher
+docker compose up --build -d   # PostgreSQL 16, RabbitMQ, migrations, API, outbox relay, worker
 make seed                      # catalogue roots: instrument type FUTURE, asset class INTEREST_RATE_FUTURE
 cd frontend && VITE_API_MOCKS=false npm run dev   # UI on http://localhost:5173 against the API
 ```
@@ -35,8 +35,25 @@ The API answers on http://127.0.0.1:8000 (`/health`, `/api/...`), and the Rabbit
 on http://127.0.0.1:15672 (user `di1`, password `di1`). The Vite dev server proxies `/api` and
 `/health` to the API; when the API runs on another port (`DI1_API_PORT`), add
 `API_PROXY_TARGET=http://127.0.0.1:<port>` to the `npm run dev` command. Without
-`VITE_API_MOCKS=false` the UI runs against its built-in MSW mocks, with no backend at all. `docker compose down -v` removes the
-stack and its data.
+`VITE_API_MOCKS=false` the UI runs against its built-in MSW mocks, with no backend at all.
+`docker compose down -v` removes the stack and its data.
+
+### Processing: why RabbitMQ
+
+Processing runs only when the user requests it, in one worker process (OQ-45, OQ-46).
+`POST /processing/requests` saves the request as `QUEUED` in PostgreSQL and, in the same
+transaction, an outbox message that only means "there is work". The outbox relay publishes it to
+RabbitMQ with publisher confirms. The worker wakes up on that message, takes the oldest `QUEUED`
+request from PostgreSQL under a row lock, runs it, and repeats until none is left.
+
+- **PostgreSQL is the source of truth** for the requests, their order and their status;
+  RabbitMQ never records what is pending.
+- **RabbitMQ is the push wake-up**: the API answers at once, and processing runs off the request
+  path, in a separate process, with no polling. This is where messaging adds value (challenge §8).
+- **A lost or duplicated message is harmless**: the next message, or the next worker start, drains
+  the `QUEUED` requests; a message that finds nothing to do does nothing.
+- Rejected alternative: PostgreSQL LISTEN/NOTIFY or polling. It removes one service, but it drops
+  the messaging part of the challenge and would rework tested code.
 
 ## Demo: the challenge example, end to end
 

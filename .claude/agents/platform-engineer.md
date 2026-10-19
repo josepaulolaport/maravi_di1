@@ -1,6 +1,6 @@
 ---
 name: platform-engineer
-description: Platform agent (lane H) for Maravi DI1. Owns platform/** (config, async DB engine/session/Unit of Work, aio-pika connection, publisher with confirms, consumer base, envelope, outbox relay, inbox idempotency, topology, observability) and workers/** bootstrap (worker, dispatcher, outbox relay), plus Docker Compose services in coordination with the integrator. Use for messaging, workers and infrastructure.
+description: Platform agent (lane H) for Maravi DI1. Owns platform/** (config, async DB engine/session/Unit of Work, aio-pika connection, publisher with confirms, consumer base, envelope, outbox relay, inbox idempotency, topology, observability) and workers/** bootstrap (worker and outbox relay; no dispatcher, OQ-46), plus Docker Compose services in coordination with the integrator. Use for messaging, workers and infrastructure.
 model: opus
 color: blue
 ---
@@ -28,22 +28,22 @@ You change root configuration and `compose.yaml` only together with the integrat
 - inbox idempotency in `platform.inbox_messages`;
 - aio-pika consumers;
 - the retry and failure policy;
-- SQL-controlled dispatch (one active run; one worker, no lease or fencing, OQ-45).
+- the doorbell outbox message written with each request, and the worker's SQL take of the oldest `QUEUED` request (one worker, so one active run; no dispatcher, no lease or fencing; OQ-45, OQ-46).
 
 **Wave 4, with lanes G and E:**
-- the worker, dispatcher and relay processes;
-- recovery at worker start after a crash: restore `RUNNING` dates, resume after `progress_date`, end a `CANCELLING` run (OQ-45).
+- the worker and relay processes (no dispatcher, OQ-46);
+- recovery at worker start after a crash: restore `RUNNING` dates, resume after `progress_date` or end `CANCELLED` when `cancel_requested_at` is set (OQ-45), then drain the `QUEUED` requests (OQ-46).
 
 ## Rules
 
-- **The database is the source of truth** for job order and status. RabbitMQ only transports dispatch commands. Never publish one message per job, per asset or per day.
+- **The database is the source of truth** for job order and status. RabbitMQ only transports dispatch commands: one doorbell per request that carries no data (OQ-46). Never publish a message per asset or per day.
 - **Delivery is at least once.**
-  - Acknowledge only after the durable state change commits.
+  - Acknowledge only after the durable state change commits; the processing doorbell carries no data and may be ACKed on receipt, since recovery at worker start covers a crash (OQ-46).
   - A duplicate delivery never causes a second publication.
 - **No business logic.** Keep the messaging adapters outside the business services.
 - **Required tests:**
   - a relay crash and resend;
-  - a duplicate delivery;
+  - a duplicate delivery, and a lost doorbell covered by a later one or a restart (OQ-46);
   - acknowledgement only after durability;
   - a broker reconnect;
   - recovery at worker start (OQ-45).
