@@ -8,25 +8,10 @@ export type CompletenessStatus = 'COMPLETE' | 'MISSING';
 export type AssetValuationStatus = CompletenessStatus | 'NOT_REQUIRED';
 
 /**
- * Proposal: a portfolio response says whether the date was ever published, and whether what
- * was published is stale (an input changed afterwards: date ≥ a dirty marker, §10.4).
- */
-interface NotProcessed {
-  date: IsoDate;
-  publication: 'NOT_PROCESSED';
-}
-
-interface Published {
-  date: IsoDate;
-  publication: 'PUBLISHED';
-  /** True when an input changed after publication; figures stay visible, flagged (§8.3). */
-  stale: boolean;
-  published_at: IsoDateTime;
-}
-
-/**
  * DRAFT (OQ-21): how current one chain's published result for a date is. FRESH: published and
- * current; STALE: published, but an input changed afterwards; NOT_PROCESSED: never published.
+ * current; STALE: published, but an input changed afterwards (date ≥ a dirty marker, §10.4),
+ * figures still shown, flagged (§8.3); NOT_PROCESSED: never published. Every portfolio read
+ * uses it (user, 2026-10-18: "Freshness everywhere").
  */
 export type Freshness = 'FRESH' | 'STALE' | 'NOT_PROCESSED';
 
@@ -103,17 +88,22 @@ export interface PositionRow {
 }
 
 /**
- * `GET /portfolio/positions?date=` — rows and totals come from the same publication. Its
- * `publication`/`stale` describe the positions chain (OQ-21 draft); lane X may align it with
- * `Freshness` (proposal).
+ * `GET /portfolio/positions?date=` — rows and totals come from the same publication, with the
+ * positions chain's freshness (OQ-21 draft). Not processed: no rows, no publication time.
  */
-export type PortfolioPositions = NotProcessed | (Published & { items: PositionRow[] });
+export interface PortfolioPositions {
+  date: IsoDate;
+  status: Freshness;
+  published_at: IsoDateTime | null;
+  items: PositionRow[];
+}
 
-/** One published day of `GET /portfolio/pnl?start_date&end_date` (OQ-16); `stale` is the positions chain's. */
+/** One published day of `GET /portfolio/pnl?start_date&end_date` (OQ-16), positions chain. */
 export interface PnlPoint {
   date: IsoDate;
   daily_pnl: Decimal | null;
   cumulative_pnl: Decimal | null;
   pnl_status: CompletenessStatus;
-  stale: boolean;
+  /** FRESH or STALE: only published days are listed. */
+  status: Freshness;
 }

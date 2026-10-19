@@ -90,7 +90,7 @@ function PortfolioBody({ date, summary, positions }: BodyProps) {
         }
       />
       <KpiGrid summary={data} />
-      {rows.publication === 'PUBLISHED' && (
+      {rows.status !== 'NOT_PROCESSED' && (
         <>
           <CumulativePnlCard date={date} cumulative={data.positions.cumulative_pnl} />
           <PositionsTable rows={rows.items} />

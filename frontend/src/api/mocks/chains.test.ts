@@ -158,7 +158,7 @@ describe('OQ-21 a job publishes only its scope', () => {
     expect(summary.cash).toMatchObject({ status: 'FRESH', balance: '506059.2651460232' });
     expect(summary.positions.status).toBe('NOT_PROCESSED');
     expect(summary.aum).toEqual({ status: 'NOT_PROCESSED', value: null });
-    expect((await portfolioApi.getPositions('2026-10-18')).publication).toBe('NOT_PROCESSED');
+    expect((await portfolioApi.getPositions('2026-10-18')).status).toBe('NOT_PROCESSED');
   });
 
   it('§10.4 POSITIONS republishes positions and clears their marker; cash is untouched', async () => {

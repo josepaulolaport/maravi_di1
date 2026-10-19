@@ -43,11 +43,9 @@ async function chainStatus(date: string) {
   return { cash: summary.cash.status, positions: summary.positions.status };
 }
 
-function published<T extends PortfolioPositions>(
-  value: T,
-): Extract<T, { publication: 'PUBLISHED' }> {
-  if (value.publication !== 'PUBLISHED') throw new Error('expected a published date');
-  return value as Extract<T, { publication: 'PUBLISHED' }>;
+function published(value: PortfolioPositions): PortfolioPositions {
+  if (value.status === 'NOT_PROCESSED') throw new Error('expected a published date');
+  return value;
 }
 
 describe('mock portfolio', () => {
@@ -120,6 +118,38 @@ describe('mock portfolio', () => {
       ['2026-10-14', '0.0000000000'],
       ['2026-10-15', '-8034.1345282660'],
       ['2026-10-16', null],
+    ]);
+  });
+});
+
+describe('OQ-21 positions and the P&L series use the same freshness as the summary', () => {
+  it('§8.3 positions report the positions chain: stale after a corrected price', async () => {
+    expect(await portfolioApi.getPositions('2026-10-16')).toMatchObject({
+      status: 'STALE',
+      published_at: '2026-10-16T18:40:00-03:00',
+    });
+    expect((await portfolioApi.getPositions('2026-10-15')).status).toBe('FRESH');
+  });
+
+  it('§12 D3 a day never processed: NOT_PROCESSED, no rows, no publication time', async () => {
+    expect(await portfolioApi.getPositions('2026-10-17')).toEqual({
+      date: '2026-10-17',
+      status: 'NOT_PROCESSED',
+      published_at: null,
+      items: [],
+    });
+  });
+
+  it('OQ-16 each P&L point carries its freshness', async () => {
+    const { items } = await portfolioApi.getPnlSeries({
+      start_date: '2026-10-14',
+      end_date: '2026-10-16',
+    });
+
+    expect(items.map((p) => [p.date, p.status])).toEqual([
+      ['2026-10-14', 'FRESH'],
+      ['2026-10-15', 'FRESH'],
+      ['2026-10-16', 'STALE'],
     ]);
   });
 });
@@ -602,7 +632,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
       start_date: '2026-10-14',
       end_date: '2026-10-18',
     });
-    expect(items.map((p) => [p.date, p.cumulative_pnl, p.stale])).toEqual([
+    expect(items.map((p) => [p.date, p.cumulative_pnl, p.status === 'STALE'])).toEqual([
       ['2026-10-14', '0.0000000000', false],
       ['2026-10-15', '-8034.1345282660', false],
       ['2026-10-16', null, false],

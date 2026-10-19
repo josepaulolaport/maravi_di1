@@ -34,12 +34,7 @@ interface SummaryChanges {
  * Serves 15/10 (complete and current for both chains in the fixtures) with the given changes
  * to one chain or both, to isolate one state (OQ-21 draft: cash and positions apart).
  */
-function override15(
-  changes: SummaryChanges,
-  positionsChanges:
-    | Partial<Extract<PortfolioPositions, { publication: 'PUBLISHED' }>>
-    | Pick<Extract<PortfolioPositions, { publication: 'NOT_PROCESSED' }>, 'publication'> = {},
-) {
+function override15(changes: SummaryChanges, positionsChanges: Partial<PortfolioPositions> = {}) {
   const rows = positions.find((p) => p.date === '2026-10-15');
   server.use(
     http.get(url('/portfolio/summary'), () => {
@@ -53,7 +48,7 @@ function override15(
       return HttpResponse.json(body);
     }),
     http.get(url('/portfolio/positions'), () =>
-      HttpResponse.json({ ...rows, stale: false, ...positionsChanges }),
+      HttpResponse.json({ ...rows, status: 'FRESH', ...positionsChanges }),
     ),
   );
 }
@@ -215,7 +210,7 @@ describe('Carteira (§11.4)', () => {
         },
         aum: { status: 'NOT_PROCESSED', value: null },
       },
-      { publication: 'NOT_PROCESSED' },
+      { status: 'NOT_PROCESSED', published_at: null, items: [] },
     );
     await openCarteira('2026-10-15');
 
@@ -319,7 +314,7 @@ describe('Carteira (§11.4)', () => {
     expect(router.state.location.search).toBe(`?date=${todayInSaoPaulo()}`);
   });
   it('§10.4 shows only the stale notice for a stale but complete day', async () => {
-    override15({ positions: { status: 'STALE' }, aum: { status: 'STALE' } }, { stale: true });
+    override15({ positions: { status: 'STALE' }, aum: { status: 'STALE' } }, { status: 'STALE' });
     await openCarteira('2026-10-15');
 
     expect(screen.getByText('Posições desatualizadas')).toBeInTheDocument();

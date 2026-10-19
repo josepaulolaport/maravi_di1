@@ -23,7 +23,7 @@ export function toChartData(items: PnlPoint[], start: IsoDate, end: IsoDate): Ch
     const valid =
       item !== undefined &&
       item.pnl_status === 'COMPLETE' &&
-      !item.stale &&
+      item.status === 'FRESH' &&
       item.cumulative_pnl !== null;
     points.push({
       date,

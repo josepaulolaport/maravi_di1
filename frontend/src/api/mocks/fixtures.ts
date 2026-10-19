@@ -265,7 +265,13 @@ export interface SeedSummary {
   pnl_status: CompletenessStatus;
 }
 
-type PublishedPositions = Extract<PortfolioPositions, { publication: 'PUBLISHED' }>;
+/** A published positions day of the seed; the handlers add its freshness. */
+interface PublishedPositions {
+  date: string;
+  publication: 'PUBLISHED';
+  published_at: string;
+  items: PortfolioPositions['items'];
+}
 
 /** Published days of the seed; freshness is set by the handlers from the dirty markers. */
 export const summaries: SeedSummary[] = [
@@ -322,7 +328,7 @@ export const summaries: SeedSummary[] = [
   },
 ];
 
-export const positions: Omit<PublishedPositions, 'stale'>[] = [
+export const positions: PublishedPositions[] = [
   {
     date: '2026-10-14',
     publication: 'PUBLISHED',
@@ -439,7 +445,7 @@ export const positions: Omit<PublishedPositions, 'stale'>[] = [
 ];
 
 /** `stale` is set by the handlers. */
-export const pnlSeries: Omit<PnlPoint, 'stale'>[] = [
+export const pnlSeries: Omit<PnlPoint, 'status'>[] = [
   {
     date: '2026-10-14',
     daily_pnl: '0.0000000000',
@@ -526,8 +532,8 @@ function dayWithoutInputs(date: string): RecalculatedDay {
 
 export interface RecalculatedDay {
   summary: SeedSummary;
-  positions: Omit<PublishedPositions, 'stale'>;
-  pnl: Omit<PnlPoint, 'stale'>;
+  positions: PublishedPositions;
+  pnl: Omit<PnlPoint, 'status'>;
 }
 
 /** Republished results that differ from the published fixtures (`published_at` is replaced). */

@@ -44,7 +44,7 @@ The user decided (2026-10-18) that cash and positions are two separately process
   - `cash.balance` comes from `portfolio.cash_balances`;
   - `positions` holds the market value, the valuation status and the P&L;
   - `aum.value` is `null` when either side is missing, and `aum.status` is the less current of the two.
-- `PortfolioPositions` and `PnlPoint` keep `publication`/`stale`, now for the positions chain only. A proposal: align them with `Freshness`.
+- Freshness everywhere (user, 2026-10-18): `PortfolioPositions` is `{date, status, published_at, items}`, and each `PnlPoint` has `status` instead of `stale`, both for the positions chain. This replaces P9's `publication` + `stale`.
 - OQ-22 (user, 2026-10-18): a CASH or ALL job whose day before has no published cash, while entries are dated on or before it, is refused when it starts. It ends `FAILED` with `error_code = CASH_PREDECESSOR_MISSING`, and the preview warns. Positions still run after a missing day (OQ-11). `Issue.chain` is set only on `STALE_PREDECESSOR`.
 - What goes stale after a write:
   - a trade: cash and positions;

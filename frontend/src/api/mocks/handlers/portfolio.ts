@@ -78,9 +78,12 @@ export const portfolioHandlers = [
     const { date, errors } = dateParam(request);
     if (errors.length > 0 || !date) return problem(422, errors);
     const published = db.published.positions.get(date);
-    const body: PortfolioPositions = published
-      ? { ...published, stale: isStale(date, 'POSITIONS') }
-      : { date, publication: 'NOT_PROCESSED' };
+    const body: PortfolioPositions = {
+      date,
+      status: freshness(date, 'POSITIONS'),
+      published_at: published?.published_at ?? null,
+      items: published?.items ?? [],
+    };
     return HttpResponse.json(body);
   }),
 
@@ -94,7 +97,7 @@ export const portfolioHandlers = [
     const items = [...db.published.pnl.values()]
       .filter((p) => p.date >= (start as string) && p.date <= (end as string))
       .sort((a, b) => a.date.localeCompare(b.date))
-      .map((p) => ({ ...p, stale: isStale(p.date, 'POSITIONS') }));
+      .map((p) => ({ ...p, status: freshness(p.date, 'POSITIONS') }));
     return HttpResponse.json<ListResponse<PnlPoint>>({ items });
   }),
 ];
