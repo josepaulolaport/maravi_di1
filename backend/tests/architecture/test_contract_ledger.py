@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import typing
 from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import uuid4
@@ -88,4 +89,7 @@ def test_the_reader_answers_whether_entries_exist_up_to_a_day() -> None:
     assert list(signature.parameters) == ["self", "day", "entry_type"]
     assert signature.parameters["entry_type"].kind is inspect.Parameter.KEYWORD_ONLY
     assert signature.parameters["entry_type"].default is None
-    assert EntryType.TRADE == "TRADE"
+    hints = typing.get_type_hints(LedgerReader.has_entries_on_or_before)
+    assert hints["entry_type"] == EntryType | None  # the public EntryType, not a domain copy
+    assert hints["day"] is date
+    assert hints["return"] is bool
