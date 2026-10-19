@@ -30,6 +30,7 @@ from di1.modules.asset.infrastructure.persistence.repositories import SqlAlchemy
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from tests.integration.asset.conftest import DI1_FUTURES, DI1_NAME, Di1Catalogue, Writer
+from tests.integration.asset.latest_prices import FakeLatestPrices, price
 
 
 def _problems(error: pytest.ExceptionInfo[DomainError]) -> list[tuple[ErrorCode, str | None]]:
@@ -368,3 +369,32 @@ class TestReads:
         assert instrument.value.errors == (
             ErrorDetail(ErrorCode.NOT_FOUND, "Contrato não encontrado."),
         )
+
+
+class TestLastReferences:
+    """`AssetService.last_references` (OQ-48): one batch read of Prices' latest preferred price."""
+
+    async def test_without_a_reader_no_instrument_has_one(
+        self, di1: Di1Catalogue, service: AssetService
+    ) -> None:
+        # Seeding and writes build the service without Prices.
+        instruments = await service.list_instruments()
+
+        assert await service.last_references(instruments) == {}
+
+    async def test_with_a_reader_only_priced_instruments_have_one(
+        self, di1: Di1Catalogue, reader_session: AsyncSession
+    ) -> None:
+        f28 = di1.instrument_ids["DI1F28"]
+        latest = FakeLatestPrices(
+            {f28: price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995")}
+        )
+        service = AssetService(SqlAlchemyAssetRepository(reader_session), latest)
+
+        references = await service.last_references(await service.list_instruments())
+
+        assert set(references) == {f28}
+        assert references[f28].pu == Decimal("89102.2226533433")
+        assert latest.calls == [frozenset(di1.instrument_ids.values())]
+        assert await service.last_references([]) == {}
+        assert len(latest.calls) == 1

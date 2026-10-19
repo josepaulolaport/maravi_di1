@@ -3,8 +3,9 @@ OQ-26 item 8: the shapes of ``frontend/src/api/contract/asset.ts``).
 
 The MSW fixtures (``frontend/src/api/mocks/fixtures.ts``) are the golden examples of the shapes:
 field names, decimals as strings, ``null`` rather than 0. Server-generated values (product and
-instrument ids, ``created_at``) are compared by type only. ``last_reference`` is ``null`` until
-Prices offers a latest-observation read (user, 2026-10-19); the mock derives it from its prices.
+instrument ids, ``created_at``) are compared by type only. ``last_reference`` is each instrument's
+latest preferred reference price from `prices.public.LatestPriceReader` (OQ-48), ``null`` when it
+has none; a fake reader stands in for Prices.
 Errors are problem+json (OQ-15) with pt-BR messages.
 """
 
@@ -12,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -22,10 +23,12 @@ from fastapi.testclient import TestClient
 from di1.composition.dependencies import get_unit_of_work
 from di1.main import create_app
 from di1.modules.asset.presentation.http.router import create_router
+from di1.modules.prices.public import PriceSource
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from tests.integration.asset.conftest import Di1Catalogue, seed_di1
+from tests.integration.asset.latest_prices import FakeLatestPrices, price
 
 # fixtures.ts: instrumentTypes, products[0] and instruments (DI1F27…DI1F30).
 GOLDEN_INSTRUMENT_TYPES = {
@@ -104,9 +107,17 @@ def seeded(settings: Settings) -> Di1Catalogue:
 
 
 @pytest.fixture
-def client(settings: Settings, seeded: Di1Catalogue) -> Iterator[TestClient]:
+def latest_prices() -> FakeLatestPrices:
+    """No instrument has a price unless a test gives it one."""
+    return FakeLatestPrices()
+
+
+@pytest.fixture
+def client(
+    settings: Settings, seeded: Di1Catalogue, latest_prices: FakeLatestPrices
+) -> Iterator[TestClient]:
     app = create_app(settings)
-    app.include_router(create_router(get_unit_of_work))
+    app.include_router(create_router(get_unit_of_work, lambda uow: latest_prices))
     with TestClient(app) as client:
         yield client
 
@@ -314,6 +325,13 @@ class TestCreateProduct:
         )
         assert client.get(f"/products/{created['id']}").json() == created
 
+    def test_the_code_is_stored_trimmed_and_upper_cased(
+        self, client: TestClient, seeded: Di1Catalogue
+    ) -> None:
+        body = DAP | {"asset_class_id": seeded.interest_rate_class_id, "code": " dap "}
+
+        assert client.post("/products", json=body).json()["code"] == "DAP"
+
     def test_the_multiplier_defaults_to_one(self, client: TestClient, seeded: Di1Catalogue) -> None:
         futures = {"face_value": "100000", "settlement_method": "CASH"}
         body = DAP | {"asset_class_id": seeded.interest_rate_class_id, "futures": futures}
@@ -367,3 +385,88 @@ class TestCreateProduct:
         assert _problem(client.post("/products", json=body))[2] == [
             ("VALIDATION_ERROR", "Já existe um produto com este código.", "code")
         ]
+
+
+class TestLastReference:
+    """``Instrument.last_reference`` (OQ-48, reversing OQ-33 item 4): the latest preferred price,
+    with its own date (OQ-19 item 5); ``null`` for an instrument without one."""
+
+    def test_each_listed_instrument_carries_its_latest_price(
+        self, client: TestClient, seeded: Di1Catalogue, latest_prices: FakeLatestPrices
+    ) -> None:
+        f28, f29 = seeded.instrument_ids["DI1F28"], seeded.instrument_ids["DI1F29"]
+        latest_prices.latest[f28] = price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995")
+        latest_prices.latest[f29] = price(
+            f29, date(2026, 10, 15), "82057.00", None, source=PriceSource.B3
+        )
+
+        items = client.get("/instruments").json()["items"]
+
+        assert {i["code"]: i["last_reference"] for i in items} == {
+            "DI1F27": None,
+            "DI1F28": {
+                "reference_date": "2026-10-16",
+                "pu": "89102.2226533433",
+                "rate": "0.0995",
+                "source": "MANUAL",
+            },
+            "DI1F29": {
+                "reference_date": "2026-10-15",
+                "pu": "82057.00",
+                "rate": None,
+                "source": "B3",
+            },
+            "DI1F30": None,
+        }
+
+    def test_a_listing_reads_the_prices_once_for_its_instruments(
+        self, client: TestClient, seeded: Di1Catalogue, latest_prices: FakeLatestPrices
+    ) -> None:
+        client.get("/instruments", params={"search": "f2"})
+
+        assert latest_prices.calls == [
+            frozenset(seeded.instrument_ids[c] for c in ("DI1F27", "DI1F28", "DI1F29"))
+        ]
+
+    def test_an_empty_listing_reads_no_prices(
+        self, client: TestClient, latest_prices: FakeLatestPrices
+    ) -> None:
+        assert client.get("/instruments", params={"search": "x"}).json() == {"items": []}
+        assert latest_prices.calls == []
+
+    def test_one_instrument_carries_its_latest_price(
+        self, client: TestClient, seeded: Di1Catalogue, latest_prices: FakeLatestPrices
+    ) -> None:
+        f28 = seeded.instrument_ids["DI1F28"]
+        latest_prices.latest[f28] = price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995")
+
+        body = client.get(f"/instruments/{f28}").json()
+
+        assert body["last_reference"] == {
+            "reference_date": "2026-10-16",
+            "pu": "89102.2226533433",
+            "rate": "0.0995",
+            "source": "MANUAL",
+        }
+        assert latest_prices.calls == [frozenset({f28})]
+
+    def test_an_unknown_instrument_is_404_without_reading_prices(
+        self, client: TestClient, latest_prices: FakeLatestPrices
+    ) -> None:
+        assert client.get(f"/instruments/{uuid4()}").status_code == 404
+        assert latest_prices.calls == []
+
+    def test_a_new_instrument_has_none(self, client: TestClient, seeded: Di1Catalogue) -> None:
+        body = {"product_id": str(seeded.di1_id), "code": "DI1N27", "maturity_date": "2027-07-01"}
+
+        assert client.post("/instruments", json=body).json()["last_reference"] is None
+
+    def test_decimals_cross_in_plain_notation(
+        self, client: TestClient, seeded: Di1Catalogue, latest_prices: FakeLatestPrices
+    ) -> None:
+        f30 = seeded.instrument_ids["DI1F30"]
+        latest_prices.latest[f30] = price(f30, date(2026, 10, 16), "7.5E+4", "1E-1")
+
+        reference = client.get(f"/instruments/{f30}").json()["last_reference"]
+
+        assert (reference["pu"], reference["rate"]) == ("75000", "0.1")
