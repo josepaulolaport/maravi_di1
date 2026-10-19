@@ -88,7 +88,8 @@ describe('Pendências (§11.1, §10.3)', () => {
     const headers = screen.getAllByRole('columnheader').map((th) => th.textContent);
     expect(headers.slice(0, 3)).toEqual(['Data', 'Ativo', 'Pendência']);
     const row = issueRow('DI1F29');
-    expect(row.getByText('16/10/2026')).toBeInTheDocument();
+    // The needed price date, then the earliest affected date (OQ-37): both 16/10 here.
+    expect(row.getAllByText('16/10/2026')).toHaveLength(2);
     expect(row.getByText('Preço de referência ausente')).toBeInTheDocument();
     expect(row.getByRole('link', { name: 'Definir preço' })).toHaveAttribute(
       'href',
@@ -111,21 +112,38 @@ describe('Pendências (§11.1, §10.3)', () => {
 
     const row = await screen.findByText('Contrato vencido com posição aberta');
     const cells = within(row.closest('tr') as HTMLElement);
-    expect(cells.getByText('05/01/2027')).toBeInTheDocument();
+    // No price is needed: the date column reads "—"; the affected date is 05/01/2027 (OQ-37).
+    expect(
+      cells
+        .getAllByRole('cell')
+        .map((cell) => cell.textContent)
+        .slice(0, 4),
+    ).toEqual(['—', 'DI1F27', 'Contrato vencido com posição aberta', '05/01/2027']);
     expect(cells.getByRole('link', { name: 'Ver lançamentos' })).toHaveAttribute(
       'href',
       '/lancamentos?busca=DI1F27',
     );
   });
 
-  it('§10.3 shows the date whose price is needed, which may differ from the affected day', async () => {
+  it('§10.3 OQ-37 shows the date whose price is needed and, apart, the earliest affected date', async () => {
     serveIssues([issue({ affected_date: '2026-10-16', required_price_date: '2026-10-15' })]);
     const { user } = renderApp(PAGE);
 
     await screen.findByText('DI1F29');
+    const headers = screen.getAllByRole('columnheader').map((th) => th.textContent);
+    expect(headers.slice(0, 4)).toEqual(['Data', 'Ativo', 'Pendência', 'Afetado desde']);
+    expect(
+      issueRow('DI1F29')
+        .getAllByRole('cell')
+        .map((cell) => cell.textContent),
+    ).toEqual([
+      '15/10/2026',
+      'DI1F29',
+      'Preço de referência ausente',
+      '16/10/2026',
+      'Definir preço',
+    ]);
     const row = issueRow('DI1F29');
-    expect(row.getByText('15/10/2026')).toBeInTheDocument();
-    expect(row.queryByText('16/10/2026')).not.toBeInTheDocument();
     expect(row.getByRole('link', { name: 'Definir preço' })).toHaveAttribute(
       'href',
       `/ativos/contratos/${IDS.di1f29}?registrar=2026-10-15`,
