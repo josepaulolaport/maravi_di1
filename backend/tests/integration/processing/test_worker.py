@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from di1.modules.ledger.public import EntryType
 from di1.modules.portfolio.public import CashBalance
 from di1.modules.prices.public import PriceSource
-from tests.integration.processing.support import seed_instrument, seed_statuses
+from tests.integration.processing.support import make_service, seed_instrument, seed_statuses
 from tests.integration.processing.worker_support import Worker
 from tests.unit.processing.run_fakes import cash_movement, trade
 
@@ -569,3 +569,131 @@ async def test_a_technical_error_on_a_single_chain_run_fails_the_run(worker: Wor
         "CASH",
         D1,
     )
+
+
+# --- review follow-ups: more adversarial sequences (plan §7, OQ-36, OQ-40) ----------------
+
+
+async def test_one_chain_failing_its_predecessor_on_the_first_date_lets_the_other_go_on(
+    worker: Worker,
+) -> None:
+    await seed_statuses(worker.engine, {D0: ("FAILED", None)})
+    request_id = await worker.enqueue("ALL", D1, D2)
+
+    await worker.dispatch_and_run()
+
+    assert (await worker.statuses())[D1] == ("FAILED", "PROCESSED")
+    assert (await worker.statuses())[D2] == (None, "PROCESSED")
+    assert await worker.writes() == [(D1, "CASH", False), (D2, "CASH", False)]
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["error_code"], run["failed_date"], run["failed_chain"]) == (
+        "COMPLETED_WITH_ISSUES",
+        "POSITIONS_PREDECESSOR_MISSING",
+        D1,
+        "POSITIONS",
+    )
+
+
+async def test_a_cancelled_all_run_keeps_its_first_failure(worker: Worker) -> None:
+    worker.writer.fail.add(("CASH", D1))
+    request_id = await worker.enqueue("ALL", D1, D3)
+    pending: list[asyncio.Task[None]] = []
+
+    async def cancel_during_d2(chain: str, day: date) -> None:
+        if day == D2:
+            pending.append(asyncio.create_task(request_cancel(worker, request_id)))
+            await asyncio.sleep(0.2)
+
+    worker.writer.hook = cancel_during_d2
+    await worker.dispatch_and_run()
+    await asyncio.gather(*pending)
+
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["error_code"], run["failed_date"], run["failed_chain"]) == (
+        "CANCELLED",
+        "PROCESSING_ERROR",
+        D1,
+        "CASH",
+    )
+    assert D3 not in await worker.statuses()
+
+
+async def test_a_failure_outside_the_chains_after_one_stopped_fails_only_the_live_chain(
+    worker: Worker,
+) -> None:
+    worker.writer.fail.add(("CASH", D1))
+    worker.fail_reading_on_date_transaction = 2  # D2's transaction
+    request_id = await worker.enqueue("ALL", D1, D3)
+
+    await worker.dispatch_and_run()
+
+    assert await worker.statuses() == {D1: ("PROCESSED", "FAILED"), D2: ("FAILED", None)}
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["error_code"], run["failed_date"], run["failed_chain"]) == (
+        "FAILED",
+        "PROCESSING_ERROR",
+        D1,
+        "CASH",
+    )
+
+
+async def test_the_lease_is_renewed_per_date(worker: Worker) -> None:
+    async def slow_date(chain: str, day: date) -> None:
+        worker.clock.advance(50)  # each date takes 50 s; the range takes 150 s > 60 s
+
+    worker.writer.hook = slow_date
+    request_id = await worker.enqueue("CASH", D1, D3)
+
+    await worker.dispatch_and_run()
+
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["attempt_count"]) == ("COMPLETED", 1)
+
+
+async def test_a_deposit_landing_during_a_positions_run_changes_no_status(
+    worker: Worker,
+) -> None:
+    async def deposit_during_d1(chain: str, day: date) -> None:
+        if day == D1:
+            worker.world.ledger.movements.append(cash_movement(D1, "500.00"))
+
+    worker.writer.hook = deposit_during_d1
+    await worker.enqueue("POSITIONS", D1, D2)
+
+    await worker.dispatch_and_run()
+
+    assert await worker.statuses() == {D1: ("PROCESSED", None), D2: ("PROCESSED", None)}
+
+
+async def test_queue_a_backdated_trade_queue_b_cancel_a_finish_b(worker: Worker) -> None:
+    service = make_service()
+    asset = await priced_asset(worker, D1, D2, D3)
+    first = await worker.enqueue("POSITIONS", D1, D3)
+    assert await worker.dispatcher.dispatch_next() == first
+    claim = await worker.claim(first)
+    assert claim is not None
+    pending: list[asyncio.Task[None]] = []
+
+    async def cancel_a_during_d2(chain: str, day: date) -> None:
+        if day == D2:
+
+            async def cancel() -> None:
+                async with worker.uow_factory() as uow:
+                    await service.request_cancel(first, uow=uow)
+
+            pending.append(asyncio.create_task(cancel()))
+            await asyncio.sleep(0.2)  # the real cancel waits on A's row lock
+
+    worker.writer.hook = cancel_a_during_d2
+    worker.world.ledger.trades.append(trade(asset, D1, 3, "95000.0000000000"))  # backdated
+    second = await worker.enqueue("POSITIONS", D1, D2)
+    await worker.processor.run(claim.request_id, claim.token)
+    await asyncio.gather(*pending)
+    worker.writer.hook = None
+
+    assert (await worker.run_row(first))["status"] == "CANCELLED"
+    assert await worker.dispatch_and_run() == second
+
+    assert (await worker.run_row(second))["status"] == "COMPLETED"
+    assert await worker.statuses() == {D1: ("PROCESSED", None), D2: ("PROCESSED", None)}
+    assert worker.world.portfolio.positions[D2].state.positions[0].quantity == 3

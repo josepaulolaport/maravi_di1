@@ -193,6 +193,10 @@ class PortfolioRangeProcessor:
             await self._run(request_id, token)
         except LeaseLostError:
             logger.warning("processing request %s: lease lost, this worker stops", request_id)
+        except Exception:
+            # Even recording the failure failed: the run keeps its lease until it expires, then
+            # the dispatcher re-dispatches it and a new claim resumes after progress_date.
+            logger.exception("processing request %s: the worker stopped", request_id)
 
     async def _run(self, request_id: UUID, token: UUID) -> None:
         run, alive = await self._start(request_id, token)
@@ -389,13 +393,10 @@ class PortfolioRangeProcessor:
         async with self._uow_factory() as uow:
             run = await self._fence(request_id, token, uow)
             request = run.request
-            positions_end = request.end_date
-            if request.failed_chain is ProcessingScope.POSITIONS and request.failed_date:
-                positions_end = request.failed_date - ONE_DAY
             with_issues = request.failed_date is not None
             if not with_issues and ProcessingChain.POSITIONS in scope_chains(request.scope):
                 rows = await self._date_statuses.get_date_statuses(
-                    request.start_date, positions_end, uow=uow
+                    request.start_date, request.end_date, uow=uow
                 )
                 with_issues = any(
                     row.portfolio is ChainStatus.PROCESSED_WITH_ISSUES for row in rows.values()

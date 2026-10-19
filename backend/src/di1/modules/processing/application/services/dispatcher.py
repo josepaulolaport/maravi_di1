@@ -82,6 +82,10 @@ class ProcessingDispatcher:
 
             queued = await self._store.lock_oldest_queued(uow=uow)
             if queued is None:
+                # A cancel committed on the oldest row while we waited on its lock: PostgreSQL
+                # re-checks that row and returns none, though others may still be queued.
+                queued = await self._store.lock_oldest_queued(uow=uow)
+            if queued is None:
                 await uow.commit()
                 return None
             await self._send(
