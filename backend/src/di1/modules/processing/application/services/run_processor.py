@@ -3,12 +3,14 @@
 OQ-11, OQ-23, OQ-26, OQ-31, OQ-36, OQ-37, OQ-38, OQ-40, OQ-44, OQ-45).
 
 The system runs exactly one processing worker (OQ-45), which handles one run at a time: there is
-no lease, claim token, fencing or recovery cap. Each step is its own Unit of Work under a row lock
-on the run's ``requests`` row:
+no lease, claim token, fencing, recovery cap, dispatcher or active slot (OQ-46). Queueing a request
+rings a doorbell, a message that names no request. On each doorbell, and at its start after
+recovery, the worker drains the queue: it takes the oldest QUEUED request by
+``(created_at, id)`` and runs it, until none is left. Each step is its own Unit of Work under a
+row lock on the run's ``requests`` row:
 
-1. **claim** (in the message's Unit of Work): only a DISPATCHED run, or a CANCELLING run that
-   never started, is acted on; any other status makes the command a no-op (a duplicate or late
-   delivery). A DISPATCHED run becomes RUNNING; a CANCELLING one ends CANCELLED, no date run;
+1. **take** (`drain`): only while no run is RUNNING, the oldest QUEUED request is locked and set
+   RUNNING with ``started_at``; a doorbell with nothing QUEUED is a no-op;
 2. per date D, in calendar order, from ``start_date`` or the day after ``progress_date``:
    a. a short transaction checks the cancel flag (a cancel ends the run CANCELLED between
       dates) and sets D's live chains RUNNING, keeping ``*_previous``;
@@ -19,13 +21,13 @@ on the run's ``requests`` row:
    c. a failure outside every savepoint (a lock timeout, say) rolls back all of D; a short
       transaction then sets D FAILED for every live chain and ends the run FAILED;
 3. the end: COMPLETED, COMPLETED_WITH_ISSUES or FAILED; any date of the range still RUNNING is
-   restored from ``*_previous`` (OQ-26), and the active slot is freed in the same transaction.
+   restored from ``*_previous`` (OQ-26).
 
 **Recovery at worker start** (`recover_at_startup`, before the worker consumes): the run left
-DISPATCHED, RUNNING or CANCELLING was interrupted. Its dates left RUNNING are restored from
-``*_previous`` (a row left empty is deleted); a run being cancelled (CANCELLING, or a cancel
-request recorded) then ends CANCELLED before any date, any other is run to its end in place,
-after ``progress_date`` (from ``start_date`` when NULL).
+RUNNING (or DISPATCHED/CANCELLING, from before OQ-46) was interrupted. Its dates left RUNNING
+are restored from ``*_previous`` (a row left empty is deleted); a run being cancelled (a cancel
+request recorded, or CANCELLING) then ends CANCELLED before any date, any other is run to its end,
+after ``progress_date`` (from ``start_date`` when NULL). Then the queue is drained.
 """
 
 from __future__ import annotations
@@ -93,11 +95,6 @@ class RunEndedError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
-class Claim:
-    request_id: UUID
-
-
-@dataclass(frozen=True, slots=True)
 class ChainFailure:
     chain: ProcessingChain
     code: str
@@ -136,13 +133,9 @@ async def end_run(
     *,
     uow: UnitOfWork,
 ) -> None:
-    """Ends the run, restoring its dates left RUNNING, and frees the active slot in the same
-    transaction, so the dispatcher's next tick dispatches the next QUEUED run (OQ-45). Lock order:
-    the run's row, its dates, then ``calculation_state``; the dispatcher reads the active run
-    without locking it, so the two never wait on each other in a cycle."""
+    """Ends the run, restoring its dates left RUNNING (OQ-26)."""
     await restore_running_dates(store, request, uow=uow)
     await store.save_run(replace(request, status=status, finished_at=now, updated_at=now), uow=uow)
-    await store.clear_active_request_id(request.id, now, uow=uow)
 
 
 class PortfolioRangeProcessor:
@@ -163,44 +156,49 @@ class PortfolioRangeProcessor:
         self._writer = writer
         self._clock = clock
 
-    # --- 1. claim --------------------------------------------------------------------------
+    # --- 1. take the queued requests, oldest first (OQ-46) ---------------------------------
 
-    async def claim(self, request_id: UUID, *, uow: UnitOfWork) -> Claim | None:
-        """Claims the dispatched run in ``uow`` and commits it. Only a DISPATCHED run, or a
-        CANCELLING run that never started (which ends CANCELLED here), is acted on; ``None``
-        otherwise: an unknown, queued, running or ended run means a duplicate or late command,
-        and nothing changes (OQ-45)."""
-        request = await self._store.get_run(request_id, uow=uow, for_update=True)
-        now = self._clock.now()
-        if (
-            request is not None
-            and request.status is ProcessingStatus.CANCELLING
-            and request.started_at is None
-        ):
-            await end_run(self._store, request, ProcessingStatus.CANCELLED, now, uow=uow)
+    async def drain(self) -> None:
+        """Runs the QUEUED requests one after the other, oldest ``(created_at, id)`` first, until
+        none is left. What a doorbell triggers; a doorbell with nothing queued does nothing."""
+        while (request_id := await self.take_next()) is not None:
+            await self.run(request_id)
+
+    async def take_next(self) -> UUID | None:
+        """Locks the oldest QUEUED request and sets it RUNNING, in one transaction. ``None`` only
+        when none is queued (a cancel and a take on the same row: whichever commits first wins),
+        or while a run is still RUNNING: one stopped by an error it could not record waits for
+        the worker's next start, so two runs never overlap."""
+        async with self._uow_factory() as uow:
+            if await self._store.lock_active_runs(uow=uow):
+                await uow.commit()
+                return None
+            while (queued := await self._store.lock_oldest_queued(uow=uow)) is None:
+                # Defensive: a cancel may commit on the oldest row while we wait on its lock.
+                # With this query's plan PostgreSQL then moves on to the next row; should a plan
+                # ever return no row instead, select again until a row is locked or none is
+                # queued at all. No test can force that case on this query.
+                if not await self._store.has_queued(uow=uow):
+                    await uow.commit()
+                    return None
+            now = self._clock.now()
+            await self._store.save_run(
+                replace(queued, status=ProcessingStatus.RUNNING, started_at=now, updated_at=now),
+                uow=uow,
+            )
             await uow.commit()
-            logger.info("processing request %s cancelled before it started", request_id)
-            return None
-        if request is None or request.status is not ProcessingStatus.DISPATCHED:
-            await uow.commit()
-            logger.info("processing request %s: command ignored (not dispatched)", request_id)
-            return None
-        await self._store.save_run(
-            replace(request, status=ProcessingStatus.RUNNING, started_at=now, updated_at=now),
-            uow=uow,
-        )
-        await uow.commit()
-        logger.info("processing request %s claimed", request_id)
-        return Claim(request_id)
+            logger.info("processing request %s started", queued.id)
+            return queued.id
 
     # --- recovery at worker start (OQ-45) -------------------------------------------------
 
     async def recover_at_startup(self) -> None:
-        """Called once when the worker starts, before it consumes: the run left DISPATCHED,
-        RUNNING or CANCELLING was interrupted. Its dates left RUNNING are restored; a run being
-        cancelled (CANCELLING, or a cancel request recorded) ends CANCELLED before any date, in the
-        same transaction that frees the slot; any other is run to its end here, after
-        ``progress_date``. Idempotent: a second call finds no active run and changes nothing."""
+        """Called once when the worker starts, before it consumes: the run left RUNNING (or
+        DISPATCHED/CANCELLING, from before OQ-46) was interrupted. Its dates left RUNNING are
+        restored; a run being cancelled (a cancel request recorded, or CANCELLING) ends CANCELLED
+        before any date; any other is run to its end here, after ``progress_date``. Then the
+        queue is drained, so a request whose doorbell was lost runs too. Idempotent: a second
+        call finds nothing to recover or run."""
         async with self._uow_factory() as uow:
             interrupted = await self._store.lock_active_runs(uow=uow)
             now = self._clock.now()
@@ -228,6 +226,7 @@ class PortfolioRangeProcessor:
         for request_id in to_resume:
             logger.warning("processing request %s resumed at worker start", request_id)
             await self.run(request_id)
+        await self.drain()
 
     # --- 2. the dates ----------------------------------------------------------------------
 

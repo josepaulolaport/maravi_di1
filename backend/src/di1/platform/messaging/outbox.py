@@ -1,7 +1,7 @@
 """The outbox writer: a message to publish is saved in the business write's own transaction.
 
-interfaces.md "Transaction boundaries" 3: the dispatcher sets the job DISPATCHED and saves the
-outbox command in the same transaction, with one COMMIT. Nothing is sent to the broker here;
+A write that must reach the worker (Processing's doorbell, OQ-46) saves its outbox command in
+the same transaction as the fact it signals, with one COMMIT. Nothing is sent to the broker here;
 the outbox relay publishes committed rows later, so a rolled-back write never publishes and a
 committed one is published at least once.
 """

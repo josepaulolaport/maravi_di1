@@ -16,10 +16,12 @@ shared by its consumers: one run at a time, in a task of the worker's own, so a 
 connection does not cancel it. Startup checks that PostgreSQL answers, so a wrong database
 fails the process instead of every command.
 
-The system runs exactly one worker (user decision). Before it consumes, the worker awaits its
-startup hook once (`di1.platform.messaging.worker.StartupHook`): Processing's recovery, under
-which a run left RUNNING by a stopped or crashed worker resumes after its ``progress_date``.
-A failing hook ends the process with status 1, before anything is consumed.
+The system runs exactly one worker and no dispatcher process (OQ-45, OQ-46). Before it
+consumes, the worker awaits its startup hook once (`di1.platform.messaging.worker.StartupHook`):
+Processing's recovery, under which a run left RUNNING by a stopped or crashed worker resumes
+after its ``progress_date``, then the drain of the requests queued meanwhile; afterwards each
+doorbell command drains again. A failing hook ends the process with status 1, before anything
+is consumed.
 
 SIGTERM or SIGINT stops it at any time, even while the broker or the database has not
 answered yet. On a stop the worker stops consuming and cancels what is in progress:
@@ -35,8 +37,7 @@ Then it closes the broker connection and the engine. A failure is logged through
 configured logging and ends the process with status 1.
 
 `main` takes the consumers and the startup hook from the composition root
-(``composition.consumers``): Processing's ``processing.run_request`` consumer, and the recovery
-of an interrupted run before it consumes (OQ-45).
+(``composition.consumers``): Processing's doorbell consumer, and its recovery then drain.
 """
 
 from __future__ import annotations

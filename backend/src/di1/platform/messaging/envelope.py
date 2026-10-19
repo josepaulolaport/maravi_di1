@@ -1,7 +1,7 @@
 """The generic message envelope: what the outbox stores and what travels on the broker.
 
 It carries no business meaning: ``message_type`` names the command, ``payload`` is its JSON body
-and belongs to the module that defines the type (Processing, for the dispatch command).
+and belongs to the module that defines the type (Processing, for its doorbell).
 ``message_id`` is the identity used for idempotency (``platform.inbox_messages``).
 
 Numbers in a payload are integers or decimal strings, never floats (CLAUDE.md §2: JSON carries

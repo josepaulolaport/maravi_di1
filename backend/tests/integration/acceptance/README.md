@@ -22,9 +22,10 @@ These tests need `TEST_DATABASE_URL`; CI sets it and runs them.
 ## Next: scenarios that need a processing run
 
 Positions, P&L and AUM over HTTP (cases 2–8, 10–15, 18–21, 24–27) need the Wave 4 worker
-(PR #78). Its `ProcessingDispatcher.dispatch_next()` and `PortfolioRangeProcessor` run in-process
-against the same database, so these tests will queue a run through `POST /api/processing/requests`,
-dispatch and run it in the test, then read `/api/portfolio/*`. Planned first: the challenge
+(PR #78). There is no dispatcher (OQ-46): the worker recovers at its start, then drains the
+queued requests (OQ-45/OQ-46). `PortfolioRangeProcessor` runs in-process against the same
+database, so these tests will queue a run through `POST /api/processing/requests`, drain it in
+the test, then read `/api/portfolio/*`. Planned first: the challenge
 example end to end (cash 109.090,91, DI1F28 1 @ 90.909,09, AUM 200.000 on 01/01/2027), the
 phase 1 two-asset scenario, a missing price giving a pendência and `COMPLETED_WITH_ISSUES`, the
 predecessor rule, the P&L chart (OQ-41), and the second halves of cases 9 and 16: a write after a

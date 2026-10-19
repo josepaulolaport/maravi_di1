@@ -283,7 +283,7 @@ def test_only_entry_points_import_composition(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("path", [APP, "platform/messaging/consumer.py"])
 def test_workers_are_not_imported_by_business_or_platform_code(tmp_path: Path, path: str) -> None:
-    assert _rules_for(tmp_path, path, "from di1.workers import dispatcher\n") == {"entry-point"}
+    assert _rules_for(tmp_path, path, "from di1.workers import main\n") == {"entry-point"}
 
 
 @pytest.mark.parametrize(
