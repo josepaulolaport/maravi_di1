@@ -922,7 +922,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     });
   });
 
-  it('§11.1 OQ-23 shows a failed run: times in Brasília, days, the date it failed on, its error', async () => {
+  it('§11.1 OQ-23 OQ-44 shows a failed run: times in Brasília, days, the date it failed on, its error', async () => {
     const { user, router } = renderApp(PAGE);
 
     const menu = within(await openMenu(user, '01/10/2026 a 05/10/2026', 'Falhou'));
@@ -940,9 +940,9 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
     expect(field('Dias concluídos').getByText('0')).toBeInTheDocument();
     expect(field('Dias restantes').getByText('5')).toBeInTheDocument();
     expect(field('Data com erro').getByText('01/10/2026')).toBeInTheDocument();
-    expect(modal.getByRole('alert')).toHaveTextContent(
-      'Falha inesperada ao gravar os resultados de 01/10/2026. Tente novamente.',
-    );
+    // A technical failure of no chain (OQ-44): its date, no chain, the API's message.
+    expect(modal.getByRole('alert')).toHaveTextContent('Erro técnico ao processar a data.');
+    expect(modal.queryByRole('group', { name: 'Cadeia com erro' })).not.toBeInTheDocument();
     expect(
       modal.getByText(
         'Nenhuma data deste processamento foi publicada; os resultados anteriores permanecem inalterados.',
@@ -1144,7 +1144,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   it('§11.1 still shows an error box for a failed job without a message', async () => {
     seedJob({
       status: 'FAILED',
-      error_code: 'UNEXPECTED_ERROR',
+      error_code: 'PROCESSING_ERROR',
       finished_at: '2026-10-18T10:01:00-03:00',
     });
     const { user } = renderApp(PAGE);

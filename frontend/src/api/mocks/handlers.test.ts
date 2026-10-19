@@ -863,6 +863,24 @@ describe('mock processing', () => {
     expect((await poll(job.id)).status).toBe('COMPLETED_WITH_ISSUES');
   });
 
+  it('OQ-44 a technical failure carries PROCESSING_ERROR and its pt-BR message', async () => {
+    const failed = (await processingApi.listRequests()).items.find((r) => r.status === 'FAILED');
+
+    // The seeded run failed outside every chain: a date, no chain (OQ-40 item 3).
+    expect(failed).toMatchObject({
+      error_code: 'PROCESSING_ERROR',
+      error_message: 'Erro técnico ao processar a data.',
+      failed_date: '2026-10-01',
+      failed_chain: null,
+    });
+  });
+
+  it('OQ-45 no run carries the retired RECOVERY_EXHAUSTED', async () => {
+    const codes = (await processingApi.listRequests()).items.map((r) => r.error_code);
+
+    expect(codes).not.toContain('RECOVERY_EXHAUSTED');
+  });
+
   it('§10.2 refuses to cancel a finished job with JOB_NOT_CANCELLABLE', async () => {
     const { items } = await processingApi.listRequests();
     const finished = items.find((r) => r.status === 'COMPLETED');

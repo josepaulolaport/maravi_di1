@@ -630,8 +630,9 @@ function job(
 export const processingRequests: ProcessingRequest[] = [
   job(REQUEST_IDS.failed, '2026-10-01', '2026-10-05', 'FAILED', '2026-10-14T08:00:00-03:00', {
     progress_date: null,
-    error_code: 'UNEXPECTED_ERROR',
-    error_message: 'Falha inesperada ao gravar os resultados de 01/10/2026. Tente novamente.',
+    // A technical failure on a date (OQ-44).
+    error_code: 'PROCESSING_ERROR',
+    error_message: 'Erro técnico ao processar a data.',
     // A failure outside every chain: it has a date but no chain (OQ-40 item 3).
     failed_date: '2026-10-01',
   }),
