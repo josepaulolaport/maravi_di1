@@ -92,6 +92,29 @@ The same steps can be done by hand in the UI. The exact example dated 01/01/2027
 automated acceptance tests with a fixed clock (`backend/tests/acceptance/`,
 `backend/tests/integration/acceptance/`).
 
+## Demo data (opt-in)
+
+```bash
+make demo   # after docker compose up, on an empty ledger: two weeks of history through the API
+```
+
+`scripts/seed_demo.py` writes, through the HTTP API (so every validation and pricing rule applies),
+dates from today − 14 to today (São Paulo):
+
+- contracts DI1F27, DI1F28 and DI1F29 (maturities 04/01/2027, 03/01/2028, 02/01/2029);
+- an opening deposit of 1.000.000, a second deposit, a withdrawal, and the challenge example's
+  deposit of 200.000 with a buy of 1 DI1F28 at 10%;
+- trades typed as a rate and as a PU, a partial sale, a sale that crosses zero into a short, and two
+  trades on one day ordered by time;
+- MANUAL reference prices typed as a rate for every calendar day, weekends included, with **one
+  deliberate gap**: DI1F29 on today − 5.
+
+It processes nothing. Open Central de Controle → Processamentos and process Tudo from today − 14 to
+today: the run ends "Concluído com pendências", with a missing-price Pendência for DI1F29, and from
+that date the cumulative P&L is unavailable. `make demo` refuses to run when the ledger already
+has an entry; start again with `docker compose down -v` and `up`. With the API on another port, set
+`DI1_API_PORT`.
+
 ## Interpretations, additions and deviations (spec §15)
 
 ### Interpretations (ambiguous text)
