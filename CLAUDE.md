@@ -67,7 +67,6 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - The portfolio total is not complete if any expected asset is missing. An asset is expected on D when Q[D−1] ≠ 0 or it trades on D (OQ-10).
   - When Q[D−1] = 0, `position_pnl` = 0 exactly (OQ-4).
   - The cumulative P&L stays unavailable from the first gap onward.
-    - Sole exception (OQ-41): the Carteira chart's running sum `range_cumulative_pnl`, where a date adds 0 unless its positions status is `PROCESSED`/`PROCESSED_WITH_ISSUES` and its `daily_pnl` is not null.
   - A missing price is not a technical failure: the job ends `COMPLETED_WITH_ISSUES`.
 - **No automatic processing.**
   - A write saves the fact. **Nothing else** (OQ-31): nothing is marked stale, Ledger and Prices do not call Processing, and there is no `FinancialResultInvalidator`. Processed results stay as they are until the user processes again; after changing history, the user reprocesses.
