@@ -164,7 +164,9 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
             await uow.commit()
         async with SqlAlchemyUnitOfWork(factory) as uow:
             # fixtures.ts positions[1]: DI1F28 held, DI1F29 bought 5 on 15/10.
-            buy_f29 = Trade(di1f29, OCT_15, time(11), 2, 5, Decimal("82057.00"), Decimal("0.0932"))
+            buy_f29 = Trade(
+                di1f29, OCT_15, time(11), 2, 5, Decimal("82057.00"), Decimal("0.093203413834")
+            )
             await writer.write_positions_day(
                 PositionsDay(
                     OCT_15,
@@ -391,8 +393,8 @@ def test_a_date_never_processed_has_an_empty_table(client: TestClient) -> None:
     }
 
 
-def test_the_pnl_series_lists_published_days_with_the_range_sum(client: TestClient) -> None:
-    # OQ-31 item 8: Σ daily_pnl from start_date: 0, then 0 + (−8034.1345282660).
+def test_the_pnl_series_has_every_date_with_the_range_sum(client: TestClient) -> None:
+    # OQ-31 item 8, OQ-41: Σ daily_pnl from start_date; 16/10 is not processed and adds 0.
     body = _get(client, "/portfolio/pnl?start_date=2026-10-14&end_date=2026-10-16")
 
     assert body == {
@@ -414,6 +416,15 @@ def test_the_pnl_series_lists_published_days_with_the_range_sum(client: TestClie
                 "pnl_status": "COMPLETE",
                 "status": "PROCESSED",
                 "published_at": PUBLISHED_AT_JSON,
+            },
+            {
+                "date": "2026-10-16",
+                "daily_pnl": None,
+                "cumulative_pnl": None,
+                "range_cumulative_pnl": "-8034.1345282660",
+                "pnl_status": None,
+                "status": "NOT_PROCESSED",
+                "published_at": None,
             },
         ]
     }

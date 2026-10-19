@@ -3,8 +3,8 @@
 
 - ``GET /portfolio/summary?date=YYYY-MM-DD``: both chains of the date and AUM;
 - ``GET /portfolio/positions?date=YYYY-MM-DD``: the positions table of the date;
-- ``GET /portfolio/pnl?start_date=&end_date=``: the published positions days, ``{items}``
-  (OQ-16, OQ-27, OQ-31 item 8).
+- ``GET /portfolio/pnl?start_date=&end_date=``: every date of the range, ``{items}`` (OQ-16,
+  OQ-27, OQ-31 item 8, OQ-41).
 
 Published data only, never recalculated on GET (spec §11.4). The composition root builds the
 router with its provider of the query service, which wires Asset, Prices and Processing's

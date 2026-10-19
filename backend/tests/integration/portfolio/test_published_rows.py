@@ -6,7 +6,7 @@ date; the writer itself never commits."""
 
 from __future__ import annotations
 
-from datetime import date, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -30,6 +30,7 @@ from di1.modules.portfolio.domain.valuation import (
     ReferenceSource,
     ValuationStatus,
 )
+from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.clock import FixedClock
 from tests.integration.asset.conftest import Di1Catalogue
@@ -552,3 +553,49 @@ async def test_a_position_closed_on_d_leaves_d_plus_one_with_no_asset(
     assert day.cumulative_pnl == Decimal("3")
     assert day.valuation_status is COMPLETE
     assert day.pnl_status is COMPLETE
+
+
+async def test_case_27_the_range_sum_skips_unprocessed_and_failed_days(
+    di1: Di1Catalogue, publish: Publisher, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    # Spec §13 case 27, OQ-41 item 4: D1 100, D2 not processed, D3 −40, D4 FAILED over an older
+    # published row (daily 999) → 100, 100, 60, 60; D4 shows FAILED with no daily P&L.
+    f28, _ = _ids(di1)
+    days = [D + timedelta(days=n) for n in range(4)]
+    for on, daily in ((days[0], "100"), (days[2], "-40"), (days[3], "999")):
+        held = (_position(f28, 10), _valued(f28, "1", ValuationStatus.COMPLETE), _pnl(daily, "0"))
+        await publish.positions(on, [held], "1", _portfolio_pnl(daily, None))
+    processed_at = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
+    statuses = FakeDateStatusReader(
+        {
+            on: DateStatus(on, status, None, processed_at, None)
+            for on, status in (
+                (days[0], ChainStatus.PROCESSED),
+                (days[2], ChainStatus.PROCESSED_WITH_ISSUES),
+                (days[3], ChainStatus.FAILED),
+            )
+        }
+    )
+
+    async with SqlAlchemyUnitOfWork(session_factory) as uow:
+        points = await portfolio_query_service(
+            uow,
+            assets=asset_reader(uow.session),
+            prices=FakePriceReader(),
+            date_statuses=statuses,
+            clock=FixedClock(days[3]),
+        ).get_pnl_series(days[0], days[3])
+
+    assert [p.range_cumulative_pnl for p in points] == [
+        Decimal("100"),
+        Decimal("100"),
+        Decimal("60"),
+        Decimal("60"),
+    ]
+    assert [p.status for p in points] == [
+        ChainStatus.PROCESSED,
+        None,
+        ChainStatus.PROCESSED_WITH_ISSUES,
+        ChainStatus.FAILED,
+    ]
+    assert points[3].daily_pnl is None

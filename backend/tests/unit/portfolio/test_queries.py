@@ -309,14 +309,16 @@ class TestPositionTable:
 
 
 class TestPnLSeries:
-    async def test_points_sum_daily_pnl_from_the_start_and_break_at_a_gap(
+    """OQ-41: one point per calendar date of the range; the range sum never goes null, a date not
+    processed or with a null daily P&L adding 0."""
+
+    async def test_every_date_is_a_point_and_a_gap_adds_zero(
         self,
         queries: PortfolioQueries,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
     ) -> None:
-        # OQ-31 item 8: Σ daily_pnl from start; null from the first day with null daily_pnl or no
-        # published day. D: 10; D+1: 5 → 15; D+2 not processed; D+3: 7 → null (after the gap).
+        # D: 10; D+1: 5 → 15; D+2 not processed → 15; D+3: 7 → 22; D+4 not processed → 22.
         days = [DAY + timedelta(days=n) for n in range(5)]
         for on, daily in ((days[0], "10"), (days[1], "5"), (days[3], "7")):
             repository.days[on] = _day(on, daily, "100")
@@ -324,18 +326,29 @@ class TestPnLSeries:
 
         points = await queries.get_pnl_series(days[0], days[4])
 
-        assert [p.date for p in points] == [days[0], days[1], days[3]]
-        assert [p.range_cumulative_pnl for p in points] == [Decimal("10"), Decimal("15"), None]
-        assert [p.cumulative_pnl for p in points] == [Decimal("100")] * 3  # stored, since inception
-        assert all(p.status is ChainStatus.PROCESSED for p in points)
-        assert all(p.published_at == POSITIONS_AT for p in points)
+        assert [p.date for p in points] == days
+        assert [p.range_cumulative_pnl for p in points] == [
+            Decimal("10"),
+            Decimal("15"),
+            Decimal("15"),
+            Decimal("22"),
+            Decimal("22"),
+        ]
+        processed = [points[0], points[1], points[3]]
+        assert [p.cumulative_pnl for p in processed] == [Decimal("100")] * 3  # stored, unchanged
+        assert all(p.status is ChainStatus.PROCESSED for p in processed)
+        assert all(p.published_at == POSITIONS_AT for p in processed)
+        for gap in (points[2], points[4]):
+            assert (gap.status, gap.published_at, gap.pnl_status) == (None, None, None)
+            assert (gap.daily_pnl, gap.cumulative_pnl) == (None, None)
 
-    async def test_a_null_daily_pnl_breaks_the_range_sum_from_that_day(
+    async def test_a_missing_price_day_adds_zero_and_keeps_its_status(
         self,
         queries: PortfolioQueries,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
     ) -> None:
+        # D: 10; D+1 processed with a missing price (daily null) → 10; D+2: 5 → 15.
         days = [DAY + timedelta(days=n) for n in range(3)]
         for on, daily in zip(days, ("10", None, "5"), strict=True):
             repository.days[on] = _day(on, daily)
@@ -343,20 +356,94 @@ class TestPnLSeries:
 
         points = await queries.get_pnl_series(days[0], days[2])
 
-        assert [p.range_cumulative_pnl for p in points] == [Decimal("10"), None, None]
+        assert [p.range_cumulative_pnl for p in points] == [
+            Decimal("10"),
+            Decimal("10"),
+            Decimal("15"),
+        ]
+        assert points[1].daily_pnl is None
         assert points[1].pnl_status is MISSING
+        assert points[1].status is ChainStatus.PROCESSED_WITH_ISSUES
 
-    async def test_a_row_without_a_positions_status_is_not_listed(
+    @pytest.mark.parametrize("chain", [ChainStatus.FAILED, ChainStatus.RUNNING])
+    async def test_a_failed_or_running_day_shows_its_status_and_adds_zero(
+        self,
+        queries: PortfolioQueries,
+        repository: InMemoryPortfolioRepository,
+        statuses: FakeDateStatusReader,
+        chain: ChainStatus,
+    ) -> None:
+        # OQ-41 item 4 (user, M2): only PROCESSED/PROCESSED_WITH_ISSUES days add their daily P&L;
+        # a FAILED or RUNNING day shows its status, no daily P&L, even over an older row.
+        days = [DAY + timedelta(days=n) for n in range(3)]
+        for on, daily in zip(days, ("100", "999", "-40"), strict=True):
+            repository.days[on] = _day(on, daily, "1")
+            statuses.statuses[on] = _status(on, ChainStatus.PROCESSED, None)
+        statuses.statuses[days[1]] = _status(days[1], chain, None)
+
+        points = await queries.get_pnl_series(days[0], days[2])
+
+        assert [p.range_cumulative_pnl for p in points] == [
+            Decimal("100"),
+            Decimal("100"),
+            Decimal("60"),
+        ]
+        stopped = points[1]
+        assert stopped.status is chain
+        assert stopped.published_at == POSITIONS_AT
+        assert (stopped.daily_pnl, stopped.cumulative_pnl, stopped.pnl_status) == (None, None, None)
+
+    async def test_case_27_an_unprocessed_day_adds_zero(
         self,
         queries: PortfolioQueries,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
     ) -> None:
-        # Only published days are listed, so a point always has a status (OQ-31 item 8).
+        # Spec §13 case 27 (OQ-41): D1 100, D2 not processed, D3 −40 → 100, 100, 60.
+        days = [DAY + timedelta(days=n) for n in range(3)]
+        for on, daily in ((days[0], "100"), (days[2], "-40")):
+            repository.days[on] = _day(on, daily)
+            statuses.statuses[on] = _status(on, ChainStatus.PROCESSED, None)
+
+        points = await queries.get_pnl_series(days[0], days[2])
+
+        assert [p.range_cumulative_pnl for p in points] == [
+            Decimal("100"),
+            Decimal("100"),
+            Decimal("60"),
+        ]
+        assert points[1].status is None
+
+    async def test_a_range_starting_on_a_gap_sums_from_zero(
+        self,
+        queries: PortfolioQueries,
+        repository: InMemoryPortfolioRepository,
+        statuses: FakeDateStatusReader,
+    ) -> None:
+        repository.days[DAY + timedelta(days=1)] = _day(DAY + timedelta(days=1), "-3")
+        statuses.statuses[DAY + timedelta(days=1)] = _status(
+            DAY + timedelta(days=1), ChainStatus.PROCESSED, None
+        )
+
+        points = await queries.get_pnl_series(DAY, DAY + timedelta(days=1))
+
+        assert [p.range_cumulative_pnl for p in points] == [Decimal("0"), Decimal("-3")]
+
+    async def test_a_row_without_a_positions_status_reads_not_processed(
+        self,
+        queries: PortfolioQueries,
+        repository: InMemoryPortfolioRepository,
+        statuses: FakeDateStatusReader,
+    ) -> None:
+        # Freshness comes only from date_status (OQ-23): a row with no positions status is ignored.
         repository.days[DAY] = _day(DAY, "10")
         statuses.statuses[DAY] = _status(DAY, None, ChainStatus.PROCESSED)
 
-        assert await queries.get_pnl_series(DAY, DAY) == ()
+        (point,) = await queries.get_pnl_series(DAY, DAY)
+
+        assert point.status is None
+        assert point.daily_pnl is None
+        assert point.range_cumulative_pnl == Decimal("0")
 
     async def test_a_start_after_the_end_is_an_invalid_range(
         self, queries: PortfolioQueries
@@ -391,7 +478,7 @@ class TestFutureDates:
     async def test_today_is_read(self, queries: PortfolioQueries) -> None:
         assert (await queries.get_summary(TODAY)).date == TODAY
         assert (await queries.get_position_table(TODAY)).items == ()
-        assert await queries.get_pnl_series(DAY, TODAY) == ()
+        assert (await queries.get_pnl_series(DAY, TODAY))[-1].date == TODAY  # every date (OQ-41)
 
     async def test_a_pnl_series_ending_after_today_is_rejected_on_end_date(
         self, queries: PortfolioQueries

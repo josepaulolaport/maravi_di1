@@ -36,7 +36,8 @@ from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 
 ZERO = Decimal("0")
 PROCESSED = frozenset({ChainStatus.PROCESSED, ChainStatus.PROCESSED_WITH_ISSUES})
-"""The chain statuses whose published figures a read combines (OQ-38, OQ-40)."""
+"""The chain statuses whose published figures a read shows and combines: AUM (OQ-38, OQ-40)
+and a P&L point's daily figures (OQ-41 item 4)."""
 
 
 class PortfolioQueries:
@@ -136,31 +137,27 @@ class PortfolioQueries:
         statuses = await self._date_statuses.get_date_statuses(start_date, end_date, uow=self._uow)
         days = {d.date: d for d in await self._repository.get_portfolio_days(start_date, end_date)}
         points: list[PnLPointView] = []
-        running: Decimal | None = ZERO
+        running = ZERO
         for offset in range((end_date - start_date).days + 1):
             current = start_date + timedelta(days=offset)
-            day, status = days.get(current), statuses.get(current)
-            if (
-                day is None
-                or status is None
-                or status.portfolio is None
-                or status.portfolio_processed_at is None
-            ):
-                running = None  # not published: the range sum is broken from here (OQ-31 item 8)
-                continue
-            with financial_context():
-                running = (
-                    None if running is None or day.daily_pnl is None else running + day.daily_pnl
-                )
+            status = statuses.get(current)
+            chain = None if status is None else status.portfolio
+            # A date's figures show and count only when its positions chain is processed (OQ-23,
+            # OQ-41 item 4): not processed, FAILED or RUNNING show no P&L and add 0, whatever
+            # older rows remain.
+            day = days.get(current) if chain in PROCESSED else None
+            if day is not None and day.daily_pnl is not None:
+                with financial_context():
+                    running = running + day.daily_pnl  # a gap or a null daily adds 0 (OQ-41)
             points.append(
                 PnLPointView(
                     date=current,
-                    daily_pnl=day.daily_pnl,
-                    cumulative_pnl=day.cumulative_pnl,
+                    daily_pnl=None if day is None else day.daily_pnl,
+                    cumulative_pnl=None if day is None else day.cumulative_pnl,
                     range_cumulative_pnl=running,
-                    pnl_status=day.pnl_status,
-                    status=status.portfolio,
-                    published_at=status.portfolio_processed_at,
+                    pnl_status=None if day is None else day.pnl_status,
+                    status=chain,
+                    published_at=None if status is None else status.portfolio_processed_at,
                 )
             )
         return tuple(points)

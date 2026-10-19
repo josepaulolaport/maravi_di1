@@ -154,13 +154,15 @@ class PortfolioPositionsOut(BaseModel):
 
 
 class PnlPointOut(BaseModel):
+    """One calendar date of the range, processed or not (OQ-41)."""
+
     date: date
     daily_pnl: str | None
     cumulative_pnl: str | None
-    range_cumulative_pnl: str | None
-    pnl_status: str
+    range_cumulative_pnl: str
+    pnl_status: str | None
     status: str
-    published_at: datetime
+    published_at: datetime | None
 
     @classmethod
     def of(cls, point: PnLPointView) -> PnlPointOut:
@@ -168,9 +170,9 @@ class PnlPointOut(BaseModel):
             date=point.date,
             daily_pnl=_decimal(point.daily_pnl),
             cumulative_pnl=_decimal(point.cumulative_pnl),
-            range_cumulative_pnl=_decimal(point.range_cumulative_pnl),
-            pnl_status=point.pnl_status.value,
-            status=point.status.value,
+            range_cumulative_pnl=to_plain(point.range_cumulative_pnl),
+            pnl_status=_code(point.pnl_status),
+            status=_status(point.status),
             published_at=point.published_at,
         )
 
