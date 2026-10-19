@@ -697,3 +697,48 @@ async def test_queue_a_backdated_trade_queue_b_cancel_a_finish_b(worker: Worker)
     assert (await worker.run_row(second))["status"] == "COMPLETED"
     assert await worker.statuses() == {D1: ("PROCESSED", None), D2: ("PROCESSED", None)}
     assert worker.world.portfolio.positions[D2].state.positions[0].quantity == 3
+
+
+# --- merger review follow-ups (spec §13 cases 19 and 26; plan §7) -------------------------
+
+
+async def test_case_19_a_cash_run_over_failed_positions_leaves_aum_null(worker: Worker) -> None:
+    await seed_statuses(worker.engine, {D1: ("FAILED", None)})
+    await worker.enqueue("CASH", D1, D1)
+
+    await worker.dispatch_and_run()
+
+    assert await worker.statuses() == {D1: ("FAILED", "PROCESSED")}
+    assert await worker.writes() == [(D1, "CASH", False)]  # FAILED is not processed (OQ-38)
+
+
+async def test_case_26_an_earlier_failed_status_alone_fails_without_asking_the_ledger(
+    worker: Worker,
+) -> None:
+    october_1, october_5 = date(2026, 10, 1), date(2026, 10, 5)
+    await seed_statuses(worker.engine, {october_1: (None, "FAILED")})
+    request_id = await worker.enqueue("CASH", october_5, october_5)
+
+    await worker.dispatch_and_run()
+
+    assert (await worker.statuses())[october_5] == (None, "FAILED")
+    assert worker.world.ledger.asked == []
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["error_code"]) == ("FAILED", "CASH_PREDECESSOR_MISSING")
+
+
+async def test_a_command_lost_after_the_outbox_publish_is_re_dispatched(worker: Worker) -> None:
+    request_id = await worker.enqueue("CASH", D1, D1)
+    assert await worker.dispatcher.dispatch_next() == request_id
+    # The relay published the command and the worker never claimed it (lost, or it crashed).
+    assert await worker.dispatcher.dispatch_next() is None  # the dispatch lease still holds
+    worker.clock.advance(61)
+
+    assert await worker.dispatcher.dispatch_next() == request_id
+    assert len(await worker.outbox()) == 2
+    assert (await worker.run_row(request_id))["status"] == "DISPATCHED"
+    claim = await worker.claim(request_id)
+    assert claim is not None
+    await worker.processor.run(claim.request_id, claim.token)
+
+    assert (await worker.run_row(request_id))["status"] == "COMPLETED"
