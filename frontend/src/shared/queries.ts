@@ -36,14 +36,18 @@ export function useSummary(date: IsoDate) {
     queryFn: () => portfolioApi.getSummary(date),
     refetchInterval: (q) => (isRunning(q.state.data) ? RUNNING_POLL_MS : false),
   });
-  const wasRunning = useRef(false);
+  // The date last seen RUNNING: only that same date leaving RUNNING means its run finished;
+  // moving to another date is not a finished run, so nothing is re-read.
+  const runningDate = useRef<IsoDate | null>(null);
   useEffect(() => {
     if (!query.data) return;
-    const running = isRunning(query.data);
-    if (wasRunning.current && !running) {
+    const { date: seen } = query.data;
+    if (isRunning(query.data)) {
+      runningDate.current = seen;
+    } else if (runningDate.current === seen) {
+      runningDate.current = null;
       void queryClient.invalidateQueries({ queryKey: queryRoots.portfolio });
     }
-    wasRunning.current = running;
   }, [query.data, queryClient]);
   return query;
 }

@@ -62,7 +62,7 @@ interface IssuesTabProps {
   onSearchChange: (text: string) => void;
 }
 
-/** Pendências (§11.1, §10.3): the current actionable issues, three types only (OQ-19). */
+/** Pendências (§11.1, §10.3): the current actionable issues, two types only (OQ-31). */
 export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
   if (issues.isError) {
     return <ErrorState error={issues.error} onRetry={() => void issues.refetch()} />;

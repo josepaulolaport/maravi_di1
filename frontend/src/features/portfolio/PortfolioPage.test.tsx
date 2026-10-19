@@ -301,6 +301,33 @@ describe('Carteira (§11.4)', () => {
     expect(positionsReads).toBeGreaterThanOrEqual(2);
   });
 
+  it('OQ-23 moving from a date being processed to another date reads the new date once', async () => {
+    const summaryReads: string[] = [];
+    server.use(
+      http.get(url('/portfolio/summary'), ({ request }) => {
+        const date = new URL(request.url).searchParams.get('date') ?? '';
+        summaryReads.push(date);
+        const summary = summaryOf(date);
+        return HttpResponse.json<PortfolioSummary>(
+          date === '2026-10-15'
+            ? { ...summary, positions: { ...summary.positions, status: 'RUNNING' } }
+            : summary,
+        );
+      }),
+    );
+    const { router } = await openCarteira('2026-10-15');
+    expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Processando']);
+
+    await router.navigate('/carteira?date=2026-10-16');
+
+    await waitFor(() => {
+      expect(screen.getByText('DI1F29', { selector: 'td *' })).toBeInTheDocument();
+    });
+    // Leaving a RUNNING date is not "the date finished processing": nothing is re-read.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(summaryReads.filter((date) => date === '2026-10-16')).toHaveLength(1);
+  });
+
   it("§11.4 a failed chain's badge leads to Processamentos for that date and chain", async () => {
     override15({ positions: { status: 'FAILED' } });
     await openCarteira('2026-10-15');
