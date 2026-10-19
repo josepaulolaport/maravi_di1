@@ -1,0 +1,60 @@
+"""P&L result values and completeness states (spec §8.3; schema ``pnl_status``).
+
+A figure that depends on a missing reference price is ``None``, never zero. Internal to the
+module until the integrator freezes the public DTOs (plan §3, W0.3b).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from decimal import Decimal
+from enum import StrEnum
+from uuid import UUID
+
+
+class CalculationCompleteness(StrEnum):
+    """Mirrors the schema's ``pnl_status`` values."""
+
+    COMPLETE = "COMPLETE"
+    MISSING = "MISSING"
+
+
+class MissingReferencePrice(StrEnum):
+    """Which exact-date reference PU a calculation needed and did not get."""
+
+    PREVIOUS = "PREVIOUS"  # D-1, needed only when Q[D-1] != 0 (OQ-4)
+    CURRENT = "CURRENT"  # D, needed when Q[D-1] != 0 or the asset trades on D
+
+
+@dataclass(frozen=True, slots=True)
+class AssetPnLResult:
+    """One asset on one day. ``daily_pnl`` is set only when both components are."""
+
+    position_pnl: Decimal | None
+    trades_pnl: Decimal | None
+    daily_pnl: Decimal | None
+    status: CalculationCompleteness
+    missing_prices: frozenset[MissingReferencePrice]
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioPnLResult:
+    """The portfolio on one day, summed over every expected asset (OQ-10).
+
+    ``status`` is the completeness of the day's P&L; ``cumulative_status`` separately records
+    whether the cumulative chain is unbroken, since a complete day after a gap still has a valid
+    ``daily_pnl`` but no ``cumulative_pnl`` (§8.3).
+    """
+
+    position_pnl: Decimal | None
+    trades_pnl: Decimal | None
+    daily_pnl: Decimal | None
+    cumulative_pnl: Decimal | None
+    status: CalculationCompleteness
+    cumulative_status: CalculationCompleteness
+    incomplete_assets: frozenset[UUID]
+
+
+def unsigned_zero(value: Decimal) -> Decimal:
+    """A short times a zero move is ``-0`` in ``Decimal``; P&L never carries that sign."""
+    return value.copy_abs() if value.is_zero() else value
