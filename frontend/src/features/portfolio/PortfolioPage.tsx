@@ -9,7 +9,7 @@ import { CumulativePnlCard } from './components/CumulativePnlCard';
 import { DataStatus } from './components/DataStatus';
 import { KpiGrid } from './components/KpiGrid';
 import { PositionsTable } from './components/PositionsTable';
-import { ChainNotices, NotProcessedNotice } from './components/StatusNotices';
+import { NotProcessedNotice } from './components/StatusNotices';
 import {
   useEvaluationDate,
   usePortfolioPositions,
@@ -83,14 +83,6 @@ function PortfolioBody({ date, summary, positions }: BodyProps) {
 
   return (
     <Stack gap="md">
-      <ChainNotices
-        date={date}
-        cash={data.cash.status}
-        positions={data.positions.status}
-        incomplete={
-          data.positions.valuation_status === 'MISSING' || data.positions.pnl_status === 'MISSING'
-        }
-      />
       <KpiGrid summary={data} />
       {rows.status !== 'NOT_PROCESSED' && (
         <>

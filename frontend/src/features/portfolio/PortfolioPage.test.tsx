@@ -30,6 +30,11 @@ function expectNoKpiBadge() {
   }
 }
 
+/** No notice card above the figures (user, 2026-10-18): the two badges tell the state. */
+function expectNoCard() {
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+}
+
 const KPIS = ['Saldo em caixa', 'Patrimônio total', 'P&L diário', 'P&L posições', 'P&L operações'];
 
 function rowOf(assetCode: string) {
@@ -85,8 +90,7 @@ describe('Carteira (§11.4)', () => {
     expect(kpi('P&L operações').getByText('-R$ 9.254,33')).toBeInTheDocument();
     expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Atualizado']);
     expectNoKpiBadge();
-    expect(screen.queryByText(/desatualizad/)).not.toBeInTheDocument();
-    expect(screen.queryByText('Resultados incompletos')).not.toBeInTheDocument();
+    expectNoCard();
   });
 
   it('§11.4 shows the cumulative P&L of the same publication', async () => {
@@ -157,24 +161,18 @@ describe('Carteira (§11.4)', () => {
     expect(row.getAllByText('—')).toHaveLength(4);
   });
 
-  it('§8.3 flags an incomplete day and links to Pendências', async () => {
+  it('§8.3 an incomplete day shows no card: the figures read "—" and the asset is marked', async () => {
     await openCarteira('2026-10-16');
 
-    expect(screen.getByText('Resultados incompletos')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Ver pendências' })).toHaveAttribute(
-      'href',
-      '/central-de-controle?tab=pendencias',
-    );
+    expectNoCard();
+    expect(kpi('Patrimônio total').getByText('—')).toBeInTheDocument();
+    expect(rowOf('DI1F29').getByText('Sem preço')).toBeInTheDocument();
   });
 
-  it('§10.4 OQ-21 a corrected price makes only positions stale; the link asks for Posições', async () => {
+  it('§10.4 OQ-21 a corrected price: only the Posições badge says it', async () => {
     await openCarteira('2026-10-16');
 
-    expect(screen.getByText('Posições desatualizadas')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Ir para Processamentos' })).toHaveAttribute(
-      'href',
-      '/central-de-controle?tab=processamentos&inicio=2026-10-16&fim=2026-10-16&escopo=posicoes',
-    );
+    expectNoCard();
     expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Desatualizado']);
     expectNoKpiBadge();
   });
@@ -183,16 +181,12 @@ describe('Carteira (§11.4)', () => {
     override15({ cash: { status: 'STALE' }, aum: { status: 'STALE' } });
     await openCarteira('2026-10-15');
 
-    expect(screen.getByText('Caixa desatualizado')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Ir para Processamentos' })).toHaveAttribute(
-      'href',
-      '/central-de-controle?tab=processamentos&inicio=2026-10-15&fim=2026-10-15&escopo=caixa',
-    );
+    expectNoCard();
     expect(dataStatus()).toEqual(['Caixa: Desatualizado', 'Posições: Atualizado']);
     expectNoKpiBadge();
   });
 
-  it('§11.4 OQ-21 both chains stale: one notice that asks for Tudo', async () => {
+  it('§11.4 OQ-21 both chains stale: both badges say so, no card', async () => {
     override15({
       cash: { status: 'STALE' },
       positions: { status: 'STALE' },
@@ -200,11 +194,8 @@ describe('Carteira (§11.4)', () => {
     });
     await openCarteira('2026-10-15');
 
-    expect(screen.getByText('Caixa e posições desatualizados')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Ir para Processamentos' })).toHaveAttribute(
-      'href',
-      '/central-de-controle?tab=processamentos&inicio=2026-10-15&fim=2026-10-15&escopo=tudo',
-    );
+    expectNoCard();
+    expect(dataStatus()).toEqual(['Caixa: Desatualizado', 'Posições: Desatualizado']);
   });
 
   it('§11.4 OQ-21 cash processed but positions not: cash shows, AUM and positions do not', async () => {
@@ -227,7 +218,7 @@ describe('Carteira (§11.4)', () => {
     );
     await openCarteira('2026-10-15');
 
-    expect(screen.getByText('Posições não processadas')).toBeInTheDocument();
+    expectNoCard();
     expect(kpi('Saldo em caixa').getByText('R$ 199.650,37')).toBeInTheDocument();
     expect(kpi('Patrimônio total').getByText('—')).toBeInTheDocument();
     expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Não processado']);
@@ -327,15 +318,15 @@ describe('Carteira (§11.4)', () => {
     });
     expect(router.state.location.search).toBe(`?date=${todayInSaoPaulo()}`);
   });
-  it('§10.4 shows only the stale notice for a stale but complete day', async () => {
+  it('§10.4 a stale but complete day: the Posições badge only', async () => {
     override15({ positions: { status: 'STALE' }, aum: { status: 'STALE' } }, { status: 'STALE' });
     await openCarteira('2026-10-15');
 
-    expect(screen.getByText('Posições desatualizadas')).toBeInTheDocument();
-    expect(screen.queryByText('Resultados incompletos')).not.toBeInTheDocument();
+    expectNoCard();
+    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Desatualizado']);
   });
 
-  it('§8.3 shows only the incomplete notice, and marks the asset, when P&L is missing', async () => {
+  it('§8.3 P&L missing: no card, the asset is marked', async () => {
     const rows = positions.find((p) => p.date === '2026-10-15')?.items ?? [];
     override15(
       {
@@ -356,8 +347,7 @@ describe('Carteira (§11.4)', () => {
     );
     await openCarteira('2026-10-15');
 
-    expect(screen.getByText('Resultados incompletos')).toBeInTheDocument();
-    expect(screen.queryByText('Posições desatualizadas')).not.toBeInTheDocument();
+    expectNoCard();
     expect(rowOf('DI1F28').getByText('P&L indisponível')).toBeInTheDocument();
     expect(rowOf('DI1F29').queryByText('P&L indisponível')).not.toBeInTheDocument();
   });
