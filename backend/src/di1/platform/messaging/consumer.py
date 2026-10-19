@@ -9,7 +9,21 @@ interfaces.md "Transaction boundaries" 7. For each delivery:
    receives the UoW and may commit it itself (a service called as ``*, uow``); whatever it left
    uncommitted, the inbox record included, is committed after it returns;
 3. only then is the delivery acknowledged. If the process dies before the ack, the broker
-   redelivers and the inbox turns the redelivery into a no-op.
+   redelivers and the inbox turns the redelivery into a no-op;
+4. a handler may return work to run after the ack (`AfterAck`): the processing run, whose
+   claim is the durable state change of step 2 and which then commits date by date in Units of
+   Work of its own (plan §7). The ack does not wait for a range that may take longer than the
+   broker's consumer timeout; recovery after a crash comes from the claim's lease, not from a
+   redelivery. A failure there is logged: the message is already acknowledged.
+
+The work after the ack runs in an `AfterAckRunner`, one at a time, in a task the process owns,
+not in the broker's delivery task: a channel that closes (a broker restart, a missed heartbeat)
+does not cancel a run that no longer depends on it. Deliveries are not serialised behind a run:
+a command that arrives meanwhile (a duplicate the relay resent, a re-dispatch) is claimed and
+acknowledged at once, and its run, if any, waits its turn in the runner. One active job at a
+time is the database's guarantee (the claim), not the consumer's. If the ack itself fails after
+the commit, the work still runs: the redelivery is an inbox duplicate with no run of its own,
+and the claim token fences the work.
 
 Failures: a `PermanentMessageError` from the handler dead-letters the delivery at once; any
 other exception rolls back and, after a pause, returns it to the queue, where the broker
@@ -26,7 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from aio_pika.abc import (
@@ -51,8 +65,73 @@ class PermanentMessageError(Exception):
     """The message can never be handled (an unknown schema version, for instance)."""
 
 
+type AfterAck = Callable[[], Awaitable[None]]
+"""Work a handler hands back to run once its delivery is acknowledged.
+
+What such work must guarantee, since the consumer cannot (interfaces.md "Transaction
+boundaries" 4 and 6):
+
+- it may start long after its claim committed, behind another run: it re-checks its claim and
+  lease when it starts, and renews them or ends without writing;
+- it bounds every wait (statement and lock timeouts) and stops at the first failed fencing
+  check: a run that hangs holds every later run of the process behind it.
+"""
+
+
 class MessageHandler(Protocol):
-    async def __call__(self, envelope: Envelope, *, uow: UnitOfWork) -> None: ...
+    async def __call__(self, envelope: Envelope, *, uow: UnitOfWork) -> AfterAck | None: ...
+
+
+class AfterAckRunner:
+    """Runs the work handed back after acks, one at a time and in order, in a task of its own.
+
+    A process shares one runner among its consumers, so it runs one job at a time. `stop`
+    cancels the work in progress and drops the waiting work, and any submitted after it: each
+    was claimed, and its lease recovers it."""
+
+    def __init__(self) -> None:
+        self._waiting: asyncio.Queue[tuple[AfterAck, str]] = asyncio.Queue()
+        self._running: asyncio.Task[None] | None = None
+        self._stopped = False
+
+    def submit(self, work: AfterAck, description: str) -> None:
+        """Queue ``work``; a failure is logged with ``description``."""
+        if self._stopped:
+            logger.warning("%s dropped: the worker is stopping; its lease recovers it", description)
+            return
+        self._waiting.put_nowait((work, description))
+        if self._running is None or self._running.done():
+            self._running = asyncio.create_task(self._run_waiting())
+
+    async def _run_waiting(self) -> None:
+        while not self._waiting.empty():
+            work, description = self._waiting.get_nowait()
+            try:
+                await work()
+            except Exception:
+                logger.exception("%s failed", description)
+
+    async def wait_idle(self) -> None:
+        """Return once no work is running or waiting."""
+        while self._running is not None and not self._running.done():
+            await asyncio.wait({self._running})
+
+    async def stop(self, *, timeout_seconds: float = 5.0) -> None:
+        """Drop the waiting work and cancel the work in progress, waiting for it at most
+        ``timeout_seconds``. Work submitted afterwards is dropped."""
+        self._stopped = True
+        dropped = self._waiting.qsize()
+        while not self._waiting.empty():
+            self._waiting.get_nowait()
+        if dropped:
+            logger.warning("%d waiting runs dropped; their leases recover them", dropped)
+        running, self._running = self._running, None
+        if running is None or running.done():
+            return
+        running.cancel()
+        _, pending = await asyncio.wait({running}, timeout=timeout_seconds)
+        if pending:
+            logger.warning("the work after the ack did not stop in %s s", timeout_seconds)
 
 
 class MessageConsumer:
@@ -63,7 +142,10 @@ class MessageConsumer:
         handler: MessageHandler,
         uow_factory: Callable[[], SqlAlchemyUnitOfWork],
         settings: BrokerSettings,
+        after_ack: AfterAckRunner | None = None,
     ) -> None:
+        """``after_ack`` runs the work handlers hand back; the worker shares one among its
+        consumers. Without one, the consumer has a runner of its own."""
         if not 0 < len(consumer_name) <= CONSUMER_NAME_MAX_LENGTH:
             raise ValueError(f"consumer_name must have 1 to {CONSUMER_NAME_MAX_LENGTH} characters")
         self._consumer_name = consumer_name
@@ -71,6 +153,7 @@ class MessageConsumer:
         self._uow_factory = uow_factory
         self._retry_base_delay = settings.rabbitmq_retry_base_delay_seconds
         self._retry_max_delay = settings.rabbitmq_retry_max_delay_seconds
+        self._after_ack = after_ack if after_ack is not None else AfterAckRunner()
 
     async def start(self, queue: AbstractQueue) -> str:
         """Consume ``queue`` with manual acknowledgements; return the consumer tag."""
@@ -90,7 +173,7 @@ class MessageConsumer:
             return
 
         try:
-            await self._process(envelope)
+            after_ack = await self._process(envelope)
         except PermanentMessageError:
             logger.exception(
                 "%s: message %s (%s) dead-lettered",
@@ -110,7 +193,21 @@ class MessageConsumer:
             await asyncio.sleep(self.retry_delay(message))
             await message.nack(requeue=True)
             return
-        await message.ack()
+        try:
+            await message.ack()
+        except Exception:
+            logger.exception(
+                "%s: the ack of message %s (%s) failed after its commit",
+                self._consumer_name,
+                envelope.message_id,
+                envelope.message_type,
+            )
+        if after_ack is not None:
+            self._after_ack.submit(
+                after_ack,
+                f"{self._consumer_name}: the work after the ack of message"
+                f" {envelope.message_id} ({envelope.message_type})",
+            )
 
     def retry_delay(self, message: AbstractIncomingMessage) -> float:
         """The pause before a failed delivery returns to the queue."""
@@ -119,13 +216,14 @@ class MessageConsumer:
         delay: float = self._retry_base_delay * 2 ** min(redeliveries, _MAX_BACKOFF_EXPONENT)
         return min(delay, self._retry_max_delay)
 
-    async def _process(self, envelope: Envelope) -> None:
+    async def _process(self, envelope: Envelope) -> AfterAck | None:
+        after_ack: AfterAck | None = None
         async with self._uow_factory() as uow:
             first = await record_delivery(
                 uow, consumer_name=self._consumer_name, message_id=envelope.message_id
             )
             if first:
-                await self._handler(envelope, uow=uow)
+                after_ack = await self._handler(envelope, uow=uow)
             else:
                 logger.info(
                     "%s: duplicate delivery of message %s ignored",
@@ -134,6 +232,7 @@ class MessageConsumer:
                 )
             if not uow.committed:
                 await uow.commit()
+        return after_ack
 
 
 async def open_consumer_channel(
