@@ -325,6 +325,13 @@ class TestCreateProduct:
         )
         assert client.get(f"/products/{created['id']}").json() == created
 
+    def test_the_code_is_stored_trimmed_and_upper_cased(
+        self, client: TestClient, seeded: Di1Catalogue
+    ) -> None:
+        body = DAP | {"asset_class_id": seeded.interest_rate_class_id, "code": " dap "}
+
+        assert client.post("/products", json=body).json()["code"] == "DAP"
+
     def test_the_multiplier_defaults_to_one(self, client: TestClient, seeded: Di1Catalogue) -> None:
         futures = {"face_value": "100000", "settlement_method": "CASH"}
         body = DAP | {"asset_class_id": seeded.interest_rate_class_id, "futures": futures}

@@ -37,11 +37,11 @@ from di1.modules.asset.domain.rules import (
     FuturesTerms,
     has_nul,
     normalize_instrument_code,
+    normalize_product_code,
     validate_catalogue_code,
     validate_futures_for_type,
     validate_maturity,
     validate_name,
-    validate_product_code,
 )
 from di1.modules.asset.domain.search import matches
 from di1.modules.prices.public import LatestPriceReader, ReferencePriceRecord
@@ -197,8 +197,9 @@ class AssetService:
         return created
 
     async def create_product(self, request: NewProduct, *, uow: UnitOfWork) -> Product:
+        code, code_errors = normalize_product_code(request.code)
         errors = [
-            *validate_product_code(request.code),
+            *code_errors,
             *validate_name(request.name, max_length=PRODUCT_NAME_LENGTH, non_blank=True),
         ]
         classified = (
@@ -213,12 +214,12 @@ class AssetService:
                 validate_futures_for_type(classified.instrument_type.code, request.futures)
             )
         duplicate = _invalid("Já existe um produto com este código.", "code")
-        if not errors and await self._repository.product_code_exists(request.code):
+        if not errors and await self._repository.product_code_exists(code):
             errors.append(duplicate)
         _raise_if(errors)
         product_id = await _insert(
             self._repository.add_product(
-                request.asset_class_id, request.code, request.name, request.futures
+                request.asset_class_id, code, request.name, request.futures
             ),
             duplicate,
         )

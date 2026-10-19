@@ -20,11 +20,11 @@ import pytest
 from di1.modules.asset.domain.rules import (
     FuturesTerms,
     normalize_instrument_code,
+    normalize_product_code,
     validate_catalogue_code,
     validate_futures_for_type,
     validate_maturity,
     validate_name,
-    validate_product_code,
 )
 from di1.shared.errors import ErrorCode, ErrorDetail
 
@@ -90,13 +90,24 @@ class TestCatalogueCode:
 
 
 class TestProductCode:
-    @pytest.mark.parametrize("code", ["DI1", "di1", "DOL.FUT", "A_B/C-D"])
-    def test_accepts_the_schema_characters(self, code: str) -> None:
-        assert validate_product_code(code) == ()
+    @pytest.mark.parametrize(
+        ("typed", "stored"),
+        [("DI1", "DI1"), ("di1", "DI1"), ("  Dol.Fut ", "DOL.FUT"), ("a_b/c-d", "A_B/C-D")],
+    )
+    def test_is_trimmed_and_upper_cased(self, typed: str, stored: str) -> None:
+        # OQ-33 item 1: an instrument or product code is trimmed and upper-cased.
+        assert normalize_product_code(typed) == (stored, ())
 
-    @pytest.mark.parametrize("code", ["", " DI1", "DI 1", "DI1!", "A" * 33])
-    def test_rejects_anything_else(self, code: str) -> None:
-        assert _fields(validate_product_code(code)) == ["code"]
+    @pytest.mark.parametrize(
+        "typed",
+        # Non-ASCII letters that upper-case into ASCII (U+FB01 → "FI", U+0131 → "I") are refused.
+        ["", "   ", "DI 1", "DI1!", "DI1\x00", "A" * 33, "\ufb01", "d\u0131", "\u017f"],
+    )
+    def test_rejects_anything_else(self, typed: str) -> None:
+        assert _fields(normalize_product_code(typed)[1]) == ["code"]
+
+    def test_fits_its_column_once_trimmed(self) -> None:
+        assert normalize_product_code(f" {'A' * 32} ") == ("A" * 32, ())
 
 
 class TestName:

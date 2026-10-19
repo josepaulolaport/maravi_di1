@@ -59,7 +59,7 @@ def _nul(field: str) -> ErrorDetail:
 
 
 def normalize_instrument_code(typed: str) -> tuple[str, Errors]:
-    """The stored code: trimmed and upper-cased (user, 2026-10-19), with its problems."""
+    """The stored code: trimmed and upper-cased (OQ-33 item 1), with its problems."""
     code = typed.strip().upper()
     if not code:
         return code, (_invalid("Informe o código do contrato.", "code"),)
@@ -82,15 +82,20 @@ def validate_catalogue_code(code: str, *, max_length: int) -> Errors:
     return ()
 
 
-def validate_product_code(code: str) -> Errors:
-    """A product code: letters, digits and ``_ . / -`` (``DI1``)."""
-    if not _PRODUCT_CODE.fullmatch(code) or len(code) > PRODUCT_CODE_LENGTH:
+def normalize_product_code(typed: str) -> tuple[str, Errors]:
+    """The stored product code (``DI1``): trimmed and upper-cased (OQ-33 item 1), then letters,
+    digits and ``_ . / -`` only, within its column."""
+    trimmed = typed.strip()
+    code = trimmed.upper()
+    # The characters are checked before upper-casing: some non-ASCII letters upper-case into
+    # ASCII ("ﬁ" → "FI"), which the schema's character set would otherwise let through.
+    if not _PRODUCT_CODE.fullmatch(trimmed) or len(code) > PRODUCT_CODE_LENGTH:
         message = (
             "O código do produto deve conter apenas letras, dígitos e '_ . / -', "
             f"com no máximo {PRODUCT_CODE_LENGTH} caracteres."
         )
-        return (_invalid(message, "code"),)
-    return ()
+        return code, (_invalid(message, "code"),)
+    return code, ()
 
 
 def _btrim_empty(text: str) -> bool:
