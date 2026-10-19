@@ -42,6 +42,7 @@ class FuturesTerms:
     def __post_init__(self) -> None:
         if not isinstance(self.face_value, Decimal):
             raise TypeError(f"face value must be a Decimal, got {type(self.face_value).__name__}")
+        # The schema already enforces face_value > 0; this guards the invariant for any caller.
         if not self.face_value.is_finite() or self.face_value <= 0:
             raise DomainError(
                 ErrorDetail(
