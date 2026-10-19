@@ -88,9 +88,9 @@ def test_manual_wins_over_b3_and_removing_it_lets_b3_prevail(
     manual = _set(client, price_body(asset, DAY, rate="0.10"))
     [day] = _days(client, asset, DAY, DAY)
 
-    assert (day["preferred"]["source"], day["preferred"]["pu"]) == (
+    assert (day["preferred"]["source"], Decimal(day["preferred"]["pu"])) == (
         "MANUAL",
-        expected_pu("0.10", 360),
+        Decimal(expected_pu("0.10", 360)),
     )
     assert sorted(s["source"] for s in day["sources"]) == ["B3", "MANUAL"]
 
@@ -117,7 +117,7 @@ def test_a_correction_replaces_the_price_of_its_source(
     [day] = _days(client, asset, DAY, DAY)
 
     assert corrected["id"] != first["id"]
-    assert day["preferred"]["pu"] == expected_pu("0.12", 360)
+    assert Decimal(day["preferred"]["pu"]) == Decimal(expected_pu("0.12", 360))
     assert sql(database_url, "SELECT count(*) FROM prices.reference_prices") == [(1,)]
 
 
