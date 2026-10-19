@@ -51,7 +51,7 @@ Use `git commit -F <file>` or a heredoc. **Never use `--no-verify`.**
 
 ```bash
 git commit --fixup <sha>                                  # no per-commit approval
-GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash main     # before opening the PR
+GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash main     # before the first push
 git rebase main --exec "<the area's fast test command>"   # every commit still green
 ```
 
