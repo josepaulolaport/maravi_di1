@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -292,3 +292,17 @@ def test_oq40_the_api_never_advertises_all_as_a_failed_chain(client: TestClient)
     ]
 
     assert enums == [["CASH", "POSITIONS"]]
+
+
+def test_run_timestamps_are_serialized_in_utc(client: TestClient, harness: Harness) -> None:
+    """The service stamps runs in São Paulo time while PostgreSQL reads them back in UTC; the
+    HTTP shape renders both the same way, as UTC with ``Z``, so POST and GET agree."""
+    created = client.post("/processing/requests", json=BODY).json()
+    cancelled = client.post(f"/processing/requests/{created['id']}/cancel").json()
+
+    stored = harness.requests.rows[UUID(created["id"])]
+    expected = stored.created_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    assert created["created_at"] == expected
+    assert created["updated_at"].endswith("Z")
+    assert cancelled["cancel_requested_at"].endswith("Z")
+    assert cancelled["finished_at"].endswith("Z")

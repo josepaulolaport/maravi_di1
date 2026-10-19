@@ -6,7 +6,7 @@ service."""
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -30,6 +30,12 @@ class ProcessingRangeBody(BaseModel):
     start_date: date
     end_date: date
     scope: ProcessingScope
+
+
+def _utc(moment: datetime | None) -> datetime | None:
+    """One rendering for every run timestamp: the service stamps runs in São Paulo time and
+    PostgreSQL reads them back in UTC, so both are sent in UTC (``Z``)."""
+    return None if moment is None else moment.astimezone(UTC)
 
 
 class ProcessingRequestOut(BaseModel):
@@ -64,12 +70,12 @@ class ProcessingRequestOut(BaseModel):
             progress_date=request.progress_date,
             error_code=request.error_code,
             error_message=request.error_message,
-            created_at=request.created_at,
-            updated_at=request.updated_at,
-            dispatched_at=request.dispatched_at,
-            started_at=request.started_at,
-            finished_at=request.finished_at,
-            cancel_requested_at=request.cancel_requested_at,
+            created_at=request.created_at.astimezone(UTC),
+            updated_at=request.updated_at.astimezone(UTC),
+            dispatched_at=_utc(request.dispatched_at),
+            started_at=_utc(request.started_at),
+            finished_at=_utc(request.finished_at),
+            cancel_requested_at=_utc(request.cancel_requested_at),
             failed_date=request.failed_date,
             failed_chain=None
             if request.failed_chain is None
