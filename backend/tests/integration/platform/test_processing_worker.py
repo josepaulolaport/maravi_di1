@@ -1,9 +1,10 @@
 """The processing worker process: consumes its registered queues through the consumer base,
 runs the work after the ack, and shuts down cleanly on SIGTERM, during startup and during work.
 
-interfaces.md "Transaction boundaries" 6 and 7 (at-least-once; ACK only after the durable
-state change; recovery from the lease after a crash) and "DI composition" (plain factories);
-plan §7. The handler here is a fake: the real one is Processing's.
+interfaces.md "Transaction boundaries" 7 (at-least-once; ACK only after the durable state
+change) and "DI composition" (plain factories); plan §7. One worker only (user decision): a run
+left RUNNING resumes at the worker's next start, through ``on_startup``. The handler here is a
+fake: the real one is Processing's.
 """
 
 from __future__ import annotations
@@ -180,7 +181,7 @@ async def test_a_stop_during_the_run_after_the_ack_cancels_it_and_the_message_st
     publisher: MessagePublisher,
 ) -> None:
     """SIGTERM mid-range: the run is cancelled (its open date transaction rolls back), the claim
-    stays committed and the message is not redelivered: the lease recovers the run."""
+    stays committed and the message is not redelivered: the run resumes at the next start."""
     spec = queue_spec(topology, "test.command")
     handler = _Run(hold_after_ack=True)
     stop = asyncio.Event()
