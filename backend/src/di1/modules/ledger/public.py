@@ -12,15 +12,23 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
+from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
 from di1.shared.input_kind import InputKind
 
 
+class EntryType(StrEnum):
+    """The type of a ledger entry (OQ-24; schema ``entries_type_check``)."""
+
+    TRADE = "TRADE"
+    CASH = "CASH"
+
+
 @dataclass(frozen=True, slots=True)
 class TradeRecord:
-    """One active trade: a TRADE row of ``ledger.entries`` (OQ-24).
+    """One trade: a TRADE row of ``ledger.entries`` (OQ-24).
 
     ``signed_quantity`` is positive for a buy and negative for a sell, never 0 (spec §7.2).
     ``execution_pu``/``execution_rate`` are the execution price, never a reference price
@@ -47,7 +55,7 @@ class TradeRecord:
 
 @dataclass(frozen=True, slots=True)
 class CashMovementRecord:
-    """One active cash movement: a CASH row of ``ledger.entries`` (OQ-24).
+    """One cash movement: a CASH row of ``ledger.entries`` (OQ-24).
 
     ``amount`` is exact and signed: positive for a deposit (aporte), negative for a withdrawal
     (retirada), never 0. Deposits and withdrawals are never P&L.
@@ -68,15 +76,23 @@ class CashMovementRecord:
 
 class LedgerReader(Protocol):
     """Read access for Portfolio and Processing over ``ledger.entries``. Ranges are inclusive
-    calendar dates; deleted entries are never returned."""
+    calendar dates. A deleted entry no longer exists (hard delete, OQ-32)."""
 
     async def get_trades(self, start_date: date, end_date: date) -> Sequence[TradeRecord]:
-        """Active trades dated in [start_date, end_date], ordered by `TradeRecord.order_key`."""
+        """Trades dated in [start_date, end_date], ordered by `TradeRecord.order_key`."""
         ...
 
     async def get_cash_movements(
         self, start_date: date, end_date: date
     ) -> Sequence[CashMovementRecord]:
-        """Active cash movements dated in [start_date, end_date], ordered by
+        """Cash movements dated in [start_date, end_date], ordered by
         `CashMovementRecord.order_key`."""
+        ...
+
+    async def has_entries_on_or_before(
+        self, day: date, *, entry_type: EntryType | None = None
+    ) -> bool:
+        """Whether any entry is dated on or before ``day``: of ``entry_type``, or of either type
+        when ``None``. Processing's zero-state check (OQ-31, OQ-37): positions ask for
+        ``EntryType.TRADE``, cash for any type."""
         ...

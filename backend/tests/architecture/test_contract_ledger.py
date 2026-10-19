@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
 from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 
-from di1.modules.ledger.public import CashMovementRecord, TradeRecord
+from di1.modules.ledger.public import CashMovementRecord, EntryType, LedgerReader, TradeRecord
 from di1.shared.clock import SAO_PAULO
 from di1.shared.input_kind import InputKind
 
@@ -75,3 +76,16 @@ def test_records_are_frozen() -> None:
         trade.signed_quantity = 5  # type: ignore[misc]
     with pytest.raises(dataclasses.FrozenInstanceError):
         movement.amount = Decimal("1")  # type: ignore[misc]
+
+
+def test_entry_type_names_the_schema_types() -> None:
+    assert {entry_type.value for entry_type in EntryType} == {"TRADE", "CASH"}
+
+
+def test_the_reader_answers_whether_entries_exist_up_to_a_day() -> None:
+    # OQ-31 zero state, OQ-37: positions ask for TRADE, cash for any type.
+    signature = inspect.signature(LedgerReader.has_entries_on_or_before)
+    assert list(signature.parameters) == ["self", "day", "entry_type"]
+    assert signature.parameters["entry_type"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["entry_type"].default is None
+    assert EntryType.TRADE == "TRADE"

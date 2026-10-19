@@ -63,12 +63,13 @@ frontend/src/
 ## Screens (spec §11)
 
 - **Central de Controle**, with two tabs:
-  - **Pendências:** actionable issues only, with "Definir preço". Only the two issue types of spec §10.3 (OQ-31); a `FAILED` job, including "Dia anterior não processado", is shown in Processamentos, not here (OQ-19).
+  - **Pendências:** actionable issues only, with "Definir preço". Only the two issue types of spec §10.3 (OQ-31); a `FAILED` job, including "Dia anterior não processado", is shown in Processamentos, not here (OQ-19). Rows come deduplicated from the API (OQ-37): one per (asset, required price date) for a missing price, so "Definir preço DI1F29 em 16/10" appears once, and one per asset for an expired open position; each row shows its earliest affected date.
   - **Processamentos** (OQ-20):
     - pick a date range and a scope (Caixa, Posições, Tudo; OQ-21) and preview exactly [A, B] (days to process), with the warning when the chain's day before is not processed (nor the zero state), so the run would fail on its first date (OQ-11, OQ-23, OQ-31); no "período efetivo";
     - queue the job, then follow its progress ("x / y dias") and status;
     - cancel a job; cancelling and queuing a new request are separate actions, with no "Cancelar e criar novo processamento" (OQ-30);
     - publication is per date (OQ-23): a cancelled or failed job keeps the dates it committed, and later dates are untouched; it offers "Solicitar novo processamento", prefilled from the failed date, or the first date not reached, to the original end;
+    - the job details show `error_code`/`error_message` on Falhou and also on Concluído com pendências, where they are set when one chain of a Tudo job failed and the other reached the end, and on Cancelado when a Tudo job is cancelled after one chain failed (OQ-36);
     - finished and cancelled jobs stay in the history; no "Motivo" column, no duplicate blocking.
   - No financial KPIs on this screen.
 - **Ativos:**
