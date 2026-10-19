@@ -8,7 +8,6 @@ project; processing runs only when the user requests it).
 from __future__ import annotations
 
 import logging
-import uuid
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -93,17 +92,15 @@ class LedgerService:
         return LedgerEntryView(entry, descriptor.code, descriptor.instrument_type)
 
     async def delete_entries(self, ids: Collection[UUID], *, uow: UnitOfWork) -> None:
-        """Soft-delete entries of either type in one transaction, all or nothing, under one
-        ``deletion_batch_id`` (OQ-24). An unknown id raises ``NOT_FOUND`` and deletes nothing;
-        an entry already deleted stays as it was."""
+        """Delete entries of either type for good, in one transaction, all or nothing (OQ-24;
+        user decision 2026-10-19). An id that names no entry raises ``NOT_FOUND`` and deletes
+        nothing."""
         repository = self._repository_for(uow)
-        found = await repository.lock_entries(ids)
-        to_delete = entries_to_delete(ids, found)
-        if to_delete:
-            batch_id = uuid.uuid4()
-            await repository.soft_delete(to_delete, deletion_batch_id=batch_id)
-            logger.info("deleted %d ledger entries, batch %s", len(to_delete), batch_id)
+        existing = await repository.lock_existing(ids)
+        to_delete = entries_to_delete(ids, existing)
+        await repository.delete(to_delete)
         await uow.commit()
+        logger.info("deleted %d ledger entries", len(to_delete))
 
     async def list_entries(
         self,
@@ -116,7 +113,7 @@ class LedgerService:
         cursor: str | None,
         uow: UnitOfWork,
     ) -> LedgerEntryPage:
-        """One page of the active entries of both types dated in [start_date, end_date],
+        """One page of the entries of both types dated in [start_date, end_date],
         ordered by (entry_date, entry_time, seq) (OQ-24, OQ-26 item 1). Writes nothing."""
         request = validate_page_request(
             start_date=start_date,

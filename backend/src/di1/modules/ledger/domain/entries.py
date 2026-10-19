@@ -10,8 +10,8 @@
   stored are rejected, never rounded (OQ-3). The value bounds are only the schema's CHECKs and
   column ranges (OQ-14).
 - A trade's cash effect is not stored: −signed_quantity × execution_pu, computed on read (§7.3).
-- Entries are never edited; a batch soft delete shares one ``deletion_batch_id`` and is all or
-  nothing (OQ-24).
+- Entries are never edited. A batch delete removes entries of either type for good, all or
+  nothing (OQ-24; user decision 2026-10-19: no soft delete).
 
 Error fields are the request's field names (``date``, ``time``, ``execution_pu``, ...), which the
 client keys its messages on (frontend contract ``ledger.ts``).
@@ -19,7 +19,7 @@ client keys its messages on (frontend contract ``ledger.ts``).
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -111,16 +111,11 @@ class LedgerEntry:
     execution_rate: Decimal | None
     input_kind: InputKind | None
     cash_amount: Decimal | None
-    deleted_at: datetime | None = None
 
     @property
     def order_key(self) -> tuple[date, time, int]:
         """Chronological order across both types (OQ-13, OQ-24)."""
         return (self.entry_date, self.entry_time, self.seq)
-
-    @property
-    def is_deleted(self) -> bool:
-        return self.deleted_at is not None
 
     @property
     def cash_effect(self) -> Decimal:
@@ -211,21 +206,16 @@ def validate_cash_movement(draft: EntryDraft, *, today: date) -> NewCashMovement
 
 
 def entries_to_delete(
-    requested_ids: Collection[UUID], found: Sequence[LedgerEntry]
+    requested_ids: Collection[UUID], existing_ids: Collection[UUID]
 ) -> tuple[UUID, ...]:
-    """The entries a batch soft delete of ``requested_ids`` marks deleted, given the entries
-    found for them (deleted or not), each once. All or nothing (OQ-24): an id that names no
-    entry raises ``NOT_FOUND`` and nothing is deleted. An entry already deleted keeps its first
-    deletion (idempotent)."""
+    """The entries a batch delete removes, each once, given which of ``requested_ids`` exist.
+    All or nothing (OQ-24): an id that names no entry, including one already deleted, raises
+    ``NOT_FOUND`` and nothing is deleted. Deletion is for good (user, 2026-10-19)."""
     if not requested_ids:
         raise DomainError(_invalid("Selecione ao menos um lançamento.", "ids"))
-    by_id = {entry.id: entry for entry in found}
-    if any(entry_id not in by_id for entry_id in requested_ids):
+    if any(entry_id not in existing_ids for entry_id in requested_ids):
         raise DomainError(ErrorDetail(ErrorCode.NOT_FOUND, "Lançamento não encontrado."))
-
-    return tuple(
-        entry_id for entry_id in dict.fromkeys(requested_ids) if not by_id[entry_id].is_deleted
-    )
+    return tuple(dict.fromkeys(requested_ids))
 
 
 def _typed_quote(draft: EntryDraft) -> tuple[Decimal | None, list[ErrorDetail]]:

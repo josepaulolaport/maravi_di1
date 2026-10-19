@@ -1,5 +1,5 @@
 """``/ledger/entries`` (interfaces.md "HTTP endpoints"; OQ-24, OQ-26 item 1): the list of both
-entry types, a new entry, and the batch soft delete. Parse, call `LedgerService`, answer; errors
+entry types, a new entry, and the batch delete. Parse, call `LedgerService`, answer; errors
 are `DomainError`s rendered as problem+json by the composition.
 
 The composition builds the router with its providers of the service and of the request's Unit

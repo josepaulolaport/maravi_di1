@@ -51,15 +51,14 @@ class SqlLedgerRepository:
             }
         )
 
-    async def lock_entries(self, ids: Collection[UUID]) -> Sequence[LedgerEntry]:
-        result = await self._session.execute(queries.entries_by_id_for_update(ids))
-        return [_entry(row) for row in result]
+    async def lock_existing(self, ids: Collection[UUID]) -> set[UUID]:
+        return set(await self._session.scalars(queries.ids_for_update(ids)))
 
-    async def soft_delete(self, ids: Collection[UUID], *, deletion_batch_id: UUID) -> None:
-        await self._session.execute(queries.soft_delete(ids, deletion_batch_id))
+    async def delete(self, ids: Collection[UUID]) -> None:
+        await self._session.execute(queries.delete_entries(ids))
 
     async def trade_asset_ids(self, start_date: date, end_date: date) -> set[UUID]:
-        result = await self._session.scalars(queries.active_trade_asset_ids(start_date, end_date))
+        result = await self._session.scalars(queries.trade_asset_ids(start_date, end_date))
         return set(result)
 
     async def page(
@@ -101,7 +100,6 @@ def _entry(row: Row[Any]) -> LedgerEntry:
         execution_rate=row.execution_rate,
         input_kind=InputKind(row.input_kind) if row.input_kind is not None else None,
         cash_amount=row.cash_amount,
-        deleted_at=row.deleted_at,
     )
 
 

@@ -231,7 +231,7 @@ def test_range_and_search_filter_on_the_server(client: TestClient) -> None:
 # --- deletion -----------------------------------------------------------------------------------
 
 
-def test_a_batch_deletion_hides_the_entries_and_answers_204(client: TestClient) -> None:
+def test_a_batch_deletion_removes_the_entries_and_answers_204(client: TestClient) -> None:
     created = record_fixtures(client)
 
     response = client.post(
@@ -242,6 +242,14 @@ def test_a_batch_deletion_hides_the_entries_and_answers_204(client: TestClient) 
     assert response.content == b""
     listed = client.get("/ledger/entries", params=RANGE).json()["items"]
     assert [item["seq"] for item in listed] == [3, 2, 1]
+
+
+def test_deleting_an_entry_twice_answers_404_the_second_time(client: TestClient) -> None:
+    created = record_fixtures(client)
+    body = {"ids": [created[4]["id"]]}
+
+    assert client.post("/ledger/entries/deletions", json=body).status_code == 204
+    assert_problem(client.post("/ledger/entries/deletions", json=body), 404, ("NOT_FOUND", None))
 
 
 def test_an_unknown_id_answers_404_and_deletes_nothing(client: TestClient) -> None:

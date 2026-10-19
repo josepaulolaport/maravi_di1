@@ -1,15 +1,17 @@
-"""Ledger against PostgreSQL 16: the one ``ledger.entries`` table, its order, the batch soft
-delete and the atomicity of a write.
+"""Ledger against PostgreSQL 16: the one ``ledger.entries`` table, its order, the batch delete
+and the atomicity of a write.
 
 Rules: spec §6, §13 item 16 (trades and cash of the same date follow (date, time, seq) across
-both types; a mixed multi-delete is all or nothing and shares the batch id); §4.2 (an execution
-price never becomes a reference price); interfaces "Ledger"; plan §5.C (several trades on one
-date, soft-delete idempotence). Since the user's decision of 2026-10-19 a write touches only the
-ledger: staleness is removed from the project.
+both types; a mixed multi-delete is all or nothing); §4.2 (an execution price never becomes a
+reference price); interfaces "Ledger"; plan §5.C (several trades on one date). User decisions of
+2026-10-19: a write touches only the ledger (staleness is removed from the project), and a
+deletion removes the entries for good.
 """
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Collection
 from datetime import date, time
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -20,11 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.dependencies import ledger_reader
 from di1.modules.ledger.domain.listing import ListOrder
+from di1.modules.ledger.infrastructure.persistence.repositories import SqlLedgerRepository
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
+from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
 from tests.integration.ledger.support import TODAY, cash, fetch, trade
-from tests.unit.ledger.fakes import DI1F29
+from tests.unit.ledger.fakes import DI1F29, CalculatorPricer, FakeAssets
 
 Sessions = async_sessionmaker[AsyncSession]
 
@@ -173,7 +177,7 @@ async def test_the_search_filters_in_the_database(
     assert await search("nada") == set()
 
 
-async def test_a_mixed_batch_is_all_or_nothing_with_one_batch_id(
+async def test_a_mixed_batch_is_all_or_nothing(
     service: LedgerService, session_factory: Sessions
 ) -> None:
     deposit = await create(service, session_factory, cash(date(2026, 10, 14)))
@@ -183,43 +187,60 @@ async def test_a_mixed_batch_is_all_or_nothing_with_one_batch_id(
     with pytest.raises(DomainError) as error:
         await delete(service, session_factory, deposit, sell, uuid4())
     assert error.value.code is ErrorCode.NOT_FOUND
-    assert (
-        await fetch(session_factory, "SELECT id FROM ledger.entries WHERE deleted_at IS NOT NULL")
-        == []
+    assert len(await fetch(session_factory, "SELECT id FROM ledger.entries")) == 3
+
+    await delete(service, session_factory, deposit, sell)
+
+    rows = await fetch(session_factory, "SELECT id FROM ledger.entries")
+    assert [row.id for row in rows] == [buy]
+
+
+async def test_a_deleted_entry_is_gone_for_good(
+    service: LedgerService, session_factory: Sessions
+) -> None:
+    entry = await create(service, session_factory, cash())
+    await delete(service, session_factory, entry)
+
+    with pytest.raises(DomainError) as error:
+        await delete(service, session_factory, entry)
+
+    assert error.value.code is ErrorCode.NOT_FOUND
+    assert await fetch(session_factory, "SELECT id FROM ledger.entries") == []
+
+
+async def test_an_overlapping_deletion_waits_then_deletes_nothing(
+    service: LedgerService, session_factory: Sessions
+) -> None:
+    a, b, c = [await create(service, session_factory, cash(amount=f"{n}.00")) for n in (1, 2, 3)]
+    first_holds_its_locks, release_first = asyncio.Event(), asyncio.Event()
+
+    class HoldingRepository(SqlLedgerRepository):
+        async def delete(self, ids: Collection[UUID]) -> None:
+            await super().delete(ids)
+            first_holds_its_locks.set()
+            await release_first.wait()
+
+    assets = FakeAssets()
+    holding = LedgerService(
+        clock=FixedClock(TODAY),
+        assets=assets,
+        pricer=CalculatorPricer(assets),
+        repository_for=lambda uow: HoldingRepository(uow.session),
     )
+    first = asyncio.create_task(delete(holding, session_factory, a, b))
+    await asyncio.wait_for(first_holds_its_locks.wait(), timeout=5)
+    second = asyncio.create_task(delete(service, session_factory, b, c))
+    await asyncio.sleep(0.3)
+    assert not second.done()  # waiting on b, locked by the first batch
 
-    await delete(service, session_factory, buy, deposit, sell)
+    release_first.set()
+    await asyncio.wait_for(first, timeout=10)
+    with pytest.raises(DomainError) as error:
+        await asyncio.wait_for(second, timeout=10)
 
-    rows = await fetch(
-        session_factory,
-        "SELECT id, deletion_batch_id FROM ledger.entries WHERE deleted_at IS NOT NULL",
-    )
-    assert {row.id for row in rows} == {deposit, sell, buy}
-    assert len({row.deletion_batch_id for row in rows}) == 1
-    assert None not in {row.deletion_batch_id for row in rows}
-
-
-async def test_soft_delete_is_idempotent(service: LedgerService, session_factory: Sessions) -> None:
-    first = await create(service, session_factory, cash())
-    second = await create(service, session_factory, cash(amount="-1.00"))
-    await delete(service, session_factory, first)
-    before = await fetch(
-        session_factory,
-        "SELECT deleted_at, deletion_batch_id FROM ledger.entries WHERE id = :id",
-        id=first,
-    )
-
-    await delete(service, session_factory, first)
-    await delete(service, session_factory, first, second)
-
-    after = await fetch(
-        session_factory,
-        "SELECT deleted_at, deletion_batch_id FROM ledger.entries WHERE id = :id",
-        id=first,
-    )
-    assert after == before
-    batches = await fetch(session_factory, "SELECT DISTINCT deletion_batch_id FROM ledger.entries")
-    assert len(batches) == 2
+    assert error.value.code is ErrorCode.NOT_FOUND  # b is gone: all or nothing, c stays
+    rows = await fetch(session_factory, "SELECT id FROM ledger.entries")
+    assert [row.id for row in rows] == [c]
 
 
 async def test_an_execution_price_never_becomes_a_reference_price(

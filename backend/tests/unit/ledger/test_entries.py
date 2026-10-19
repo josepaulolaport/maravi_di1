@@ -1,8 +1,9 @@
-"""A stored ledger entry, its cash effect, and the entries a batch soft delete marks.
+"""A stored ledger entry, its cash effect, and the entries a batch delete removes.
 
 Rules: spec §6 and §7.3 (a trade's cash effect is −signed_quantity × execution_pu, computed on
-read, never stored; a cash entry's effect is its signed amount); OQ-24 (one batch deletes entries
-of either type all or nothing); interfaces "Ledger".
+read, never stored; a cash entry's effect is its signed amount); OQ-24 and the user's decision of
+2026-10-19 (one batch deletes entries of either type, for good, all or nothing); interfaces
+"Ledger".
 Expected cash effects are the MSW golden fixtures (frontend/src/api/mocks/fixtures.ts at 57b4df0).
 """
 
@@ -27,7 +28,6 @@ def trade(
     *,
     quantity: int = 10,
     pu: str = "89006.4625467350",
-    deleted: bool = False,
     entry_id: UUID | None = None,
 ) -> LedgerEntry:
     return LedgerEntry(
@@ -43,7 +43,6 @@ def trade(
         execution_rate=Decimal("0.10"),
         input_kind=InputKind.RATE,
         cash_amount=None,
-        deleted_at=CREATED if deleted else None,
     )
 
 
@@ -51,7 +50,6 @@ def cash(
     entry_date: date = date(2026, 10, 14),
     *,
     amount: str = "1500000.00",
-    deleted: bool = False,
     entry_id: UUID | None = None,
 ) -> LedgerEntry:
     return LedgerEntry(
@@ -67,7 +65,6 @@ def cash(
         execution_rate=None,
         input_kind=None,
         cash_amount=Decimal(amount),
-        deleted_at=CREATED if deleted else None,
     )
 
 
@@ -107,13 +104,13 @@ def test_the_order_key_is_date_time_seq() -> None:
     assert entry.order_key == (date(2026, 10, 14), time(9, 0), 1)
 
 
-# --- batch soft delete --------------------------------------------------------------------------
+# --- batch delete -------------------------------------------------------------------------------
 
 
 def test_an_unknown_id_deletes_nothing() -> None:
     known = trade()
     with pytest.raises(DomainError) as error:
-        entries_to_delete([known.id, uuid4()], [known])
+        entries_to_delete([known.id, uuid4()], {known.id})
 
     assert error.value.code is ErrorCode.NOT_FOUND
     assert error.value.errors[0].message == "Lançamento não encontrado."
@@ -121,7 +118,7 @@ def test_an_unknown_id_deletes_nothing() -> None:
 
 def test_an_empty_batch_is_rejected() -> None:
     with pytest.raises(DomainError) as error:
-        entries_to_delete([], [])
+        entries_to_delete([], set())
 
     assert error.value.code is ErrorCode.VALIDATION_ERROR
     assert error.value.errors[0].field == "ids"
@@ -130,23 +127,10 @@ def test_an_empty_batch_is_rejected() -> None:
 def test_a_mixed_batch_deletes_every_requested_entry() -> None:
     deposit, sell = cash(date(2026, 10, 14)), trade(date(2026, 10, 16), quantity=-4)
 
-    assert set(entries_to_delete([sell.id, deposit.id], [deposit, sell])) == {deposit.id, sell.id}
-
-
-def test_deleting_an_already_deleted_entry_changes_nothing() -> None:
-    gone = trade(deleted=True)
-
-    assert entries_to_delete([gone.id], [gone]) == ()
-
-
-def test_already_deleted_entries_do_not_join_the_batch() -> None:
-    gone = cash(date(2026, 10, 1), deleted=True)
-    live = trade(date(2026, 10, 16))
-
-    assert entries_to_delete([gone.id, live.id], [gone, live]) == (live.id,)
+    assert entries_to_delete([sell.id, deposit.id], {deposit.id, sell.id}) == (sell.id, deposit.id)
 
 
 def test_a_repeated_id_is_deleted_once() -> None:
     entry = trade()
 
-    assert entries_to_delete([entry.id, entry.id], [entry]) == (entry.id,)
+    assert entries_to_delete([entry.id, entry.id], {entry.id}) == (entry.id,)

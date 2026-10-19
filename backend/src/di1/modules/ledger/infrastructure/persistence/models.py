@@ -1,5 +1,8 @@
 """ORM mapping of ``ledger.entries``, mirroring docs/schema.sql (OQ-24). The migrations own the
-table, its CHECKs and its indexes; nothing is generated from this mapping."""
+table, its CHECKs and its indexes; nothing is generated from this mapping.
+
+Entries are deleted for good (user decision 2026-10-19), so ``deleted_at`` and
+``deletion_batch_id`` are not mapped; the integrator's migration drops them from the table."""
 
 from __future__ import annotations
 
@@ -29,5 +32,3 @@ class LedgerEntryRow(Base):
     input_kind: Mapped[str | None] = mapped_column(String(8))
     cash_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 2, asdecimal=True))
     created_at: Mapped[datetime] = mapped_column(server_default="now()")
-    deleted_at: Mapped[datetime | None]
-    deletion_batch_id: Mapped[uuid.UUID | None]

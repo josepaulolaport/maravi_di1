@@ -1,8 +1,8 @@
 """`LedgerService`: a write saves the fact in one Unit of Work and commits once; it touches
 nothing else (user decision 2026-10-19: staleness removed from the project).
 
-Rules: spec §6, §6.1, §6.2; interfaces "Ledger"; OQ-24 (batch soft delete, all or nothing, one
-``deletion_batch_id``); OQ-1, OQ-3
+Rules: spec §6, §6.1, §6.2; interfaces "Ledger"; OQ-24 and the user's decision of 2026-10-19
+(batch delete of either type, for good, all or nothing); OQ-1, OQ-3
 (PU ↔ rate through Pricing, the typed value kept as typed). Golden execution prices are the MSW
 fixtures (frontend/src/api/mocks/fixtures.ts at 57b4df0), computed offline with DC/365.
 """
@@ -215,23 +215,19 @@ async def test_a_pricing_refusal_writes_nothing(harness: Harness) -> None:
 # --- delete -------------------------------------------------------------------------------------
 
 
-async def test_a_mixed_batch_shares_one_batch_id(
-    harness: Harness,
-) -> None:
+async def test_a_mixed_batch_deletes_the_entries_in_one_commit(harness: Harness) -> None:
     cash = await harness.service.create_entry(deposit(), uow=FakeUnitOfWork())
     sell = await harness.service.create_entry(
         buy_rate(entry_date=date(2026, 10, 16), signed_quantity=-4), uow=FakeUnitOfWork()
     )
-    other = await harness.service.create_entry(
+    kept = await harness.service.create_entry(
         buy_rate(entry_date=date(2026, 10, 17)), uow=FakeUnitOfWork()
     )
     uow = FakeUnitOfWork()
 
-    await harness.service.delete_entries([other.entry.id, cash.entry.id, sell.entry.id], uow=uow)
+    await harness.service.delete_entries([sell.entry.id, cash.entry.id], uow=uow)
 
-    batches = harness.repository.batches
-    assert set(batches) == {other.entry.id, cash.entry.id, sell.entry.id}
-    assert len(set(batches.values())) == 1
+    assert harness.repository.rows == [kept.entry]
     assert uow.commits == 1
 
 
@@ -243,18 +239,18 @@ async def test_an_unknown_id_deletes_nothing(harness: Harness) -> None:
         await harness.service.delete_entries([kept.entry.id, uuid4()], uow=uow)
 
     assert error.value.code is ErrorCode.NOT_FOUND
-    assert not harness.repository.rows[0].is_deleted
+    assert harness.repository.rows == [kept.entry]
     assert uow.commits == 0
 
 
-async def test_deleting_again_changes_nothing(harness: Harness) -> None:
+async def test_a_deleted_entry_no_longer_exists(harness: Harness) -> None:
     entry = await harness.service.create_entry(deposit(), uow=FakeUnitOfWork())
     await harness.service.delete_entries([entry.entry.id], uow=FakeUnitOfWork())
-    first_batch = harness.repository.batches[entry.entry.id]
 
-    await harness.service.delete_entries([entry.entry.id], uow=FakeUnitOfWork())
+    with pytest.raises(DomainError) as error:
+        await harness.service.delete_entries([entry.entry.id], uow=FakeUnitOfWork())
 
-    assert harness.repository.batches[entry.entry.id] == first_batch
+    assert error.value.code is ErrorCode.NOT_FOUND
 
 
 # --- list ---------------------------------------------------------------------------------------

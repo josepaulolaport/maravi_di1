@@ -24,21 +24,20 @@ class LedgerRepository(Protocol):
 
     async def add_cash_movement(self, movement: NewCashMovement) -> LedgerEntry: ...
 
-    async def lock_entries(self, ids: Collection[UUID]) -> Sequence[LedgerEntry]:
-        """The entries named by ``ids``, deleted or not, locked until the transaction ends;
-        unknown ids are absent."""
+    async def lock_existing(self, ids: Collection[UUID]) -> set[UUID]:
+        """Which of ``ids`` name an entry, those entries locked until the transaction ends."""
         ...
 
-    async def soft_delete(self, ids: Collection[UUID], *, deletion_batch_id: UUID) -> None: ...
+    async def delete(self, ids: Collection[UUID]) -> None: ...
 
     async def trade_asset_ids(self, start_date: date, end_date: date) -> set[UUID]:
-        """The contracts of the active trades dated in the range."""
+        """The contracts of the trades dated in the range."""
         ...
 
     async def page(
         self, request: PageRequest, *, matching_asset_ids: Collection[UUID]
     ) -> Sequence[LedgerEntry]:
-        """Up to ``request.limit + 1`` active entries after the cursor, in the requested order."""
+        """Up to ``request.limit + 1`` entries after the cursor, in the requested order."""
         ...
 
     async def get_trades(self, start_date: date, end_date: date) -> Sequence[TradeRecord]: ...

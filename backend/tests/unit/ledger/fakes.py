@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
@@ -118,7 +118,6 @@ class InMemoryLedgerRepository:
     PostgreSQL in tests/integration/ledger."""
 
     rows: list[LedgerEntry] = field(default_factory=list)
-    batches: dict[UUID, UUID] = field(default_factory=dict)
     next_seq: int = 1
     now: datetime = datetime(2026, 10, 18, 12, 0, tzinfo=SAO_PAULO)
 
@@ -150,14 +149,11 @@ class InMemoryLedgerRepository:
             cash_amount=movement.amount,
         )
 
-    async def lock_entries(self, ids: Collection[UUID]) -> Sequence[LedgerEntry]:
-        return [row for row in self.rows if row.id in set(ids)]
+    async def lock_existing(self, ids: Collection[UUID]) -> set[UUID]:
+        return {row.id for row in self.rows if row.id in set(ids)}
 
-    async def soft_delete(self, ids: Collection[UUID], *, deletion_batch_id: UUID) -> None:
-        for index, row in enumerate(self.rows):
-            if row.id in set(ids) and not row.is_deleted:
-                self.rows[index] = replace(row, deleted_at=self.now)
-                self.batches[row.id] = deletion_batch_id
+    async def delete(self, ids: Collection[UUID]) -> None:
+        self.rows = [row for row in self.rows if row.id not in set(ids)]
 
     async def trade_asset_ids(self, start_date: date, end_date: date) -> set[UUID]:
         return {
@@ -199,11 +195,7 @@ class InMemoryLedgerRepository:
         raise NotImplementedError
 
     def _active(self, start_date: date, end_date: date) -> list[LedgerEntry]:
-        return [
-            row
-            for row in self.rows
-            if not row.is_deleted and start_date <= row.entry_date <= end_date
-        ]
+        return [row for row in self.rows if start_date <= row.entry_date <= end_date]
 
     def _add(self, **fields: Any) -> LedgerEntry:
         entry = LedgerEntry(id=uuid4(), seq=self.next_seq, created_at=self.now, **fields)
