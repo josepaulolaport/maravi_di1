@@ -3,6 +3,7 @@ interfaces.md "Prices"; OQ-25, OQ-26 item 7, OQ-31)."""
 
 from __future__ import annotations
 
+import inspect
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
@@ -14,7 +15,7 @@ from di1.modules.prices.application.services.price_service import (
     PriceService,
     SetReferencePrice,
 )
-from di1.modules.prices.public import PriceReader, PriceSource
+from di1.modules.prices.public import LatestPriceReader, PriceReader, PriceSource
 from di1.modules.pricing.public import Quote
 from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
@@ -374,6 +375,14 @@ class TestPreferredReader:
 
 class TestLatestPreferred:
     """`get_latest_preferred_many`, for ``Instrument.last_reference`` (OQ-48)."""
+
+    def test_it_satisfies_the_public_contract(self, world: World) -> None:
+        # The annotation makes mypy check the reader against the Protocol; the signature check
+        # catches a renamed or reordered parameter at run time too.
+        reader: LatestPriceReader = world.reader
+        assert inspect.signature(type(reader).get_latest_preferred_many) == inspect.signature(
+            LatestPriceReader.get_latest_preferred_many
+        )
 
     async def test_the_latest_date_wins_over_the_source(self, world: World) -> None:
         # MANUAL on 14/10 is older than B3 on 16/10: the latest date comes first, then MANUAL > B3.
