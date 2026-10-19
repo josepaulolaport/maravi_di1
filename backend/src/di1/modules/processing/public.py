@@ -106,8 +106,12 @@ class ProcessingRequest:
     failed_date: date | None
     """The date of the run's first failure (OQ-40); ``None`` if the run never failed."""
     failed_chain: ProcessingScope | None
-    """The chain that failed first, ``CASH`` or ``POSITIONS`` (never ``ALL``); ``None`` with a
-    ``failed_date`` when the failure belonged to no chain (lease lost, lock timeout, the AUM
-    recompute), which fails the date for every chain and the run. "Solicitar novo processamento"
-    on ``COMPLETED_WITH_ISSUES`` is prefilled with this chain's scope from ``failed_date`` to
-    ``end_date``."""
+    """The chain that failed first, ``CASH`` or ``POSITIONS`` (never ``ALL``): the run's chain on a
+    single-chain run, ``POSITIONS`` when both fail on the same date (integrator choices). Any
+    error raised by a chain's writer call, AUM recompute included, belongs to that chain.
+    ``None`` with a ``failed_date`` when the failure belonged to no chain (outside every chain's
+    savepoint, e.g. a lock timeout), which fails the date for every chain still alive and the
+    run; a lost lease is not a failure at D (the worker is fenced and the run recovers).
+    Both are kept when the run ends ``CANCELLED``. "Solicitar novo processamento" on
+    ``COMPLETED_WITH_ISSUES`` or ``CANCELLED`` also offers this chain's scope from
+    ``failed_date`` to ``end_date`` (OQ-40)."""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import typing
 from datetime import date, datetime
 from uuid import uuid4
 
@@ -94,3 +95,6 @@ def test_a_request_records_its_first_failure() -> None:
     fields = [field.name for field in dataclasses.fields(ProcessingRequest)]
 
     assert fields[-2:] == ["failed_date", "failed_chain"]
+    hints = typing.get_type_hints(ProcessingRequest)
+    assert hints["failed_date"] == date | None
+    assert hints["failed_chain"] == ProcessingScope | None
