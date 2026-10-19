@@ -75,9 +75,11 @@ class DateStatusReader(Protocol):
     """Read access to ``processing.date_status`` for Portfolio's read models (OQ-23)."""
 
     async def get_date_statuses(
-        self, start_date: date, end_date: date
+        self, start_date: date, end_date: date, *, uow: UnitOfWork
     ) -> Mapping[date, DateStatus]:
-        """The statuses of [start_date, end_date]; a date with no row is absent (not processed)."""
+        """The statuses of [start_date, end_date], read in ``uow``'s transaction so a caller sees
+        them in the same snapshot as its own tables; a date with no row is absent (not
+        processed)."""
         ...
 
 
