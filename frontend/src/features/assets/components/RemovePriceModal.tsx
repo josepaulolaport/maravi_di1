@@ -42,6 +42,7 @@ function RemoveForm({ day, onClose }: { day: ReferencePriceDay; onClose: () => v
     remove.mutate(selected, {
       onSuccess: () => {
         notifications.show({
+          color: 'teal',
           message:
             selected.length === 1
               ? 'Preço de referência removido.'

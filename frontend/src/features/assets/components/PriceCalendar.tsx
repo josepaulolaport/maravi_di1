@@ -1,10 +1,10 @@
-import { ActionIcon, Group, Menu, Paper, Table, Text, Title } from '@mantine/core';
+import { ActionIcon, Group, Menu, Paper, Table, Text, Title, VisuallyHidden } from '@mantine/core';
 import { IconDots, IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
 
 import type { IsoDate, PriceSource, ReferencePriceDay } from '@/api/contract';
 import { formatDate, formatPu, formatRate, UNAVAILABLE } from '@/shared/format';
 
-import { countLabel } from './countLabel';
+import { countLabel } from '@/shared/format';
 import type { CalendarRow } from './calendarData';
 
 export const SOURCE_LABELS: Record<PriceSource, string> = { MANUAL: 'Manual', B3: 'B3' };
@@ -48,7 +48,9 @@ export function PriceCalendar({ rows, onRegister, onCorrect, onRemove }: PriceCa
               <Table.Th ta="right">PU</Table.Th>
               <Table.Th ta="right">Taxa a.a.</Table.Th>
               <Table.Th>Fonte</Table.Th>
-              <Table.Th w={56} />
+              <Table.Th w={56}>
+                <VisuallyHidden>Ações</VisuallyHidden>
+              </Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>

@@ -18,7 +18,7 @@ interface RequestCardProps {
 }
 
 /**
- * "Solicitar processamento" (§10.1): an inclusive range and its scope (OQ-21 draft: Caixa,
+ * "Solicitar processamento" (§10.1): an inclusive range and its scope (OQ-21: Caixa,
  * Posições or Tudo), previewed before it is queued.
  */
 export function RequestCard({

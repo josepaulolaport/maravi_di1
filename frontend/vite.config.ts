@@ -36,5 +36,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // A failing query prints the whole page, not the first 7000 characters (Testing Library's
+    // default), so a failure seen only in CI can be read from its log.
+    env: { DEBUG_PRINT_LIMIT: '200000' },
   },
 });

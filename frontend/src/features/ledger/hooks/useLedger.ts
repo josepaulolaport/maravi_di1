@@ -2,47 +2,45 @@ import {
   useInfiniteQuery,
   useIsMutating,
   useMutation,
-  useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 
 import type { CreateLedgerEntryRequest, IsoDate, LedgerOrder } from '@/api/contract';
-import { assetsApi, ledgerApi, portfolioApi } from '@/api/endpoints';
+import { ledgerApi } from '@/api/endpoints';
 import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
 import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
 
 import type { LedgerEntry } from '../entries';
 
-// A key's root is the API area it reads (`@/api/queryRoots`): the cash strip reads the
-// portfolio summary under the same key Carteira uses, so a finished job refreshes both.
-export const ledgerKeys = {
+// A key's root is the API area it reads (`@/api/queryRoots`). The cash strip's summary and the
+// form's catalogue come from `@/shared/queries`, shared with Carteira and Ativos.
+const ledgerKeys = {
   all: queryRoots.ledger,
   entries: (start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) =>
     [...queryRoots.ledger, 'entries', start, end, search, order] as const,
-  summary: (date: IsoDate) => [...queryRoots.portfolio, 'summary', date] as const,
-  instruments: () => [...queryRoots.assets, 'instruments', 'all'] as const,
-  products: () => [...queryRoots.assets, 'products', 'all'] as const,
-  instrumentTypes: () => [...queryRoots.assets, 'instrument-types'] as const,
   /** Mutation key of the new-entry saves, so the page knows a save is running. */
   create: () => [...queryRoots.ledger, 'create'] as const,
 };
 
 /** Days in the default range, ending today (São Paulo). */
-export const DEFAULT_RANGE_DAYS = 30;
+const DEFAULT_RANGE_DAYS = 30;
 
-export interface LedgerFilters {
+interface LedgerFilters {
   start: IsoDate;
   end: IsoDate;
   search: string;
   today: IsoDate;
+  /** Newest first by default; `?ordem=asc` for the oldest first. */
+  order: LedgerOrder;
   setRange: (start: IsoDate, end: IsoDate) => void;
   setSearch: (search: string) => void;
+  setOrder: (order: LedgerOrder) => void;
 }
 
 /**
- * The inclusive range and the search live in the URL (`?inicio=&fim=&busca=`, `ledgerLinks`),
- * so a filtered view can be linked. A missing, invalid or future end is today; a missing or
+ * The inclusive range, the search and the order live in the URL (`?inicio=&fim=&busca=&ordem=`,
+ * `ledgerLinks`), so a filtered view can be linked. A missing, invalid or future end is today; a missing or
  * invalid start, or one after the end, is the end's 30-day window.
  */
 export function useLedgerFilters(): LedgerFilters {
@@ -56,6 +54,7 @@ export function useLedgerFilters(): LedgerFilters {
       ? requestedStart
       : addDays(end, -(DEFAULT_RANGE_DAYS - 1));
   const search = params.get('busca') ?? '';
+  const order: LedgerOrder = params.get('ordem') === 'asc' ? 'asc' : 'desc';
 
   const update = (changes: Record<string, string>, replace: boolean) => {
     setParams(
@@ -82,11 +81,15 @@ export function useLedgerFilters(): LedgerFilters {
       // Typing is debounced into the URL; each pause is not a history entry.
       update({ busca: next.trim() }, true);
     },
+    order,
+    setOrder: (next) => {
+      update({ ordem: next === 'asc' ? 'asc' : '' }, true);
+    },
   };
 }
 
 /** Entries per page of the list (P21); "Carregar mais" reads the next one. */
-export const LEDGER_PAGE_SIZE = 50;
+const LEDGER_PAGE_SIZE = 50;
 
 /**
  * The list, filtered and ordered by the backend (P18), read page by page (P21); `data.items`
@@ -118,36 +121,7 @@ export function useEntries(start: IsoDate, end: IsoDate, search: string, order: 
   });
 }
 
-export function useCashSummary(date: IsoDate) {
-  return useQuery({
-    queryKey: ledgerKeys.summary(date),
-    queryFn: () => portfolioApi.getSummary(date),
-  });
-}
-
-export function useInstruments() {
-  return useQuery({
-    queryKey: ledgerKeys.instruments(),
-    queryFn: () => assetsApi.listInstruments(),
-  });
-}
-
-/** Products carry the asset class of their contracts (the trade form's class filter). */
-export function useProducts() {
-  return useQuery({
-    queryKey: ledgerKeys.products(),
-    queryFn: () => assetsApi.listProducts(),
-  });
-}
-
-export function useInstrumentTypes() {
-  return useQuery({
-    queryKey: ledgerKeys.instrumentTypes(),
-    queryFn: () => assetsApi.listInstrumentTypes(),
-  });
-}
-
-/** Every write marks published days stale (§10.4): refresh everything that depends on it. */
+/** Every write changes the facts behind later results (§10.4): refresh what depends on them. */
 function useLedgerWrite<TVariables, TResult>(
   write: (variables: TVariables) => Promise<TResult>,
   mutationKey?: readonly unknown[],

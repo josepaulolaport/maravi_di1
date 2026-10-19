@@ -7,7 +7,7 @@ import type { IsoDate } from '@/api/contract';
 
 import { parsePtBrDate } from '@/shared/format';
 
-export const INVALID_RANGE_MESSAGE = 'A data inicial deve ser anterior ou igual à data final.';
+const INVALID_RANGE_MESSAGE = 'A data inicial deve ser anterior ou igual à data final.';
 
 /** A complete range with A ≤ B; dates are ISO strings, so they compare as text. */
 export function isValidRange(start: IsoDate | null, end: IsoDate | null): boolean {

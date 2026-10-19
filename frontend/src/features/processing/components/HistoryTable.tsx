@@ -1,19 +1,10 @@
-import {
-  ActionIcon,
-  Menu,
-  Paper,
-  Skeleton,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-  Title,
-  VisuallyHidden,
-} from '@mantine/core';
-import { IconDots, IconSearch } from '@tabler/icons-react';
+import { ActionIcon, Menu, Paper, Stack, Table, Text, Title, VisuallyHidden } from '@mantine/core';
+import { IconDots } from '@tabler/icons-react';
 
+import { SearchInput } from '@/shared/ui/SearchInput';
+import { Loading } from '@/shared/ui/Loading';
 import type { ProcessingRequest } from '@/api/contract';
-import { formatQuantity } from '@/shared/format';
+import { countLabel } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { LoadMore } from '@/shared/ui/LoadMore';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
@@ -24,11 +15,13 @@ import { formatPeriod, formatProgress, shortId } from '../format';
 import type { useProcessingRequests } from '../hooks/useProcessing';
 import { canCancel, canRequestAgain, jobStatusBadge, progressOf } from '../jobStatus';
 
-/** What the user can do with a job, from its row menu or its details modal (OQ-20). */
+/**
+ * What the user can do with a job, from its row menu or its details modal (OQ-20). Cancel and
+ * queue are separate actions: there is no cancel and replace (OQ-30).
+ */
 export interface JobActions {
   onDetails: (job: ProcessingRequest) => void;
   onCancel: (job: ProcessingRequest) => void;
-  onReplace: (job: ProcessingRequest) => void;
   onRequestAgain: (job: ProcessingRequest) => void;
 }
 
@@ -44,10 +37,10 @@ function matchesSearch(job: ProcessingRequest, search: string): boolean {
 }
 
 /** "encontrados" once every page is read; "exibidos" while the backend has more (P21). */
-const countLabel = (n: number, more: boolean) => {
-  if (more) return `${formatQuantity(n)} processamentos exibidos`;
-  return n === 1 ? '1 processamento encontrado' : `${formatQuantity(n)} processamentos encontrados`;
-};
+const jobsLabel = (n: number, more: boolean) =>
+  more
+    ? countLabel(n, 'processamento exibido', 'processamentos exibidos')
+    : countLabel(n, 'processamento encontrado', 'processamentos encontrados');
 
 interface HistoryTableProps extends JobActions {
   requests: ReturnType<typeof useProcessingRequests>;
@@ -63,14 +56,11 @@ export function HistoryTable({ requests, search, onSearchChange, ...actions }: H
         <Title order={2} size="h4" id="history-title">
           Histórico de processamentos
         </Title>
-        <TextInput
-          aria-label="Buscar processamento"
+        <SearchInput
+          label="Buscar processamento"
           placeholder="Buscar processamento..."
-          leftSection={<IconSearch size={16} stroke={1.5} />}
           value={search}
-          onChange={(event) => {
-            onSearchChange(event.currentTarget.value);
-          }}
+          onChange={onSearchChange}
           maw={360}
         />
         <HistoryBody requests={requests} search={search} actions={actions} />
@@ -90,14 +80,14 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
     return <ErrorState error={requests.error} onRetry={() => void requests.refetch()} />;
   }
   if (requests.isPending) {
-    return <Skeleton h={220} aria-busy="true" aria-label="Carregando processamentos" />;
+    return <Loading label="Carregando processamentos" h={220} />;
   }
   // The search filters the pages read so far; "Carregar mais" reads older jobs.
   const rows = requests.data.items.filter((job) => matchesSearch(job, search));
   return (
     <>
       <Table.ScrollContainer minWidth={640}>
-        <Table verticalSpacing="sm">
+        <Table verticalSpacing="sm" aria-label="Processamentos">
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Processamento</Table.Th>
@@ -115,7 +105,10 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
               <Table.Tr>
                 <Table.Td colSpan={6}>
                   <Text size="sm" c="dimmed" ta="center" py="md">
-                    Nenhum processamento encontrado.
+                    {/* The search covers the pages read so far; older ones may still match. */}
+                    {requests.hasNextPage && search.trim()
+                      ? 'Nenhum processamento entre os exibidos. Use “Carregar mais” para buscar nos anteriores.'
+                      : 'Nenhum processamento encontrado.'}
                   </Text>
                 </Table.Td>
               </Table.Tr>
@@ -133,7 +126,7 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
         }}
       />
       <Text size="sm" c="dimmed">
-        {countLabel(rows.length, requests.hasNextPage)}
+        {jobsLabel(rows.length, requests.hasNextPage)}
       </Text>
     </>
   );
@@ -167,23 +160,14 @@ function JobRow({ job, actions }: { job: ProcessingRequest; actions: JobActions 
               Ver detalhes
             </Menu.Item>
             {canCancel(job.status) && (
-              <>
-                <Menu.Item
-                  color="red"
-                  onClick={() => {
-                    actions.onCancel(job);
-                  }}
-                >
-                  Cancelar processamento
-                </Menu.Item>
-                <Menu.Item
-                  onClick={() => {
-                    actions.onReplace(job);
-                  }}
-                >
-                  Cancelar e criar novo processamento
-                </Menu.Item>
-              </>
+              <Menu.Item
+                color="red"
+                onClick={() => {
+                  actions.onCancel(job);
+                }}
+              >
+                Cancelar processamento
+              </Menu.Item>
             )}
             {canRequestAgain(job.status) && (
               <Menu.Item

@@ -82,10 +82,10 @@ class SqlLedgerRepository:
         return [_cash_record(row) for row in result]
 
     async def has_entries_on_or_before(self, day: date, *, entry_type: str | None = None) -> bool:
-        """Processing's zero-state check (OQ-31, OQ-37), only for the edge case of a chain's
-        first processed day: D−1 has no status and nothing is processed before it. Every other day
-        is decided by ``processing.date_status`` alone. Positions ask for trades, cash for any
-        type.
+        """Processing's zero-state check (OQ-31, OQ-37), asked only when the chain has no status
+        on any date before D (OQ-40 item 5): no date before D has any status for the chain
+        (``PROCESSED``, ``PROCESSED_WITH_ISSUES``, ``RUNNING`` or ``FAILED``). Every other day is
+        decided by ``processing.date_status`` alone. Positions ask for trades, cash for any type.
 
         ``entry_type`` is typed ``str``: any ``StrEnum`` of the entry types fits, Ledger's domain
         one and ``ledger.public.EntryType`` alike, so this satisfies `LedgerReader` whichever
