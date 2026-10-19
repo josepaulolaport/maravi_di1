@@ -119,7 +119,7 @@ export const portfolioHandlers = [
     const start = params.get('start_date');
     const end = params.get('end_date');
     // A series ending after today is FUTURE_DATE on end_date (OQ-35 item 2).
-    const errors = rangeErrors(start, end, { futureOnEndOnly: true });
+    const errors = rangeErrors(start, end, { future: 'end' });
     if (errors.length > 0) return problem(422, errors);
     return HttpResponse.json<ListResponse<PnlPoint>>({
       items: pnlSeries(start as string, end as string),

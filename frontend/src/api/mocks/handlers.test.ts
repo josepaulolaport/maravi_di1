@@ -359,6 +359,49 @@ describe('mock reference prices', () => {
     expect((await problemOf(pricesApi.removeReferencePrice(PRICE_IDS.f28_1016))).status).toBe(404);
   });
 
+  it('OQ-42 a price read accepts dates after today; those days come back empty', async () => {
+    const future = await pricesApi.listReferencePrices({
+      asset_id: IDS.di1f28,
+      start_date: '2026-10-19',
+      end_date: '2026-11-30',
+    });
+    const across = await pricesApi.listReferencePrices({
+      asset_id: IDS.di1f28,
+      start_date: '2026-10-16',
+      end_date: '2026-10-25',
+    });
+
+    expect(future.items).toEqual([]);
+    expect(across.items.map((d) => d.reference_date)).toEqual(['2026-10-16']);
+  });
+
+  it('OQ-42 a price read still refuses a start after its end', async () => {
+    const problem = await problemOf(
+      pricesApi.listReferencePrices({
+        asset_id: IDS.di1f28,
+        start_date: '2026-10-25',
+        end_date: '2026-10-20',
+      }),
+    );
+
+    expect(problem.errors?.map((e) => [e.code, e.field])).toEqual([
+      ['INVALID_RANGE', 'start_date'],
+    ]);
+  });
+
+  it('OQ-42 OQ-14 a price write dated after today is still refused', async () => {
+    const problem = await problemOf(
+      pricesApi.setReferencePrice({
+        asset_id: IDS.di1f28,
+        reference_date: '2026-10-19',
+        input_kind: 'PU',
+        pu: '89000.00',
+      }),
+    );
+
+    expect(problem.errors?.[0]).toMatchObject({ code: 'FUTURE_DATE', field: 'reference_date' });
+  });
+
   it('§5 requires the contract when listing reference prices', async () => {
     const problem = await problemOf(
       pricesApi.listReferencePrices({

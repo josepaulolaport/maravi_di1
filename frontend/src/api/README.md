@@ -52,9 +52,9 @@ Recorded by lane X (OQ-21, OQ-22; OQ-23 to OQ-26 in PR #43). The user ruled that
 - OQ-30: cancel-and-replace is removed (cancel, then request again). A position row's `reference_pu`, `reference_rate` and `reference_source` are the current preferred price in the price table (PU 0 after maturity), so a price recorded after processing shows on the row before the date is reprocessed.
 - A run (OQ-23): `ProcessingRequest = {id, scope, start_date, end_date, status, progress_date, error_code, error_message, created_at, updated_at, dispatched_at, started_at, finished_at, cancel_requested_at}`, eight statuses (no `SUPERSEDED`). Each date is published on its own: `progress_date` is the last one committed; days done and the date being processed derive from it. A failure at a date marks it `FAILED` and ends the run; a cancel lets the current date commit, and a cancel during the last date ends `COMPLETED` (or `COMPLETED_WITH_ISSUES`, OQ-26 item 9). A run ends `COMPLETED_WITH_ISSUES` when a date it wrote is `PROCESSED_WITH_ISSUES`. "Solicitar novo processamento" prefills from the failed date, or the first date not reached, to the original end.
 
-## OQ-32 to OQ-40
+## OQ-32 to OQ-42
 
-Recorded by lane X in PR #54; the mock follows them.
+Recorded by lane X in PR #54 (OQ-32 to OQ-40), #59 (OQ-41) and #68 (OQ-42); the mock follows them.
 
 - OQ-32: a ledger deletion is permanent. An unknown or already-deleted id is 404 and deletes nothing; a repeated id counts once; an empty `ids` is 422 on `ids`.
 - OQ-33: a contract code is trimmed and upper-cased; an unknown id in a body is 422 on that field (404 only for a path id); `search` ignores case and accents; `Instrument.last_reference` is always `null` for now, shown as "—".
@@ -63,6 +63,7 @@ Recorded by lane X in PR #54; the mock follows them.
 - OQ-39: `GET /processing/preview` returns `predecessor.cash` and `predecessor.positions` for every scope; the screen shows and warns only for the scope's chains.
 - OQ-38, OQ-40 items 2 and 5: a chain written on a date stores that date's AUM as cash + market value only when the other chain is `PROCESSED` or `PROCESSED_WITH_ISSUES` there, whichever run wrote it; otherwise `null`. A chain is in its zero state on D only when no date before D has any status for it and no entry of its type is dated on or before D−1, so a gap after an earlier status fails D.
 - OQ-36, OQ-40 items 3 and 6: on an ALL run, a chain that fails on D (its predecessor, or the fake's changed inputs) reads Erro there and stops; the other chain is still written on D and goes on to the end. The run ends `COMPLETED_WITH_ISSUES` with the first failure's `error_code` and `error_message`, `CANCELLED` keeping them when cancelled, and `FAILED` only when both chains fail. `ProcessingRequest` gains `failed_date` and `failed_chain` (`CASH` or `POSITIONS`, positions when both fail at once, the run's chain on a single-chain run, `null` for a failure outside every chain or a run that never failed).
+- OQ-42: `GET /reference-prices` accepts any range, dates after today included; those days come back empty. Writes still refuse dates after today (OQ-14). The contract page's calendar still ends on min(today, maturity) (§11.2): it never asks for days that cannot have a price.
 
 ## Decided gap
 
