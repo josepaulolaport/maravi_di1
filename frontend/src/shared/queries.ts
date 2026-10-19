@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 
-import type { IsoDate } from '@/api/contract';
+import type { IsoDate, PortfolioSummary } from '@/api/contract';
 import { assetsApi, portfolioApi } from '@/api/endpoints';
 import { queryRoots } from '@/api/queryRoots';
 
@@ -16,22 +17,35 @@ const sharedKeys = {
 };
 
 /** How often a date being processed (`RUNNING`) is read again, as the job history is (§12). */
-export const RUNNING_POLL_MS = 2_000;
+const RUNNING_POLL_MS = 2_000;
+
+const isRunning = (summary: PortfolioSummary | undefined) =>
+  summary?.cash.status === 'RUNNING' || summary?.positions.status === 'RUNNING';
 
 /**
  * The portfolio summary of a date (§11.4, OQ-21). While either chain is being processed it is
- * read again every 2 s, so a "Processando" badge turns into the result without a reload.
+ * read again every 2 s, so a "Processando" badge turns into the result without a reload; when
+ * the date is done, every portfolio read (positions, the P&L series) is refreshed too, so the
+ * page never mixes two runs. Only a date already RUNNING is followed: a date whose run is still
+ * queued is refreshed when it starts or when the user comes back to it.
  */
 export function useSummary(date: IsoDate) {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: sharedKeys.summary(date),
     queryFn: ({ signal }) => portfolioApi.getSummary(date, signal),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      const running = data?.cash.status === 'RUNNING' || data?.positions.status === 'RUNNING';
-      return running ? RUNNING_POLL_MS : false;
-    },
+    refetchInterval: (q) => (isRunning(q.state.data) ? RUNNING_POLL_MS : false),
   });
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (!query.data) return;
+    const running = isRunning(query.data);
+    if (wasRunning.current && !running) {
+      void queryClient.invalidateQueries({ queryKey: queryRoots.portfolio });
+    }
+    wasRunning.current = running;
+  }, [query.data, queryClient]);
+  return query;
 }
 
 /** The instrument types with their asset classes (the catalogue tabs, §11.2). */

@@ -4,7 +4,7 @@ import { IconSearch } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 
 /** How long typing must pause before the search reaches the URL (and the request or filter). */
-export const SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_DEBOUNCE_MS = 300;
 
 interface SearchInputProps {
   /** The search in the URL (`?busca=`), which the screen's query or filter reads. */

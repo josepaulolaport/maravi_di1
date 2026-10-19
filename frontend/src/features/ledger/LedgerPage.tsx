@@ -263,10 +263,7 @@ function RangePicker({
   );
 }
 
-/**
- * The search box follows the URL (`busca`): typing is debounced into it, and a change from
- * outside (a link, the sidebar) replaces what was typed instead of being overwritten by it.
- */
+/** Deletes one entry or the selected ones, after confirmation (§6.1). */
 function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClose: () => void }) {
   // One request for one entry or many, of either type (`POST /ledger/entries/deletions`).
   const mutation = useDeleteEntries();

@@ -4,7 +4,7 @@ import { useDocumentTitle } from '@mantine/hooks';
 const APP = 'Maravi Backoffice';
 
 /** The browser tab's title for a page: "Carteira · Maravi Backoffice". */
-export function usePageTitle(title: string) {
+function usePageTitle(title: string) {
   useDocumentTitle(`${title} · ${APP}`);
 }
 

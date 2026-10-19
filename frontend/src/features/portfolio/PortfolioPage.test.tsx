@@ -235,11 +235,45 @@ describe('Carteira (§11.4)', () => {
     await openCarteira('2026-10-15');
     expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Processando']);
 
-    // Polled every 2 s while a chain is RUNNING (§12), then no more.
-    await waitFor(() => {
-      expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Atualizado']);
-    });
-    expect(reads).toBe(2);
+    // Polled every 2 s while a chain is RUNNING (§12); the wait allows one poll under load.
+    await waitFor(
+      () => {
+        expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Atualizado']);
+      },
+      { timeout: 5_000 },
+    );
+    expect(reads).toBeGreaterThanOrEqual(2);
+  });
+
+  it('OQ-23 when a date finishes processing, its positions are read again too', async () => {
+    let summaryReads = 0;
+    let positionsReads = 0;
+    const rows = positions.find((p) => p.date === '2026-10-15');
+    server.use(
+      http.get(url('/portfolio/summary'), () => {
+        summaryReads += 1;
+        const summary = summaryOf('2026-10-15');
+        const running = { ...summary.positions, status: 'RUNNING' as const };
+        return HttpResponse.json<PortfolioSummary>(
+          summaryReads === 1 ? { ...summary, positions: running } : summary,
+        );
+      }),
+      // Before the run commits, the date had no positions published.
+      http.get(url('/portfolio/positions'), () => {
+        positionsReads += 1;
+        const body: PortfolioPositions =
+          positionsReads === 1
+            ? { date: '2026-10-15', status: 'RUNNING', published_at: null, items: [] }
+            : { date: '2026-10-15', status: 'FRESH', published_at: null, items: rows?.items ?? [] };
+        return HttpResponse.json(body);
+      }),
+    );
+    await openCarteira('2026-10-15');
+
+    expect(
+      await screen.findByText('DI1F28', { selector: 'td *' }, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+    expect(positionsReads).toBeGreaterThanOrEqual(2);
   });
 
   it("§11.4 a stale chain's badge leads to Processamentos for that date and chain", async () => {

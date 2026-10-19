@@ -92,6 +92,10 @@ describe('splitProblem (forms, OQ-15)', () => {
     expect(result.page).toEqual(['Fonte inválida.', 'Erro geral.']);
   });
 
+  it("§12 shows the problem's own message when it lists no errors", () => {
+    expect(splitProblem(problem([]), {})).toEqual({ fields: {}, page: ['Detalhe'] });
+  });
+
   it('§12 shows a generic message for an error that is not a problem+json, and nothing for none', () => {
     expect(splitProblem(new Error('x'), {}).page).toEqual([
       'Ocorreu um erro inesperado. Tente novamente.',
