@@ -141,7 +141,7 @@ async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _queue_exists(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name))
 
     await publisher.publish(envelope)
 
@@ -154,12 +154,20 @@ async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
     assert resources.clock is clock
 
 
-async def _queue_exists(broker: AbstractRobustConnection, name: str) -> bool:
+async def _is_consumed(broker: AbstractRobustConnection, name: str) -> bool:
+    """Whether the worker consumes the queue. A queue that merely exists is not enough: the
+    worker declares it, then binds it to its message types, then consumes it, and a publish
+    between the declaration and the binding is refused (NO_ROUTE). Once the queue has a
+    consumer, its bindings are in place."""
+    channel = await broker.channel()
     try:
-        await _ready_messages(broker, name)
+        queue = await channel.declare_queue(name, passive=True)
+        return (queue.declaration_result.consumer_count or 0) > 0
     except Exception:
         return False
-    return True
+    finally:
+        if not channel.is_closed:
+            await channel.close()
 
 
 async def test_a_stop_during_the_run_after_the_ack_cancels_it_and_the_message_stays_acked(
@@ -185,7 +193,7 @@ async def test_a_stop_during_the_run_after_the_ack_cancels_it_and_the_message_st
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _queue_exists(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name))
     await publisher.publish(envelope)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
@@ -221,7 +229,7 @@ async def test_a_stop_before_the_ack_rolls_back_and_returns_the_message(
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _queue_exists(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name))
     await publisher.publish(envelope)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
@@ -261,7 +269,7 @@ async def test_a_dropped_broker_connection_does_not_cancel_the_run(
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _queue_exists(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name))
     await publisher.publish(envelope)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
@@ -299,7 +307,7 @@ async def test_a_command_arriving_during_a_run_is_claimed_and_acked_at_once(
         )
     )
     first, second = make_envelope(), make_envelope()
-    await eventually(lambda: _queue_exists(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name))
     await publisher.publish(first)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
