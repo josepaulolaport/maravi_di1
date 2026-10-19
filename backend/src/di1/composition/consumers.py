@@ -5,8 +5,8 @@ boundaries" 3 to 7; OQ-45, OQ-46). The only composition module the workers impor
   only says there is work (OQ-46): after it is acked the handler drains the oldest QUEUED
   requests;
 - `processing_startup`: run once by the worker before it consumes. Exactly one worker exists
-  (OQ-45), so an interrupted run is resumed after its ``progress_date``, or a CANCELLING one is
-  ended CANCELLED, inline; then the queue is drained;
+  (OQ-45), so an interrupted run is resumed after its ``progress_date``, or a run with
+  ``cancel_requested_at`` set is ended CANCELLED (OQ-46), inline; then the queue is drained;
 - `QUEUES`: the consumers' queues, which the outbox relay also declares at startup, so a doorbell
   published before the worker starts is queued instead of refused.
 
@@ -22,11 +22,11 @@ from di1.modules.asset.dependencies import asset_reader
 from di1.modules.ledger.dependencies import ledger_reader
 from di1.modules.portfolio.dependencies import portfolio_reader, results_writer
 from di1.modules.prices.dependencies import price_reader
-from di1.modules.processing.application.services.run_processor import PortfolioRangeProcessor
 from di1.modules.processing.dependencies import (
     DOORBELL_CONSUMER_NAME,
     DOORBELL_QUEUE_NAME,
     DOORBELL_ROUTING_KEY,
+    PortfolioRangeProcessor,
     make_doorbell_handler,
     make_range_processor,
 )
