@@ -119,7 +119,10 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
           {failure && (
             <>
               <SimpleGrid cols={2}>
-                <Field label="Data com erro">{formatDate(job.failed_date ?? nextDate(job))}</Field>
+                {/* A failure with no date (writing the run's end, OQ-47 item 7) shows none. */}
+                {job.failed_date !== null && (
+                  <Field label="Data com erro">{formatDate(job.failed_date)}</Field>
+                )}
                 {job.failed_chain !== null && (
                   <Field label="Cadeia com erro">{SCOPE_LABELS[job.failed_chain]}</Field>
                 )}

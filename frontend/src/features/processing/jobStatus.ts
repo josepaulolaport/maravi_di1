@@ -93,10 +93,14 @@ export interface RetryRequest {
  * Where the plain retry starts (OQ-23 item 10): a failed run from its failed date, which on a
  * Tudo run whose chains failed on different dates is the first failure, before the chain that
  * failed later stopped; a cancelled run, or a failure with no date, from the first date not
- * reached.
+ * reached. A run that failed with no date after committing every date (writing its end failed,
+ * OQ-47 item 7) is asked again in full: re-running a committed date is safe.
  */
-const retryStart = (job: ProcessingRequest): IsoDate =>
-  job.status === 'FAILED' ? (job.failed_date ?? nextDate(job)) : nextDate(job);
+function retryStart(job: ProcessingRequest): IsoDate {
+  if (job.status === 'FAILED' && job.failed_date !== null) return job.failed_date;
+  const next = nextDate(job);
+  return next <= job.end_date ? next : job.start_date;
+}
 
 /**
  * The new requests a finished run offers (OQ-20 item 4, OQ-23 item 10, OQ-40 items 3 and 6):
