@@ -81,6 +81,7 @@ frontend/src/
   - The price calendar shows days without an observation as such; it never interpolates. It has a "Fonte" column (Manual/B3), and the row menu offers Corrigir and Remover; there are no revisions (OQ-25).
 - **Lançamentos:**
   - The history of trades and cash movements, with an inclusive date range and search. Trades show both PU and rate.
+  - The column **Financeiro** (not "Valor") shows each entry's `cash_amount`, its cash effect: a buy negative, a sale positive, an aporte positive, a retirada negative; it is not market value. Its header has a keyboard-accessible tooltip with that explanation (user, 2026-10-19: "Financeiro is good"; spec §11.3).
   - A cash strip: Caixa D0 = published cash on the range's end date, Caixa D−1 = the day before, each with the cash chain's status on that date (OQ-19, OQ-23).
   - One "Novo lançamento" modal for compra, venda, aporte and retirada; one entry list for trades and cash movements (OQ-24).
   - Delete one or many entries, with confirmation. The deletion is permanent, all or nothing, with no reason (OQ-32). No editing.

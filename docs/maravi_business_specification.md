@@ -332,6 +332,7 @@ Duas abas: **Pendências** e **Processamentos**.
 - Distinguir **tipo de instrumento** de **tipo de lançamento**.
 - Excluir um lançamento ou vários com confirmação, sem motivo e em uma única transação (tudo ou nada); a exclusão é definitiva, sem trilha de auditoria (OQ-32); **não editar** lançamentos existentes (OQ-24).
 - Exibir data/hora efetiva e valores com formatação brasileira. Cada operação mostra PU **e** taxa de execução: o valor informado e o calculado pelo backend ao salvar (OQ-19).
+- A coluna **Financeiro** mostra o `cash_amount` de cada lançamento, isto é, seu efeito no caixa: numa operação, −quantidade × PU de execução (compra negativa, venda positiva); numa movimentação, o valor (aporte positivo, retirada negativa). Não é valor de mercado; o cabeçalho tem a dica "Efeito no caixa: compra negativa, venda positiva; aporte positivo, retirada negativa." (usuário, 2026-10-19: "Financeiro is good"; o enunciado chama esse número de "Financeiro operação").
 - Faixa de caixa (OQ-19): **Caixa D0** é o saldo publicado na data final do período selecionado e **Caixa D−1** o do dia anterior, lidos do caixa publicado (`cash_balances`, via resumo da carteira) e marcados conforme o status de **caixa** de cada data em `processing.date_status`, com "Processado em dd/mm/aaaa hh:mm" quando processado (§10.4; OQ-21, OQ-23, OQ-31).
 
 ### 11.4 Carteira

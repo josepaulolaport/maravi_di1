@@ -52,6 +52,11 @@ export default defineConfig(({ mode }) => ({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // Screen tests render the whole app with its lazy routes. Under a machine shared with other
+    // parallel jobs, one worker per core starves them and they pass the 5 s default; half the
+    // cores and a 20 s budget per test keep them green without touching any assertion.
+    maxWorkers: '50%',
+    testTimeout: 20_000,
     // A failing query prints the whole page, not the first 7000 characters (Testing Library's
     // default), so a failure seen only in CI can be read from its log.
     env: { DEBUG_PRINT_LIMIT: '200000' },

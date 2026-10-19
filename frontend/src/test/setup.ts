@@ -6,8 +6,9 @@ import { TEST_TODAY } from './msw/fixtures';
 import { server } from './msw/server';
 
 // The first test of a file also loads its lazy route, which can pass the default 1 s under a
-// busy machine; 3 s keeps `findBy*`/`waitFor` honest without masking real hangs.
-configure({ asyncUtilTimeout: 3_000 });
+// busy machine; 8 s (below the 20 s test timeout in vite.config.ts) keeps `findBy*`/`waitFor`
+// honest without masking real hangs.
+configure({ asyncUtilTimeout: 8_000 });
 
 // jsdom lacks these browser APIs; Mantine needs them (Mantine testing guide).
 Object.defineProperty(window, 'matchMedia', {

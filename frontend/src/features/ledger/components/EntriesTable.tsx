@@ -5,6 +5,7 @@ import {
   Menu,
   Table,
   Text,
+  Tooltip,
   UnstyledButton,
   VisuallyHidden,
 } from '@mantine/core';
@@ -36,6 +37,10 @@ export function entryLabel(entry: LedgerEntry): string {
   const quantity = formatSignedQuantity(entry.signedQuantity);
   return `${type} ${entry.assetCode} ${quantity} ${when} PU ${formatPu(entry.pu)}`;
 }
+
+/** The Financeiro column is the entry's cash effect (`cash_amount`), not a market value. */
+const CASH_EFFECT_HINT =
+  'Efeito no caixa: compra negativa, venda positiva; aporte positivo, retirada negativa.';
 
 const dash = <span title="Não se aplica">{UNAVAILABLE}</span>;
 const unknownType = <span title="Indisponível">{UNAVAILABLE}</span>;
@@ -104,11 +109,18 @@ export function EntriesTable({
                 {label}
               </Table.Th>
             ))}
-            {['Qtd.', 'PU', 'Taxa', 'Valor financeiro'].map((label) => (
+            {['Qtd.', 'PU', 'Taxa'].map((label) => (
               <Table.Th key={label} ta="right" fw={400} c="dimmed" className={table.nowrap}>
                 {label}
               </Table.Th>
             ))}
+            <Table.Th ta="right" fw={400} c="dimmed" className={table.nowrap}>
+              <Tooltip label={CASH_EFFECT_HINT} events={{ hover: true, focus: true, touch: true }}>
+                <Text component="span" inherit tabIndex={0} td="underline dotted">
+                  Financeiro
+                </Text>
+              </Tooltip>
+            </Table.Th>
             <Table.Th w={48}>
               <VisuallyHidden>Ações</VisuallyHidden>
             </Table.Th>
