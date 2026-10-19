@@ -119,7 +119,6 @@ def test_cumulative_pnl_stays_unavailable_from_the_first_gap() -> None:
     assert monday.status is CalculationCompleteness.COMPLETE
     # ... but the cumulative chain broke on Saturday and stays null (§8.3).
     assert monday.cumulative_pnl is None
-    assert monday.cumulative_status is CalculationCompleteness.MISSING
 
 
 def test_partial_pnl_never_looks_like_a_complete_portfolio_total() -> None:
@@ -140,7 +139,10 @@ def test_partial_pnl_never_looks_like_a_complete_portfolio_total() -> None:
     assert friday.pnl.trades_pnl is None  # not 100
     assert friday.pnl.daily_pnl is None
     assert friday.pnl.status is CalculationCompleteness.MISSING
-    assert friday.pnl.incomplete_assets == {DI1F29}
+    incomplete = {
+        a for a, r in friday.asset_pnl.items() if r.status is not CalculationCompleteness.COMPLETE
+    }
+    assert incomplete == {DI1F29}
     assert friday.valuation.positions_market_value is None  # not 90100
     assert friday.valuation.status is ValuationStatus.MISSING
 

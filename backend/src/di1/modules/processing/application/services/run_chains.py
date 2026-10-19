@@ -31,7 +31,6 @@ from di1.modules.portfolio.public import (
     PortfolioResultsWriter,
     PositionsEngine,
     PositionState,
-    ReferenceSource,
     Trade,
     ValuationCalculator,
     is_past_maturity,
@@ -163,7 +162,6 @@ async def process_positions_day(
                 quantity=position.quantity,
                 maturity_date=maturity,
                 reference_pu=None if current is None else current.pu,
-                reference_source=None if current is None else ReferenceSource(current.source),
             )
         )
         result = AssetPnLCalculator().calculate(
@@ -177,8 +175,6 @@ async def process_positions_day(
             previous_day if missing is MissingReferencePrice.PREVIOUS else day
             for missing in result.missing_prices
         }
-        if position.quantity != 0 and reference_pu(asset_id, day) is None:
-            needed.add(day)  # the valuation of D needs D's price too
         issues.extend(
             NewIssue(IssueType.MISSING_REFERENCE_PRICE, asset_id, day, required)
             for required in sorted(needed)
@@ -186,7 +182,7 @@ async def process_positions_day(
         if is_past_maturity(day, maturity) and position.quantity != 0:
             issues.append(NewIssue(IssueType.EXPIRED_OPEN_POSITION, asset_id, day, None))
 
-    valuation = ValuationCalculator().calculate_day(day, valuation_inputs, cash_balance=None)
+    valuation = ValuationCalculator().calculate_day(day, valuation_inputs)
     pnl = PortfolioPnLCalculator().aggregate(set(asset_ids), asset_pnl, previous_cumulative)
     await writer.write_positions_day(
         positions_day,

@@ -23,7 +23,6 @@ from di1.modules.portfolio.domain.trade import Trade
 from di1.modules.portfolio.domain.valuation import (
     AssetValuation,
     PortfolioValuation,
-    ReferenceSource,
     ValuationStatus,
 )
 from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28
@@ -53,14 +52,12 @@ def _valuation(*asset_ids: UUID, market_value: str | None = "951000") -> Portfol
             AssetValuation(
                 a,
                 Decimal("95100"),
-                ReferenceSource.MANUAL,
                 Decimal("951000"),
                 ValuationStatus.COMPLETE,
             )
             for a in asset_ids
         ),
         positions_market_value=None if market_value is None else Decimal(market_value),
-        aum=Decimal("123"),  # never stored: the writer recomputes AUM from the published cash
         status=ValuationStatus.COMPLETE if market_value is not None else ValuationStatus.MISSING,
     )
 
@@ -78,8 +75,6 @@ PNL = PortfolioPnLResult(
     daily_pnl=Decimal("1000"),
     cumulative_pnl=Decimal("1500"),
     status=COMPLETE,
-    cumulative_status=COMPLETE,
-    incomplete_assets=frozenset(),
 )
 
 
@@ -191,7 +186,7 @@ async def test_a_day_with_no_expected_asset_writes_only_the_portfolio_row(
 ) -> None:
     # OQ-22 item 5: every position closed earlier; market value 0, P&L 0, cumulative carried.
     carried = PortfolioPnLResult(
-        Decimal("0"), Decimal("0"), Decimal("0"), Decimal("1500"), COMPLETE, COMPLETE, frozenset()
+        Decimal("0"), Decimal("0"), Decimal("0"), Decimal("1500"), COMPLETE
     )
     await writer.write_positions_day(
         PositionsDay(DAY, ()),
@@ -336,9 +331,7 @@ class TestOtherChainProcessed:
         assert repository.days[DAY].aum == Decimal("1000000")
 
 
-ZERO_PNL = PortfolioPnLResult(
-    Decimal("0"), Decimal("0"), Decimal("0"), Decimal("7"), COMPLETE, COMPLETE, frozenset()
-)
+ZERO_PNL = PortfolioPnLResult(Decimal("0"), Decimal("0"), Decimal("0"), Decimal("7"), COMPLETE)
 
 
 @pytest.mark.parametrize(
@@ -360,7 +353,6 @@ async def test_a_day_with_no_expected_asset_has_zero_value_and_zero_pnl(
         DAY,
         (),
         None if market_value is None else Decimal(market_value),
-        None,
         ValuationStatus.MISSING if market_value is None else ValuationStatus.COMPLETE,
     )
     with pytest.raises(ValueError):

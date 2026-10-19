@@ -66,8 +66,6 @@ def test_complete_assets_are_summed_per_component_and_accumulated() -> None:
         "100",
     )
     assert result.status is CalculationCompleteness.COMPLETE
-    assert result.cumulative_status is CalculationCompleteness.COMPLETE
-    assert result.incomplete_assets == frozenset()
     assert (result.position_pnl, result.trades_pnl, result.daily_pnl) == (
         D("500"),
         D("400"),
@@ -91,16 +89,13 @@ def test_incomplete_asset_makes_the_portfolio_total_null_not_a_partial_sum() -> 
         "100",
     )
     assert result.status is CalculationCompleteness.MISSING
-    assert result.incomplete_assets == frozenset({ASSET_B})
     assert (result.position_pnl, result.trades_pnl, result.daily_pnl) == (None, None, None)
     assert result.cumulative_pnl is None
-    assert result.cumulative_status is CalculationCompleteness.MISSING
 
 
 def test_expected_asset_without_a_result_is_incomplete() -> None:
     result = aggregate({ASSET_A, ASSET_C}, {ASSET_A: complete("1000", "0")}, "0")
     assert result.status is CalculationCompleteness.MISSING
-    assert result.incomplete_assets == frozenset({ASSET_C})
     assert result.daily_pnl is None
     assert result.cumulative_pnl is None
 
@@ -118,7 +113,6 @@ def test_component_available_on_every_expected_asset_is_still_summed() -> None:
         {ASSET_A, ASSET_B}, {ASSET_A: complete("1000", "400"), ASSET_B: missing_previous}, "0"
     )
     assert result.status is CalculationCompleteness.MISSING
-    assert result.incomplete_assets == frozenset({ASSET_B})
     assert result.position_pnl is None
     assert result.trades_pnl == D("600")
     assert result.daily_pnl is None
@@ -131,7 +125,6 @@ def test_broken_chain_keeps_cumulative_null_even_on_a_complete_day() -> None:
     assert result.status is CalculationCompleteness.COMPLETE
     assert result.daily_pnl == D("1000")
     assert result.cumulative_pnl is None
-    assert result.cumulative_status is CalculationCompleteness.MISSING
 
 
 def test_zero_quantity_expected_asset_is_part_of_the_total() -> None:

@@ -24,7 +24,6 @@ import pytest
 from di1.modules.pnl.public import CalculationCompleteness
 from di1.modules.portfolio.public import (
     AssetValuationInput,
-    ReferenceSource,
     ValuationCalculator,
     ValuationStatus,
 )
@@ -51,9 +50,7 @@ def test_maturity_is_the_harness_contract_date() -> None:
 def test_a_reference_price_after_maturity_is_rejected() -> None:
     with pytest.raises(ValueError, match="no reference price is accepted after maturity"):
         ValuationCalculator().calculate_day(
-            THURSDAY,
-            [AssetValuationInput(DI1F27, 1, MATURITY, Decimal("1"), ReferenceSource.MANUAL)],
-            cash_balance=Decimal(0),
+            THURSDAY, [AssetValuationInput(DI1F27, 1, MATURITY, Decimal("1"))]
         )
 
 

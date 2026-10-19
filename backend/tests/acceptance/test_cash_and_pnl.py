@@ -115,7 +115,6 @@ def test_pnl_per_asset_then_aggregated() -> None:
     assert tuesday.pnl.daily_pnl == Decimal("1100")
     assert tuesday.pnl.cumulative_pnl == Decimal("9800")
     assert tuesday.pnl.status is CalculationCompleteness.COMPLETE
-    assert tuesday.pnl.cumulative_status is CalculationCompleteness.COMPLETE
 
 
 def test_market_value_and_aum() -> None:

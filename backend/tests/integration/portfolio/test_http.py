@@ -32,7 +32,6 @@ from di1.modules.portfolio.domain.trade import Trade
 from di1.modules.portfolio.domain.valuation import (
     AssetValuation,
     PortfolioValuation,
-    ReferenceSource,
     ValuationStatus,
 )
 from di1.modules.portfolio.presentation.http.router import create_router
@@ -119,13 +118,11 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                         AssetValuation(
                             di1f28,
                             Decimal("89006.4625467350"),
-                            ReferenceSource.MANUAL,
                             Decimal("890064.6254673500"),
                             ValuationStatus.COMPLETE,
                         ),
                     ),
                     Decimal("890064.6254673500"),
-                    None,
                     ValuationStatus.COMPLETE,
                 ),
                 {
@@ -143,8 +140,6 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                     Decimal("0.0000000000"),
                     Decimal("0.0000000000"),
                     COMPLETE,
-                    COMPLETE,
-                    frozenset(),
                 ),
                 uow=uow,
                 other_chain_processed=False,
@@ -190,20 +185,17 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                         AssetValuation(
                             di1f28,
                             Decimal("89128.4824345118"),
-                            ReferenceSource.B3,
                             Decimal("891284.8243451180"),
                             ValuationStatus.COMPLETE,
                         ),
                         AssetValuation(
                             di1f29,
                             Decimal("80206.1333187932"),
-                            ReferenceSource.MANUAL,
                             Decimal("401030.6665939660"),
                             ValuationStatus.COMPLETE,
                         ),
                     ),
                     Decimal("1292315.4909390840"),
-                    None,
                     ValuationStatus.COMPLETE,
                 ),
                 {
@@ -228,8 +220,6 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                     Decimal("-8034.1345282660"),
                     Decimal("-8034.1345282660"),
                     COMPLETE,
-                    COMPLETE,
-                    frozenset(),
                 ),
                 uow=uow,
                 other_chain_processed=False,

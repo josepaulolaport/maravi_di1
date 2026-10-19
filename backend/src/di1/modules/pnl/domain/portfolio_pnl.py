@@ -40,11 +40,10 @@ class PortfolioPnLCalculator:
                 f"P&L results for assets not expected on the day: {sorted(unexpected)}"
             )
 
-        incomplete = frozenset(
-            asset
+        complete = all(
+            (result := asset_results.get(asset)) is not None
+            and result.status is CalculationCompleteness.COMPLETE
             for asset in expected_assets
-            if (result := asset_results.get(asset)) is None
-            or result.status is not CalculationCompleteness.COMPLETE
         )
 
         def total(component: Callable[[AssetPnLResult], Decimal | None]) -> Decimal | None:
@@ -67,19 +66,12 @@ class PortfolioPnLCalculator:
                 else previous_cumulative + daily_pnl
             )
 
-        def status(value: Decimal | None) -> CalculationCompleteness:
-            if value is None:
-                return CalculationCompleteness.MISSING
-            return CalculationCompleteness.COMPLETE
-
         return PortfolioPnLResult(
             position_pnl=position_pnl,
             trades_pnl=trades_pnl,
             daily_pnl=daily_pnl,
             cumulative_pnl=cumulative_pnl,
-            status=CalculationCompleteness.MISSING
-            if incomplete
-            else CalculationCompleteness.COMPLETE,
-            cumulative_status=status(cumulative_pnl),
-            incomplete_assets=incomplete,
+            status=CalculationCompleteness.COMPLETE
+            if complete
+            else CalculationCompleteness.MISSING,
         )

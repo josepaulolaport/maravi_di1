@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
-from uuid import UUID
 
 
 class CalculationCompleteness(StrEnum):
@@ -41,9 +40,8 @@ class AssetPnLResult:
 class PortfolioPnLResult:
     """The portfolio on one day, summed over every expected asset (OQ-10).
 
-    ``status`` is the completeness of the day's P&L; ``cumulative_status`` separately records
-    whether the cumulative chain is unbroken, since a complete day after a gap still has a valid
-    ``daily_pnl`` but no ``cumulative_pnl`` (§8.3).
+    ``status`` is the completeness of the day's P&L. A complete day after a gap still has a valid
+    ``daily_pnl`` but no ``cumulative_pnl``: the cumulative chain stays broken (§8.3).
     """
 
     position_pnl: Decimal | None
@@ -51,8 +49,6 @@ class PortfolioPnLResult:
     daily_pnl: Decimal | None
     cumulative_pnl: Decimal | None
     status: CalculationCompleteness
-    cumulative_status: CalculationCompleteness
-    incomplete_assets: frozenset[UUID]
 
 
 def unsigned_zero(value: Decimal) -> Decimal:
