@@ -133,3 +133,15 @@ def test_downgrade_to_0004_gives_back_its_schema(database_url: str) -> None:
         at_0004 = catalog(reference_url)
     for part in ("columns", "constraints", "indexes"):
         assert downgraded[part] == at_0004[part], part
+
+
+def test_downgrade_to_0005_gives_back_its_schema(database_url: str) -> None:
+    command.upgrade(_alembic(database_url), "head")
+    command.downgrade(_alembic(database_url), "0005")
+
+    downgraded = catalog(database_url)
+    with database() as reference_url:
+        command.upgrade(_alembic(reference_url), "0005")
+        at_0005 = catalog(reference_url)
+    for part in ("columns", "constraints", "indexes"):
+        assert downgraded[part] == at_0005[part], part
