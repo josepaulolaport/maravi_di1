@@ -12,9 +12,11 @@ from pydantic import ValidationError
 from di1.platform.config import (
     BrokerSettings,
     LoggingSettings,
+    ProcessingSettings,
     Settings,
     get_broker_settings,
     get_logging_settings,
+    get_processing_settings,
     get_settings,
 )
 
@@ -269,3 +271,55 @@ def test_the_log_level_is_case_insensitive(
     monkeypatch.setenv("LOG_LEVEL", value)
 
     assert LoggingSettings().log_level == level
+
+
+PROCESSING_ENV_NAMES = ("PROCESSING_LEASE_SECONDS", "PROCESSING_MAX_RECOVERY_ATTEMPTS")
+
+
+@pytest.fixture
+def clean_processing_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in PROCESSING_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.usefixtures("clean_processing_environment")
+def test_processing_defaults_are_a_60_s_lease_and_3_recovery_attempts() -> None:
+    """OQ-5: a 60 s lease; the user's decision: recovery capped, default 3."""
+    settings = ProcessingSettings()
+
+    assert settings.processing_lease_seconds == 60
+    assert settings.processing_max_recovery_attempts == 3
+
+
+@pytest.mark.usefixtures("clean_processing_environment")
+def test_processing_values_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROCESSING_LEASE_SECONDS", "90")
+    monkeypatch.setenv("PROCESSING_MAX_RECOVERY_ATTEMPTS", "5")
+
+    settings = get_processing_settings()
+
+    assert (settings.processing_lease_seconds, settings.processing_max_recovery_attempts) == (90, 5)
+
+
+@pytest.mark.usefixtures("clean_processing_environment")
+def test_zero_recovery_attempts_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0 = an expired lease is never re-dispatched (the dispatcher accepts it)."""
+    monkeypatch.setenv("PROCESSING_MAX_RECOVERY_ATTEMPTS", "0")
+
+    assert ProcessingSettings().processing_max_recovery_attempts == 0
+
+
+@pytest.mark.usefixtures("clean_processing_environment")
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("PROCESSING_LEASE_SECONDS", "0"),
+        ("PROCESSING_MAX_RECOVERY_ATTEMPTS", "-1"),
+        ("PROCESSING_MAX_RECOVERY_ATTEMPTS", "2.5"),
+    ],
+)
+def test_processing_bounds(monkeypatch: pytest.MonkeyPatch, name: str, value: str) -> None:
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValidationError, match=name.lower()):
+        ProcessingSettings()

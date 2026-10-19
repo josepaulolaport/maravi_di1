@@ -101,6 +101,25 @@ def get_dispatcher_settings() -> DispatcherSettings:
     return DispatcherSettings()
 
 
+class ProcessingSettings(BaseSettings):
+    """Processing runs' lease and recovery, read by the processes that dispatch and run them
+    (OQ-5: every value comes from configuration)."""
+
+    model_config = SettingsConfigDict(frozen=True, extra="ignore")
+
+    processing_lease_seconds: int = Field(default=60, ge=1)
+    """A run's lease (OQ-5: 60 s, renewed after each processed day); once it expires, the run
+    is recoverable."""
+    processing_max_recovery_attempts: int = Field(default=3, ge=0)
+    """How many times a run whose lease expired is dispatched again before it ends FAILED (the
+    user's decision: capped, default 3); 0 never dispatches it again."""
+
+
+def get_processing_settings() -> ProcessingSettings:
+    """Read the processing settings from the environment now (never at import time)."""
+    return ProcessingSettings()
+
+
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 
