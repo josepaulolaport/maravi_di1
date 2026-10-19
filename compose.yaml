@@ -1,6 +1,7 @@
-# Local stack (plan §0): PostgreSQL 16, RabbitMQ 4.1, the one-shot migration, the API and the
-# outbox relay. `docker compose up --build`; the API answers on http://127.0.0.1:8000 (/health,
-# /api/...), the RabbitMQ management UI on http://127.0.0.1:15672.
+# Local stack (plan §0): PostgreSQL 16, RabbitMQ 4.1, the one-shot migration, the API, the outbox
+# relay, the dispatcher and the one processing worker. `docker compose up --build`; the API
+# answers on http://127.0.0.1:8000 (/health, /api/...), the RabbitMQ management UI on
+# http://127.0.0.1:15672.
 #
 # The credentials are local development defaults; override them with the DI1_* variables. Each
 # user and password sets the server's account and is also copied, as is, into DATABASE_URL or
@@ -102,29 +103,32 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Placeholder: the processing worker and the dispatcher are added when their entry points land
-  # on main (worker bootstrap, branch claude/worker-bootstrap-07f3e7; Processing, lane G). Each
-  # runs one replica and stops on SIGTERM within the default grace period.
-  #
-  # worker:
-  #   <<: *backend
-  #   command: ["python", "-m", "di1.workers.main"]
-  #   environment:
-  #     <<: [*database-env, *broker-env]
-  #   depends_on:
-  #     migrate: {condition: service_completed_successfully}
-  #     rabbitmq: {condition: service_healthy}
-  #   restart: unless-stopped
-  #
-  # dispatcher:          # database only, no broker
-  #   <<: *backend
-  #   command: ["python", "-m", "di1.workers.dispatcher"]
-  #   environment:
-  #     <<: *database-env
-  #     DISPATCHER_POLL_INTERVAL_SECONDS: "1.0"
-  #   depends_on:
-  #     migrate: {condition: service_completed_successfully}
-  #   restart: unless-stopped
+  # Exactly one processing worker (OQ-45): it recovers an interrupted run at startup, before it
+  # consumes, so it must never be scaled. Both processes stop on SIGTERM within the default grace
+  # period and exit 1 on a startup failure; without a health check `up --wait` waits for them
+  # to be running.
+  worker:
+    <<: *backend
+    command: ["python", "-m", "di1.workers.main"]
+    environment:
+      <<: [*database-env, *broker-env]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  dispatcher: # database only, no broker
+    <<: *backend
+    command: ["python", "-m", "di1.workers.dispatcher"]
+    environment:
+      <<: *database-env
+      DISPATCHER_POLL_INTERVAL_SECONDS: ${DI1_DISPATCHER_POLL_INTERVAL_SECONDS:-1.0}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
 volumes:
   postgres-data:

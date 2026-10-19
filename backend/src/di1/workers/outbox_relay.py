@@ -10,8 +10,7 @@ dependencies (interfaces.md "DI composition").
 
 Declaring the queues at startup, and not only in the workers that consume them, means a
 command published before its worker has started is queued instead of refused (NO_ROUTE).
-The queues come from the composition root; until it lists them (``composition.consumers``,
-integrator), `main` declares none and each worker declares its own queue as it starts. Every
+`main` takes the queues from the composition root (``composition.consumers.QUEUES``). Every
 process that declares a queue must share the same ``RABBITMQ_*`` settings: a queue declared
 again with another delivery limit is refused by the broker (PRECONDITION_FAILED).
 
@@ -27,6 +26,7 @@ from collections.abc import Sequence
 
 from aio_pika.abc import AbstractRobustConnection
 
+from di1.composition import consumers as composition
 from di1.platform.config import (
     BrokerSettings,
     Settings,
@@ -112,7 +112,9 @@ async def _prepare(
 def main() -> None:
     run_process(
         "outbox relay",
-        lambda stop: run_outbox_relay(get_settings(), get_broker_settings(), queues=(), stop=stop),
+        lambda stop: run_outbox_relay(
+            get_settings(), get_broker_settings(), queues=composition.QUEUES, stop=stop
+        ),
         logger,
     )
 
