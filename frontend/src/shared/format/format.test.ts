@@ -4,6 +4,7 @@ import {
   decimalSign,
   displayedSign,
   formatDate,
+  formatDateTime,
   formatMoney,
   formatPu,
   formatQuantity,
@@ -110,5 +111,18 @@ describe('date formatting', () => {
     expect(isIsoDate('2026-02-29')).toBe(false);
     expect(isIsoDate('2028-02-29')).toBe(true);
     expect(isIsoDate('16/10/2026')).toBe(false);
+  });
+});
+
+describe('formatDateTime', () => {
+  it('§11 shows an instant in São Paulo time as DD/MM/AAAA HH:MM, whatever its offset', () => {
+    expect(formatDateTime('2026-10-17T10:00:00-03:00')).toBe('17/10/2026 10:00');
+    expect(formatDateTime('2026-10-17T02:30:00Z')).toBe('16/10/2026 23:30');
+    expect(formatDateTime('2026-10-16T21:35:00Z')).toBe('16/10/2026 18:35');
+  });
+
+  it('§12 shows a missing instant as unavailable', () => {
+    expect(formatDateTime(null)).toBe('—');
+    expect(formatDateTime(undefined)).toBe('—');
   });
 });
