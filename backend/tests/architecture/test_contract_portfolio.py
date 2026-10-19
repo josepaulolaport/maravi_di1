@@ -94,9 +94,20 @@ def test_the_writer_publishes_one_date_per_chain() -> None:
     positions = inspect.signature(PortfolioResultsWriter.write_positions_day)
     cash = inspect.signature(PortfolioResultsWriter.write_cash_day)
 
-    assert list(positions.parameters) == ["self", "day", "valuation", "asset_pnl", "pnl", "uow"]
-    assert positions.parameters["uow"].kind is inspect.Parameter.KEYWORD_ONLY
-    assert list(cash.parameters) == ["self", "day", "uow"]
+    assert list(positions.parameters) == [
+        "self",
+        "day",
+        "valuation",
+        "asset_pnl",
+        "pnl",
+        "uow",
+        "other_chain_processed",
+    ]
+    assert list(cash.parameters) == ["self", "day", "uow", "other_chain_processed"]
+    for signature in (positions, cash):
+        assert signature.parameters["uow"].kind is inspect.Parameter.KEYWORD_ONLY
+        # OQ-38: Processing says whether the other chain of the date is processed.
+        assert signature.parameters["other_chain_processed"].kind is inspect.Parameter.KEYWORD_ONLY
     assert not hasattr(PortfolioResultsWriter, "publish_range")
 
 
