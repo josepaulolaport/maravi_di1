@@ -8,7 +8,7 @@ import type {
   ReferencePriceDay,
 } from '../../contract';
 import { daysInclusive } from '../dates';
-import { db, markDirty, newId } from '../db';
+import { db, markChanged, newId } from '../db';
 import {
   dateErrors,
   decimalErrors,
@@ -99,7 +99,7 @@ export const priceHandlers = [
     db.referencePrices = db.referencePrices.filter(
       (p) => !(p.asset_id === instrument.id && p.reference_date === date && p.source === 'MANUAL'),
     );
-    markDirty('price', date);
+    markChanged('price', date);
     const created: ReferencePrice = {
       id: newId(),
       asset_id: instrument.id,
@@ -119,7 +119,7 @@ export const priceHandlers = [
     const price = db.referencePrices.find((p) => p.id === params.id);
     if (!price) return notFound('Preço de referência');
     db.referencePrices = db.referencePrices.filter((p) => p !== price);
-    markDirty('price', price.reference_date);
+    markChanged('price', price.reference_date);
     return new HttpResponse(null, { status: 204 });
   }),
 ];

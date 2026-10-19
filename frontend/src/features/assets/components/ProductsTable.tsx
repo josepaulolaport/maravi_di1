@@ -5,7 +5,7 @@ import { Link } from 'react-router';
 import type { Product } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
 
-import { countLabel } from './countLabel';
+import { countLabel } from '@/shared/format';
 
 /** Catalogue rows (§11.2): código, produto, classe, contratos; each opens its product. */
 export function ProductsTable({ products }: { products: Product[] }) {

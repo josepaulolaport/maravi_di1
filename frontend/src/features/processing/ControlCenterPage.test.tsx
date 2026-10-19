@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
 import type { Issue } from '@/api/contract';
@@ -23,7 +23,6 @@ const issue = (changes: Partial<Issue>): Issue => ({
   asset_code: 'DI1F29',
   affected_date: '2026-10-16',
   required_price_date: '2026-10-16',
-  chain: null,
   request_id: '7f3c9a02-0000-4000-8000-000000000002',
   ...changes,
 });
@@ -40,6 +39,10 @@ describe('Central de Controle (§11.1)', () => {
 
     const tab = await screen.findByRole('tab', { name: /Pendências/ });
     expect(tab).toHaveAttribute('aria-selected', 'true');
+    // The count is read once, in words; the badge is hidden from screen readers.
+    await waitFor(() => {
+      expect(tab).toHaveAccessibleName('Pendências, 1 pendência');
+    });
     expect(await within(tab).findByText('1')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Processamentos' })).toHaveAttribute(
       'aria-selected',
@@ -115,35 +118,6 @@ describe('Pendências (§11.1, §10.3)', () => {
     );
   });
 
-  it('OQ-11 OQ-21 links a stale predecessor to Processamentos for its chain, ending the day before', async () => {
-    serveIssues([
-      issue({
-        issue_type: 'STALE_PREDECESSOR',
-        asset_id: null,
-        asset_code: null,
-        affected_date: '2026-10-17',
-        required_price_date: null,
-        chain: 'CASH',
-      }),
-    ]);
-    const { user, router } = renderApp(PAGE);
-
-    const text = await screen.findByText('Estado anterior desatualizado (caixa)');
-    const cells = within(text.closest('tr') as HTMLElement);
-    expect(cells.getByText('—')).toBeInTheDocument();
-    const link = cells.getByRole('link', { name: 'Processar intervalo anterior' });
-    expect(link).toHaveAttribute(
-      'href',
-      '/central-de-controle?tab=processamentos&fim=2026-10-16&escopo=caixa',
-    );
-
-    await user.click(link);
-
-    expect(router.state.location.search).toBe('?tab=processamentos&fim=2026-10-16&escopo=caixa');
-    expect(await screen.findByRole('textbox', { name: 'Data final' })).toHaveValue('16/10/2026');
-    expect(screen.getByRole('radio', { name: 'Caixa' })).toBeChecked();
-  });
-
   it('§10.3 shows the date whose price is needed, which may differ from the affected day', async () => {
     serveIssues([issue({ affected_date: '2026-10-16', required_price_date: '2026-10-15' })]);
     const { user } = renderApp(PAGE);
@@ -179,12 +153,14 @@ describe('Pendências (§11.1, §10.3)', () => {
     const search = screen.getByRole('textbox', { name: 'Buscar pendência' });
     expect(search).toHaveAttribute('placeholder', 'Buscar ativo ou data...');
     await user.type(search, 'f28');
-    expect(screen.queryByText('DI1F29')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText('DI1F29')).not.toBeInTheDocument();
+    });
     expect(screen.getByText('DI1F28')).toBeInTheDocument();
 
     await user.clear(search);
     await user.type(search, '16/10');
-    expect(screen.getByText('DI1F29')).toBeInTheDocument();
+    expect(await screen.findByText('DI1F29')).toBeInTheDocument();
     expect(screen.queryByText('DI1F28')).not.toBeInTheDocument();
     expect(screen.getByText('1 pendência encontrada')).toBeInTheDocument();
   });

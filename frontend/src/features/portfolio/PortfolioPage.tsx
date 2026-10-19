@@ -1,7 +1,10 @@
-import { Group, Skeleton, Stack } from '@mantine/core';
+import { Group, Stack } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { IconCalendar } from '@tabler/icons-react';
 
+import { PageTitle } from '@/shared/ui/PageTitle';
+import { useSummary } from '@/shared/queries';
+import { Loading } from '@/shared/ui/Loading';
 import type { IsoDate } from '@/api/contract';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
@@ -10,28 +13,24 @@ import { DataStatus } from './components/DataStatus';
 import { KpiGrid } from './components/KpiGrid';
 import { PositionsTable } from './components/PositionsTable';
 import { NotProcessedNotice } from './components/StatusNotices';
-import {
-  useChartStart,
-  useEvaluationDate,
-  usePortfolioPositions,
-  usePortfolioSummary,
-} from './hooks/usePortfolio';
+import { useChartStart, useEvaluationDate, usePortfolioPositions } from './hooks/usePortfolio';
 
 /**
  * Carteira (spec §11.4): one evaluation date, published data only; nothing is recalculated
- * here. Cash and positions are published by separate chains (OQ-21 draft), so each KPI and
- * notice follows its own chain's freshness; AUM joins both.
+ * here. Cash and positions are published by separate chains (OQ-21), so each KPI and
+ * notice follows its own chain's status (OQ-31); AUM joins both.
  */
 export function PortfolioPage() {
   const [date, setDate, today] = useEvaluationDate();
   // Read here, not in the chart card, so a start the date has passed is dropped from the URL
   // even on a date whose card is not shown (not processed).
   const chartStart = useChartStart(date);
-  const summary = usePortfolioSummary(date);
+  const summary = useSummary(date);
   const positions = usePortfolioPositions(date);
 
   return (
     <Stack gap="md">
+      <PageTitle>Carteira</PageTitle>
       <Group justify="space-between" align="flex-end">
         <DatePickerInput
           label="Data de avaliação"
@@ -54,7 +53,7 @@ export function PortfolioPage() {
 interface BodyProps {
   date: IsoDate;
   chartStart: ReturnType<typeof useChartStart>;
-  summary: ReturnType<typeof usePortfolioSummary>;
+  summary: ReturnType<typeof useSummary>;
   positions: ReturnType<typeof usePortfolioPositions>;
 }
 
@@ -71,13 +70,7 @@ function PortfolioBody({ date, chartStart, summary, positions }: BodyProps) {
     );
   }
   if (summary.isPending || positions.isPending) {
-    return (
-      <Stack gap="md" aria-busy="true" aria-label="Carregando carteira">
-        <Skeleton h={76} />
-        <Skeleton h={260} />
-        <Skeleton h={220} />
-      </Stack>
-    );
+    return <Loading label="Carregando carteira" h={[76, 260, 220]} />;
   }
 
   const data = summary.data;

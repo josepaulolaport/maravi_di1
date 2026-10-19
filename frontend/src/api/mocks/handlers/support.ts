@@ -131,8 +131,8 @@ export function rangeErrors(start: unknown, end: unknown): FieldError[] {
 }
 
 /** The page size when `limit` is not given, and the largest one accepted. */
-export const DEFAULT_PAGE_SIZE = 50;
-export const MAX_PAGE_SIZE = 200;
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 200;
 
 /**
  * Keyset pagination over an already-ordered list (P21): the cursor is opaque to the client;

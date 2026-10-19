@@ -1,26 +1,29 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 
-import type { JobStatus, ProcessingRangeRequest } from '@/api/contract';
+import type { JobStatus } from '@/api/contract';
 import { processingApi } from '@/api/endpoints';
 import { invalidateAfterJobFinished, queryRoots } from '@/api/queryRoots';
 
 import { isActive, isFinal } from '../jobStatus';
 
-export const processingKeys = {
+const processingKeys = {
   all: queryRoots.processing,
   requests: () => [...processingKeys.all, 'requests'] as const,
   issues: () => [...processingKeys.all, 'issues'] as const,
 };
 
 /** How often the history is read while a job is active (§12). */
-export const POLL_INTERVAL_MS = 2_000;
+const POLL_INTERVAL_MS = 2_000;
 
 /** Jobs per page of the history (P21); "Carregar mais" reads the next one. */
-export const JOBS_PAGE_SIZE = 20;
+const JOBS_PAGE_SIZE = 20;
 
 export function useIssues() {
-  return useQuery({ queryKey: processingKeys.issues(), queryFn: processingApi.listIssues });
+  return useQuery({
+    queryKey: processingKeys.issues(),
+    queryFn: () => processingApi.listIssues(),
+  });
 }
 
 /**
@@ -84,11 +87,4 @@ function useProcessingMutation<TVariables, TData>(fn: (variables: TVariables) =>
 
 export function useCancel() {
   return useProcessingMutation((requestId: string) => processingApi.cancel(requestId));
-}
-
-export function useCancelAndReplace() {
-  return useProcessingMutation(
-    ({ requestId, range }: { requestId: string; range: ProcessingRangeRequest }) =>
-      processingApi.cancelAndReplace(requestId, range),
-  );
 }

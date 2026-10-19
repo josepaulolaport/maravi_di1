@@ -9,7 +9,7 @@ import type {
   TradeLedgerEntry,
 } from '../../contract';
 import { daysInclusive } from '../dates';
-import { db, markDirty, newId } from '../db';
+import { db, markChanged, newId } from '../db';
 import {
   dateErrors,
   decimalErrors,
@@ -116,7 +116,7 @@ function createTrade(body: Record<string, unknown>) {
     created_at: new Date().toISOString(),
   };
   db.entries.push(entry);
-  markDirty('trade', date);
+  markChanged('trade', date);
   return HttpResponse.json(entry, { status: 201 });
 }
 
@@ -139,7 +139,7 @@ function createCash(body: Record<string, unknown>) {
     created_at: new Date().toISOString(),
   };
   db.entries.push(entry);
-  markDirty('cash', entry.date);
+  markChanged('cash', entry.date);
   return HttpResponse.json(entry, { status: 201 });
 }
 
@@ -167,8 +167,7 @@ export const ledgerHandlers = [
     return problem(422, [fieldError('VALIDATION_ERROR', 'Informe o tipo do lançamento.', 'type')]);
   }),
 
-  // All or nothing: if any id is unknown nothing is deleted (§6.1 "operação atômica"). A trade
-  // marks cash and positions dirty; a cash entry only cash.
+  // All or nothing: if any id is unknown nothing is deleted (§6.1 "operação atômica").
   http.post(url('/ledger/entries/deletions'), async ({ request }) => {
     await latency();
     const body = await readJson(request);
@@ -180,7 +179,7 @@ export const ledgerHandlers = [
     if (found.some((entry) => entry === undefined)) return notFound('Lançamento');
     db.entries = db.entries.filter((e) => !ids.includes(e.id));
     for (const entry of found as LedgerEntry[]) {
-      markDirty(entry.type === 'TRADE' ? 'trade' : 'cash', entry.date);
+      markChanged(entry.type === 'TRADE' ? 'trade' : 'cash', entry.date);
     }
     return new HttpResponse(null, { status: 204 });
   }),
