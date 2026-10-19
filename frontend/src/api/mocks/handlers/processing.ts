@@ -109,7 +109,11 @@ function failChains(
 ): boolean {
   const alive = aliveChains(job);
   for (const chain of chains) setStatus(date, chain, 'FAILED');
-  if (job.failed_date === null) {
+  // The first failure stays; when cash failed earlier on this same date and positions fail now,
+  // the positions error is the one kept (OQ-36 item 5, OQ-40 item 3).
+  const samePositionsDate =
+    job.failed_date === date && job.failed_chain === 'CASH' && chains.includes('POSITIONS');
+  if (job.failed_date === null || samePositionsDate) {
     Object.assign(job, {
       error_code: error.code,
       error_message: error.message,

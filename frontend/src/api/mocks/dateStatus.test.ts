@@ -231,6 +231,22 @@ describe('OQ-23 the status of a date, per chain', () => {
     expect(await status('2026-10-18')).toEqual({ cash: 'FAILED', positions: 'NOT_PROCESSED' });
   });
 
+  it('OQ-36 OQ-40 both chains failing on the same date keep the positions error, even in two steps', async () => {
+    // Positions have 17/10, cash does not; a price on 18/10 makes positions fail there too.
+    await finish(await enqueue('2026-10-17', '2026-10-17', 'POSITIONS'));
+    await setPrice('2026-10-18');
+
+    const job = await finish(await enqueue('2026-10-18', '2026-10-18', 'ALL'));
+
+    expect(job).toMatchObject({
+      status: 'FAILED',
+      error_code: 'MOCK_INPUTS_CHANGED',
+      failed_date: '2026-10-18',
+      failed_chain: 'POSITIONS',
+    });
+    expect(await status('2026-10-18')).toEqual({ cash: 'FAILED', positions: 'FAILED' });
+  });
+
   it('OQ-36 OQ-40 an ALL run cancelled after one chain failed ends CANCELLED and keeps the failure', async () => {
     await setPrice('2026-10-16');
     const job = await enqueue('2026-10-15', '2026-10-18', 'ALL');
