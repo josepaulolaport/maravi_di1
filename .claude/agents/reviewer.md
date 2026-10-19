@@ -30,7 +30,7 @@ You review one lane branch in a fresh context. You never edit files.
    - the portfolio total is not shown as complete when an expected asset is missing.
 3. **No automatic processing:** look for any hidden recalculation or enqueue triggered by a write.
 4. **Atomicity:**
-   - each fact and its invalidation are saved in one UoW;
+   - each write saves only its fact, in one UoW, with no invalidation (OQ-31);
    - each date's published rows (`positions`, `position_metrics`, `portfolio_metrics`, `cash_balances`), its AUM, its `date_status` and `progress_date` are written in that date's one transaction (OQ-23);
    - the claim-token check and the D−1/D `date_status` row locks happen in that transaction.
 5. **Concurrency:**

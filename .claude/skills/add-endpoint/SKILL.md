@@ -8,7 +8,7 @@ description: Add or change a Maravi DI1 backend HTTP endpoint end to end inside 
 ## 1. Contract first
 
 - **Find the endpoint** in `docs/interfaces.md`, "HTTP endpoints", and the service method behind it in the module's contract section.
-- **Find its transaction boundary** in `docs/interfaces.md`, "Transaction boundaries", for example a mutation plus invalidation in one UoW.
+- **Find its transaction boundary** in `docs/interfaces.md`, "Transaction boundaries", for example a mutation saved in one UoW, with nothing else (OQ-31).
 - **Find the behaviour** in `docs/maravi_business_specification.md`.
 - **If the method, path, body, response or error is not specified, stop and use `spec-gap`.** Errors follow `docs/interfaces.md` "Errors" (problem+json and its code catalogue).
 
@@ -17,7 +17,7 @@ description: Add or change a Maravi DI1 backend HTTP endpoint end to end inside 
 - **Unit test of the service**, with in-memory fakes of its interfaces:
   - the happy path;
   - each error;
-  - for writes, that the invalidator was called in the same UoW and that **nothing was enqueued**.
+  - for writes, that only the fact was saved (no date status changed, OQ-31) and that **nothing was enqueued**.
 - **HTTP test against PostgreSQL** in your worktree's database:
   - the request and the full response;
   - decimals as strings;

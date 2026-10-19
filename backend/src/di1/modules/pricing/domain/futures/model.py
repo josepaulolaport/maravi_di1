@@ -6,16 +6,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from enum import StrEnum
 
 from di1.modules.pricing.domain.errors import InvalidPricingInputError
-
-
-class InputKind(StrEnum):
-    """Which value was typed (schema: `input_kind IN ('PU','RATE')`)."""
-
-    PU = "PU"
-    RATE = "RATE"
+from di1.shared.input_kind import InputKind as InputKind  # one definition, shared (W0.3b)
 
 
 @dataclass(frozen=True, slots=True)

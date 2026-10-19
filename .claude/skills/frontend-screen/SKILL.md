@@ -23,10 +23,10 @@ description: Build or change a Maravi DI1 screen or component (React, TypeScript
 - The MSW handlers and fixtures follow the endpoint contracts.
 - Cover:
   - loading and empty;
-  - valid, missing/incomplete, stale and unprocessed data;
+  - valid, missing/incomplete and unprocessed data, and each date status with its processing time (OQ-31);
   - `COMPLETED_WITH_ISSUES`;
   - every job status;
-  - cancel, and cancel and replace;
+  - cancel (no cancel and replace, OQ-30);
   - `null` shown as unavailable;
   - the exact pt-BR formatted strings.
 

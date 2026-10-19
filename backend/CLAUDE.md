@@ -10,7 +10,7 @@ These rules add to the root CLAUDE.md. The authorities are:
 ```text
 backend/
   pyproject.toml  uv.lock  alembic.ini
-  migrations/{env.py, versions/, sql/}  # integrator (X) only; sql/ holds each revision's reviewed SQL; 0001 + 0002 + 0003 = docs/schema.sql
+  migrations/{env.py, versions/, sql/}  # integrator (X) only; sql/ holds each revision's reviewed SQL; 0001 + 0002 + 0003 + 0004 = docs/schema.sql
   src/di1/
     main.py                              # integrator
     composition/{routers,dependencies,consumers}.py   # integrator
@@ -48,7 +48,7 @@ Create only the files and packages that are used. Initially only Processing has 
   - no internal randomness: a calculation that needs it takes an explicit seed or an injected generator (`rng: random.Random`, or `random.Random(seed)`); the module-level `random` functions, `random.seed`, `SystemRandom` and an unseeded `random.Random()` are rejected.
 - **Services:**
   - Services and HTTP may be `async`.
-  - A write receives the Unit of Work (`*, uow`) and saves the fact and the invalidation (`FinancialResultInvalidator`) in the same session, then commits once.
+  - A write receives the Unit of Work (`*, uow`), saves only the fact, then commits once. There is no invalidation and no `FinancialResultInvalidator`: Ledger and Prices never call Processing (OQ-31).
   - A write never enqueues processing.
 - **Persistence:**
   - The ORM models mirror `docs/schema.sql` exactly; do not invent columns. A schema change needs the user's decision first (`spec-gap`).

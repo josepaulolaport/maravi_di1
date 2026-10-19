@@ -1,13 +1,14 @@
-"""Processing's public contract: invalidation of results and the request DTO (interfaces.md
+"""Processing's public contract: the request DTO and the per-date chain statuses (interfaces.md
 "Processing").
 
-Frozen in W0.3b. Lane G implements `FinancialResultInvalidator`; Ledger and Prices call it in the
-same Unit of Work as their write, and it never enqueues processing. Changes go through the
-integrator.
+Frozen in W0.3b. Nothing outside Processing writes a status: since OQ-31 a write in Ledger or
+Prices saves only the fact, and a date's results change only when the user processes it again.
+Changes go through the integrator.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
@@ -15,29 +16,6 @@ from typing import Protocol
 from uuid import UUID
 
 from di1.platform.database.unit_of_work import UnitOfWork
-
-
-class FinancialResultInvalidator(Protocol):
-    """Marks published dates stale from a date on, in ``processing.date_status`` (OQ-23): the
-    affected chain becomes STALE on every date >= the given one that has a status."""
-
-    async def trades_changed(self, effective_date: date, *, uow: UnitOfWork) -> None:
-        """A trade dated ``effective_date`` was created or deleted: the cash and the positions
-        chains are stale from that date on (OQ-21, OQ-23). Does not commit."""
-        ...
-
-    async def cash_movements_changed(self, effective_date: date, *, uow: UnitOfWork) -> None:
-        """A deposit or withdrawal dated ``effective_date`` was created or deleted: only the
-        cash chain is stale from that date on (OQ-21, OQ-23). Does not commit."""
-        ...
-
-    async def prices_changed(
-        self, asset_id: UUID, reference_date: date, *, uow: UnitOfWork
-    ) -> None:
-        """A reference price of ``asset_id`` for ``reference_date`` was set, corrected or
-        removed: the positions chain (valuation and P&L) is stale from that date on (OQ-23,
-        OQ-25). Does not commit."""
-        ...
 
 
 class ProcessingScope(StrEnum):
@@ -50,14 +28,42 @@ class ProcessingScope(StrEnum):
 
 
 class ChainStatus(StrEnum):
-    """The current status of one chain on one date (OQ-23; schema ``processing.date_status``).
-    A date with no status is not processed."""
+    """The current status of one chain on one date (OQ-23, OQ-31; schema
+    ``processing.date_status``). A date with no status is "Não processado"."""
 
-    FRESH = "FRESH"
-    FRESH_WITH_ISSUES = "FRESH_WITH_ISSUES"
-    STALE = "STALE"
+    PROCESSED = "PROCESSED"
+    """Processado."""
+    PROCESSED_WITH_ISSUES = "PROCESSED_WITH_ISSUES"
+    """Processado com pendências: a missing price or an expired open position."""
     RUNNING = "RUNNING"
+    """Processando."""
     FAILED = "FAILED"
+    """Erro: the run failed on this date, e.g. its day before was not processed (OQ-31)."""
+
+
+@dataclass(frozen=True, slots=True)
+class DateStatus:
+    """The current status of both chains on one date (OQ-23; ``processing.date_status``);
+    ``None`` is "not processed". Each ``*_processed_at`` is when a run last committed that chain
+    for the date, shown as "Processado em dd/mm/aaaa hh:mm"; ``None`` if never (OQ-31)."""
+
+    date: date
+    portfolio: ChainStatus | None
+    cash: ChainStatus | None
+    portfolio_processed_at: datetime | None
+    cash_processed_at: datetime | None
+
+
+class DateStatusReader(Protocol):
+    """Read access to ``processing.date_status`` for Portfolio's read models (OQ-23)."""
+
+    async def get_date_statuses(
+        self, start_date: date, end_date: date, *, uow: UnitOfWork
+    ) -> Mapping[date, DateStatus]:
+        """The statuses of [start_date, end_date], read in ``uow``'s transaction so a caller sees
+        them in the same snapshot as its own tables; a date with no row is absent (not
+        processed)."""
+        ...
 
 
 class ProcessingStatus(StrEnum):
@@ -79,7 +85,9 @@ class ProcessingRequest:
     """A run: a user's request to process exactly [start_date, end_date] of one scope, one date
     per transaction (OQ-11, OQ-21, OQ-23; schema ``processing.requests``). ``progress_date`` is
     the last date it committed; the error belongs to the run, the failed date shows FAILED in
-    ``date_status``. Claim token and lease stay inside Processing."""
+    ``date_status``. A date whose day before is neither processed nor the chain's zero state
+    fails with ``CASH_PREDECESSOR_MISSING`` or ``POSITIONS_PREDECESSOR_MISSING`` (OQ-31). Claim
+    token and lease stay inside Processing."""
 
     id: UUID
     scope: ProcessingScope
