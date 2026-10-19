@@ -32,8 +32,10 @@ cd frontend && VITE_API_MOCKS=false npm run dev   # UI on http://localhost:5173 
 ```
 
 The API answers on http://127.0.0.1:8000 (`/health`, `/api/...`), and the RabbitMQ management UI
-on http://127.0.0.1:15672 (user `di1`, password `di1`). Without `VITE_API_MOCKS=false` the UI runs
-against its built-in MSW mocks, with no backend at all. `docker compose down -v` removes the
+on http://127.0.0.1:15672 (user `di1`, password `di1`). The Vite dev server proxies `/api` and
+`/health` to the API; when the API runs on another port (`DI1_API_PORT`), add
+`API_PROXY_TARGET=http://127.0.0.1:<port>` to the `npm run dev` command. Without
+`VITE_API_MOCKS=false` the UI runs against its built-in MSW mocks, with no backend at all. `docker compose down -v` removes the
 stack and its data.
 
 ## Demo: the challenge example, end to end
@@ -74,8 +76,6 @@ automated acceptance tests with a fixed clock (`backend/tests/acceptance/`,
 - **Catalogue roots are seeded by `make seed`, not by a migration:** the API has no route for
   instrument types and asset classes, so a fresh database needs `make seed` before the DI1 product
   can be created.
-- **The UI against the real API needs a dev proxy:** the Vite dev server must proxy `/api` to the
-  API (no CORS on the backend); requested from the frontend lane.
 - **Reference prices are typed by hand:** there is no CSV or B3 price import yet; the B3 source
   exists in the model and the MANUAL > B3 precedence is implemented.
 - **Repository housekeeping:** the `.claude/settings.json` deny list on `main` still carries
