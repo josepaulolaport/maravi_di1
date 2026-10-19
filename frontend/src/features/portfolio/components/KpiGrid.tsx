@@ -1,37 +1,16 @@
-import { Group, Paper, SimpleGrid, Text } from '@mantine/core';
+import { Paper, SimpleGrid, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
-import type { Decimal, Freshness, PortfolioSummary } from '@/api/contract';
+import type { Decimal, PortfolioSummary } from '@/api/contract';
 import { formatMoney, UNAVAILABLE } from '@/shared/format';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
-import { StatusBadge } from '@/shared/ui/StatusBadge';
 
-/** A KPI's own freshness, from its chain (OQ-21 draft): nothing when current. */
-function FreshnessMarker({ status }: { status: Freshness }) {
-  if (status === 'STALE') return <StatusBadge label="Desatualizado" color="yellow" size="sm" />;
-  if (status === 'NOT_PROCESSED') {
-    return <StatusBadge label="Não processado" color="gray" size="sm" />;
-  }
-  return null;
-}
-
-function Kpi({
-  label,
-  status,
-  children,
-}: {
-  label: string;
-  status: Freshness;
-  children: ReactNode;
-}) {
+function Kpi({ label, children }: { label: string; children: ReactNode }) {
   return (
     <Paper p="md" role="group" aria-label={label}>
-      <Group justify="space-between" gap={4} wrap="nowrap">
-        <Text size="sm" c="dimmed">
-          {label}
-        </Text>
-        <FreshnessMarker status={status} />
-      </Group>
+      <Text size="sm" c="dimmed">
+        {label}
+      </Text>
       <Text size="xl" fw={500} mt={4}>
         {children}
       </Text>
@@ -45,27 +24,26 @@ function Money({ value }: { value: Decimal | null }) {
 }
 
 /**
- * The five indicators of §11.4. Cash is a KPI, never a position row (D1). Each is marked with
- * its own chain's freshness (OQ-21 draft): Saldo em caixa with the cash; the P&L with the
- * positions; Patrimônio (AUM = cash + market value) when either side is behind.
+ * The five indicators of §11.4. Cash is a KPI, never a position row (D1). No figure carries a
+ * freshness badge of its own: the cash and positions chains do (DataStatus).
  */
 export function KpiGrid({ summary }: { summary: PortfolioSummary }) {
   const { cash, positions, aum } = summary;
   return (
     <SimpleGrid cols={{ base: 2, md: 5 }} spacing="md">
-      <Kpi label="Saldo em caixa" status={cash.status}>
+      <Kpi label="Saldo em caixa">
         <Money value={cash.balance} />
       </Kpi>
-      <Kpi label="Patrimônio total" status={aum.status}>
+      <Kpi label="Patrimônio total">
         <Money value={aum.value} />
       </Kpi>
-      <Kpi label="P&L diário" status={positions.status}>
+      <Kpi label="P&L diário">
         <SignedMoney value={positions.daily_pnl} />
       </Kpi>
-      <Kpi label="P&L posições" status={positions.status}>
+      <Kpi label="P&L posições">
         <SignedMoney value={positions.position_pnl} />
       </Kpi>
-      <Kpi label="P&L operações" status={positions.status}>
+      <Kpi label="P&L operações">
         <SignedMoney value={positions.trades_pnl} />
       </Kpi>
     </SimpleGrid>

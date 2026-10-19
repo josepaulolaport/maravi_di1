@@ -96,7 +96,7 @@ export function ChainNotices({ date, cash, positions, incomplete }: ChainNotices
         >
           <Text size="sm">
             Os dados de origem mudaram depois da publicação desta data, ou o dia anterior não estava
-            atualizado quando ela foi processada. Os valores marcados são os últimos publicados e
+            atualizado quando ela foi processada. Os valores abaixo são os últimos publicados e
             podem não refletir os dados atuais; o patrimônio total também fica desatualizado.
           </Text>
           <Anchor

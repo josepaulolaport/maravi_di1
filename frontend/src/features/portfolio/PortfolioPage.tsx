@@ -6,6 +6,7 @@ import type { IsoDate } from '@/api/contract';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
 import { CumulativePnlCard } from './components/CumulativePnlCard';
+import { DataStatus } from './components/DataStatus';
 import { KpiGrid } from './components/KpiGrid';
 import { PositionsTable } from './components/PositionsTable';
 import { ChainNotices, NotProcessedNotice } from './components/StatusNotices';
@@ -27,7 +28,7 @@ export function PortfolioPage() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between">
+      <Group justify="space-between" align="flex-end">
         <DatePickerInput
           label="Data de avaliação"
           value={date}
@@ -39,6 +40,7 @@ export function PortfolioPage() {
           leftSection={<IconCalendar size={16} stroke={1.5} />}
           w={220}
         />
+        {summary.data && <DataStatus summary={summary.data} />}
       </Group>
       <PortfolioBody date={date} summary={summary} positions={positions} />
     </Stack>

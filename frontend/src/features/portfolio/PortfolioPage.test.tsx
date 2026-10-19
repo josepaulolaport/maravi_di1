@@ -17,6 +17,21 @@ function kpi(label: string) {
   return within(screen.getByRole('group', { name: label }));
 }
 
+/** The two data-status badges (user, 2026-10-18): one for the cash, one for the positions. */
+function dataStatus() {
+  const group = within(screen.getByRole('group', { name: 'Situação dos dados' }));
+  return group.getAllByText(/^(Caixa|Posições): /).map((badge) => badge.textContent);
+}
+
+/** No KPI carries a status badge of its own; freshness belongs to the chains. */
+function expectNoKpiBadge() {
+  for (const label of KPIS) {
+    expect(kpi(label).queryByText(/Desatualizado|Não processado|Atualizado/)).toBeNull();
+  }
+}
+
+const KPIS = ['Saldo em caixa', 'Patrimônio total', 'P&L diário', 'P&L posições', 'P&L operações'];
+
 function rowOf(assetCode: string) {
   const cell = screen.getByText(assetCode, { selector: 'td *' });
   const row = cell.closest('tr');
@@ -68,6 +83,8 @@ describe('Carteira (§11.4)', () => {
     expect(kpi('P&L diário').getByText('-R$ 8.034,13')).toBeInTheDocument();
     expect(kpi('P&L posições').getByText('+R$ 1.220,20')).toBeInTheDocument();
     expect(kpi('P&L operações').getByText('-R$ 9.254,33')).toBeInTheDocument();
+    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Atualizado']);
+    expectNoKpiBadge();
     expect(screen.queryByText(/desatualizad/)).not.toBeInTheDocument();
     expect(screen.queryByText('Resultados incompletos')).not.toBeInTheDocument();
   });
@@ -158,12 +175,11 @@ describe('Carteira (§11.4)', () => {
       'href',
       '/central-de-controle?tab=processamentos&inicio=2026-10-16&fim=2026-10-16&escopo=posicoes',
     );
-    expect(kpi('Saldo em caixa').queryByText('Desatualizado')).not.toBeInTheDocument();
-    expect(kpi('P&L operações').getByText('Desatualizado')).toBeInTheDocument();
-    expect(kpi('Patrimônio total').getByText('Desatualizado')).toBeInTheDocument();
+    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Desatualizado']);
+    expectNoKpiBadge();
   });
 
-  it('§11.4 OQ-21 stale cash marks Saldo em caixa and AUM, never the P&L', async () => {
+  it('§11.4 OQ-21 stale cash shows on the Caixa badge; positions stay current', async () => {
     override15({ cash: { status: 'STALE' }, aum: { status: 'STALE' } });
     await openCarteira('2026-10-15');
 
@@ -172,11 +188,8 @@ describe('Carteira (§11.4)', () => {
       'href',
       '/central-de-controle?tab=processamentos&inicio=2026-10-15&fim=2026-10-15&escopo=caixa',
     );
-    expect(kpi('Saldo em caixa').getByText('Desatualizado')).toBeInTheDocument();
-    expect(kpi('Patrimônio total').getByText('Desatualizado')).toBeInTheDocument();
-    for (const label of ['P&L diário', 'P&L posições', 'P&L operações']) {
-      expect(kpi(label).queryByText('Desatualizado')).not.toBeInTheDocument();
-    }
+    expect(dataStatus()).toEqual(['Caixa: Desatualizado', 'Posições: Atualizado']);
+    expectNoKpiBadge();
   });
 
   it('§11.4 OQ-21 both chains stale: one notice that asks for Tudo', async () => {
@@ -217,7 +230,8 @@ describe('Carteira (§11.4)', () => {
     expect(screen.getByText('Posições não processadas')).toBeInTheDocument();
     expect(kpi('Saldo em caixa').getByText('R$ 199.650,37')).toBeInTheDocument();
     expect(kpi('Patrimônio total').getByText('—')).toBeInTheDocument();
-    expect(kpi('Patrimônio total').getByText('Não processado')).toBeInTheDocument();
+    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Não processado']);
+    expectNoKpiBadge();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
