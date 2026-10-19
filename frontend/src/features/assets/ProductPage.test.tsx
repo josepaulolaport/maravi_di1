@@ -85,14 +85,14 @@ describe('Ativos: produto (§11.2)', () => {
       'DI1F28',
       '03/01/2028',
       '89.250,31',
-      '9,80%',
+      '9,8000%',
       '16/10/2026',
     ]);
     expect(cellTexts('DI1F29').slice(0, 5)).toEqual([
       'DI1F29',
       '02/01/2029',
       '80.206,13',
-      '10,45%',
+      '10,4500%',
       '15/10/2026',
     ]);
     expect(screen.getByText('4 contratos cadastrados')).toBeInTheDocument();

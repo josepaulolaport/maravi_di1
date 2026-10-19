@@ -159,9 +159,9 @@ describe('Carteira (§11.4)', () => {
       '03/01/2028',
       '10',
       '89.006,46',
-      '10,00%',
+      '10,0000%',
       '89.128,48',
-      '9,90%',
+      '9,9000%',
       'R$ 891.284,82',
       '+R$ 1.220,20',
       'R$ 0,00',
@@ -223,7 +223,7 @@ describe('Carteira (§11.4)', () => {
 
     const row = rowOf('DI1F28');
     expect(row.getByText('89.250,31')).toBeInTheDocument();
-    expect(row.getByText('9,80%')).toBeInTheDocument();
+    expect(row.getByText('9,8000%')).toBeInTheDocument();
     // The market value is the processed one (89.200,90 × 6).
     expect(row.getByText('R$ 535.205,41')).toBeInTheDocument();
   });

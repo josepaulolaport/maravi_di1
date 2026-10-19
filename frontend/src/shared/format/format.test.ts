@@ -48,11 +48,15 @@ describe('number formatting (pt-BR, from decimal strings)', () => {
     expect(formatSignedMoney('0.0000000000')).toBe(`R$${NBSP}0,00`);
   });
 
-  it('§4.1 formats PU with 2 decimals and the rate fraction as a percentage', () => {
+  it('§4.1 formats PU with 2 decimals and the rate fraction as a percentage with 4 decimals', () => {
     expect(formatPu('90909.0909090909')).toBe('90.909,09');
-    expect(formatRate('0.10')).toBe('10,00%');
-    expect(formatRate('0.093203413834')).toBe('9,32%');
-    expect(formatRate('0')).toBe('0,00%');
+    expect(formatRate('0.10')).toBe('10,0000%');
+    expect(formatRate('0.093203413834')).toBe('9,3203%');
+    expect(formatRate('0')).toBe('0,0000%');
+  });
+
+  it('§4.1 never rounds a rate above −100% to −100% (user decision: 4 decimals)', () => {
+    expect(formatRate('-0.999998085813')).toBe('-99,9998%');
   });
 
   it('formats quantities, signed when they are trades', () => {

@@ -92,8 +92,8 @@ describe('Ativos: contrato (§11.2)', () => {
     expect(
       dayRow('17/10/2026').getByRole('button', { name: 'Registrar preço em 17/10/2026' }),
     ).toBeInTheDocument();
-    expect(cells('16/10/2026')).toEqual(['16/10/2026', '89.250,31', '9,80%', 'Manual']);
-    expect(cells('15/10/2026')).toEqual(['15/10/2026', '89.128,48', '9,90%', 'B3']);
+    expect(cells('16/10/2026')).toEqual(['16/10/2026', '89.250,31', '9,8000%', 'Manual']);
+    expect(cells('15/10/2026')).toEqual(['15/10/2026', '89.128,48', '9,9000%', 'B3']);
   });
 
   it('§5 prefers MANUAL over B3 on the same date (16/10)', async () => {
@@ -141,7 +141,7 @@ describe('Ativos: contrato (§11.2)', () => {
     await user.click(priceModal.getByRole('button', { name: 'Salvar' }));
 
     await waitFor(() => {
-      expect(cells('16/10/2026')[2]).toBe('9,75%');
+      expect(cells('16/10/2026')[2]).toBe('9,7500%');
     });
     await waitFor(() => {
       expect(
@@ -158,14 +158,14 @@ describe('Ativos: contrato (§11.2)', () => {
     const modal = within(
       await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
     );
-    const manual = modal.getByRole('checkbox', { name: 'Manual: PU 89.250,31, taxa 9,80%' });
-    const b3 = modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,81%' });
+    const manual = modal.getByRole('checkbox', { name: 'Manual: PU 89.250,31, taxa 9,8000%' });
+    const b3 = modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,8100%' });
     expect(manual).toBeChecked();
     expect(b3).not.toBeChecked();
     await user.click(modal.getByRole('button', { name: 'Remover' }));
 
     await waitFor(() => {
-      expect(cells('16/10/2026')).toEqual(['16/10/2026', '89.240,43', '9,81%', 'B3']);
+      expect(cells('16/10/2026')).toEqual(['16/10/2026', '89.240,43', '9,8100%', 'B3']);
     });
   });
 
@@ -176,7 +176,7 @@ describe('Ativos: contrato (§11.2)', () => {
     const modal = within(
       await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
     );
-    await user.click(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,81%' }));
+    await user.click(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,8100%' }));
     await user.click(modal.getByRole('button', { name: 'Remover' }));
 
     await waitFor(() => {
@@ -192,7 +192,7 @@ describe('Ativos: contrato (§11.2)', () => {
     const modal = within(
       await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
     );
-    expect(modal.getByRole('checkbox', { name: 'B3: PU 89.128,48, taxa 9,90%' })).toBeChecked();
+    expect(modal.getByRole('checkbox', { name: 'B3: PU 89.128,48, taxa 9,9000%' })).toBeChecked();
     await user.click(modal.getByRole('button', { name: 'Remover' }));
 
     await waitFor(() => {
@@ -217,17 +217,17 @@ describe('Ativos: contrato (§11.2)', () => {
     const modal = within(
       await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
     );
-    await user.click(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,81%' }));
+    await user.click(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,8100%' }));
     await user.click(modal.getByRole('button', { name: 'Remover' }));
 
     expect(await modal.findByText('Falha ao remover.')).toBeInTheDocument();
     await waitFor(() => {
       expect(
-        modal.queryByRole('checkbox', { name: 'Manual: PU 89.250,31, taxa 9,80%' }),
+        modal.queryByRole('checkbox', { name: 'Manual: PU 89.250,31, taxa 9,8000%' }),
       ).not.toBeInTheDocument();
     });
     expect(cells('16/10/2026')[3]).toBe('B3');
-    expect(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,81%' })).toBeChecked();
+    expect(modal.getByRole('checkbox', { name: 'B3: PU 89.240,43, taxa 9,8100%' })).toBeChecked();
 
     await user.click(modal.getByRole('button', { name: 'Remover' }));
     await waitFor(() => {
@@ -242,7 +242,7 @@ describe('Ativos: contrato (§11.2)', () => {
     const modal = within(
       await screen.findByRole('dialog', { name: 'Remover preço de referência' }),
     );
-    const b3 = modal.getByRole('checkbox', { name: 'B3: PU 89.128,48, taxa 9,90%' });
+    const b3 = modal.getByRole('checkbox', { name: 'B3: PU 89.128,48, taxa 9,9000%' });
     await user.click(b3);
 
     expect(await modal.findByText('Selecione ao menos uma observação.')).toBeInTheDocument();
