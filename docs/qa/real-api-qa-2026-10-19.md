@@ -3,6 +3,17 @@
 Read-only QA: every screen of the frontend driven in a browser against the real backend, to find
 mismatches between the MSW mocks and the API before delivery. No code was changed.
 
+## Status (added by lane X, 2026-10-19)
+
+- **3 (empty catalogue), fixed** in the lane X final-fixes PR: the Compose `seed` service applies
+  `scripts/seed_catalogue.sql` on every `docker compose up`, and it now seeds the DI1 product too.
+- **8 (`created_at` offset), fixed** in the same PR: the ledger sends `created_at` in UTC (`Z`), like
+  every other module.
+- **9 (mixed decimal scales), left as it is, on purpose:** every value is exact and the UI formats them
+  all; changing scales would touch every read model shortly before delivery for a cosmetic gain.
+- **Frontend findings (1, 2, 4, 5, 6, 7, 10):** handled in a parallel lane I PR; its description says
+  which are fixed.
+
 ## Setup
 
 - Code: `origin/main` at `dde3dd6` (worktree `qa-real-api-31390d`).
