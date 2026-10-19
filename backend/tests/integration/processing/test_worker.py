@@ -844,6 +844,62 @@ async def test_a_crash_mid_run_resumes_at_restart_then_drains_the_queue(worker: 
     assert (await worker.run_row(second))["status"] == "COMPLETED"
 
 
+# --- recording the end of a run (a stuck queue otherwise) ---------------------------------
+
+
+async def test_a_transient_failure_recording_the_end_is_retried(worker: Worker) -> None:
+    request_id = await worker.enqueue("CASH", D1, D2)
+    queued = await worker.enqueue("CASH", D3, D3)
+    worker.store.end_failures = 2  # the third attempt succeeds
+
+    await worker.ring()
+
+    assert (await worker.run_row(request_id))["status"] == "COMPLETED"
+    assert (await worker.run_row(queued))["status"] == "COMPLETED"
+    assert worker.store.end_failures == 0
+
+
+async def test_a_transient_failure_recording_a_failed_date_is_retried(worker: Worker) -> None:
+    worker.fail_reading_on_date_transaction = 1  # D1 fails outside the chains
+    request_id = await worker.enqueue("CASH", D1, D2)
+    worker.store.end_failures = 1
+
+    await worker.ring()
+
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["error_code"], run["failed_date"]) == (
+        "FAILED",
+        "PROCESSING_ERROR",
+        D1,
+    )
+    assert await worker.statuses() == {D1: (None, "FAILED")}
+
+
+async def test_a_persistent_failure_recording_the_end_escapes_and_the_restart_ends_the_run(
+    worker: Worker,
+) -> None:
+    """The run stays RUNNING, and while it does no other run is taken: the error escapes so
+    the worker process exits and restarts (Compose), and recovery at its start ends the run
+    and drains the queue (OQ-45, OQ-46)."""
+    request_id = await worker.enqueue("CASH", D1, D2)
+    queued = await worker.enqueue("CASH", D3, D3)
+    worker.store.end_failures = 3  # every attempt fails
+
+    with pytest.raises(RuntimeError, match="database blip"):
+        await worker.ring()
+
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["progress_date"]) == ("RUNNING", D2)
+    assert (await worker.run_row(queued))["status"] == "QUEUED"
+    assert await worker.statuses() == {D1: (None, "PROCESSED"), D2: (None, "PROCESSED")}
+
+    await worker.restart()
+
+    assert (await worker.run_row(request_id))["status"] == "COMPLETED"
+    assert (await worker.run_row(queued))["status"] == "COMPLETED"
+    assert [w[0] for w in await worker.writes()] == [D1, D2, D3]  # nothing processed twice
+
+
 async def test_a_cancel_committing_on_the_oldest_row_during_a_take_still_takes_the_next(
     worker: Worker,
 ) -> None:

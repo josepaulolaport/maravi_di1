@@ -22,12 +22,15 @@ from di1.modules.portfolio.public import (
     PreviousPositionsDay,
 )
 from di1.modules.processing.application.services.run_chains import DayReaders
-from di1.modules.processing.application.services.run_processor import PortfolioRangeProcessor
+from di1.modules.processing.application.services.run_processor import (
+    FINISHED,
+    PortfolioRangeProcessor,
+)
 from di1.modules.processing.infrastructure.persistence.repositories import (
     SqlDateStatusRepository,
 )
 from di1.modules.processing.infrastructure.persistence.run_store import SqlRunStore
-from di1.modules.processing.public import ProcessingScope
+from di1.modules.processing.public import ProcessingRequest, ProcessingScope
 from di1.platform.database.unit_of_work import UnitOfWork, unit_of_work_factory
 from di1.shared.clock import SAO_PAULO
 from tests.integration.processing.support import make_service
@@ -94,6 +97,23 @@ class TableWriter:
             raise RuntimeError(f"{chain} writer failed on {day}")
 
 
+class FlakyRunStore(SqlRunStore):
+    """`SqlRunStore` whose next ``end_failures`` writes of a finished run fail, as a database
+    blip would: the step's transaction then rolls back."""
+
+    end_failures = 0
+
+    async def save_run(self, request: ProcessingRequest, *, uow: UnitOfWork) -> None:
+        if request.status in FINISHED and self.end_failures > 0:
+            self.end_failures -= 1
+            raise RuntimeError("database blip while ending the run")
+        await super().save_run(request, uow=uow)
+
+
+END_RETRY_DELAYS = (0.0, 0.0)
+"""Two retries without a pause: three attempts at the end of a run."""
+
+
 class Worker:
     def __init__(
         self,
@@ -109,15 +129,16 @@ class Worker:
         self.fail_reading_on_date_transaction: int | None = None
         self._date_transactions = 0
         self.uow_factory = unit_of_work_factory(session_factory)
-        store = SqlRunStore(self.clock)
+        self.store = FlakyRunStore(self.clock)
         self.service = make_service(clock=self.clock)
         self.processor = PortfolioRangeProcessor(
             uow_factory=self.uow_factory,
-            store=store,
+            store=self.store,
             date_statuses=SqlDateStatusRepository(),
             readers_for=self._readers,
             writer=self.writer,
             clock=self.clock,
+            end_retry_delays=END_RETRY_DELAYS,
         )
 
     def _readers(self, uow: UnitOfWork) -> DayReaders:

@@ -23,6 +23,13 @@ row lock on the run's ``requests`` row:
 3. the end: COMPLETED, COMPLETED_WITH_ISSUES or FAILED; any date of the range still RUNNING is
    restored from ``*_previous`` (OQ-26).
 
+**A step that cannot be recorded.** The end of a run (step 3) and the failure of a date
+(step 2c) are retried after short pauses (``end_retry_delays``), since a database blip there
+would leave the run RUNNING, and no later run is taken while it is. If they still fail, or any
+other step outside a date's chains fails, the error escapes `run`: the worker process stops
+with status 1 and restarts (`di1.platform.messaging.consumer.AfterAckRunner`), and recovery at
+its start finishes the run.
+
 **Recovery at worker start** (`recover_at_startup`, before the worker consumes): the run left
 RUNNING (or DISPATCHED/CANCELLING, from before OQ-46) was interrupted. Its dates left RUNNING
 are restored from ``*_previous`` (a row left empty is deleted); a run being cancelled (a cancel
@@ -32,10 +39,12 @@ after ``progress_date`` (from ``start_date`` when NULL). Then the queue is drain
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from functools import partial
 from uuid import UUID
 
 from di1.modules.ledger.public import EntryType
@@ -88,6 +97,8 @@ PREDECESSOR_CODES = {
 TECHNICAL_ERROR_CODE = "PROCESSING_ERROR"
 """The run's error for a technical failure on a date (OQ-44)."""
 TECHNICAL_ERROR_MESSAGE = "Erro técnico ao processar a data."
+END_RETRY_DELAYS = (0.5, 2.0, 5.0)
+"""Pauses, in seconds, before each retry of a run's end or of a date's failure."""
 
 
 class RunEndedError(Exception):
@@ -148,6 +159,7 @@ class PortfolioRangeProcessor:
         readers_for: ReadersFactory,
         writer: PortfolioResultsWriter,
         clock: Clock,
+        end_retry_delays: Sequence[float] = END_RETRY_DELAYS,
     ) -> None:
         self._uow_factory = uow_factory
         self._store = store
@@ -155,6 +167,7 @@ class PortfolioRangeProcessor:
         self._readers_for = readers_for
         self._writer = writer
         self._clock = clock
+        self._end_retry_delays = tuple(end_retry_delays)
 
     # --- 1. take the queued requests, oldest first (OQ-46) ---------------------------------
 
@@ -231,15 +244,19 @@ class PortfolioRangeProcessor:
     # --- 2. the dates ----------------------------------------------------------------------
 
     async def run(self, request_id: UUID) -> None:
-        """Processes the claimed run to its end."""
+        """Processes the claimed run to its end. An error that escapes left the run RUNNING
+        (even recording its end failed): the worker must restart, and recovery at its start
+        resumes the run after ``progress_date``."""
         try:
             await self._run(request_id)
         except RunEndedError:
             logger.info("processing request %s has already ended", request_id)
         except Exception:
-            # Even recording the failure failed: the run stays RUNNING and is resumed after
-            # progress_date when the worker starts again.
-            logger.exception("processing request %s: the worker stopped", request_id)
+            logger.exception(
+                "processing request %s left RUNNING: the worker must restart to resume it",
+                request_id,
+            )
+            raise
 
     async def _run(self, request_id: UUID) -> None:
         request, alive = await self._start(request_id)
@@ -257,12 +274,37 @@ class PortfolioRangeProcessor:
                 logger.exception(
                     "processing request %s: %s failed outside its chains", request_id, day
                 )
-                await self._fail_day(request_id, day, alive)
+                await self._retrying(
+                    partial(self._fail_day, request_id, day, alive), request_id, "the failed date"
+                )
                 return
             if not alive:
                 return  # the run ended FAILED in the date's transaction
             day += ONE_DAY
-        await self._complete(request_id)
+        await self._retrying(partial(self._complete, request_id), request_id, "the end")
+
+    async def _retrying(
+        self, step: Callable[[], Awaitable[None]], request_id: UUID, what: str
+    ) -> None:
+        """Runs ``step``, its own Unit of Work, again after each pause of
+        ``end_retry_delays`` while it fails; the last failure is raised. A step that committed
+        before its error finds the run ended on the retry (`RunEndedError`)."""
+        for delay in self._end_retry_delays:
+            try:
+                await step()
+                return
+            except RunEndedError:
+                raise
+            except Exception:
+                logger.warning(
+                    "processing request %s: recording %s failed; retrying in %s s",
+                    request_id,
+                    what,
+                    delay,
+                    exc_info=True,
+                )
+            await asyncio.sleep(delay)
+        await step()
 
     async def _start(
         self, request_id: UUID
