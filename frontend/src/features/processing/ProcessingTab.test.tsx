@@ -253,10 +253,10 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
     const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    // The fields appear once the preview has loaded.
+    await modal.findByText('17/10/2026 a 18/10/2026');
     expect(
-      await field(modal, 'Estado anterior das posições').findByText(
-        'Processado com pendências (16/10)',
-      ),
+      field(modal, 'Estado anterior das posições').getByText('Processado com pendências (16/10)'),
     ).toBeInTheDocument();
     expect(
       field(modal, 'Estado anterior do caixa').getByText('Processado (16/10)'),
