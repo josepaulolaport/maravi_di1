@@ -462,7 +462,7 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
       http.post(url('/reference-prices'), () =>
         problem(422, [
           { code: 'VALIDATION_ERROR', message: 'Forma de entrada inválida.', field: 'input_kind' },
-          { code: 'VALIDATION_ERROR', message: 'O valor deve ser maior que zero.', field: 'pu' },
+          { code: 'VALIDATION_ERROR', message: 'O PU deve ser maior que zero.', field: 'pu' },
         ]),
       ),
     );
@@ -475,7 +475,7 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
     await user.click(modal.getByRole('button', { name: 'Salvar' }));
 
     expect(
-      await modal.findByText('O valor deve ser maior que zero.', { exact: false }),
+      await modal.findByText('O PU deve ser maior que zero.', { exact: false }),
     ).toBeInTheDocument();
     expect(modal.getByText('Forma de entrada inválida.', { exact: false })).toBeInTheDocument();
   });
