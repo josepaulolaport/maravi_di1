@@ -6,7 +6,6 @@ import { IconCalendar, IconPlayerPlay, IconPlus, IconSearch, IconTrash } from '@
 import { useEffect, useMemo, useState } from 'react';
 
 import type { IsoDate } from '@/api/contract';
-import { useOutdated } from '@/shared/processing/hooks';
 import {
   type ProcessingDraft,
   ProcessingRequestModal,
@@ -51,8 +50,6 @@ export function LedgerPage() {
   const saving = useIsSavingEntry();
 
   const [creating, setCreating] = useState(false);
-  // Which days are behind, per chain, prefills the "Processar" requests (OQ-21 draft).
-  const outdated = useOutdated(start, end);
   const [processing, setProcessing] = useState<ProcessingDraft | null>(null);
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
 
@@ -129,10 +126,8 @@ export function LedgerPage() {
           <Button
             variant="default"
             leftSection={<IconPlayerPlay size={16} stroke={1.5} />}
-            disabled={outdated.isPending || outdated.isError}
-            {...(outdated.isError ? { 'aria-describedby': 'outdated-error' } : {})}
             onClick={() => {
-              setProcessing(processDraft(outdated.data, start, end));
+              setProcessing(processDraft(start, end));
             }}
           >
             Processar
@@ -148,21 +143,11 @@ export function LedgerPage() {
         </Group>
       </Group>
 
-      {outdated.isError && (
-        <Text id="outdated-error" size="sm" c="red.7" role="alert">
-          Não foi possível verificar os dias a processar.
-        </Text>
-      )}
-
       <CashStrip
         end={end}
-        onProcessCash={
-          outdated.data?.cash_from
-            ? () => {
-                setProcessing(processCashDraft(outdated.data, start, end));
-              }
-            : undefined
-        }
+        onProcessCash={(from) => {
+          setProcessing(processCashDraft(from, end));
+        }}
       />
 
       {list.isError ? (

@@ -73,18 +73,6 @@ export interface ProcessingPreview {
   predecessor: { cash: PredecessorState; positions: PredecessorState };
 }
 
-/**
- * Proposal P19 (draft, OQ-21): `GET /processing/outdated?start_date&end_date` — per chain, the
- * first day of the range that is stale or was never processed, or `null` when every day is
- * current. Lançamentos prefills its "Processar" request from it.
- */
-export interface OutdatedRange {
-  start_date: IsoDate;
-  end_date: IsoDate;
-  cash_from: IsoDate | null;
-  positions_from: IsoDate | null;
-}
-
 /** `POST /processing/requests/{id}/cancel-and-replace` (§10.2). */
 export interface CancelAndReplaceResponse {
   cancelled: ProcessingRequest;

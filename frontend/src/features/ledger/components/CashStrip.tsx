@@ -11,6 +11,12 @@ import { useCashSummary } from '../hooks/useLedger';
 // date, Caixa D−1 the one on the day before, each read from the cash chain of the portfolio
 // summary with its own freshness, apart from positions. Nothing is computed from the rows.
 
+/** A day's cash is behind when it is stale or was never processed. */
+function useCashBehind(date: IsoDate): boolean {
+  const status = useCashSummary(date).data?.cash.status;
+  return status === 'STALE' || status === 'NOT_PROCESSED';
+}
+
 function CashCard({ label, date }: { label: string; date: IsoDate }) {
   const summary = useCashSummary(date);
 
@@ -57,24 +63,30 @@ function CashCard({ label, date }: { label: string; date: IsoDate }) {
 
 interface CashStripProps {
   end: IsoDate;
-  /** Set when the period's cash is stale or unprocessed: offers "Processar caixa". */
-  onProcessCash?: (() => void) | undefined;
+  /** "Processar caixa" from the first of D−1 / D0 whose cash is behind. */
+  onProcessCash: (from: IsoDate) => void;
 }
 
 export function CashStrip({ end, onProcessCash }: CashStripProps) {
+  const before = addDays(end, -1);
+  const beforeBehind = useCashBehind(before);
+  const endBehind = useCashBehind(end);
+  const from = beforeBehind ? before : endBehind ? end : null;
   return (
     <Stack gap="xs">
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-        <CashCard label="Caixa D−1" date={addDays(end, -1)} />
+        <CashCard label="Caixa D−1" date={before} />
         <CashCard label="Caixa D0" date={end} />
       </SimpleGrid>
-      {onProcessCash && (
+      {from !== null && (
         <Group justify="flex-end">
           <Button
             size="xs"
             variant="light"
             leftSection={<IconPlayerPlay size={14} stroke={1.5} />}
-            onClick={onProcessCash}
+            onClick={() => {
+              onProcessCash(from);
+            }}
           >
             Processar caixa
           </Button>

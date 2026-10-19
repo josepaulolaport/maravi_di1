@@ -320,26 +320,4 @@ describe('OQ-21 scope on requests, preview and Pendências', () => {
 
     expect(items.map((i) => [i.issue_type, i.chain])).toEqual([['MISSING_REFERENCE_PRICE', null]]);
   });
-
-  it('OQ-11 days before the first entry are the valid zero state, never outdated', async () => {
-    expect(
-      await processingApi.outdated({ start_date: '2026-10-01', end_date: '2026-10-15' }),
-    ).toMatchObject({ cash_from: null, positions_from: null });
-  });
-
-  it('OQ-21 lists, per chain, the first stale or unprocessed day of a range', async () => {
-    expect(
-      await processingApi.outdated({ start_date: '2026-10-14', end_date: '2026-10-18' }),
-    ).toEqual({
-      start_date: '2026-10-14',
-      end_date: '2026-10-18',
-      cash_from: '2026-10-17',
-      positions_from: '2026-10-16',
-    });
-
-    await run('2026-10-16', '2026-10-18', 'ALL');
-    expect(
-      await processingApi.outdated({ start_date: '2026-10-14', end_date: '2026-10-18' }),
-    ).toMatchObject({ cash_from: null, positions_from: null });
-  });
 });

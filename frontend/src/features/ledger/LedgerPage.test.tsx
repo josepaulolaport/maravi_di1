@@ -815,15 +815,11 @@ describe('Lançamentos (§11.3)', () => {
 
   describe('Processar (OQ-21 draft, user 2026-10-18)', () => {
     async function openProcessar(user: ReturnType<typeof renderApp>['user']) {
-      const button = screen.getByRole('button', { name: 'Processar' });
-      await waitFor(() => {
-        expect(button).toBeEnabled();
-      });
-      await user.click(button);
+      await user.click(screen.getByRole('button', { name: 'Processar' }));
       return within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
     }
 
-    it('§10.1 after a trade, prefills Tudo from the first day either chain is behind', async () => {
+    it('§10.1 prefills the whole period with Tudo, also after a trade (P19 dropped)', async () => {
       await ledgerApi.createTrade({
         asset_id: IDS.di1f28,
         trade_date: '2026-10-15',
@@ -836,42 +832,35 @@ describe('Lançamentos (§11.3)', () => {
 
       const modal = await openProcessar(user);
 
-      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('15/10/2026');
+      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('14/10/2026');
       expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('16/10/2026');
       expect(modal.getByRole('radio', { name: 'Tudo' })).toBeChecked();
     });
 
-    it('OQ-11 a period starting before the first entry counts those days as current', async () => {
-      const { user } = await openLedger('/lancamentos?inicio=2026-10-01&fim=2026-10-15');
+    it('§11.3 "Processar caixa" starts at Caixa D0 when only D0 is behind', async () => {
+      await ledgerApi.createCashMovement({
+        movement_date: '2026-10-16',
+        movement_type: 'WITHDRAWAL',
+        amount: '10.00',
+      });
+      const { user } = await openLedger();
 
-      expect(screen.queryByRole('button', { name: 'Processar caixa' })).not.toBeInTheDocument();
-      const modal = await openProcessar(user);
-      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('01/10/2026');
-      expect(modal.getByRole('radio', { name: 'Tudo' })).toBeChecked();
+      await user.click(await screen.findByRole('button', { name: 'Processar caixa' }));
+
+      const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
+      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('16/10/2026');
+      expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('16/10/2026');
+      expect(modal.getByRole('radio', { name: 'Caixa' })).toBeChecked();
     });
 
-    it('§12 when the days to process cannot be checked, says so and does not guess', async () => {
-      server.use(
-        http.get(url('/processing/outdated'), () =>
-          problem(422, [fieldError('INVALID_RANGE', 'Período inválido.', 'start_date')]),
-        ),
-      );
-      await openLedger();
+    it('§11.3 "Processar caixa" is offered when Caixa D0 was never processed', async () => {
+      const { user } = await openLedger('/lancamentos?inicio=2026-10-14&fim=2026-10-17');
 
-      expect(
-        await screen.findByText('Não foi possível verificar os dias a processar.'),
-      ).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Processar' })).toBeDisabled();
-    });
+      await user.click(await screen.findByRole('button', { name: 'Processar caixa' }));
 
-    it('§10.1 with nothing behind, prefills the whole period with Tudo', async () => {
-      const { user } = await openLedger('/lancamentos?inicio=2026-10-14&fim=2026-10-15');
-
-      const modal = await openProcessar(user);
-
-      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('14/10/2026');
-      expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('15/10/2026');
-      expect(modal.getByRole('radio', { name: 'Tudo' })).toBeChecked();
+      const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
+      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('17/10/2026');
+      expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('17/10/2026');
     });
 
     it('§10.1 previews and queues the job without leaving Lançamentos', async () => {
