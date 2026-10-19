@@ -19,13 +19,8 @@ from di1.modules.portfolio.domain.average_cost import (
     closing_average_rate,
     next_average,
 )
-from di1.modules.portfolio.domain.errors import (
-    AccountingError,
-    days_between,
-    require_next_day,
-    require_range,
-)
-from di1.modules.portfolio.domain.trade import Trade, day_trades, trades_by_date
+from di1.modules.portfolio.domain.errors import AccountingError, require_next_day
+from di1.modules.portfolio.domain.trade import Trade, day_trades
 
 
 @dataclass(frozen=True)
@@ -129,20 +124,6 @@ class PositionsEngine:
                 for asset_id, r in sorted(running.items(), key=lambda item: item[0])
             ),
         )
-
-    def calculate_range(
-        self, previous_state: PositionState, trades: Sequence[Trade], end_date: date
-    ) -> tuple[PositionsDay, ...]:
-        """Every calendar day from ``previous_state.as_of + 1`` to ``end_date`` (spec §7.1)."""
-        grouped = trades_by_date(trades)
-        start_date = require_range(previous_state.as_of, end_date, grouped)
-        days: list[PositionsDay] = []
-        state = previous_state
-        for current in days_between(start_date, end_date):
-            day = self.calculate_day(state, grouped.get(current, []), current)
-            days.append(day)
-            state = day.closing_state()
-        return tuple(days)
 
 
 @dataclass

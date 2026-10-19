@@ -8,18 +8,13 @@ sums them into daily totals. Money is kept exact (OQ-3).
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from di1.modules.portfolio.domain.errors import (
-    AccountingError,
-    days_between,
-    require_next_day,
-    require_range,
-)
-from di1.modules.portfolio.domain.trade import Trade, day_trades, trades_by_date
+from di1.modules.portfolio.domain.errors import AccountingError, require_next_day
+from di1.modules.portfolio.domain.trade import Trade, day_trades
 from di1.shared.decimals import financial_context
 
 ZERO = Decimal("0")
@@ -85,31 +80,3 @@ class CashCalculator:
             withdrawals=withdrawals,
             cash_balance=cash_balance,
         )
-
-    def calculate_range(
-        self,
-        previous_balance: CashBalance,
-        trades: Sequence[Trade],
-        deposits: Mapping[date, Decimal],
-        withdrawals: Mapping[date, Decimal],
-        end_date: date,
-    ) -> tuple[CashDay, ...]:
-        """Every calendar day from ``previous_balance.as_of + 1`` to ``end_date``; a date missing
-        from ``deposits`` or ``withdrawals`` means none."""
-        grouped = trades_by_date(trades)
-        start_date = require_range(
-            previous_balance.as_of, end_date, [*grouped, *deposits, *withdrawals]
-        )
-        days: list[CashDay] = []
-        balance = previous_balance
-        for current in days_between(start_date, end_date):
-            day = self.calculate_day(
-                balance,
-                grouped.get(current, []),
-                deposits.get(current, ZERO),
-                withdrawals.get(current, ZERO),
-                current,
-            )
-            days.append(day)
-            balance = day.closing_balance()
-        return tuple(days)
