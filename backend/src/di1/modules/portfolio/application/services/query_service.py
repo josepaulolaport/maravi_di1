@@ -28,13 +28,15 @@ from di1.modules.portfolio.public import (
     PositionTableView,
 )
 from di1.modules.prices.public import PriceReader
-from di1.modules.processing.public import DateStatus, DateStatusReader
+from di1.modules.processing.public import ChainStatus, DateStatus, DateStatusReader
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
 from di1.shared.decimals import financial_context
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 
 ZERO = Decimal("0")
+PROCESSED = frozenset({ChainStatus.PROCESSED, ChainStatus.PROCESSED_WITH_ISSUES})
+"""The chain statuses whose published figures a read combines (OQ-38, OQ-40)."""
 
 
 class PortfolioQueries:
@@ -85,7 +87,7 @@ class PortfolioQueries:
                 cumulative_pnl=None if day is None else day.cumulative_pnl,
                 pnl_status=None if day is None else day.pnl_status,
             ),
-            aum=None if day is None else day.aum,
+            aum=day.aum if day is not None and _both_processed(status) else None,
         )
 
     async def get_position_table(self, on: date) -> PositionTableView:
@@ -176,6 +178,12 @@ class PortfolioQueries:
 
     async def _status(self, on: date) -> DateStatus | None:
         return (await self._date_statuses.get_date_statuses(on, on, uow=self._uow)).get(on)
+
+
+def _both_processed(status: DateStatus | None) -> bool:
+    """AUM follows both chains' statuses on the date, whichever run wrote it (OQ-38, OQ-40): a
+    stored AUM is shown only while neither chain is FAILED, RUNNING or not processed."""
+    return status is not None and status.cash in PROCESSED and status.portfolio in PROCESSED
 
 
 def _future_date(field: str) -> ErrorDetail:

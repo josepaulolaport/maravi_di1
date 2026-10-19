@@ -3,6 +3,7 @@ read (spec §11.4; OQ-23, OQ-27, OQ-28, OQ-30, OQ-31)."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
@@ -32,6 +33,7 @@ from tests.unit.portfolio.fakes import (
 
 TODAY = DAY + timedelta(days=10)
 COMPLETE = CalculationCompleteness.COMPLETE
+ZERO = Decimal("0")
 MISSING = CalculationCompleteness.MISSING
 CASH_AT = datetime(2027, 1, 4, 21, 0, tzinfo=UTC)
 POSITIONS_AT = datetime(2027, 1, 4, 21, 5, tzinfo=UTC)
@@ -185,6 +187,54 @@ class TestSummary:
         assert summary.cash.balance == Decimal("7")
         assert summary.positions.status is None
         assert summary.aum is None
+
+
+class TestAumNeedsBothChainsProcessed:
+    """OQ-38, OQ-40: AUM follows both chains' statuses on the date, whichever run wrote it. A
+    stored AUM is shown only while both chains are PROCESSED or PROCESSED_WITH_ISSUES, so a
+    later FAILED or RUNNING chain hides it (reviewer M1)."""
+
+    @pytest.fixture(autouse=True)
+    def published(self, repository: InMemoryPortfolioRepository) -> None:
+        # D processed as ALL: cash 100 + market value 50 → AUM 150 stored.
+        repository.cash[DAY] = PublishedCash(DAY, Decimal("100"), ZERO, Decimal("100"), ZERO)
+        repository.days[DAY] = replace(
+            _day(DAY, "0"), positions_market_value=Decimal("50"), aum=Decimal("150")
+        )
+
+    @pytest.mark.parametrize(
+        ("positions", "cash"),
+        [
+            (ChainStatus.PROCESSED, ChainStatus.FAILED),
+            (ChainStatus.FAILED, ChainStatus.PROCESSED),
+            (ChainStatus.PROCESSED, ChainStatus.RUNNING),
+            (ChainStatus.RUNNING, ChainStatus.PROCESSED_WITH_ISSUES),
+            (ChainStatus.PROCESSED, None),
+            (None, ChainStatus.PROCESSED),
+        ],
+    )
+    async def test_aum_is_hidden_unless_both_chains_are_processed(
+        self,
+        queries: PortfolioQueries,
+        statuses: FakeDateStatusReader,
+        positions: ChainStatus | None,
+        cash: ChainStatus | None,
+    ) -> None:
+        statuses.statuses[DAY] = _status(DAY, positions, cash)
+
+        summary = await queries.get_summary(DAY)
+
+        assert summary.aum is None
+        assert summary.cash.balance == Decimal("100")  # each chain's own figures still show
+        assert summary.positions.market_value == Decimal("50")
+
+    @pytest.mark.parametrize("status", [ChainStatus.PROCESSED, ChainStatus.PROCESSED_WITH_ISSUES])
+    async def test_aum_shows_when_both_chains_are_processed(
+        self, queries: PortfolioQueries, statuses: FakeDateStatusReader, status: ChainStatus
+    ) -> None:
+        statuses.statuses[DAY] = _status(DAY, status, ChainStatus.PROCESSED)
+
+        assert (await queries.get_summary(DAY)).aum == Decimal("150")
 
 
 class TestPositionTable:
