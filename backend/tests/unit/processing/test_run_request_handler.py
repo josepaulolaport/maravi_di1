@@ -1,38 +1,27 @@
-"""The ``processing.run_request`` handler: it parses the command and claims, and runs the dates
-only after the acknowledgement (interfaces.md "Transaction boundaries" 7)."""
+"""The doorbell handler: it checks the envelope and hands back the drain, to run after the
+acknowledgement; the payload is ignored (OQ-46; interfaces.md "Transaction boundaries" 7)."""
 
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
 
 import pytest
 
-from di1.modules.processing.application.services.run_processor import Claim
 from di1.modules.processing.presentation.messaging.run_request import RunRequestHandler
-from di1.platform.database.unit_of_work import UnitOfWork
 from di1.platform.messaging.consumer import PermanentMessageError
 from di1.platform.messaging.envelope import Envelope
 from tests.unit.processing.fakes import FakeUnitOfWork
 
-REQUEST_ID = UUID(int=7)
-
 
 @dataclass
 class FakeProcessor:
-    claimable: bool = True
-    claimed: list[UUID] = field(default_factory=list)
-    ran: list[UUID] = field(default_factory=list)
+    drained: int = 0
 
-    async def claim(self, request_id: UUID, *, uow: UnitOfWork) -> Claim | None:
-        self.claimed.append(request_id)
-        return Claim(request_id) if self.claimable else None
-
-    async def run(self, request_id: UUID) -> None:
-        self.ran.append(request_id)
+    async def drain(self) -> None:
+        self.drained += 1
 
 
 def envelope(
@@ -47,37 +36,31 @@ def envelope(
     )
 
 
-async def test_the_claim_happens_in_the_handler_and_the_dates_after_it_returns() -> None:
+@pytest.mark.parametrize(
+    "payload", [{}, {"request_id": str(uuid.UUID(int=7))}, {"anything": "ignored"}]
+)
+async def test_the_drain_runs_only_after_the_handler_returns(payload: dict[str, Any]) -> None:
     processor = FakeProcessor()
-    handler = RunRequestHandler(processor)
+    uow = FakeUnitOfWork()
 
-    after_ack = await handler(envelope({"request_id": str(REQUEST_ID)}), uow=FakeUnitOfWork())
+    after_ack = await RunRequestHandler(processor)(envelope(payload), uow=uow)
 
-    assert processor.claimed == [REQUEST_ID]
-    assert processor.ran == []
+    assert processor.drained == 0
+    assert uow.commits == 0  # the consumer commits the inbox record
     assert after_ack is not None
     await after_ack()
-    assert processor.ran == [REQUEST_ID]
-
-
-async def test_nothing_to_run_when_the_claim_is_refused() -> None:
-    handler = RunRequestHandler(FakeProcessor(claimable=False))
-
-    assert await handler(envelope({"request_id": str(REQUEST_ID)}), uow=FakeUnitOfWork()) is None
+    assert processor.drained == 1
 
 
 @pytest.mark.parametrize(
     "bad",
     [
-        envelope({"request_id": "not-a-uuid"}),
-        envelope({}),
-        envelope({"request_id": str(REQUEST_ID), "extra": 1}),
-        envelope({"request_id": str(REQUEST_ID)}, message_type="other.command"),
-        envelope({"request_id": str(REQUEST_ID)}, version=2),
+        envelope({}, message_type="other.command"),
+        envelope({}, version=2),
     ],
 )
-async def test_a_command_that_can_never_succeed_is_dead_lettered(bad: Envelope) -> None:
+async def test_a_message_that_is_not_a_doorbell_is_dead_lettered(bad: Envelope) -> None:
     processor = FakeProcessor()
     with pytest.raises(PermanentMessageError):
         await RunRequestHandler(processor)(bad, uow=FakeUnitOfWork())
-    assert processor.claimed == []
+    assert processor.drained == 0

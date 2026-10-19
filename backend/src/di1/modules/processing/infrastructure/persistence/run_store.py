@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -73,20 +73,6 @@ class SqlRunStore:
 
     def __init__(self, clock: Clock) -> None:
         self._clock = clock
-
-    async def lock_active_request_id(self, *, uow: UnitOfWork) -> UUID | None:
-        value = await uow.session.scalar(sql.LOCK_CALCULATION_STATE)
-        return value if isinstance(value, UUID) else None
-
-    async def set_active_request_id(
-        self, request_id: UUID | None, now: datetime, *, uow: UnitOfWork
-    ) -> None:
-        await uow.session.execute(sql.SET_ACTIVE_REQUEST, {"request_id": request_id, "now": now})
-
-    async def clear_active_request_id(
-        self, request_id: UUID, now: datetime, *, uow: UnitOfWork
-    ) -> None:
-        await uow.session.execute(sql.CLEAR_ACTIVE_REQUEST, {"request_id": request_id, "now": now})
 
     async def lock_active_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
         return [_to_run(row) for row in await uow.session.execute(sql.LOCK_ACTIVE_RUNS)]

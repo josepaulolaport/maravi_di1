@@ -19,7 +19,6 @@ from di1.modules.asset.dependencies import asset_reader
 from di1.modules.ledger.dependencies import ledger_reader
 from di1.modules.portfolio.dependencies import portfolio_reader, results_writer
 from di1.modules.prices.dependencies import price_reader
-from di1.modules.processing.application.services.dispatcher import ProcessingDispatcher
 from di1.modules.processing.application.services.run_chains import DayReaders
 from di1.modules.processing.application.services.run_processor import PortfolioRangeProcessor
 from di1.modules.processing.infrastructure.persistence.repositories import (
@@ -49,9 +48,6 @@ class RealWorker:
         uow_factory = unit_of_work_factory(factory)
         store = SqlRunStore(self.clock)
         self.uow_factory = uow_factory
-        self.dispatcher = ProcessingDispatcher(
-            uow_factory=uow_factory, store=store, clock=self.clock
-        )
         self.processor = PortfolioRangeProcessor(
             uow_factory=uow_factory,
             store=store,
@@ -75,12 +71,7 @@ class RealWorker:
                 ),
                 {"s": scope, "a": start, "b": end, "t": self.clock.now()},
             )
-        assert await self.dispatcher.dispatch_next() == request_id
-        async with self.uow_factory() as uow:
-            claim = await self.processor.claim(request_id, uow=uow)
-        assert claim is not None
-        await self.processor.run(claim.request_id)
-        await self.dispatcher.dispatch_next()  # frees the slot
+        await self.processor.drain()  # the doorbell (OQ-46)
         async with self.engine.connect() as connection:
             row = (
                 await connection.execute(

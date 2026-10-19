@@ -1,9 +1,8 @@
 """`ProcessingService`: the user's processing requests (spec §10, interfaces.md "Processing").
 
-Enqueueing only records a QUEUED run for exactly [start, end] of one scope (OQ-11, OQ-21);
-overlapping and repeated requests are allowed, and the queue is FIFO by ``(created_at, id)``
-(OQ-5). Dispatch, the one active run and its execution belong to the worker (Wave 4): nothing
-here publishes a message or touches ``processing.calculation_state``.
+Enqueueing records a QUEUED run for exactly [start, end] of one scope (OQ-11, OQ-21) and rings
+the worker's doorbell in the same transaction (OQ-46); overlapping and repeated requests are
+allowed, and the worker takes them FIFO by ``(created_at, id)`` (OQ-5), one at a time.
 """
 
 from __future__ import annotations
@@ -17,6 +16,7 @@ from enum import StrEnum
 from uuid import UUID
 
 from di1.modules.asset.public import AssetReader
+from di1.modules.processing.application.interfaces.doorbell import Doorbell
 from di1.modules.processing.application.interfaces.repositories import (
     ChainHistory,
     DateStatusRepository,
@@ -42,9 +42,7 @@ logger = logging.getLogger(__name__)
 MAX_PAGE_SIZE = 200
 """The largest page of the run history."""
 
-CANCELLABLE = frozenset(
-    {ProcessingStatus.QUEUED, ProcessingStatus.DISPATCHED, ProcessingStatus.RUNNING}
-)
+CANCELLABLE = frozenset({ProcessingStatus.QUEUED, ProcessingStatus.RUNNING})
 """A run that has not finished and whose cancellation was not already requested."""
 
 
@@ -140,10 +138,10 @@ def _not_found() -> DomainError:
     return DomainError(ErrorDetail(ErrorCode.NOT_FOUND, "Processamento não encontrado."))
 
 
-def _not_cancellable(status: ProcessingStatus) -> DomainError:
+def _not_cancellable(request: ProcessingRequest) -> DomainError:
     message = (
         "O cancelamento deste processamento já foi solicitado."
-        if status is ProcessingStatus.CANCELLING
+        if request.status is ProcessingStatus.CANCELLING or request.cancel_requested_at is not None
         else "Este processamento já foi encerrado e não pode ser cancelado."
     )
     return DomainError(ErrorDetail(ErrorCode.JOB_NOT_CANCELLABLE, message))
@@ -162,8 +160,10 @@ class ProcessingService:
         chain_history: ChainHistory,
         assets: AssetReader,
         clock: Clock,
+        doorbell: Doorbell,
     ) -> None:
         self._requests = requests
+        self._doorbell = doorbell
         self._date_statuses = date_statuses
         self._issues = issues
         self._chain_history = chain_history
@@ -191,10 +191,11 @@ class ProcessingService:
     async def enqueue_range(
         self, scope: ProcessingScope, start_date: date, end_date: date, *, uow: UnitOfWork
     ) -> ProcessingRequest:
-        """Records a QUEUED run for exactly [start, end] and commits (interfaces.md
-        "Transaction boundaries" 2)."""
+        """Records a QUEUED run for exactly [start, end], rings the worker's doorbell in the same
+        transaction, and commits (OQ-46; interfaces.md "Transaction boundaries" 2)."""
         validate_range(start_date, end_date, self._clock.today())
         request = await self._add(scope, start_date, end_date, uow)
+        await self._doorbell.ring(uow=uow)
         await uow.commit()
         logger.info(
             "processing request %s queued: %s %s..%s", request.id, scope, start_date, end_date
@@ -202,8 +203,9 @@ class ProcessingService:
         return request
 
     async def request_cancel(self, request_id: UUID, *, uow: UnitOfWork) -> ProcessingRequest:
-        """A queued run is cancelled at once; a dispatched or running one is flagged and the
-        worker stops it between dates (spec §10.2)."""
+        """A queued run is cancelled at once; a running one gets ``cancel_requested_at`` and the
+        worker stops it between dates (spec §10.2, OQ-46). A second cancel, or one of an ended
+        run, answers JOB_NOT_CANCELLABLE."""
         cancelled = await self._cancel(request_id, uow)
         await uow.commit()
         return cancelled
@@ -297,12 +299,12 @@ class ProcessingService:
         return request
 
     async def _cancel(self, request_id: UUID, uow: UnitOfWork) -> ProcessingRequest:
-        # The row lock orders this against the dispatcher, the worker and another cancel.
+        # The row lock orders this against the worker and another cancel.
         request = await self._requests.get(request_id, uow=uow, for_update=True)
         if request is None:
             raise _not_found()
-        if request.status not in CANCELLABLE:
-            raise _not_cancellable(request.status)
+        if request.status not in CANCELLABLE or request.cancel_requested_at is not None:
+            raise _not_cancellable(request)
         now = self._clock.now()
         if request.status is ProcessingStatus.QUEUED:
             cancelled = replace(
@@ -313,11 +315,8 @@ class ProcessingService:
                 updated_at=now,
             )
         else:
-            # A dispatched run is flagged like a running one; the worker ends it CANCELLED when
-            # it claims it (GAP-G-2, decided by the user).
-            cancelled = replace(
-                request, status=ProcessingStatus.CANCELLING, cancel_requested_at=now, updated_at=now
-            )
+            # A running run keeps RUNNING; the worker sees the flag between dates (OQ-46).
+            cancelled = replace(request, cancel_requested_at=now, updated_at=now)
         await self._requests.update(cancelled, uow=uow)
         logger.info("processing request %s: cancel requested (%s)", request.id, cancelled.status)
         return cancelled

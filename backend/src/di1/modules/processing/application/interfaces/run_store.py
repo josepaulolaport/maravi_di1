@@ -1,8 +1,8 @@
-"""What the dispatcher and the worker need from persistence (interfaces.md "Processing",
-"Transaction boundaries" 3, 4 and 6).
+"""What the worker needs from persistence (interfaces.md "Processing", "Transaction boundaries"
+4 and 6; OQ-46).
 
-Every call runs in the caller's Unit of Work and never commits: the dispatcher and the processor
-own their transactions, one per step (dispatch, claim, RUNNING, the date, the end).
+Every call runs in the caller's Unit of Work and never commits: the processor owns its
+transactions, one per step (take, RUNNING, the date, the end).
 """
 
 from __future__ import annotations
@@ -93,27 +93,13 @@ class NewIssue:
 
 
 class RunStore(Protocol):
-    async def lock_active_request_id(self, *, uow: UnitOfWork) -> UUID | None:
-        """Row-locks the singleton ``calculation_state`` and returns its active run."""
-        ...
-
-    async def set_active_request_id(
-        self, request_id: UUID | None, now: datetime, *, uow: UnitOfWork
-    ) -> None: ...
-
-    async def clear_active_request_id(
-        self, request_id: UUID, now: datetime, *, uow: UnitOfWork
-    ) -> None:
-        """Frees the active slot only if it holds ``request_id`` (a run's end)."""
-        ...
-
     async def lock_oldest_queued(self, *, uow: UnitOfWork) -> ProcessingRequest | None:
-        """The oldest QUEUED run by ``(created_at, id)``, row-locked (OQ-5 item 4)."""
+        """The oldest QUEUED run by ``(created_at, id)``, row-locked (OQ-5 item 4, OQ-46)."""
         ...
 
     async def lock_active_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
-        """The runs DISPATCHED, RUNNING or CANCELLING, oldest first, row-locked: at the worker's
-        start, the run it was processing (there is one worker, OQ-45)."""
+        """The runs RUNNING (or DISPATCHED/CANCELLING, from before OQ-46), oldest first,
+        row-locked: the run the worker is processing, or at its start the one it was (OQ-45)."""
         ...
 
     async def get_run(

@@ -1,6 +1,6 @@
-"""The dispatcher and the worker on PostgreSQL (plan §7 Wave 4 and its adversarial sequences;
-interfaces.md "Processing", "Transaction boundaries" 3 to 7; OQ-5, OQ-23, OQ-26, OQ-31, OQ-36 to
-OQ-40)."""
+"""The worker on PostgreSQL: the doorbell and the FIFO drain (OQ-46), one transaction per date,
+recovery at worker start (OQ-45), and plan §7's adversarial sequences (interfaces.md
+"Processing", "Transaction boundaries" 4 to 7; OQ-5, OQ-23, OQ-26, OQ-31, OQ-36 to OQ-40)."""
 
 from __future__ import annotations
 
@@ -11,13 +11,12 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.ledger.public import EntryType
 from di1.modules.portfolio.public import CashBalance
 from di1.modules.prices.public import PriceSource
-from tests.integration.processing.support import make_service, seed_instrument, seed_statuses
+from tests.integration.processing.support import seed_instrument, seed_statuses
 from tests.integration.processing.worker_support import Worker
 from tests.unit.processing.run_fakes import cash_movement, trade
 
@@ -42,99 +41,121 @@ async def priced_asset(w: Worker, *days: date, pu: str = "95000.0000000000") -> 
     return asset_id
 
 
-# --- dispatcher -----------------------------------------------------------------------------
+# --- the doorbell and the queue (OQ-46) --------------------------------------------------
 
 
-async def test_dispatch_takes_the_oldest_queued_run_and_writes_the_command(worker: Worker) -> None:
-    first = await worker.enqueue("CASH", D1, D1)
-    await worker.enqueue("CASH", D2, D2)
+async def test_requests_run_oldest_first_by_created_at(worker: Worker) -> None:
+    later = await worker.enqueue("CASH", D3, D3)
+    worker.clock.advance(-10)  # created before the first, inserted after it
+    earliest = await worker.enqueue("CASH", D1, D1)
+    worker.clock.advance(20)
+    last = await worker.enqueue("CASH", D2, D2)
 
-    assert await worker.dispatcher.dispatch_next() == first
+    taken: list[UUID] = []
+    while (request_id := await worker.take_next()) is not None:
+        taken.append(request_id)
+        await worker.processor.run(request_id)
 
-    row = await worker.run_row(first)
-    assert row["status"] == "DISPATCHED"
-    assert row["dispatched_at"] == worker.clock.now()
-    assert await worker.active_request_id() == first
-    assert await worker.outbox() == [("processing.run_request", {"request_id": str(first)})]
-
-
-async def test_only_one_run_is_active_at_a_time(worker: Worker) -> None:
-    await worker.enqueue("CASH", D1, D1)
-    second = await worker.enqueue("CASH", D2, D2)
-    await worker.dispatcher.dispatch_next()
-
-    assert await worker.dispatcher.dispatch_next() is None
-    assert (await worker.run_row(second))["status"] == "QUEUED"
-    assert len(await worker.outbox()) == 1
+    assert taken == [earliest, later, last]  # by (created_at, id), not by insertion
 
 
-async def test_an_empty_queue_dispatches_nothing(worker: Worker) -> None:
-    assert await worker.dispatcher.dispatch_next() is None
-    assert await worker.outbox() == []
+async def test_a_doorbell_with_nothing_queued_is_a_no_op(worker: Worker) -> None:
+    await worker.ring()
+
+    assert await worker.statuses() == {}
+    assert await worker.writes() == []
 
 
-async def test_the_next_run_is_dispatched_once_the_active_one_ends(worker: Worker) -> None:
-    first = await worker.enqueue("CASH", D1, D1)
-    second = await worker.enqueue("CASH", D2, D2)
-
-    await worker.dispatch_and_run()
-
-    assert (await worker.run_row(first))["status"] == "COMPLETED"
-    assert await worker.dispatcher.dispatch_next() == second
-    assert await worker.active_request_id() == second
-
-
-async def test_a_slot_left_on_an_ended_run_is_freed_by_the_dispatcher(worker: Worker) -> None:
-    first = await worker.enqueue("CASH", D1, D1)
-    second = await worker.enqueue("CASH", D2, D2)
-    await worker.dispatch_and_run()
-    await worker.execute(  # as if an older version had left the slot on the ended run
-        "UPDATE processing.calculation_state SET active_request_id = :id", id=first
+async def test_a_duplicate_doorbell_is_a_no_op(worker: Worker) -> None:
+    request_id = await worker.enqueue("CASH", D1, D1)
+    await worker.ring()
+    after_first = (
+        await worker.run_row(request_id),
+        await worker.status_rows(),
+        await worker.writes(),
     )
 
-    assert await worker.dispatcher.dispatch_next() == second
+    await worker.ring()  # the same message again, or a late one
+
+    assert (
+        await worker.run_row(request_id),
+        await worker.status_rows(),
+        await worker.writes(),
+    ) == after_first
+
+
+async def test_a_lost_doorbell_is_covered_by_the_next_requests_doorbell(worker: Worker) -> None:
+    first = await worker.enqueue("CASH", D1, D1)  # its doorbell never arrives
+    second = await worker.enqueue("CASH", D2, D2)
+
+    await worker.ring()  # the second request's doorbell
+
+    assert (await worker.run_row(first))["status"] == "COMPLETED"
+    assert (await worker.run_row(second))["status"] == "COMPLETED"
+
+
+async def test_a_lost_doorbell_is_covered_by_a_restart(worker: Worker) -> None:
+    request_id = await worker.enqueue("CASH", D1, D1)  # its doorbell never arrives
+
+    await worker.restart()
+
+    assert (await worker.run_row(request_id))["status"] == "COMPLETED"
+
+
+async def test_nothing_is_taken_while_a_run_is_running(worker: Worker) -> None:
+    first = await worker.enqueue("CASH", D1, D1)
+    second = await worker.enqueue("CASH", D2, D2)
+    assert await worker.take_next() == first
+
+    assert await worker.take_next() is None  # one run at a time
+    await worker.ring()
+    assert (await worker.run_row(second))["status"] == "QUEUED"
+
+
+async def test_a_queued_request_cancelled_before_pickup_never_runs(worker: Worker) -> None:
+    request_id = await worker.enqueue("CASH", D1, D1)
+    await worker.cancel(request_id)
+
+    await worker.ring()
+
+    assert (await worker.run_row(request_id))["status"] == "CANCELLED"
+    assert await worker.statuses() == {}
+    assert await worker.writes() == []
 
 
 async def end_completed(worker: Worker) -> UUID:
-    await worker.enqueue("CASH", D1, D1)
-    return await worker.dispatch_and_run()
+    request_id = await worker.enqueue("CASH", D1, D1)
+    await worker.ring()
+    return request_id
 
 
 async def end_completed_with_issues(worker: Worker) -> UUID:
     asset = await priced_asset(worker)  # no price: a Pendência
     worker.world.ledger.trades.append(trade(asset, D1, 1, "95000.0000000000"))
-    await worker.enqueue("POSITIONS", D1, D1)
-    return await worker.dispatch_and_run()
+    request_id = await worker.enqueue("POSITIONS", D1, D1)
+    await worker.ring()
+    return request_id
 
 
 async def end_failed(worker: Worker) -> UUID:
     await seed_statuses(worker.engine, {D0: (None, "FAILED")})
-    await worker.enqueue("CASH", D1, D1)
-    return await worker.dispatch_and_run()
+    request_id = await worker.enqueue("CASH", D1, D1)
+    await worker.ring()
+    return request_id
 
 
 async def end_cancelled_between_dates(worker: Worker) -> UUID:
     request_id = await worker.enqueue("CASH", D1, D2)
-    await worker.dispatcher.dispatch_next()
-    assert await worker.claim(request_id) is not None
-    await request_cancel(worker, request_id)
+    assert await worker.take_next() == request_id
+    await worker.cancel(request_id)
     await worker.processor.run(request_id)
-    return request_id
-
-
-async def end_cancelled_at_the_claim(worker: Worker) -> UUID:
-    request_id = await worker.enqueue("CASH", D1, D2)
-    await worker.dispatcher.dispatch_next()
-    await request_cancel(worker, request_id)
-    assert await worker.claim(request_id) is None
     return request_id
 
 
 async def end_cancelled_at_the_worker_start(worker: Worker) -> UUID:
     request_id = await worker.enqueue("CASH", D1, D2)
-    await worker.dispatcher.dispatch_next()
-    assert await worker.claim(request_id) is not None
-    await request_cancel(worker, request_id)
+    assert await worker.take_next() == request_id
+    await worker.cancel(request_id)
     await worker.restart()
     return request_id
 
@@ -146,19 +167,20 @@ async def end_cancelled_at_the_worker_start(worker: Worker) -> UUID:
         (end_completed_with_issues, "COMPLETED_WITH_ISSUES"),
         (end_failed, "FAILED"),
         (end_cancelled_between_dates, "CANCELLED"),
-        (end_cancelled_at_the_claim, "CANCELLED"),
         (end_cancelled_at_the_worker_start, "CANCELLED"),
     ],
 )
-async def test_every_run_end_frees_the_slot_and_the_next_run_dispatches(
+async def test_after_every_kind_of_end_the_next_doorbell_runs_the_next_request(
     worker: Worker, end: Callable[[Worker], Awaitable[UUID]], status: str
 ) -> None:
     ended = await end(worker)
     assert (await worker.run_row(ended))["status"] == status
-    assert await worker.active_request_id() is None  # freed with the end status (OQ-45)
     queued = await worker.enqueue("CASH", D3, D3)
 
-    assert await worker.dispatcher.dispatch_next() == queued
+    await worker.ring()
+
+    assert (await worker.run_row(queued))["status"] in {"COMPLETED", "FAILED"}
+    assert (await worker.run_row(queued))["started_at"] is not None
 
 
 # --- a run end to end -----------------------------------------------------------------------
@@ -168,7 +190,7 @@ async def test_a_cash_run_from_the_zero_state_processes_every_date(worker: Worke
     worker.world.ledger.movements.append(cash_movement(D1, "1000.00"))
     request_id = await worker.enqueue("CASH", D1, D3)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.statuses() == {
         D1: (None, "PROCESSED"),
@@ -191,7 +213,7 @@ async def test_a_cash_run_counts_positions_processed_by_another_run(worker: Work
     await seed_statuses(worker.engine, {D1: ("PROCESSED", None)})
     await worker.enqueue("CASH", D1, D1)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.writes() == [(D1, "CASH", True)]
 
@@ -203,7 +225,7 @@ async def test_an_all_run_writes_positions_first_then_cash_with_its_outcome(
     worker.world.ledger.trades.append(trade(asset, D1, 10, "95000.0000000000"))
     request_id = await worker.enqueue("ALL", D1, D2)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.statuses() == {
         D1: ("PROCESSED", "PROCESSED"),
@@ -225,7 +247,7 @@ async def test_a_missing_saturday_price_is_an_issue_not_a_failure(worker: Worker
     worker.world.ledger.trades.append(trade(asset, saturday, 5, "95000.0000000000"))
     request_id = await worker.enqueue("POSITIONS", saturday, sunday)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.statuses() == {
         saturday: ("PROCESSED", None),
@@ -242,12 +264,12 @@ async def test_reprocessing_a_date_replaces_its_issues(worker: Worker) -> None:
     asset = await priced_asset(worker)
     worker.world.ledger.trades.append(trade(asset, D1, 5, "95000.0000000000"))
     await worker.enqueue("POSITIONS", D1, D1)
-    await worker.dispatch_and_run()
+    await worker.ring()
     assert await worker.issues() == [("MISSING_REFERENCE_PRICE", D1, D1)]
 
     worker.world.prices.set(asset, D1, "95000.0000000000")
     second = await worker.enqueue("POSITIONS", D1, D1)
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.issues() == []
     assert await worker.statuses() == {D1: ("PROCESSED", None)}
@@ -263,7 +285,7 @@ async def test_a_gap_before_the_first_date_fails_it_without_asking_the_ledger(
     await seed_statuses(worker.engine, {date(2026, 10, 1): (None, "PROCESSED")})
     request_id = await worker.enqueue("CASH", D1, D3)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     statuses = await worker.statuses()
     assert statuses[D1] == (None, "FAILED")
@@ -277,8 +299,6 @@ async def test_a_gap_before_the_first_date_fails_it_without_asking_the_ledger(
     assert run["failed_chain"] == "CASH"
     assert run["progress_date"] is None
     assert await worker.writes() == []
-    assert await worker.dispatcher.dispatch_next() is None
-    assert await worker.active_request_id() is None
 
 
 @pytest.mark.parametrize("previous", ["FAILED", "RUNNING"])
@@ -286,7 +306,7 @@ async def test_a_failed_or_running_day_before_fails_the_date(worker: Worker, pre
     await seed_statuses(worker.engine, {D0: (None, previous)})
     request_id = await worker.enqueue("CASH", D1, D1)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert (await worker.statuses())[D1] == (None, "FAILED")
     assert worker.world.ledger.asked == []
@@ -298,7 +318,7 @@ async def test_entries_before_an_unprocessed_first_date_fail_it(worker: Worker) 
     worker.world.ledger.trades.append(trade(asset, D0, 1, "95000.0000000000"))
     request_id = await worker.enqueue("POSITIONS", D1, D2)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert worker.world.ledger.asked == [(D0, EntryType.TRADE)]
     assert await worker.statuses() == {D1: ("FAILED", None)}
@@ -314,7 +334,7 @@ async def test_cash_entries_do_not_break_the_positions_zero_state(worker: Worker
     worker.world.ledger.movements.append(cash_movement(D0, "10.00"))
     await worker.enqueue("POSITIONS", D1, D1)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.statuses() == {D1: ("PROCESSED", None)}
 
@@ -325,7 +345,7 @@ async def test_an_all_run_failing_both_predecessors_keeps_the_positions_code(
     await seed_statuses(worker.engine, {D0: ("FAILED", "FAILED")})
     request_id = await worker.enqueue("ALL", D1, D2)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.statuses() == {D0: ("FAILED", "FAILED"), D1: ("FAILED", "FAILED")}
     run = await worker.run_row(request_id)
@@ -344,7 +364,7 @@ async def test_a_technical_error_in_one_chain_rolls_back_only_that_chain(worker:
     worker.writer.fail.add(("CASH", D2))
     request_id = await worker.enqueue("ALL", D1, D3)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.statuses() == {
         D1: ("PROCESSED", "PROCESSED"),
@@ -371,7 +391,7 @@ async def test_both_chains_failing_on_different_dates_ends_the_run_failed(worker
     worker.writer.fail |= {("POSITIONS", D1), ("CASH", D2)}
     request_id = await worker.enqueue("ALL", D1, D3)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.statuses() == {D1: ("FAILED", "PROCESSED"), D2: (None, "FAILED")}
     run = await worker.run_row(request_id)
@@ -385,7 +405,7 @@ async def test_a_failure_outside_the_chains_fails_the_date_for_every_live_chain(
     worker.fail_reading_on_date_transaction = 2  # D2's transaction
     request_id = await worker.enqueue("CASH", D1, D3)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     statuses = await worker.statuses()
     assert statuses[D2] == (None, "FAILED")
@@ -402,32 +422,9 @@ async def test_a_failure_outside_the_chains_fails_the_date_for_every_live_chain(
 
 
 async def request_cancel(worker: Worker, request_id: UUID) -> None:
-    """What ``ProcessingService.request_cancel`` does to a running run, in its own
-    transaction."""
-    await worker.execute(
-        "UPDATE processing.requests SET status = 'CANCELLING', cancel_requested_at = now()"
-        " WHERE id = :id",
-        id=request_id,
-    )
-
-
-async def test_a_run_cancelled_before_it_started_ends_at_the_claim(worker: Worker) -> None:
-    request_id = await worker.enqueue("CASH", D1, D3)
-    await worker.dispatcher.dispatch_next()
-    await worker.execute(
-        "UPDATE processing.requests SET status = 'CANCELLING', cancel_requested_at = now()"
-        " WHERE id = :id",
-        id=request_id,
-    )
-
-    assert await worker.claim(request_id) is None
-
-    run = await worker.run_row(request_id)
-    assert run["status"] == "CANCELLED"
-    assert run["started_at"] is None
-    assert await worker.statuses() == {}
-    assert await worker.dispatcher.dispatch_next() is None
-    assert await worker.active_request_id() is None
+    """``ProcessingService.request_cancel``, in its own transaction: a running run keeps RUNNING
+    with ``cancel_requested_at`` set (OQ-46)."""
+    await worker.cancel(request_id)
 
 
 async def test_a_cancel_mid_run_commits_the_current_date_and_stops(worker: Worker) -> None:
@@ -441,15 +438,13 @@ async def test_a_cancel_mid_run_commits_the_current_date_and_stops(worker: Worke
     worker.writer.hook = cancel_during_d2
     pending: list[asyncio.Task[None]] = []
 
-    await worker.dispatch_and_run()
+    await worker.ring()
     await asyncio.gather(*pending)
 
     assert await worker.statuses() == {D1: (None, "PROCESSED"), D2: (None, "PROCESSED")}
     run = await worker.run_row(request_id)
     assert run["status"] == "CANCELLED"
     assert run["progress_date"] == D2
-    assert await worker.dispatcher.dispatch_next() is None
-    assert await worker.active_request_id() is None
 
 
 async def test_a_cancel_during_the_last_date_lets_the_run_complete(worker: Worker) -> None:
@@ -463,7 +458,7 @@ async def test_a_cancel_during_the_last_date_lets_the_run_complete(worker: Worke
     worker.writer.hook = cancel_during_d2
     pending: list[asyncio.Task[None]] = []
 
-    await worker.dispatch_and_run()
+    await worker.ring()
     await asyncio.gather(*pending)
 
     assert (await worker.run_row(request_id))["status"] == "COMPLETED"
@@ -472,31 +467,11 @@ async def test_a_cancel_during_the_last_date_lets_the_run_complete(worker: Worke
 # --- one worker: crash and recovery at startup (user decision, 2026-10-19) ----------------
 
 
-async def test_a_command_for_a_run_that_ended_does_nothing(worker: Worker) -> None:
-    request_id = await worker.enqueue("CASH", D1, D1)
-    await worker.dispatch_and_run()
-
-    assert await worker.claim(request_id) is None
-    assert (await worker.run_row(request_id))["status"] == "COMPLETED"
-
-
-async def test_the_dispatcher_never_re_dispatches_an_active_run(worker: Worker) -> None:
-    request_id = await worker.enqueue("CASH", D1, D1)
-    await worker.dispatcher.dispatch_next()
-    assert await worker.claim(request_id) is not None
-    worker.clock.advance(3600)
-
-    assert await worker.dispatcher.dispatch_next() is None
-    assert len(await worker.outbox()) == 1
-
-
-async def test_startup_with_nothing_active_recovers_nothing(worker: Worker) -> None:
-    queued = await worker.enqueue("CASH", D1, D1)
-
+async def test_startup_with_nothing_to_recover_or_queued_does_nothing(worker: Worker) -> None:
     await worker.restart()
 
-    assert (await worker.run_row(queued))["status"] == "QUEUED"
     assert await worker.statuses() == {}
+    assert await worker.writes() == []
 
 
 async def test_a_crash_mid_date_resumes_after_progress_date(worker: Worker) -> None:
@@ -510,7 +485,7 @@ async def test_a_crash_mid_date_resumes_after_progress_date(worker: Worker) -> N
 
     worker.writer.hook = crash_on_d2
     with pytest.raises(asyncio.CancelledError):
-        await worker.dispatch_and_run()
+        await worker.ring()
 
     rows = await worker.status_rows()
     assert (rows[D2]["cash"], rows[D2]["cash_previous"]) == ("RUNNING", "PROCESSED")
@@ -540,7 +515,7 @@ async def test_a_cancel_after_a_crash_restores_the_running_date(worker: Worker) 
 
     worker.writer.hook = crash
     with pytest.raises(asyncio.CancelledError):
-        await worker.dispatch_and_run()
+        await worker.ring()
     await worker.execute(
         "UPDATE processing.requests SET status = 'CANCELLING', cancel_requested_at = now()"
         " WHERE id = :id",
@@ -563,7 +538,7 @@ async def test_a_crash_on_a_new_date_deletes_its_row_when_the_run_ends(worker: W
 
     worker.writer.hook = crash
     with pytest.raises(asyncio.CancelledError):
-        await worker.dispatch_and_run()
+        await worker.ring()
     assert await worker.statuses() == {D1: (None, "RUNNING")}
     await worker.execute(
         "UPDATE processing.requests SET status = 'CANCELLING', cancel_requested_at = now()"
@@ -586,7 +561,7 @@ async def test_recovery_of_an_all_run_keeps_a_failed_chain_stopped(worker: Worke
     worker.writer.hook = crash_on_d2
     request_id = await worker.enqueue("ALL", D1, D3)
     with pytest.raises(asyncio.CancelledError):
-        await worker.dispatch_and_run()
+        await worker.ring()
 
     worker.writer.hook = None
     await worker.restart()
@@ -604,7 +579,7 @@ async def test_a_technical_error_on_a_single_chain_run_fails_the_run(worker: Wor
     worker.writer.fail.add(("CASH", D2))
     request_id = await worker.enqueue("CASH", D1, D3)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.statuses() == {D1: (None, "PROCESSED"), D2: (None, "FAILED")}
     assert await worker.writes() == [(D1, "CASH", False)]
@@ -626,7 +601,7 @@ async def test_one_chain_failing_its_predecessor_on_the_first_date_lets_the_othe
     await seed_statuses(worker.engine, {D0: ("FAILED", None)})
     request_id = await worker.enqueue("ALL", D1, D2)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert (await worker.statuses())[D1] == ("FAILED", "PROCESSED")
     assert (await worker.statuses())[D2] == (None, "PROCESSED")
@@ -651,7 +626,7 @@ async def test_a_cancelled_all_run_keeps_its_first_failure(worker: Worker) -> No
             await worker.wait_for_a_lock_waiter()
 
     worker.writer.hook = cancel_during_d2
-    await worker.dispatch_and_run()
+    await worker.ring()
     await asyncio.gather(*pending)
 
     run = await worker.run_row(request_id)
@@ -671,7 +646,7 @@ async def test_a_failure_outside_the_chains_after_one_stopped_fails_only_the_liv
     worker.fail_reading_on_date_transaction = 2  # D2's transaction
     request_id = await worker.enqueue("ALL", D1, D3)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.statuses() == {D1: ("PROCESSED", "FAILED"), D2: ("FAILED", None)}
     run = await worker.run_row(request_id)
@@ -693,39 +668,31 @@ async def test_a_deposit_landing_during_a_positions_run_changes_no_status(
     worker.writer.hook = deposit_during_d1
     await worker.enqueue("POSITIONS", D1, D2)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.statuses() == {D1: ("PROCESSED", None), D2: ("PROCESSED", None)}
 
 
 async def test_queue_a_backdated_trade_queue_b_cancel_a_finish_b(worker: Worker) -> None:
-    service = make_service()
     asset = await priced_asset(worker, D1, D2, D3)
     first = await worker.enqueue("POSITIONS", D1, D3)
-    assert await worker.dispatcher.dispatch_next() == first
-    claim = await worker.claim(first)
-    assert claim is not None
+    assert await worker.take_next() == first
     pending: list[asyncio.Task[None]] = []
 
     async def cancel_a_during_d2(chain: str, day: date) -> None:
         if day == D2:
-
-            async def cancel() -> None:
-                async with worker.uow_factory() as uow:
-                    await service.request_cancel(first, uow=uow)
-
-            pending.append(asyncio.create_task(cancel()))
+            pending.append(asyncio.create_task(worker.cancel(first)))
             await worker.wait_for_a_lock_waiter()  # the real cancel waits on A's row lock
 
     worker.writer.hook = cancel_a_during_d2
     worker.world.ledger.trades.append(trade(asset, D1, 3, "95000.0000000000"))  # backdated
     second = await worker.enqueue("POSITIONS", D1, D2)
-    await worker.processor.run(claim.request_id)
+    await worker.processor.run(first)
     await asyncio.gather(*pending)
     worker.writer.hook = None
 
     assert (await worker.run_row(first))["status"] == "CANCELLED"
-    assert await worker.dispatch_and_run() == second
+    await worker.ring()
 
     assert (await worker.run_row(second))["status"] == "COMPLETED"
     assert await worker.statuses() == {D1: ("PROCESSED", None), D2: ("PROCESSED", None)}
@@ -739,7 +706,7 @@ async def test_case_19_a_cash_run_over_failed_positions_leaves_aum_null(worker: 
     await seed_statuses(worker.engine, {D1: ("FAILED", None)})
     await worker.enqueue("CASH", D1, D1)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert await worker.statuses() == {D1: ("FAILED", "PROCESSED")}
     assert await worker.writes() == [(D1, "CASH", False)]  # FAILED is not processed (OQ-38)
@@ -752,7 +719,7 @@ async def test_case_26_an_earlier_failed_status_alone_fails_without_asking_the_l
     await seed_statuses(worker.engine, {october_1: (None, "FAILED")})
     request_id = await worker.enqueue("CASH", october_5, october_5)
 
-    await worker.dispatch_and_run()
+    await worker.ring()
 
     assert (await worker.statuses())[october_5] == (None, "FAILED")
     assert worker.world.ledger.asked == []
@@ -765,57 +732,28 @@ async def test_case_26_an_earlier_failed_status_alone_fails_without_asking_the_l
     )
 
 
-async def test_a_dispatched_run_never_claimed_is_run_at_the_worker_start(
+async def test_a_dispatched_run_left_from_before_oq46_is_run_at_the_worker_start(
     worker: Worker,
 ) -> None:
     request_id = await worker.enqueue("CASH", D1, D1)
-    assert await worker.dispatcher.dispatch_next() == request_id
-    # The worker stopped before it claimed the command.
+    await worker.execute(
+        "UPDATE processing.requests SET status = 'DISPATCHED' WHERE id = :id", id=request_id
+    )
 
     await worker.restart()
 
     assert (await worker.run_row(request_id))["status"] == "COMPLETED"
     assert await worker.statuses() == {D1: (None, "PROCESSED")}
-    # The command still in the queue arrives afterwards: a no-op.
-    assert await worker.claim(request_id) is None
-    assert len(await worker.outbox()) == 1
 
 
-# --- duplicate deliveries (OQ-45) ------------------------------------------------------
+# --- recovery at the worker start (OQ-45, OQ-46) ---------------------------------------
 
 
-async def test_a_duplicate_command_for_a_running_run_is_a_no_op(worker: Worker) -> None:
+async def test_a_run_cancelled_while_taken_ends_cancelled_at_the_worker_start(
+    worker: Worker,
+) -> None:
     request_id = await worker.enqueue("CASH", D1, D2)
-    await worker.dispatcher.dispatch_next()
-    assert await worker.claim(request_id) is not None
-    before = await worker.run_row(request_id)
-
-    assert await worker.claim(request_id) is None
-
-    assert await worker.run_row(request_id) == before
-
-
-async def test_a_duplicate_command_for_a_queued_run_is_a_no_op(worker: Worker) -> None:
-    request_id = await worker.enqueue("CASH", D1, D1)
-
-    assert await worker.claim(request_id) is None
-    assert (await worker.run_row(request_id))["status"] == "QUEUED"
-
-
-async def test_a_command_for_a_cancelling_run_that_started_is_a_no_op(worker: Worker) -> None:
-    request_id = await worker.enqueue("CASH", D1, D2)
-    await worker.dispatcher.dispatch_next()
-    assert await worker.claim(request_id) is not None
-    await request_cancel(worker, request_id)
-
-    assert await worker.claim(request_id) is None
-    assert (await worker.run_row(request_id))["status"] == "CANCELLING"
-
-
-async def test_a_cancelling_run_at_the_worker_start_ends_cancelled(worker: Worker) -> None:
-    request_id = await worker.enqueue("CASH", D1, D2)
-    await worker.dispatcher.dispatch_next()
-    assert await worker.claim(request_id) is not None
+    assert await worker.take_next() == request_id  # the worker stopped before its first date
     await request_cancel(worker, request_id)
 
     await worker.restart()
@@ -837,13 +775,9 @@ async def test_a_running_run_with_a_cancel_request_at_the_worker_start_ends_canc
 
     worker.writer.hook = crash
     with pytest.raises(asyncio.CancelledError):
-        await worker.dispatch_and_run()
+        await worker.ring()
     worker.writer.hook = None
-    # The cancel was recorded while the run kept its RUNNING status.
-    await worker.execute(
-        "UPDATE processing.requests SET cancel_requested_at = now() WHERE id = :id",
-        id=request_id,
-    )
+    await request_cancel(worker, request_id)  # RUNNING keeps its status (OQ-46)
     writes_before = await worker.writes()
 
     await worker.restart()
@@ -854,7 +788,6 @@ async def test_a_running_run_with_a_cancel_request_at_the_worker_start_ends_canc
     assert (rows[D1]["cash"], rows[D1]["cash_previous"]) == ("PROCESSED", None)  # restored
     assert D2 not in rows
     assert await worker.writes() == writes_before  # no date processed
-    assert await worker.active_request_id() is None
 
 
 async def test_recovery_at_the_worker_start_is_idempotent(worker: Worker) -> None:
@@ -868,7 +801,7 @@ async def test_recovery_at_the_worker_start_is_idempotent(worker: Worker) -> Non
 
     worker.writer.hook = crash_on_d2
     with pytest.raises(asyncio.CancelledError):
-        await worker.dispatch_and_run()
+        await worker.ring()
     worker.writer.hook = None
 
     await worker.restart()
@@ -876,7 +809,6 @@ async def test_recovery_at_the_worker_start_is_idempotent(worker: Worker) -> Non
         await worker.run_row(request_id),
         await worker.status_rows(),
         await worker.writes(),
-        await worker.active_request_id(),
     )
     await worker.restart()  # e.g. a stop raced with the end and the hook runs again
 
@@ -885,21 +817,27 @@ async def test_recovery_at_the_worker_start_is_idempotent(worker: Worker) -> Non
         await worker.run_row(request_id),
         await worker.status_rows(),
         await worker.writes(),
-        await worker.active_request_id(),
     ) == after_first
 
 
-async def test_the_dispatcher_never_waits_on_the_active_run_row(worker: Worker) -> None:
-    """A run's end holds the run's row, then waits for calculation_state; a tick that held
-    calculation_state and waited for that row would deadlock with it."""
-    request_id = await worker.enqueue("CASH", D1, D1)
-    await worker.dispatcher.dispatch_next()
-    assert await worker.claim(request_id) is not None
+async def test_a_crash_mid_run_resumes_at_restart_then_drains_the_queue(worker: Worker) -> None:
+    await seed_statuses(worker.engine, {D0: (None, "PROCESSED")})
+    worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("0"))
+    first = await worker.enqueue("CASH", D1, D2)
+    order: list[date] = []
 
-    async with worker.engine.connect() as connection, connection.begin():
-        await connection.execute(  # as a run's end does first
-            text("SELECT id FROM processing.requests WHERE id = :id FOR UPDATE"),
-            {"id": request_id},
-        )
-        async with asyncio.timeout(5):
-            assert await worker.dispatcher.dispatch_next() is None
+    async def crash_on_d2(chain: str, day: date) -> None:
+        order.append(day)
+        if day == D2 and len(order) == 2:
+            raise asyncio.CancelledError
+
+    worker.writer.hook = crash_on_d2
+    with pytest.raises(asyncio.CancelledError):
+        await worker.ring()
+    second = await worker.enqueue("CASH", D3, D3)  # queued while the worker is down
+
+    await worker.restart()
+
+    assert order == [D1, D2, D2, D3]  # D2 again (resumed after progress_date), then the queue
+    assert (await worker.run_row(first))["status"] == "COMPLETED"
+    assert (await worker.run_row(second))["status"] == "COMPLETED"

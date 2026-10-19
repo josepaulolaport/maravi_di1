@@ -151,6 +151,16 @@ class FakeAssets:
         )
 
 
+@dataclass
+class FakeDoorbell:
+    """Counts the doorbells rung, and in which Unit of Work."""
+
+    rung: list[object] = field(default_factory=list)
+
+    async def ring(self, *, uow: UnitOfWork) -> None:
+        self.rung.append(uow)
+
+
 class Harness:
     def __init__(self) -> None:
         self.requests = InMemoryRequests()
@@ -159,6 +169,7 @@ class Harness:
         self.history = FakeChainHistory()
         self.assets = FakeAssets()
         self.clock = SteppingClock()
+        self.doorbell = FakeDoorbell()
         self.service = ProcessingService(
             requests=self.requests,
             date_statuses=self.date_statuses,
@@ -166,6 +177,7 @@ class Harness:
             chain_history=self.history,
             assets=self.assets,
             clock=self.clock,
+            doorbell=self.doorbell,
         )
 
     async def enqueue(

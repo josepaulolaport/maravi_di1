@@ -129,8 +129,8 @@ async def test_oq40_cancelling_a_running_run_keeps_its_first_failure(
             )
         ).one()
 
-    assert flagged.status is ProcessingStatus.CANCELLING
-    assert tuple(row) == ("CANCELLING", date(2026, 10, 2), "CASH")
+    assert flagged.status is ProcessingStatus.RUNNING  # flagged only (OQ-46)
+    assert tuple(row) == ("RUNNING", date(2026, 10, 2), "CASH")
 
 
 async def test_an_enqueued_run_reads_back_as_stored(
@@ -155,13 +155,14 @@ async def test_13_10_concurrent_overlapping_requests_are_all_queued(
     assert len({r.id for r in created}) == 10
     assert set((await request_statuses(engine)).values()) == {"QUEUED"}
     assert await count(engine, "processing.requests") == 10
-    # Nothing is dispatched by enqueueing: that is the worker's (Wave 4).
+    # Each request rings the doorbell once, in its own transaction (OQ-46).
     async with engine.connect() as connection:
-        active = await connection.scalar(
-            text("SELECT active_request_id FROM processing.calculation_state")
-        )
-    assert active is None
-    assert await count(engine, "platform.outbox_messages") == 0
+        doorbells = (
+            await connection.execute(
+                text("SELECT message_type, payload FROM platform.outbox_messages")
+            )
+        ).all()
+    assert [tuple(d) for d in doorbells] == [("processing.run_request", {})] * 10
 
 
 async def test_13_10_cancelling_a_queued_run_is_immediate(
@@ -189,8 +190,9 @@ async def test_13_10_cancelling_a_running_run_flags_it(
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
         flagged = await service.request_cancel(run.id, uow=uow)
 
-    assert flagged.status is ProcessingStatus.CANCELLING
-    assert (await request_statuses(engine))[run.id] == "CANCELLING"
+    assert flagged.status is ProcessingStatus.RUNNING  # no CANCELLING (OQ-46)
+    assert flagged.cancel_requested_at is not None
+    assert (await request_statuses(engine))[run.id] == "RUNNING"
 
 
 async def _cancel(
@@ -204,8 +206,7 @@ async def _cancel(
     ("status", "outcome"),
     [
         ("QUEUED", ProcessingStatus.CANCELLED),
-        ("DISPATCHED", ProcessingStatus.CANCELLING),
-        ("RUNNING", ProcessingStatus.CANCELLING),
+        ("RUNNING", ProcessingStatus.RUNNING),
     ],
 )
 async def test_13_10_two_concurrent_cancels_have_one_winner(
@@ -215,7 +216,7 @@ async def test_13_10_two_concurrent_cancels_have_one_winner(
     outcome: ProcessingStatus,
 ) -> None:
     """The run's row lock orders concurrent cancels: one cancels or flags it, the other finds
-    it finished or already CANCELLING and answers 409 (OQ-29)."""
+    it finished or its cancel already requested and answers 409 (OQ-29, OQ-46)."""
     for _ in range(5):
         service = make_service()
         active = await _enqueue(session_factory, service)

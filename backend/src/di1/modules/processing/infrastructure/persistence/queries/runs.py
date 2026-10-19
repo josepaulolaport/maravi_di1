@@ -1,8 +1,6 @@
-"""SQL of the dispatcher and the worker over ``processing.requests``, ``calculation_state``,
-``date_status`` and ``issues`` (OQ-5, OQ-23, OQ-26, OQ-40). Row locks are taken in a fixed
-order: a run's row, then its dates ascending, then ``calculation_state`` (a run's end frees the
-slot in its own transaction). The dispatcher takes ``calculation_state`` and reads the active run
-without locking it, then locks only QUEUED runs, so no cycle forms."""
+"""SQL of the worker over ``processing.requests``, ``date_status`` and ``issues`` (OQ-23, OQ-26,
+OQ-40, OQ-46). Row locks are taken in one order: a run's row, then its dates ascending. There is
+no dispatcher and no active slot; ``calculation_state`` is unused (OQ-46)."""
 
 from __future__ import annotations
 
@@ -12,20 +10,6 @@ RUN_COLUMNS = (
     "id, scope, start_date, end_date, status, created_at, dispatched_at, started_at,"
     " finished_at, cancel_requested_at, progress_date, error_code, error_message, updated_at,"
     " failed_date, failed_chain"
-)
-
-LOCK_CALCULATION_STATE = text(
-    "SELECT active_request_id FROM processing.calculation_state WHERE singleton FOR UPDATE"
-)
-
-SET_ACTIVE_REQUEST = text(
-    "UPDATE processing.calculation_state SET active_request_id = :request_id,"
-    " updated_at = :now WHERE singleton"
-)
-
-CLEAR_ACTIVE_REQUEST = text(
-    "UPDATE processing.calculation_state SET active_request_id = NULL, updated_at = :now"
-    " WHERE singleton AND active_request_id = :request_id"
 )
 
 LOCK_OLDEST_QUEUED = text(

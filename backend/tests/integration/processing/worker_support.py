@@ -5,7 +5,6 @@ rolled-back savepoint or date leaves no row."""
 from __future__ import annotations
 
 import asyncio
-import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -22,18 +21,16 @@ from di1.modules.portfolio.public import (
     PositionsDay,
     PreviousPositionsDay,
 )
-from di1.modules.processing.application.services.dispatcher import ProcessingDispatcher
 from di1.modules.processing.application.services.run_chains import DayReaders
-from di1.modules.processing.application.services.run_processor import (
-    Claim,
-    PortfolioRangeProcessor,
-)
+from di1.modules.processing.application.services.run_processor import PortfolioRangeProcessor
 from di1.modules.processing.infrastructure.persistence.repositories import (
     SqlDateStatusRepository,
 )
 from di1.modules.processing.infrastructure.persistence.run_store import SqlRunStore
+from di1.modules.processing.public import ProcessingScope
 from di1.platform.database.unit_of_work import UnitOfWork, unit_of_work_factory
 from di1.shared.clock import SAO_PAULO
+from tests.integration.processing.support import make_service
 from tests.unit.processing.run_fakes import World
 
 T0 = datetime(2026, 10, 19, 9, 0, tzinfo=SAO_PAULO)
@@ -113,9 +110,7 @@ class Worker:
         self._date_transactions = 0
         self.uow_factory = unit_of_work_factory(session_factory)
         store = SqlRunStore(self.clock)
-        self.dispatcher = ProcessingDispatcher(
-            uow_factory=self.uow_factory, store=store, clock=self.clock
-        )
+        self.service = make_service(clock=self.clock)
         self.processor = PortfolioRangeProcessor(
             uow_factory=self.uow_factory,
             store=store,
@@ -139,33 +134,28 @@ class Worker:
             )
 
     async def enqueue(self, scope: str, start: date, end: date) -> UUID:
-        request_id = uuid.uuid4()
+        """Queues a request through `ProcessingService`, which rings the doorbell (OQ-46)."""
         self.clock.advance(1)
-        async with self.engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "INSERT INTO processing.requests (id, scope, start_date, end_date,"
-                    " created_at, updated_at) VALUES (:id, :s, :a, :b, :t, :t)"
-                ),
-                {"id": request_id, "s": scope, "a": start, "b": end, "t": self.clock.now()},
-            )
-        return request_id
-
-    async def claim(self, request_id: UUID) -> Claim | None:
         async with self.uow_factory() as uow:
-            return await self.processor.claim(request_id, uow=uow)
+            request = await self.service.enqueue_range(ProcessingScope(scope), start, end, uow=uow)
+        return request.id
 
-    async def dispatch_and_run(self) -> UUID:
-        """Dispatch the next run, claim it and run it to its end."""
-        request_id = await self.dispatcher.dispatch_next()
-        assert request_id is not None
-        claim = await self.claim(request_id)
-        assert claim is not None
-        await self.processor.run(claim.request_id)
-        return request_id
+    async def cancel(self, request_id: UUID) -> None:
+        """`ProcessingService.request_cancel`, in its own transaction."""
+        async with self.uow_factory() as uow:
+            await self.service.request_cancel(request_id, uow=uow)
+
+    async def ring(self) -> None:
+        """The worker consumes a doorbell: it drains the queue (OQ-46)."""
+        await self.processor.drain()
+
+    async def take_next(self) -> UUID | None:
+        """The worker takes the oldest QUEUED request (RUNNING) without running it yet."""
+        return await self.processor.take_next()
 
     async def restart(self) -> None:
-        """The worker starts again: it recovers the interrupted run before consuming (OQ-45)."""
+        """The worker starts again: it recovers the interrupted run, then drains the queue
+        (OQ-45, OQ-46)."""
         await self.processor.recover_at_startup()
 
     async def run_row(self, request_id: UUID) -> dict[str, Any]:
@@ -196,13 +186,6 @@ class Worker:
                 text("SELECT day, chain, other FROM public.test_writes ORDER BY day, chain")
             )
             return [(row[0], row[1], row[2]) for row in result]
-
-    async def active_request_id(self) -> UUID | None:
-        async with self.engine.connect() as connection:
-            value = await connection.scalar(
-                text("SELECT active_request_id FROM processing.calculation_state")
-            )
-            return value if isinstance(value, UUID) else None
 
     async def outbox(self) -> list[tuple[str, dict[str, Any]]]:
         async with self.engine.connect() as connection:

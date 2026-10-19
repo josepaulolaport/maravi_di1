@@ -8,6 +8,7 @@ from di1.modules.asset.public import AssetReader
 from di1.modules.ledger.public import LedgerReader
 from di1.modules.processing.application.services.chain_history import LedgerChainHistory
 from di1.modules.processing.application.services.processing import ProcessingService
+from di1.modules.processing.infrastructure.messaging.outbox_doorbell import OutboxDoorbell
 from di1.modules.processing.infrastructure.persistence.repositories import (
     SqlDateStatusRepository,
     SqlIssueRepository,
@@ -27,6 +28,7 @@ def make_processing_service(
         chain_history=LedgerChainHistory(ledger),
         assets=assets,
         clock=clock,
+        doorbell=OutboxDoorbell(),
     )
 
 
