@@ -225,22 +225,23 @@ class PositionTableView:
 
 @dataclass(frozen=True, slots=True)
 class PnLPointView:
-    """One date of the positions chain for the Carteira chart (OQ-16, OQ-27, OQ-31 item 8).
-    ``cumulative_pnl`` is the stored since-inception figure; ``range_cumulative_pnl`` is
-    Σ ``daily_pnl`` from the requested start date to this date, summed in the backend on
-    request."""
+    """One calendar date of the range for the Carteira chart (OQ-16, OQ-27, OQ-31 item 8, OQ-41):
+    every date of [start_date, end_date] is a point, processed or not. ``cumulative_pnl`` is the
+    stored since-inception figure (``None`` from the first gap, spec §8.3); ``range_cumulative_pnl``
+    is Σ ``daily_pnl`` from the requested start date to this date, summed in the backend on
+    request, where a date not processed or with ``daily_pnl`` ``None`` counts as 0."""
 
     date: date
     daily_pnl: Decimal | None
     cumulative_pnl: Decimal | None
-    range_cumulative_pnl: Decimal | None
-    """``None`` from the first date of the range whose ``daily_pnl`` is ``None`` or that has no
-    published positions day."""
-    pnl_status: CalculationCompleteness
-    status: ChainStatus
-    """A published day always has a status (never "not processed")."""
-    published_at: datetime
-    """When the positions chain of the date was last processed (OQ-31)."""
+    range_cumulative_pnl: Decimal
+    """Never ``None``: a missing or incomplete date adds 0 (OQ-41)."""
+    pnl_status: CalculationCompleteness | None
+    """``None`` on a date not processed."""
+    status: ChainStatus | None
+    """The positions chain status of the date; ``None`` is "não processado" (OQ-41)."""
+    published_at: datetime | None
+    """When the positions chain of the date was last processed (OQ-31); ``None`` if never."""
 
 
 class PortfolioQueryService(Protocol):
@@ -254,7 +255,7 @@ class PortfolioQueryService(Protocol):
     async def get_position_table(self, on: date) -> PositionTableView: ...
 
     async def get_pnl_series(self, start_date: date, end_date: date) -> tuple[PnLPointView, ...]:
-        """The published positions days of [start_date, end_date], in date order (OQ-16,
-        OQ-27), each with its positions status and processing time only (OQ-31 item 8) and the
-        running sum of ``daily_pnl`` from ``start_date``."""
+        """Every date of [start_date, end_date], in date order (OQ-16, OQ-27, OQ-41), each with
+        its positions status and processing time only (OQ-31 item 8) and the running sum of
+        ``daily_pnl`` from ``start_date``, a missing or incomplete date counting as 0."""
         ...
