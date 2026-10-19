@@ -131,12 +131,23 @@ describe('Carteira (§11.4)', () => {
     expectNoCard();
   });
 
-  it('§11.4 shows the cumulative P&L of the same publication', async () => {
-    await openCarteira('2026-10-15');
+  it("§11.4 OQ-41 the card's headline is the chart's range total on the date, since its start (user, 2026-10-19)", async () => {
+    // 16/10 has a missing price: its stored cumulative P&L is null, but the range total is not.
+    await openCarteira('2026-10-16');
 
     const card = within(screen.getByRole('region', { name: 'P&L acumulado' }));
-    expect(card.getByText('-R$ 8.034,13')).toBeInTheDocument();
-    expect(card.getByText('Até 15/10/2026')).toBeInTheDocument();
+    expect(await card.findByText('-R$ 8.034,13')).toBeInTheDocument();
+    expect(card.getByText('Desde 17/09/2026')).toBeInTheDocument();
+    expect(card.getByText('Até 16/10/2026')).toBeInTheDocument();
+  });
+
+  it('§11.4 the headline reads "—" when the series has no point for the date', async () => {
+    server.use(http.get(url('/portfolio/pnl'), () => HttpResponse.json({ items: [] })));
+    await openCarteira('2026-10-16');
+
+    const card = within(screen.getByRole('region', { name: 'P&L acumulado' }));
+    await card.findByText('Sem dados para o período selecionado.');
+    expect(card.getByText('P&L acumulado').nextElementSibling).toHaveTextContent('—');
   });
 
   it('§11.4 lists the spec columns only: no realized/unrealized P&L and no cash row', async () => {
@@ -526,7 +537,20 @@ describe('Carteira (§11.4)', () => {
     );
   });
 
-  it('§11.4 OQ-16 picking a chart start reloads the chart up to the date and keeps it in the URL', async () => {
+  it('§11.4 OQ-16 picking a chart start reloads the chart, and its headline total, up to the date', async () => {
+    // The range total on 16/10 depends on where the sum starts.
+    server.use(
+      http.get(url('/portfolio/pnl'), ({ request }) => {
+        const start = new URL(request.url).searchParams.get('start_date');
+        const total = start === '2026-10-14' ? '-8034.1345282660' : '1500.0000000000';
+        return HttpResponse.json({
+          items: pnlSeries.map((p) =>
+            p.date === '2026-10-16' ? { ...p, range_cumulative_pnl: total } : p,
+          ),
+        });
+      }),
+    );
+    // Registered last, so it sees each request first and passes it on.
     const ranges = recordPnlRanges();
     const { user, router } = renderApp('/carteira?date=2026-10-16&pnl_start=2026-10-10');
     await waitFor(() => {
@@ -534,7 +558,8 @@ describe('Carteira (§11.4)', () => {
     });
 
     const card = within(await screen.findByRole('region', { name: 'P&L acumulado' }));
-    const headline = card.getByText('P&L acumulado').nextElementSibling?.textContent;
+    expect(await card.findByText('+R$ 1.500,00')).toBeInTheDocument();
+    expect(card.getByText('Desde 10/10/2026')).toBeInTheDocument();
 
     await user.click(await screen.findByRole('button', { name: /Início do gráfico/ }));
     await user.click(await screen.findByRole('button', { name: '14 outubro 2026' }));
@@ -543,9 +568,8 @@ describe('Carteira (§11.4)', () => {
     await waitFor(() => {
       expect(ranges.at(-1)).toEqual(['2026-10-14', '2026-10-16']);
     });
-    // The headline stays the date's own published figure.
-    expect(headline).toBeTruthy();
-    expect(card.getByText('P&L acumulado').nextElementSibling).toHaveTextContent(headline ?? '');
+    expect(await card.findByText('-R$ 8.034,13')).toBeInTheDocument();
+    expect(card.getByText('Desde 14/10/2026')).toBeInTheDocument();
     expect(card.getByText('Até 16/10/2026')).toBeInTheDocument();
   });
 
