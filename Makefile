@@ -57,7 +57,7 @@ lint-commits:
 	scripts/lint-commits.sh "$(BASE)" "$(HEAD_REF)"
 
 seed:
-	docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -q -U "$${DI1_DB_USER:-di1}" -d "$${DI1_DB_NAME:-di1}" < scripts/seed_catalogue.sql
+	docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < scripts/seed_catalogue.sql
 
 e2e:
 	scripts/e2e.sh

@@ -1,6 +1,7 @@
 """Process settings, read from the environment (plan §3, Wave 0).
 
-Every value comes from configuration (OQ-5). Secrets are `SecretStr` and validation errors never
+Every value comes from configuration (OQ-5): the process environment, else the `.env` files in
+`ENV_FILES`, else the field's default. Secrets are `SecretStr` and validation errors never
 echo their input, so a URL with a password never reaches a log or a traceback.
 """
 
@@ -16,12 +17,23 @@ from sqlalchemy.exc import ArgumentError
 
 DATABASE_DRIVER = "postgresql+psycopg"
 
+ENV_FILES = ("../.env", ".env")
+"""Read relative to the working directory, ``backend/`` for every ``uv run``: the repository
+root's `.env` (the one Compose interpolates), then ``backend/.env``, which wins over it. A missing
+file is skipped; in the image neither exists, and Compose sets the environment."""
+
 
 class Settings(BaseSettings):
     """Settings shared by the API and the workers. Environment names are the field names in
     upper case (``DATABASE_URL``, ``DATABASE_POOL_SIZE``, ...)."""
 
-    model_config = SettingsConfigDict(frozen=True, extra="ignore", hide_input_in_errors=True)
+    model_config = SettingsConfigDict(
+        frozen=True,
+        extra="ignore",
+        hide_input_in_errors=True,
+        env_file=ENV_FILES,
+        env_file_encoding="utf-8",
+    )
 
     database_url: SecretStr
     """SQLAlchemy URL, ``postgresql+psycopg://user:password@host:port/database``."""
@@ -53,7 +65,13 @@ class BrokerSettings(BaseSettings):
     """RabbitMQ settings, read only by the processes that use the broker (the outbox relay and
     the workers): an HTTP write never publishes, so the API does not need them."""
 
-    model_config = SettingsConfigDict(frozen=True, extra="ignore", hide_input_in_errors=True)
+    model_config = SettingsConfigDict(
+        frozen=True,
+        extra="ignore",
+        hide_input_in_errors=True,
+        env_file=ENV_FILES,
+        env_file_encoding="utf-8",
+    )
 
     rabbitmq_url: SecretStr
     """``amqp://user:password@host:port/vhost``."""
@@ -95,7 +113,9 @@ class HeartbeatSettings(BaseSettings):
     health check (`di1.workers.healthcheck`), which read the same variables. No file, no
     heartbeat."""
 
-    model_config = SettingsConfigDict(frozen=True, extra="ignore")
+    model_config = SettingsConfigDict(
+        frozen=True, extra="ignore", env_file=ENV_FILES, env_file_encoding="utf-8"
+    )
 
     heartbeat_file: Path | None = None
     heartbeat_interval_seconds: float = Field(default=5.0, gt=0)
@@ -113,7 +133,9 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 class LoggingSettings(BaseSettings):
     """Logging, configured once at each process's startup (`di1.platform.observability`)."""
 
-    model_config = SettingsConfigDict(frozen=True, extra="ignore")
+    model_config = SettingsConfigDict(
+        frozen=True, extra="ignore", env_file=ENV_FILES, env_file_encoding="utf-8"
+    )
 
     log_level: LogLevel = "INFO"
 

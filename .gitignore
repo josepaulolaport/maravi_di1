@@ -15,8 +15,10 @@ dist/
 frontend/test-results/
 frontend/playwright-report/
 
-# Environment and local settings
+# Environment and local settings (the committed templates are .env.example)
 .env
+.env.*
+!.env.example
 .claude/settings.local.json
 CLAUDE.local.md
 

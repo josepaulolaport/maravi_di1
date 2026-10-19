@@ -89,8 +89,10 @@ cleanup() {
 trap cleanup EXIT
 
 "${compose[@]}" up -d --build --wait
-"${compose[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -q \
-  -U "${DI1_DB_USER:-di1}" -d "${DI1_DB_NAME:-di1}" < scripts/seed_catalogue.sql
+# The container's own user and database: Compose may have taken them from a .env this shell
+# never read.
+"${compose[@]}" exec -T postgres sh -c \
+  'psql -v ON_ERROR_STOP=1 -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < scripts/seed_catalogue.sql
 python3 scripts/e2e_smoke.py --api "http://127.0.0.1:${DI1_API_PORT}"
 
 # The web service: the SPA on / (and on a client-side route) and the API through its proxy.
