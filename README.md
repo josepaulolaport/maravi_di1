@@ -58,10 +58,24 @@ The same steps can be done by hand in the UI. The exact example dated 01/01/2027
 automated acceptance tests with a fixed clock (`backend/tests/acceptance/`,
 `backend/tests/integration/acceptance/`).
 
-## Deviations from the challenge (spec §15)
+## Interpretations, additions and deviations (spec §15)
 
-| # | Challenge | This application | How the example still runs |
+### Interpretations (ambiguous text)
+
+| # | Challenge | Reading adopted | Why |
 |---|---|---|---|
+| I1 | §3: the contract has an identifier, **reference date**, maturity and rate or PU | The contract has an identifier and a maturity; the reference date and rate/PU belong to the calculator, the trade or the reference price | The same data, split between the static contract and the dated events |
+| I2 | §4.2: cash balance = inflows − outflows | Cash also includes the trades' financial effect (§7.3) | The §5 example requires it: cash 109.090,91 after the purchase |
+| I3 | §5: "Financeiro total: 200.000" | AUM = cash + market value (§8.2) | 200.000 = 109.090,91 + 90.909,09 |
+| I4 | §5: "Resultado financeiro simplificado da posição" | Market value (`financial_total`) and positions and trades P&L (§8) | The challenge does not define the metric |
+
+### Additions (they reject nothing the challenge describes, except D4)
+
+Mandatory trade time (§6.1); maturity rules (§7.4); MANUAL and B3 price sources (§5); Pendências and
+processing on request (§10).
+
+### Deliberate deviations
+
 | D1 | §5 shows BRL as a row of the positions table (qty 109090.91, price 1) | Cash is the "Saldo em caixa" indicator, never a position row (§11.4) | Same numbers, different presentation |
 | D2 | §5 values DI1F28 at the trade's own price ("available reference prices") | A reference price comes only from the exact date; an execution price never becomes a reference price (§4.2, §5) | The user also enters a 10% reference price (PU 90.909,09) for the day; the numbers then match |
 | D3 | §5 and requirement 6: the query rebuilds the portfolio from the events up to the date | Rebuilding happens in a processing run the user requests; the GET only reads published results (§10, §11.4) | After a run for the date; before it the screen shows "Não processado" with a link to Processamentos |
@@ -69,18 +83,13 @@ automated acceptance tests with a fixed clock (`backend/tests/acceptance/`,
 
 ## Known gaps and next steps
 
-- **One worker, simpler recovery (OQ-45):** the system runs exactly one processing worker, with
-  recovery at worker start. Until the worker simplification lands, the merged code (#78) still
-  carries the lease and claim-token machinery that a single worker does not need; the
-  `claim_token`, `lease_expires_at` and `attempt_count` columns stay in the schema, unused.
+- **One worker, recovery at its start (OQ-45):** the system runs exactly one processing worker;
+  the schema keeps `claim_token`, `lease_expires_at` and `attempt_count` unused (OQ-45).
 - **Catalogue roots are seeded by `make seed`, not by a migration:** the API has no route for
   instrument types and asset classes, so a fresh database needs `make seed` before the DI1 product
   can be created.
 - **Reference prices are typed by hand:** there is no CSV or B3 price import yet; the B3 source
   exists in the model and the MANUAL > B3 precedence is implemented.
-- **Repository housekeeping:** the `.claude/settings.json` deny list on `main` still carries
-  merge-related entries from before the reviewer session was allowed to merge; an upstream MSW
-  issue found by the frontend lane is still to be reported.
 - Open questions and every decision taken are in [docs/open-questions.md](docs/open-questions.md).
 
 ## CI
