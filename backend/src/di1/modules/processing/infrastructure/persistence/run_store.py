@@ -83,6 +83,11 @@ class SqlRunStore:
     ) -> None:
         await uow.session.execute(sql.SET_ACTIVE_REQUEST, {"request_id": request_id, "now": now})
 
+    async def clear_active_request_id(
+        self, request_id: UUID, now: datetime, *, uow: UnitOfWork
+    ) -> None:
+        await uow.session.execute(sql.CLEAR_ACTIVE_REQUEST, {"request_id": request_id, "now": now})
+
     async def lock_active_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
         return [_to_run(row) for row in await uow.session.execute(sql.LOCK_ACTIVE_RUNS)]
 

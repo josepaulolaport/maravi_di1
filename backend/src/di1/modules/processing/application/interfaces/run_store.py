@@ -101,6 +101,12 @@ class RunStore(Protocol):
         self, request_id: UUID | None, now: datetime, *, uow: UnitOfWork
     ) -> None: ...
 
+    async def clear_active_request_id(
+        self, request_id: UUID, now: datetime, *, uow: UnitOfWork
+    ) -> None:
+        """Frees the active slot only if it holds ``request_id`` (a run's end)."""
+        ...
+
     async def lock_oldest_queued(self, *, uow: UnitOfWork) -> ProcessingRequest | None:
         """The oldest QUEUED run by ``(created_at, id)``, row-locked (OQ-5 item 4)."""
         ...

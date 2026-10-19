@@ -5,7 +5,7 @@ OQ-40)."""
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
@@ -83,14 +83,81 @@ async def test_the_next_run_is_dispatched_once_the_active_one_ends(worker: Worke
     assert await worker.active_request_id() == second
 
 
-async def test_the_dispatcher_frees_the_slot_of_an_ended_run(worker: Worker) -> None:
+async def test_a_slot_left_on_an_ended_run_is_freed_by_the_dispatcher(worker: Worker) -> None:
     first = await worker.enqueue("CASH", D1, D1)
+    second = await worker.enqueue("CASH", D2, D2)
     await worker.dispatch_and_run()
-    assert await worker.active_request_id() == first  # the worker never locks the slot
+    await worker.execute(  # as if an older version had left the slot on the ended run
+        "UPDATE processing.calculation_state SET active_request_id = :id", id=first
+    )
 
-    assert await worker.dispatcher.dispatch_next() is None
-    assert await worker.dispatcher.dispatch_next() is None
-    assert await worker.active_request_id() is None
+    assert await worker.dispatcher.dispatch_next() == second
+
+
+async def end_completed(worker: Worker) -> UUID:
+    await worker.enqueue("CASH", D1, D1)
+    return await worker.dispatch_and_run()
+
+
+async def end_completed_with_issues(worker: Worker) -> UUID:
+    asset = await priced_asset(worker)  # no price: a Pendência
+    worker.world.ledger.trades.append(trade(asset, D1, 1, "95000.0000000000"))
+    await worker.enqueue("POSITIONS", D1, D1)
+    return await worker.dispatch_and_run()
+
+
+async def end_failed(worker: Worker) -> UUID:
+    await seed_statuses(worker.engine, {D0: (None, "FAILED")})
+    await worker.enqueue("CASH", D1, D1)
+    return await worker.dispatch_and_run()
+
+
+async def end_cancelled_between_dates(worker: Worker) -> UUID:
+    request_id = await worker.enqueue("CASH", D1, D2)
+    await worker.dispatcher.dispatch_next()
+    assert await worker.claim(request_id) is not None
+    await request_cancel(worker, request_id)
+    await worker.processor.run(request_id)
+    return request_id
+
+
+async def end_cancelled_at_the_claim(worker: Worker) -> UUID:
+    request_id = await worker.enqueue("CASH", D1, D2)
+    await worker.dispatcher.dispatch_next()
+    await request_cancel(worker, request_id)
+    assert await worker.claim(request_id) is None
+    return request_id
+
+
+async def end_cancelled_at_the_worker_start(worker: Worker) -> UUID:
+    request_id = await worker.enqueue("CASH", D1, D2)
+    await worker.dispatcher.dispatch_next()
+    assert await worker.claim(request_id) is not None
+    await request_cancel(worker, request_id)
+    await worker.restart()
+    return request_id
+
+
+@pytest.mark.parametrize(
+    ("end", "status"),
+    [
+        (end_completed, "COMPLETED"),
+        (end_completed_with_issues, "COMPLETED_WITH_ISSUES"),
+        (end_failed, "FAILED"),
+        (end_cancelled_between_dates, "CANCELLED"),
+        (end_cancelled_at_the_claim, "CANCELLED"),
+        (end_cancelled_at_the_worker_start, "CANCELLED"),
+    ],
+)
+async def test_every_run_end_frees_the_slot_and_the_next_run_dispatches(
+    worker: Worker, end: Callable[[Worker], Awaitable[UUID]], status: str
+) -> None:
+    ended = await end(worker)
+    assert (await worker.run_row(ended))["status"] == status
+    assert await worker.active_request_id() is None  # freed with the end status (OQ-45)
+    queued = await worker.enqueue("CASH", D3, D3)
+
+    assert await worker.dispatcher.dispatch_next() == queued
 
 
 # --- a run end to end -----------------------------------------------------------------------

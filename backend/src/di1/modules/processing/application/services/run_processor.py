@@ -19,7 +19,7 @@ on the run's ``requests`` row:
    c. a failure outside every savepoint (a lock timeout, say) rolls back all of D; a short
       transaction then sets D FAILED for every live chain and ends the run FAILED;
 3. the end: COMPLETED, COMPLETED_WITH_ISSUES or FAILED; any date of the range still RUNNING is
-   restored from ``*_previous`` (OQ-26).
+   restored from ``*_previous`` (OQ-26), and the active slot is freed in the same transaction.
 
 **Recovery at worker start** (`recover_at_startup`, before the worker consumes): the run left
 DISPATCHED, RUNNING or CANCELLING was interrupted. Its dates left RUNNING are restored from
@@ -135,11 +135,13 @@ async def end_run(
     *,
     uow: UnitOfWork,
 ) -> None:
-    """Ends the run, restoring its dates left RUNNING. The worker never locks
-    ``calculation_state``: the dispatcher locks it before a run's row, so the worker, which locks
-    the run's row first, leaves freeing the slot to the dispatcher's next tick."""
+    """Ends the run, restoring its dates left RUNNING, and frees the active slot in the same
+    transaction, so the dispatcher's next tick dispatches the next QUEUED run (OQ-45). Lock order:
+    the run's row, its dates, then ``calculation_state``; the dispatcher reads the active run
+    without locking it, so the two never wait on each other in a cycle."""
     await restore_running_dates(store, request, uow=uow)
     await store.save_run(replace(request, status=status, finished_at=now, updated_at=now), uow=uow)
+    await store.clear_active_request_id(request.id, now, uow=uow)
 
 
 class PortfolioRangeProcessor:

@@ -86,8 +86,8 @@ class ProcessingRequest:
     per transaction (OQ-11, OQ-21, OQ-23; schema ``processing.requests``). ``progress_date`` is
     the last date it committed; the error belongs to the run, the failed date shows FAILED in
     ``date_status``. A date whose day before is neither processed nor the chain's zero state
-    fails with ``CASH_PREDECESSOR_MISSING`` or ``POSITIONS_PREDECESSOR_MISSING`` (OQ-31). One
-    worker processes runs, one at a time, and resumes an interrupted run when it starts (OQ-45)."""
+    fails with ``CASH_PREDECESSOR_MISSING`` or ``POSITIONS_PREDECESSOR_MISSING`` (OQ-31). Claim
+    token and lease stay inside Processing."""
 
     id: UUID
     scope: ProcessingScope
@@ -111,8 +111,7 @@ class ProcessingRequest:
     error raised by a chain's writer call, AUM recompute included, belongs to that chain.
     ``None`` with a ``failed_date`` when the failure belonged to no chain (outside every chain's
     savepoint, e.g. a lock timeout), which fails the date for every chain still alive and the
-    run; a worker stopped mid-date is not a failure at D (the run resumes at the worker's start,
-    OQ-45).
+    run; a lost lease is not a failure at D (the worker is fenced and the run recovers).
     Both are kept when the run ends ``CANCELLED``. "Solicitar novo processamento" on
     ``COMPLETED_WITH_ISSUES`` or ``CANCELLED`` also offers this chain's scope from
     ``failed_date`` to ``end_date`` (OQ-40)."""
