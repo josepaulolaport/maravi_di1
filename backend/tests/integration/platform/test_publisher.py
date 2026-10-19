@@ -16,7 +16,11 @@ from aio_pika.abc import AbstractRobustConnection
 
 from di1.platform.config import BrokerSettings
 from di1.platform.messaging.envelope import Envelope
-from di1.platform.messaging.publisher import MessagePublisher, PublishFailedError
+from di1.platform.messaging.publisher import (
+    BrokerUnavailableError,
+    MessagePublisher,
+    PublishFailedError,
+)
 from di1.platform.messaging.topology import Topology, declare_queue
 from tests.integration.platform.conftest import queue_spec
 
@@ -61,15 +65,16 @@ async def test_a_message_no_queue_accepts_is_a_failed_publish(
     """An unroutable message would be dropped silently; the relay must keep it and retry."""
     publisher = await MessagePublisher.create(broker, topology, settings=broker_settings)
 
-    with pytest.raises(PublishFailedError, match="NO_ROUTE"):
+    with pytest.raises(PublishFailedError, match="NO_ROUTE") as raised:
         await publisher.publish(_envelope("nobody.listens"))
+    assert not isinstance(raised.value, BrokerUnavailableError)  # this message only
 
 
-async def test_a_closed_channel_is_a_failed_publish(
+async def test_a_closed_channel_is_an_unavailable_broker(
     broker: AbstractRobustConnection, broker_settings: BrokerSettings, topology: Topology
 ) -> None:
     publisher = await MessagePublisher.create(broker, topology, settings=broker_settings)
     await publisher.close()
 
-    with pytest.raises(PublishFailedError):
+    with pytest.raises(BrokerUnavailableError):  # every later message would fail the same way
         await publisher.publish(_envelope())

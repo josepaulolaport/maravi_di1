@@ -5,8 +5,11 @@
 It reads ``DATABASE_URL``, ``RABBITMQ_URL`` and the optional broker, relay and ``LOG_LEVEL``
 settings (`di1.platform.config`), configures logging once, declares the consumer queues it is
 given, then publishes committed ``platform.outbox_messages`` rows until SIGTERM or SIGINT
-(`di1.platform.messaging.outbox_relay`). Everything is built with plain factories, not FastAPI
-dependencies (interfaces.md "DI composition").
+(`di1.platform.messaging.outbox_relay`). Its poll loop also deletes the inbox records older
+than ``INBOX_RETENTION_DAYS``, once per ``INBOX_RETENTION_INTERVAL_SECONDS``
+(`di1.platform.messaging.inbox.InboxRetention`), and touches ``HEARTBEAT_FILE``, when set,
+after each turn, for compose.yaml's health check (`di1.workers.healthcheck`). Everything is
+built with plain factories, not FastAPI dependencies (interfaces.md "DI composition").
 
 Declaring the queues at startup, and not only in the workers that consume them, means a
 command published before its worker has started is queued instead of refused (NO_ROUTE).
@@ -22,7 +25,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
+from datetime import timedelta
 
 from aio_pika.abc import AbstractRobustConnection
 
@@ -31,15 +35,18 @@ from di1.platform.config import (
     BrokerSettings,
     Settings,
     get_broker_settings,
+    get_heartbeat_settings,
     get_settings,
 )
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.connection import connect
+from di1.platform.messaging.inbox import InboxRetention
 from di1.platform.messaging.outbox_relay import OutboxRelay
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import QueueSpec, Topology, declare_queue
+from di1.platform.observability.heartbeat import Heartbeat
 from di1.workers.lifecycle import close_connection, run_process, unless_stopped
 
 logger = logging.getLogger(__name__)
@@ -54,8 +61,13 @@ async def run_outbox_relay(
     queues: Sequence[QueueSpec],
     stop: asyncio.Event,
     topology: Topology | None = None,
+    heartbeat: Heartbeat | None = None,
 ) -> None:
-    """Relay until ``stop`` is set, then close the broker connection and the engine."""
+    """Relay until ``stop`` is set, then close the broker connection and the engine.
+    ``heartbeat`` is removed at once (a file left by a previous process says nothing about
+    this one), then beaten after each turn of the poll loop."""
+    if heartbeat is not None:
+        heartbeat.clear()
     topology = topology if topology is not None else Topology()
     engine = create_engine(settings)
     try:
@@ -74,16 +86,25 @@ async def run_outbox_relay(
             if publisher is None:
                 logger.info("outbox relay stopped before the broker answered")
                 return
+            uow_factory = unit_of_work_factory(create_session_factory(engine))
             relay = OutboxRelay(
-                unit_of_work_factory(create_session_factory(engine)),
+                uow_factory,
                 publisher,
                 batch_size=broker_settings.outbox_relay_batch_size,
                 retry_base_delay_seconds=broker_settings.outbox_relay_retry_base_delay_seconds,
                 retry_max_delay_seconds=broker_settings.outbox_relay_retry_max_delay_seconds,
             )
             logger.info("outbox relay started (%d queues declared)", len(queues))
+            retention = InboxRetention(
+                uow_factory,
+                older_than=timedelta(days=broker_settings.inbox_retention_days),
+                interval_seconds=broker_settings.inbox_retention_interval_seconds,
+            )
             await relay.run(
-                stop, poll_interval_seconds=broker_settings.outbox_relay_poll_interval_seconds
+                stop,
+                poll_interval_seconds=broker_settings.outbox_relay_poll_interval_seconds,
+                inbox_retention=retention,
+                heartbeat=heartbeat,
             )
         finally:
             await close_connection(connection)
@@ -110,13 +131,17 @@ async def _prepare(
 
 
 def main() -> None:
-    run_process(
-        "outbox relay",
-        lambda stop: run_outbox_relay(
-            get_settings(), get_broker_settings(), queues=composition.QUEUES, stop=stop
-        ),
-        logger,
-    )
+    def run(stop: asyncio.Event) -> Awaitable[None]:
+        path = get_heartbeat_settings().heartbeat_file
+        return run_outbox_relay(
+            get_settings(),
+            get_broker_settings(),
+            queues=composition.QUEUES,
+            stop=stop,
+            heartbeat=Heartbeat(path) if path is not None else None,
+        )
+
+    run_process("outbox relay", run, logger)
 
 
 if __name__ == "__main__":

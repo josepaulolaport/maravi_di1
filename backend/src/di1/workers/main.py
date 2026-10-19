@@ -33,8 +33,16 @@ answered yet. On a stop the worker stops consuming and cancels what is in progre
   OQ-45); a run still waiting is dropped and resumed the same way;
 - a startup hook in progress is cancelled, and runs again on the next start.
 
+Work after an ack that fails (a run that could not record its end, so stays RUNNING and holds
+the queue) stops the worker the same way, then raises `AfterAckFailedError`: the process exits
+with status 1, Docker restarts it, and the startup hook resumes the run (OQ-45).
+
 Then it closes the broker connection and the engine. A failure is logged through the
 configured logging and ends the process with status 1.
+
+With ``HEARTBEAT_FILE`` set (`di1.platform.config.HeartbeatSettings`), a task of the event loop
+touches that file every ``HEARTBEAT_INTERVAL_SECONDS`` while the process runs; compose.yaml's
+health check (`di1.workers.healthcheck`) reads its age.
 
 `main` takes the consumers and the startup hook from the composition root
 (``composition.consumers``): Processing's doorbell consumer, and its recovery then drain.
@@ -52,12 +60,19 @@ from aio_pika.abc import AbstractIncomingMessage, AbstractQueue, AbstractRobustC
 
 from di1.composition import consumers as composition
 from di1.platform.clock import SystemClock
-from di1.platform.config import BrokerSettings, Settings, get_broker_settings, get_settings
+from di1.platform.config import (
+    BrokerSettings,
+    Settings,
+    get_broker_settings,
+    get_heartbeat_settings,
+    get_settings,
+)
 from di1.platform.database.engine import check_connection, create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.connection import connect
 from di1.platform.messaging.consumer import (
+    AfterAckFailedError,
     AfterAckRunner,
     MessageConsumer,
     open_consumer_channel,
@@ -69,6 +84,7 @@ from di1.platform.messaging.worker import (
     StartupHook,
     WorkerResources,
 )
+from di1.platform.observability.heartbeat import Heartbeat, beat_until_stopped
 from di1.shared.clock import Clock
 from di1.workers.lifecycle import (
     CLOSE_TIMEOUT_SECONDS,
@@ -91,9 +107,56 @@ async def run_worker(
     topology: Topology | None = None,
     clock: Clock | None = None,
     on_startup: StartupHook | None = None,
+    heartbeat: Heartbeat | None = None,
+    heartbeat_interval_seconds: float = 5.0,
 ) -> None:
-    """Run ``on_startup`` once, then consume until ``stop`` is set; then stop consuming, cancel
-    the deliveries and the run in progress, and close the broker connection and the engine."""
+    """`_serve`, with ``heartbeat`` beaten every ``heartbeat_interval_seconds`` from a task of
+    the event loop, from the start (the startup step included) until the worker stops: a
+    fresh file shows the loop is responsive (compose.yaml's health check)."""
+    if heartbeat is None:
+        await _serve(
+            settings,
+            broker_settings,
+            consumers=consumers,
+            stop=stop,
+            topology=topology,
+            clock=clock,
+            on_startup=on_startup,
+        )
+        return
+    stopped = asyncio.Event()
+    beating = asyncio.create_task(
+        beat_until_stopped(heartbeat, stopped, interval_seconds=heartbeat_interval_seconds)
+    )
+    try:
+        await _serve(
+            settings,
+            broker_settings,
+            consumers=consumers,
+            stop=stop,
+            topology=topology,
+            clock=clock,
+            on_startup=on_startup,
+        )
+    finally:
+        stopped.set()
+        await beating
+
+
+async def _serve(
+    settings: Settings,
+    broker_settings: BrokerSettings,
+    *,
+    consumers: ConsumerFactory,
+    stop: asyncio.Event,
+    topology: Topology | None,
+    clock: Clock | None,
+    on_startup: StartupHook | None,
+) -> None:
+    """Run ``on_startup`` once, then consume until ``stop`` is set or the work after an ack
+    fails; then stop consuming, cancel the deliveries and the run in progress, and close the
+    broker connection and the engine. A failed work after an ack is then raised as
+    `AfterAckFailedError`."""
     topology = topology if topology is not None else Topology()
     engine = create_engine(settings)
     try:
@@ -131,13 +194,25 @@ async def run_worker(
                 logger.info("worker stopped before the broker answered")
                 return
             logger.info("worker started (%d consumers)", len(registrations))
-            await stop.wait()
+            await _until_stopped_or_failed(stop, running.after_ack.failed)
         finally:
             await running.stop()
             await close_connection(connection)
     finally:
         await engine.dispose()
+    if running.after_ack.failure is not None:
+        logger.error("worker stopped: the work after an ack failed")
+        raise AfterAckFailedError("the work after an ack failed") from running.after_ack.failure
     logger.info("worker stopped")
+
+
+async def _until_stopped_or_failed(stop: asyncio.Event, failed: asyncio.Event) -> None:
+    waits = {asyncio.ensure_future(stop.wait()), asyncio.ensure_future(failed.wait())}
+    try:
+        await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for wait in waits:
+            wait.cancel()
 
 
 async def _run_startup_step(step: Awaitable[None], stop: asyncio.Event) -> bool:
@@ -249,17 +324,20 @@ class _RunningConsumers:
 
 
 def main() -> None:
-    run_process(
-        "processing worker",
-        lambda stop: run_worker(
+    def run(stop: asyncio.Event) -> Awaitable[None]:
+        heartbeat_settings = get_heartbeat_settings()
+        path = heartbeat_settings.heartbeat_file
+        return run_worker(
             get_settings(),
             get_broker_settings(),
             consumers=composition.consumers,
             on_startup=composition.processing_startup,
             stop=stop,
-        ),
-        logger,
-    )
+            heartbeat=Heartbeat(path) if path is not None else None,
+            heartbeat_interval_seconds=heartbeat_settings.heartbeat_interval_seconds,
+        )
+
+    run_process("processing worker", run, logger)
 
 
 if __name__ == "__main__":
