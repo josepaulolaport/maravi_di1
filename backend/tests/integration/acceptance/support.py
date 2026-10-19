@@ -1,0 +1,180 @@
+"""Phase 2 acceptance support: the real app (``create_app``) on a fresh PostgreSQL 16 database
+migrated to head, with an injected clock (OQ-14; spec §15 D4), driven only through ``/api``.
+
+The instrument type and asset class have no HTTP route (seeded catalogue roots); everything else
+is created through the API, as a user would. Expected PUs are spec §4.1's formula evaluated here
+with ``decimal`` (34 digits, half-up, stored at 10 places, OQ-3), never read from the code under
+test.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import date
+from decimal import ROUND_HALF_UP, Decimal, localcontext
+from pathlib import Path
+from typing import Any
+
+import psycopg
+from alembic import command
+from alembic.config import Config
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
+
+from di1.main import create_app
+from di1.platform.config import Settings
+from di1.shared.clock import FixedClock
+from tests.integration.databases import fresh_database_url, psycopg_url
+
+BACKEND = Path(__file__).resolve().parents[3]
+PROBLEM_JSON = "application/problem+json"
+
+
+def expected_pu(rate: str, calendar_days: int) -> str:
+    """Spec §4.1: ``PU = 100000 / (1 + taxa)^(dias_corridos/365)``, stored at 10 places."""
+    with localcontext(prec=34, rounding=ROUND_HALF_UP):
+        pu = Decimal(100000) / (1 + Decimal(rate)) ** (Decimal(calendar_days) / Decimal(365))
+    return str(pu.quantize(Decimal("1E-10"), rounding=ROUND_HALF_UP))
+
+
+def expected_rate(pu: str, calendar_days: int) -> str:
+    """Spec §4.1: ``taxa = (100000 / PU)^(365/dias_corridos) − 1``, stored at 12 places."""
+    with localcontext(prec=34, rounding=ROUND_HALF_UP):
+        rate = (Decimal(100000) / Decimal(pu)) ** (Decimal(365) / Decimal(calendar_days)) - 1
+    return str(rate.quantize(Decimal("1E-12"), rounding=ROUND_HALF_UP))
+
+
+@contextmanager
+def acceptance_app(today: date) -> Iterator[tuple[TestClient, str]]:
+    """A client of the real app whose "today" is ``today``, and its database URL."""
+    for url in fresh_database_url():
+        _migrate(url)
+        _seed_catalogue_roots(url)
+        app = create_app(Settings(database_url=SecretStr(url)), clock=FixedClock(today))
+        with TestClient(app) as client:
+            yield client, url
+
+
+def sql(database_url: str, statement: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+    """Run one statement directly, for setup the API does not offer (a B3 price) and for proof
+    that a write stored nothing else."""
+    with psycopg.connect(psycopg_url(database_url), autocommit=True) as connection:
+        cursor = connection.execute(statement, params)
+        return cursor.fetchall() if cursor.description else []
+
+
+def create_di1_product(client: TestClient) -> str:
+    response = client.post(
+        "/api/products",
+        json={
+            "asset_class_id": 1,
+            "code": "DI1",
+            "name": "Futuro de Depósito Interfinanceiro",
+            "futures": {
+                "face_value": "100000",
+                "contract_multiplier": "1",
+                "settlement_method": "CASH",
+            },
+        },
+    )
+    assert response.status_code == 201, response.text
+    product_id: str = response.json()["id"]
+    return product_id
+
+
+def create_instrument(client: TestClient, product_id: str, code: str, maturity: str) -> str:
+    response = client.post(
+        "/api/instruments",
+        json={"product_id": product_id, "code": code, "maturity_date": maturity},
+    )
+    assert response.status_code == 201, response.text
+    instrument_id: str = response.json()["id"]
+    return instrument_id
+
+
+def trade_body(
+    asset_id: str,
+    on: str,
+    at: str,
+    quantity: int,
+    *,
+    rate: str | None = None,
+    pu: str | None = None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "type": "TRADE",
+        "asset_id": asset_id,
+        "date": on,
+        "time": at,
+        "signed_quantity": quantity,
+    }
+    if rate is not None:
+        body |= {"input_kind": "RATE", "execution_rate": rate}
+    if pu is not None:
+        body |= {"input_kind": "PU", "execution_pu": pu}
+    return body
+
+
+def cash_body(on: str, at: str, amount: str) -> dict[str, Any]:
+    return {"type": "CASH", "date": on, "time": at, "cash_amount": amount}
+
+
+def price_body(
+    asset_id: str, on: str, *, rate: str | None = None, pu: str | None = None
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"asset_id": asset_id, "reference_date": on}
+    if rate is not None:
+        body |= {"input_kind": "RATE", "rate": rate}
+    if pu is not None:
+        body |= {"input_kind": "PU", "pu": pu}
+    return body
+
+
+DERIVED_TABLES = (
+    "processing.requests",
+    "processing.date_status",
+    "processing.issues",
+    "platform.outbox_messages",
+    "portfolio.positions",
+    "portfolio.position_metrics",
+    "portfolio.portfolio_metrics",
+    "portfolio.cash_balances",
+)
+"""Everything a processing run, or a write that wrongly triggered one, would fill (OQ-31)."""
+
+
+def derived_rows(database_url: str) -> dict[str, int]:
+    """Row counts of `DERIVED_TABLES`: all zero when writes only saved their facts."""
+    return {
+        table: sql(database_url, f"SELECT count(*) FROM {table}")[0][0] for table in DERIVED_TABLES
+    }
+
+
+def problem(response: Any, status: int) -> list[tuple[str, str | None]]:
+    """The ``(code, field)`` pairs of an RFC 9457 problem response (OQ-15)."""
+    assert response.status_code == status, response.text
+    assert response.headers["content-type"] == PROBLEM_JSON
+    body = response.json()
+    assert body["status"] == status
+    assert all(e["message"] for e in body["errors"])  # a pt-BR message for every error
+    return [(e["code"], e["field"]) for e in body["errors"]]
+
+
+def _migrate(database_url: str) -> None:
+    config = Config(str(BACKEND / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND / "migrations"))
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    command.upgrade(config, "head")
+
+
+def _seed_catalogue_roots(database_url: str) -> None:
+    sql(
+        database_url,
+        "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuros')",
+    )
+    sql(
+        database_url,
+        "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
+        " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuros de Taxa de Juros')",
+    )
