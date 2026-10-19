@@ -2,9 +2,8 @@ import { delay, HttpResponse } from 'msw';
 
 import type { ErrorCode, FieldError, Page, Problem } from '../../contract';
 import { API_BASE } from '../../http';
-import { isIsoDate } from '../dates';
+import { isIsoDate, today } from '../dates';
 import { db } from '../db';
-import { MOCK_TODAY } from '../fixtures';
 
 /** Full mock URL for an API path. */
 export const url = (path: string) => `${API_BASE}${path}`;
@@ -44,7 +43,7 @@ export const notFound = (what: string) =>
 /** Errors for a date that must be a valid calendar date not after today (OQ-14). */
 export function dateErrors(value: unknown, field: string): FieldError[] {
   if (!isIsoDate(value)) return [fieldError('VALIDATION_ERROR', 'Informe uma data válida.', field)];
-  if (value > MOCK_TODAY) {
+  if (value > today()) {
     return [fieldError('FUTURE_DATE', 'A data não pode ser posterior a hoje.', field)];
   }
   return [];

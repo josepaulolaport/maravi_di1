@@ -28,6 +28,7 @@ import type {
 //          DI1F28 price corrected after publication (overwritten) → 16/10 is stale.
 //   17/10, 18/10  not processed (weekend; no prices).
 
+/** The day the fixtures' story is told from. The fake backend follows the real clock; tests pin it here. */
 export const MOCK_TODAY = '2026-10-18';
 
 export const IDS = {

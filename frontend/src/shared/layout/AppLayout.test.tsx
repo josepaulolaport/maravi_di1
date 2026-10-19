@@ -87,8 +87,7 @@ describe('AppLayout', () => {
     it('§11 keeps the position when a screen only changes its query (search, date, range)', async () => {
       const scrollTo = vi.fn();
       vi.stubGlobal('scrollTo', scrollTo);
-      // An explicit range: the default one ends on the real today, which the mock (fixed at
-      // MOCK_TODAY) rejects as a future date once the clock passes it.
+      // An explicit range, so the rows on screen do not depend on the day the test runs.
       const range = '/lancamentos?inicio=2026-10-14&fim=2026-10-16';
       const { router } = renderApp(range);
       await screen.findByText(/lançamentos? encontrados?$/);

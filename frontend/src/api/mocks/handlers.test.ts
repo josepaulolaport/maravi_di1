@@ -241,6 +241,17 @@ describe('mock reference prices', () => {
 });
 
 describe('mock ledger validation', () => {
+  it("OQ-14 the fake backend's today is the app's clock (São Paulo), not a fixed date", async () => {
+    vi.setSystemTime(new Date('2026-10-25T12:00:00-03:00'));
+    const cash = (date: string) =>
+      ledgerApi.createEntry({ type: 'CASH', date, time: '10:00:00', cash_amount: '1.00' });
+
+    await expect(cash('2026-10-25')).resolves.toMatchObject({ date: '2026-10-25' });
+    expect((await problemOf(cash('2026-10-26'))).errors?.[0]).toMatchObject({
+      code: 'FUTURE_DATE',
+    });
+  });
+
   const trade = {
     asset_id: IDS.di1f28,
     date: '2026-10-17',
