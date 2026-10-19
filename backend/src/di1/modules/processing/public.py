@@ -70,7 +70,8 @@ class ProcessingStatus(StrEnum):
     """The eight run statuses (spec §10.3; schema ``requests_status_check``); there is no
     SUPERSEDED since OQ-23. DISPATCHED and CANCELLING are never set since OQ-46: a request goes
     QUEUED → RUNNING when the worker takes it, and a cancel of a RUNNING run only records
-    ``cancel_requested_at``; the values stay for rows written before."""
+    ``cancel_requested_at``. The two values stay only because the schema's CHECK and the API
+    enum keep them (user decision); no code reads or writes them, and no row holds them."""
 
     QUEUED = "QUEUED"
     DISPATCHED = "DISPATCHED"

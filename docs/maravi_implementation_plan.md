@@ -57,6 +57,7 @@ backend/
     workers/
       main.py
       outbox_relay.py
+      healthcheck.py   # the Compose healthcheck of the worker and the relay
   tests/
     unit/
     integration/
@@ -154,9 +155,9 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 - **Done:** calculator returns explicit missing/completeness states and no persistence.
 
 ### I. Frontend (mock contracts)
-- Implement existing pt-BR screens using Mantine and TanStack Query against typed mock API fixtures: Ativos, Lançamentos, Carteira, Central de Controle/Pendências/Processamentos.
+- Implement existing pt-BR screens using Mantine and TanStack Query against typed MSW fixtures: Ativos, Lançamentos, Carteira, Central de Controle/Pendências/Processamentos. Since #114 MSW serves static fixtures to the tests only; development runs against the real API.
 - Handle incomplete metric chips, the eight job statuses with their pt-BR labels (spec §10.3, OQ-20, OQ-23), the per-date Caixa and Posições statuses from `date_status` with "Processado em dd/mm/aaaa hh:mm" (spec §10.4, OQ-31), cancel and queue as separate actions (no cancel and replace, OQ-30), "Solicitar novo processamento" prefilled from the failed date or the first date not reached (OQ-23), exact-range preview and day progress. Design-vs-spec decisions: OQ-19, OQ-20.
-- **Done:** screens demonstrate full flows with mock adapters before backend integration.
+- **Done:** screens demonstrated full flows on the fixtures before backend integration; Wave 5 moved them to the real API.
 
 ## 5. Wave 2 — input persistence + processing request API (parallel)
 
@@ -209,7 +210,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 
 ## 8. Wave 5 — integration, hardening, reviewer checks
 
-- Frontend I swaps mock adapters for typed APIs; Integrator X owns cross-cutting API response compatibility. No secret changes to frontend requirements.
+- Frontend I moved the screens to the typed API (#88); #114 then removed the MSW dev mode, so MSW only answers the tests with static fixtures. Integrator X owns cross-cutting API response compatibility. No secret changes to frontend requirements.
 - Query index performance checks using `EXPLAIN (ANALYZE, BUFFERS)` on representative assets/dates; prefer one indexed Portfolio query over N+1 service calls.
 - Include fixtures for weekends, missing prices, reversals and backdated corrections. Use deterministic clocks to test queue ordering.
 - Tests: unit for calculators, integration on Postgres (not only SQLite), RabbitMQ e2e including retries, schema constraints, architecture import boundaries, frontend API contracts. `uv run pytest`, lint/type checks and Docker smoke instructions.
@@ -241,7 +242,7 @@ None. OQ-1 to OQ-47 are answered (`docs/open-questions.md`); a new gap goes thro
 
 ## 12. Progress and remaining work (2026-10-19)
 
-Every lane's code is merged. Decisions OQ-1 to OQ-47 are answered and none is open. OQ-47 records the user's answer to the pre-delivery code review ("all recommended"): robustness fixes, single-sourced rules, dead code removed and one frontend fix land in their own PRs; the rest is known debt, listed in the README ("Known limitations / technical debt").
+Every lane's code is merged. Decisions OQ-1 to OQ-48 are answered and none is open. OQ-47 records the user's answer to the pre-delivery code review ("all recommended"): robustness fixes, single-sourced rules, dead code removed and one frontend fix land in their own PRs; the rest is known debt, listed in the README ("Known limitations / technical debt").
 
 ### Verified on `main` at `bbf7027`
 
@@ -279,6 +280,7 @@ Gates: G0–G5 are met (Gate 4 by `make e2e` on Compose: challenge example, run 
 | Item | State |
 |---|---|
 | Code-review follow-ups (OQ-47): robustness fixes (inbox retention among them), single-sourced rules, dead code, one frontend fix | in flight, in their own PRs |
+| Lane I UI decisions (OQ-48): `Instrument.last_reference` filled through `prices.public.LatestPriceReader` (lane D implements it, lane A fills the field, x-wiring wires it); price entry from the Ativos product page and the Carteira "P&L acumulado" headline (lane I, frontend only) | contract in `prices/public.py`; implementation in flight |
 | Known technical debt (OQ-47 item 5) | deferred by the user; listed in the README, "Known limitations / technical debt" |
 | `POST /pricing/calculate` | deliberately not built: OQ-19 keeps it "if needed", and the backend computes the complementary PU or rate when an entry is saved (OQ-19 item 7) |
 | CSV and B3 reference-price import | post-delivery TODO (§11, spec §14) |

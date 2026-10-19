@@ -45,7 +45,8 @@ def di1_future(code: str, instrument_id: UUID, maturity: date) -> InstrumentDesc
     )
 
 
-# The contracts of the MSW fixtures (frontend/src/api/mocks/fixtures.ts at 57b4df0).
+# The contracts of the frontend's test fixtures (frontend/src/test/msw/fixtures.ts; before #114,
+# frontend/src/api/mocks/fixtures.ts at 57b4df0).
 DI1F27 = di1_future("DI1F27", UUID("6f1c2a10-0000-4000-8000-0000000000f7"), date(2027, 1, 4))
 DI1F28 = di1_future("DI1F28", UUID("6f1c2a10-0000-4000-8000-0000000000f8"), date(2028, 1, 3))
 DI1F29 = di1_future("DI1F29", UUID("6f1c2a10-0000-4000-8000-0000000000f9"), date(2029, 1, 2))

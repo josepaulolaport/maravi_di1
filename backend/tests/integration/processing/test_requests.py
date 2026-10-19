@@ -12,10 +12,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.processing.application.interfaces.repositories import IssueType
-from di1.modules.processing.application.services.processing import (
-    PredecessorState,
-    ProcessingService,
-)
+from di1.modules.processing.application.services.processing import ProcessingService
+from di1.modules.processing.domain.predecessor import PredecessorState
 from di1.modules.processing.public import ProcessingRequest, ProcessingScope, ProcessingStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.clock import FixedClock

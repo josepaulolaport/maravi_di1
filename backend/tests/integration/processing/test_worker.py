@@ -12,11 +12,13 @@ from uuid import UUID
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.ledger.public import EntryType
 from di1.modules.portfolio.public import CashBalance
 from di1.modules.prices.public import PriceSource
+from di1.modules.processing.domain.predecessor import PredecessorState, allows_run
 from tests.integration.processing.support import seed_instrument, seed_statuses
 from tests.integration.processing.worker_support import Worker
 from tests.unit.processing.run_fakes import cash_movement, trade
@@ -361,6 +363,53 @@ async def test_an_all_run_failing_both_predecessors_keeps_the_positions_code(
 # --- ALL: one chain fails, the other continues (OQ-36, OQ-38, OQ-40) -----------------------
 
 
+AGREEMENT_CASES = [
+    # (scope, date_status seeded as {date: (portfolio, cash)}, cash on D0, trade on D0, state)
+    ("CASH", {D0: (None, "PROCESSED")}, True, False, PredecessorState.PROCESSED),
+    ("CASH", {D0: (None, "PROCESSED_WITH_ISSUES")}, True, False, "PROCESSED_WITH_ISSUES"),
+    ("CASH", {D0: (None, "FAILED")}, False, False, PredecessorState.FAILED),
+    ("CASH", {D0: (None, "RUNNING")}, False, False, PredecessorState.RUNNING),
+    ("CASH", {date(2026, 10, 1): (None, "PROCESSED")}, False, False, "NOT_PROCESSED"),
+    ("CASH", {}, True, False, PredecessorState.NOT_PROCESSED),  # a deposit on D0
+    ("CASH", {}, False, False, PredecessorState.ZERO_STATE),
+    ("POSITIONS", {}, True, False, PredecessorState.ZERO_STATE),  # cash entries only
+    ("POSITIONS", {}, False, True, PredecessorState.NOT_PROCESSED),
+    ("POSITIONS", {D0: ("FAILED", None)}, False, False, PredecessorState.FAILED),
+]
+
+
+@pytest.mark.parametrize(("scope", "seeded", "cash_on_d0", "trade_on_d0", "state"), AGREEMENT_CASES)
+async def test_the_preview_and_the_run_apply_the_same_predecessor_rule(
+    worker: Worker,
+    scope: str,
+    seeded: dict[date, tuple[str | None, str | None]],
+    cash_on_d0: bool,
+    trade_on_d0: bool,
+    state: str,
+) -> None:
+    """H2: one rule. Whatever the preview reports for D1−1, the run of D1 follows it: it runs
+    exactly when the preview's state allows it (OQ-31, OQ-37 item 4, OQ-40 item 5)."""
+    await seed_statuses(worker.engine, seeded)
+    if cash_on_d0:
+        worker.world.ledger.movements.append(cash_movement(D0, "10.00"))
+        worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("10.00"))
+    if trade_on_d0:
+        asset = await priced_asset(worker, D0, D1)
+        worker.world.ledger.trades.append(trade(asset, D0, 1, "95000.0000000000"))
+
+    preview = await worker.preview(scope, D1, D1)
+    reported = preview.cash if scope == "CASH" else preview.positions
+    request_id = await worker.enqueue(scope, D1, D1)
+    await worker.ring()
+
+    assert reported == state
+    portfolio, cash = (await worker.statuses())[D1]
+    ran = (cash if scope == "CASH" else portfolio) == "PROCESSED"
+    assert ran is allows_run(reported)
+    if not ran:
+        assert (await worker.run_row(request_id))["error_code"] == f"{scope}_PREDECESSOR_MISSING"
+
+
 async def test_a_technical_error_in_one_chain_rolls_back_only_that_chain(worker: Worker) -> None:
     worker.writer.fail.add(("CASH", D2))
     request_id = await worker.enqueue("ALL", D1, D3)
@@ -517,11 +566,7 @@ async def test_a_cancel_after_a_crash_restores_the_running_date(worker: Worker) 
     worker.writer.hook = crash
     with pytest.raises(asyncio.CancelledError):
         await worker.ring()
-    await worker.execute(
-        "UPDATE processing.requests SET status = 'CANCELLING', cancel_requested_at = now()"
-        " WHERE id = :id",
-        id=request_id,
-    )
+    await request_cancel(worker, request_id)  # RUNNING keeps its status (OQ-46)
     worker.writer.hook = None
 
     await worker.restart()
@@ -541,11 +586,7 @@ async def test_a_crash_on_a_new_date_deletes_its_row_when_the_run_ends(worker: W
     with pytest.raises(asyncio.CancelledError):
         await worker.ring()
     assert await worker.statuses() == {D1: (None, "RUNNING")}
-    await worker.execute(
-        "UPDATE processing.requests SET status = 'CANCELLING', cancel_requested_at = now()"
-        " WHERE id = :id",
-        id=request_id,
-    )
+    await request_cancel(worker, request_id)  # RUNNING keeps its status (OQ-46)
 
     await worker.restart()
 
@@ -733,20 +774,6 @@ async def test_case_26_an_earlier_failed_status_alone_fails_without_asking_the_l
     )
 
 
-async def test_a_dispatched_run_left_from_before_oq46_is_run_at_the_worker_start(
-    worker: Worker,
-) -> None:
-    request_id = await worker.enqueue("CASH", D1, D1)
-    await worker.execute(
-        "UPDATE processing.requests SET status = 'DISPATCHED' WHERE id = :id", id=request_id
-    )
-
-    await worker.restart()
-
-    assert (await worker.run_row(request_id))["status"] == "COMPLETED"
-    assert await worker.statuses() == {D1: (None, "PROCESSED")}
-
-
 # --- recovery at the worker start (OQ-45, OQ-46) ---------------------------------------
 
 
@@ -885,7 +912,7 @@ async def test_a_persistent_failure_recording_the_end_escapes_and_the_restart_en
     queued = await worker.enqueue("CASH", D3, D3)
     worker.store.end_failures = 3  # every attempt fails
 
-    with pytest.raises(RuntimeError, match="database blip"):
+    with pytest.raises(OperationalError, match="database blip"):
         await worker.ring()
 
     run = await worker.run_row(request_id)
@@ -898,6 +925,97 @@ async def test_a_persistent_failure_recording_the_end_escapes_and_the_restart_en
     assert (await worker.run_row(request_id))["status"] == "COMPLETED"
     assert (await worker.run_row(queued))["status"] == "COMPLETED"
     assert [w[0] for w in await worker.writes()] == [D1, D2, D3]  # nothing processed twice
+
+
+async def test_an_end_that_committed_before_its_error_is_not_written_twice(
+    worker: Worker, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The end commits, then a transient error (the connection drops before the COMMIT's
+    answer arrives, say): the retry finds the run ended (`RunEndedError`) and writes nothing;
+    the queue goes on."""
+    request_id = await worker.enqueue("CASH", D1, D1)
+    queued = await worker.enqueue("CASH", D2, D2)
+    complete = worker.processor._complete
+    calls: list[UUID] = []
+
+    async def committed_then_failed(run_id: UUID) -> None:
+        calls.append(run_id)
+        await complete(run_id)
+        if len(calls) == 1:
+            raise OperationalError("COMMIT", {}, Exception("connection lost after commit"))
+
+    monkeypatch.setattr(worker.processor, "_complete", committed_then_failed)
+    await worker.ring()
+
+    assert calls == [request_id, request_id, queued]  # one retry, then the next run
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["error_code"]) == ("COMPLETED", None)
+    assert worker.store.end_attempts == 2  # the retry stopped at the lock: no second write
+    assert (await worker.run_row(queued))["status"] == "COMPLETED"
+
+
+async def test_a_bug_recording_the_end_is_not_retried_and_ends_the_run_failed(
+    worker: Worker,
+) -> None:
+    """A deterministic error would recur on every retry and every restart, so the queue would
+    stay blocked behind a RUNNING run: it is not retried, and the run ends FAILED with
+    PROCESSING_ERROR in a fresh transaction; the dates it committed keep their statuses."""
+    request_id = await worker.enqueue("CASH", D1, D2)
+    queued = await worker.enqueue("CASH", D3, D3)
+    worker.store.end_bugs = 1
+
+    await worker.ring()
+
+    assert worker.store.end_attempts == 3  # the end once, the FAILED end, then the next run
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["error_code"], run["error_message"]) == (
+        "FAILED",
+        "PROCESSING_ERROR",
+        "Erro técnico ao processar a data.",
+    )
+    assert (run["progress_date"], run["failed_date"], run["finished_at"]) == (
+        D2,
+        None,  # no date failed
+        worker.clock.now(),
+    )
+    assert await worker.statuses() == {
+        D1: (None, "PROCESSED"),
+        D2: (None, "PROCESSED"),
+        D3: (None, "PROCESSED"),
+    }
+    assert (await worker.run_row(queued))["status"] == "COMPLETED"
+
+
+async def test_a_bug_recording_a_failed_date_ends_the_run_failed_and_restores_the_date(
+    worker: Worker,
+) -> None:
+    worker.fail_reading_on_date_transaction = 1  # D1 fails outside the chains
+    request_id = await worker.enqueue("CASH", D1, D2)
+    worker.store.end_bugs = 1  # recording D1's failure fails, not retried
+
+    await worker.ring()
+
+    run = await worker.run_row(request_id)
+    assert (run["status"], run["error_code"], run["failed_date"]) == (
+        "FAILED",
+        "PROCESSING_ERROR",
+        None,
+    )
+    assert await worker.statuses() == {}  # D1's RUNNING is restored: it had no status
+
+
+async def test_a_bug_that_also_blocks_the_failed_end_escapes_for_a_restart(
+    worker: Worker,
+) -> None:
+    request_id = await worker.enqueue("CASH", D1, D1)
+    worker.store.end_bugs = 2  # the end and the FAILED end both fail
+
+    with pytest.raises(ValueError, match="bug while ending the run"):
+        await worker.ring()
+
+    assert (await worker.run_row(request_id))["status"] == "RUNNING"
+    await worker.restart()
+    assert (await worker.run_row(request_id))["status"] == "COMPLETED"
 
 
 async def test_a_cancel_committing_on_the_oldest_row_during_a_take_still_takes_the_next(

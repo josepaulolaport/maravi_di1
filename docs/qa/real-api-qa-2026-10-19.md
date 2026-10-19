@@ -13,6 +13,9 @@ mismatches between the MSW mocks and the API before delivery. No code was change
   all; changing scales would touch every read model shortly before delivery for a cosmetic gain.
 - **Frontend findings (1, 2, 4, 5, 6, 7, 10):** handled in a parallel lane I PR; its description says
   which are fixed.
+- **Mock dev mode removed (#114, later the same day):** the MSW fake backend and `VITE_API_MOCKS` this
+  report compares against no longer exist; MSW now answers the tests only, with static fixtures, and
+  the dev server always proxies to the real API. The report below is kept as written.
 
 ## Setup
 
