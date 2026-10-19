@@ -25,7 +25,9 @@ import asyncio
 import contextlib
 import logging
 import signal
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
+
+from aio_pika.abc import AbstractRobustConnection
 
 from di1.platform.config import (
     BrokerSettings,
@@ -46,6 +48,7 @@ from di1.platform.observability.logging_setup import configure_logging
 logger = logging.getLogger(__name__)
 
 CONNECTION_NAME = "di1-outbox-relay"
+CLOSE_TIMEOUT_SECONDS = 5.0
 
 
 async def run_outbox_relay(
@@ -61,22 +64,18 @@ async def run_outbox_relay(
     engine = create_engine(settings)
     try:
         connection = await _unless_stopped(
-            connect(broker_settings, connection_name=CONNECTION_NAME), stop
+            connect(broker_settings, connection_name=CONNECTION_NAME), stop, discard=_close
         )
         if connection is None:
             logger.info("outbox relay stopped before the broker answered")
             return
         try:
-            if queues:
-                channel = await connection.channel()
-                try:
-                    for spec in queues:
-                        await declare_queue(channel, topology, spec, settings=broker_settings)
-                finally:
-                    await channel.close()
-            publisher = await MessagePublisher.create(
-                connection, topology, settings=broker_settings
+            publisher = await _unless_stopped(
+                _prepare(connection, topology, queues, broker_settings), stop
             )
+            if publisher is None:
+                logger.info("outbox relay stopped before the broker answered")
+                return
             relay = OutboxRelay(
                 unit_of_work_factory(create_session_factory(engine)),
                 publisher,
@@ -89,28 +88,74 @@ async def run_outbox_relay(
                 stop, poll_interval_seconds=broker_settings.outbox_relay_poll_interval_seconds
             )
         finally:
-            await connection.close()
+            await _close(connection)
     finally:
         await engine.dispose()
     logger.info("outbox relay stopped")
 
 
-async def _unless_stopped[T](step: Awaitable[T], stop: asyncio.Event) -> T | None:
+async def _prepare(
+    connection: AbstractRobustConnection,
+    topology: Topology,
+    queues: Sequence[QueueSpec],
+    broker_settings: BrokerSettings,
+) -> MessagePublisher:
+    """Declare the queues and open the publisher's channel. aio-pika waits for these answers
+    without a timeout, so the caller runs this under the stop. A channel left open by a stop
+    is closed with the connection."""
+    if queues:
+        channel = await connection.channel()
+        for spec in queues:
+            await declare_queue(channel, topology, spec, settings=broker_settings)
+        await channel.close()
+    return await MessagePublisher.create(connection, topology, settings=broker_settings)
+
+
+async def _close(connection: AbstractRobustConnection) -> None:
+    """Close the connection, which also stops its reconnect task; a broker that does not
+    answer the close does not hold the shutdown longer than `CLOSE_TIMEOUT_SECONDS`."""
+    try:
+        await asyncio.wait_for(connection.close(), timeout=CLOSE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.warning("the broker did not answer the close in %s s", CLOSE_TIMEOUT_SECONDS)
+
+
+async def _unless_stopped[T](
+    step: Awaitable[T],
+    stop: asyncio.Event,
+    *,
+    discard: Callable[[T], Awaitable[None]] | None = None,
+) -> T | None:
     """Await ``step``, or cancel it and return `None` if ``stop`` is set first: a broker that
-    hangs at startup must not keep SIGTERM waiting until Docker's SIGKILL."""
+    hangs at startup must not keep SIGTERM waiting until Docker's SIGKILL.
+
+    If the caller is cancelled while ``step`` has just produced its result, nobody will use
+    that result: ``discard`` releases it (a connection, which would otherwise keep its
+    reconnect task running)."""
     running = asyncio.ensure_future(step)
     stopping = asyncio.ensure_future(stop.wait())
     try:
         await asyncio.wait({running, stopping}, return_when=asyncio.FIRST_COMPLETED)
-    finally:
+    except BaseException:
         stopping.cancel()
-        if not running.done():
-            running.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await running
-    if running.cancelled():
+        await _abandon(running, discard)
+        raise
+    stopping.cancel()
+    if not running.done():
+        await _abandon(running, discard)
         return None
     return running.result()
+
+
+async def _abandon[T](
+    running: asyncio.Future[T], discard: Callable[[T], Awaitable[None]] | None
+) -> None:
+    if not running.done():
+        running.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await running
+    if discard is not None and not running.cancelled() and running.exception() is None:
+        await discard(running.result())
 
 
 async def _main() -> None:
