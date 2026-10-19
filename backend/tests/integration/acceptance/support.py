@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
 from typing import Any
@@ -30,7 +30,7 @@ from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.worker import WorkerResources
-from di1.shared.clock import FixedClock
+from di1.shared.clock import SAO_PAULO, FixedClock
 from tests.integration.databases import fresh_database_url, psycopg_url
 
 BACKEND = Path(__file__).resolve().parents[3]
@@ -51,13 +51,32 @@ def expected_rate(pu: str, calendar_days: int) -> str:
     return str(rate.quantize(Decimal("1E-12"), rounding=ROUND_HALF_UP))
 
 
+class TickingClock:
+    """The API's clock: "today" is fixed (OQ-14), and each ``now`` is one second after the last,
+    from noon of that day, so requests queued one after the other keep their order
+    (``created_at``, the queue's FIFO key, OQ-46) as they would in real time."""
+
+    def __init__(self, today: date) -> None:
+        self._today = today
+        self._ticks = 0
+
+    def today(self) -> date:
+        return self._today
+
+    def now(self) -> datetime:
+        self._ticks += 1
+        return datetime.combine(self._today, time(12, 0), tzinfo=SAO_PAULO) + timedelta(
+            seconds=self._ticks
+        )
+
+
 @contextmanager
 def acceptance_app(today: date) -> Iterator[tuple[TestClient, str]]:
     """A client of the real app whose "today" is ``today``, and its database URL."""
     for url in fresh_database_url():
         _migrate(url)
         _seed_catalogue_roots(url)
-        app = create_app(Settings(database_url=SecretStr(url)), clock=FixedClock(today))
+        app = create_app(Settings(database_url=SecretStr(url)), clock=TickingClock(today))
         with TestClient(app) as client:
             yield client, url
 
