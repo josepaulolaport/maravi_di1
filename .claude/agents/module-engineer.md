@@ -42,7 +42,7 @@ Nothing else. To change anything outside, raise a contract-change request to the
 - **Writes** (C, D) only save the fact in their UoW: no invalidation and no call to Processing (OQ-31). They never enqueue processing.
 - **Lane-specific traps:**
   - B, F and E (pure accounting) contain no persistence.
-  - G guarantees exactly one active job, overlapping queued jobs, cooperative cancellation, one transaction per date with the D−1/D `date_status` row locks and the claim-token check, the per-day predecessor rule (OQ-31), failure and cancellation that leave later dates untouched, and recovery from `progress_date` (OQ-23).
+  - G guarantees exactly one active job, overlapping queued jobs, cooperative cancellation, one transaction per date with the D−1/D `date_status` row locks, the per-day predecessor rule (OQ-31), failure and cancellation that leave later dates untouched, and recovery from `progress_date` (OQ-23) when the single worker starts, with no lease or claim token (OQ-45).
 - **Commits:** follow the `commit` skill; no per-commit approval (CLAUDE.md §4).
 - **When ready:** run `pr-ready`. It runs the `reviewer`, pushes the branch and opens a GitHub PR. Never merge.
 
