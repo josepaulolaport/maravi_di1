@@ -5,7 +5,7 @@
 #                  (+ frontend eslint, tsc and prettier --check)
 #   make test      Alembic head and migration smoke, then pytest with coverage against PostgreSQL 16
 #                  (a throwaway container unless TEST_DATABASE_URL is set) (+ frontend tests)
-#   make seed      catalogue roots (FUTURE, INTEREST_RATE_FUTURE) into the running Compose stack
+#   make seed      catalogue (FUTURE, INTEREST_RATE_FUTURE, the DI1 product) into the running stack, again
 #   make e2e       the challenge example end to end on a throwaway Compose stack (scripts/e2e.sh)
 #
 # Every recipe fails on the first failing command; nothing is silenced. Recipes avoid pipes:

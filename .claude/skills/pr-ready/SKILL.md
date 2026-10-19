@@ -73,4 +73,4 @@ Not verified / known limits:
 - …
 ```
 
-A human reviews and merges it on GitHub. Never `git merge` into `main` and never `gh pr merge`; bringing `origin/main` into your own branch is allowed (CLAUDE.md §4). Give the user the PR URL.
+A human reviews and merges it on GitHub. While GitHub Actions is down the merge gate is the real local results (CLAUDE.md §4), so the "Verified" lines must come from runs on your branch merged with `origin/main`. Never `git merge` into `main` and never `gh pr merge`; bringing `origin/main` into your own branch is allowed (CLAUDE.md §4). Give the user the PR URL.

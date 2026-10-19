@@ -26,9 +26,15 @@ messages of `origin/main..HEAD`.
 ## Run the application
 
 ```bash
-docker compose up --build -d   # PostgreSQL 16, RabbitMQ, migrations, API, outbox relay, worker, web
-make seed                      # catalogue roots: instrument type FUTURE, asset class INTEREST_RATE_FUTURE
+docker compose up --build -d   # PostgreSQL 16, RabbitMQ, migrations, seed, API, demo data, relay, worker, web
 ```
+
+On every `up`, after the migrations, the one-shot `seed` service applies
+`scripts/seed_catalogue.sql`: the instrument type FUTURE, the asset class INTEREST_RATE_FUTURE and
+the DI1 product (face value 100.000), which the UI cannot create (Ativos only browses products,
+spec §11.2). It is idempotent and keeps rows that already exist; `make seed` applies it again by
+hand. A fresh stack can therefore create a DI1 contract at once (Ativos → DI1 → Novo contrato) and
+trade it.
 
 Then open http://localhost:8080: the `web` service serves the built UI (nginx) and forwards `/api/`
 and `/health` to the API, so the UI runs on the real backend (no MSW mocks in the build). The API
@@ -68,13 +74,21 @@ request from PostgreSQL under a row lock, runs it, and repeats until none is lef
 ## Demo: the challenge example, end to end
 
 ```bash
-make e2e   # throwaway stack (project di1-e2e, API on :18000): seed, run the example, check, remove
+make e2e   # throwaway stack (project di1-e2e, API on :18000): run the example, check, remove
+```
+
+To run two at once (for example from two worktrees), give the second its own project and ports, or
+the runs tear down each other's stack:
+
+```bash
+DI1_E2E_PROJECT=di1-e2e-2 DI1_E2E_API_PORT=18100 DI1_E2E_WEB_PORT=18180 DI1_E2E_RABBITMQ_MANAGEMENT_PORT=25772 make e2e
 ```
 
 `scripts/e2e_smoke.py` runs the challenge example (§5 of the challenge) through the HTTP API,
 dated **today** rather than 01/01/2027 (deviation D4 below):
 
-1. Create the product DI1 (face value 100.000) and a contract maturing today + 365 calendar days.
+1. Use the seeded product DI1 (face value 100.000) and create a contract maturing today + 365
+   calendar days.
 2. Deposit 200.000 (Lançamentos → aporte).
 3. Buy 1 contract at 10% a.a. → execution PU **90.909,09** (`100000 / 1.1`).
 4. Enter a reference price of 10% for today (Ativos → contrato; deviation D2).
@@ -84,6 +98,29 @@ dated **today** rather than 01/01/2027 (deviation D4 below):
 The same steps can be done by hand in the UI. The exact example dated 01/01/2027 runs in the
 automated acceptance tests with a fixed clock (`backend/tests/acceptance/`,
 `backend/tests/integration/acceptance/`).
+
+## Demo data
+
+`docker compose up` loads two weeks of demo history: after the API is healthy, the one-shot `demo`
+service runs `scripts/seed_demo.py`, which writes through the HTTP API (so every validation and
+pricing rule applies). The dates are relative to the **first** `up`: data written on day X is dated
+X − 14 to X (São Paulo). Every later `up` finds a non-empty ledger and adds nothing ("already
+loaded"); `docker compose down -v` and `up` load a fresh copy dated from that day. `DI1_DEMO=0`
+turns it off (`make e2e` does, to keep its ledger empty).
+
+- Three contracts: the January DI1 of each of the next three years (DI1F27, DI1F28 and DI1F29 when
+  loaded in 2026, maturing 04/01/2027, 03/01/2028 and 02/01/2029).
+- An opening deposit of 1.000.000, a second deposit, a withdrawal and, as in the challenge example,
+  a deposit of 200.000 with a buy of 1 DI1F28 at 10% (DI1F28 does not mature in 365 days, so the
+  challenge's figures are those of `make e2e`, not these).
+- Trades typed as a rate and as a PU, a partial sale, a sale that crosses zero into a short, and a
+  buy and a sale of the longest contract on one day, applied in time order.
+- MANUAL reference prices typed as a rate for every calendar day, weekends included, with **one
+  deliberate gap**: the longest contract (DI1F29) on X − 5.
+
+Nothing is processed. Open Central de Controle → Processamentos and process Tudo from X − 14 to
+X: the run ends "Concluído com pendências", with a missing-price Pendência for the gap, and from
+that date the cumulative P&L is unavailable. `docker compose logs demo` lists everything it wrote.
 
 ## Interpretations, additions and deviations (spec §15)
 
@@ -112,9 +149,9 @@ processing on request (§10).
 
 - **One worker, recovery at its start (OQ-45):** the system runs exactly one processing worker;
   the schema keeps `claim_token`, `lease_expires_at` and `attempt_count` unused (OQ-45).
-- **Catalogue roots are seeded by `make seed`, not by a migration:** the API has no route for
-  instrument types and asset classes, so a fresh database needs `make seed` before the DI1 product
-  can be created.
+- **The catalogue is seeded by a Compose step, not by a migration:** the API has no route for
+  instrument types and asset classes and the UI none for products, so the `seed` service applies
+  `scripts/seed_catalogue.sql` (FUTURE, INTEREST_RATE_FUTURE, DI1) on every `docker compose up`.
 - **Reference prices are typed by hand:** there is no CSV or B3 price import yet; the B3 source
   exists in the model and the MANUAL > B3 precedence is implemented.
 - Open questions and every decision taken are in [docs/open-questions.md](docs/open-questions.md).

@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # make e2e: start a throwaway Compose stack (project di1-e2e, its own volumes and ports, so a dev
-# stack on the default ports is never touched), seed the catalogue roots, run the challenge
-# example end to end (scripts/e2e_smoke.py), then remove the stack and its volumes.
+# stack on the default ports is never touched), whose `seed` service seeds the catalogue and the
+# DI1 product; apply the seed again (`make seed`'s step, which must change nothing), run the
+# challenge example end to end (scripts/e2e_smoke.py), then remove the stack and its volumes.
 # It also checks that the web container serves the UI and forwards the API.
 # Ports: DI1_E2E_API_PORT (default 18000), DI1_E2E_WEB_PORT (18080) and
 # DI1_E2E_RABBITMQ_MANAGEMENT_PORT (25672).
+# Project: DI1_E2E_PROJECT (default di1-e2e). Two runs at once (two worktrees) need a different
+# project and different ports each, or they tear down each other's stack.
 # KEEP_E2E_STACK=1 leaves the stack running for inspection.
 set -euo pipefail
 
@@ -12,7 +15,9 @@ cd "$(dirname "$0")/.."
 export DI1_API_PORT="${DI1_E2E_API_PORT:-18000}"
 export DI1_WEB_PORT="${DI1_E2E_WEB_PORT:-18080}"
 export DI1_RABBITMQ_MANAGEMENT_PORT="${DI1_E2E_RABBITMQ_MANAGEMENT_PORT:-25672}"
-project=di1-e2e
+# The challenge checks need an empty ledger: the demo service skips its data.
+export DI1_DEMO=0
+project="${DI1_E2E_PROJECT:-di1-e2e}"
 compose=(docker compose -p "$project")
 
 # A stack left by KEEP_E2E_STACK=1, an interrupted run, or a `down` without -v (its volumes) would

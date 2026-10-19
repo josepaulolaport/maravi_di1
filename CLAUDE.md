@@ -135,6 +135,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - When a branch is ready, push it and open a GitHub pull request with `gh pr create` (skill `pr-ready`). Bringing `origin/main` into your own branch is allowed (integrator choice): before the first push you may rebase your own unpushed commits; after it, merge `origin/main` in and add fixes as new commits, since a rewrite would need a force-push.
   - A human reviews and merges it on GitHub.
   - Never `git merge` into `main`, never `gh pr merge`, never force-push, never `--no-verify`.
+- **Merge gate while GitHub Actions is down** (user, 2026-10-19: "github actions is down. Report this to the reviewers. We will only use the tests locally. We need to move fast"). Merges do not wait for the `ci-ok` check: they go on the reviewer's real local results on the PR head merged with `origin/main` (ruff, mypy, unit, architecture, acceptance and the relevant integration tests on a fresh PostgreSQL, `make e2e` when relevant), with no unresolved review thread. Phase-2 acceptance tests then run only through `make test-backend`. The `ci-ok` gate comes back when the user says Actions works again.
 - **Commits** (skill `commit`):
   - Conventional Commits, `<type>(<scope>): <summary>`, with a body that explains why and a `Refs:` line citing the spec section.
   - One logical change per commit. Every commit is green: it builds, passes lint and types, and every test passes.

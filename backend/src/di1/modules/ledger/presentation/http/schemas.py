@@ -10,7 +10,7 @@ error names the field the client knows (``execution_pu``, not ``PU.execution_pu`
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
@@ -19,7 +19,6 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictInt, W
 
 from di1.modules.ledger.application.services.ledger_service import LedgerEntryView
 from di1.modules.ledger.domain.entries import EntryDraft, EntryType
-from di1.shared.clock import SAO_PAULO
 from di1.shared.decimals import to_plain
 from di1.shared.input_kind import InputKind
 
@@ -136,7 +135,8 @@ def entry_response(view: LedgerEntryView) -> TradeEntryResponse | CashEntryRespo
         "time": entry.entry_time.isoformat(timespec="seconds"),
         "seq": entry.seq,
         "cash_amount": to_plain(entry.cash_effect),
-        "created_at": entry.created_at.astimezone(SAO_PAULO),
+        # UTC ("Z"), the one rendering every module uses for an instant.
+        "created_at": entry.created_at.astimezone(UTC),
     }
     if entry.type is EntryType.CASH:
         return CashEntryResponse(**common)  # type: ignore[arg-type]
