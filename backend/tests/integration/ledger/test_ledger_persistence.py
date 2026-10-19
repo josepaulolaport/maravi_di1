@@ -28,7 +28,7 @@ from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
 from tests.integration.ledger.support import TODAY, cash, fetch, trade
-from tests.unit.ledger.fakes import DI1F29, CalculatorPricing, FakeAssets
+from tests.unit.ledger.fakes import DI1F29, FakeAssets, FormulaPricing
 
 Sessions = async_sessionmaker[AsyncSession]
 
@@ -224,7 +224,7 @@ async def test_an_overlapping_deletion_waits_then_deletes_nothing(
     holding = LedgerService(
         clock=FixedClock(TODAY),
         assets=assets,
-        pricing=CalculatorPricing(assets),
+        pricing=FormulaPricing(assets),
         repository_for=lambda uow: HoldingRepository(uow.session),
     )
     first = asyncio.create_task(delete(holding, session_factory, a, b))

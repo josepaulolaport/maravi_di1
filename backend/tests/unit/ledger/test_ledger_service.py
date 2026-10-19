@@ -26,9 +26,9 @@ from di1.shared.input_kind import InputKind
 from tests.unit.ledger.fakes import (
     DI1F28,
     DI1F29,
-    CalculatorPricing,
     FakeAssets,
     FakeUnitOfWork,
+    FormulaPricing,
     InMemoryLedgerRepository,
 )
 
@@ -38,7 +38,7 @@ TODAY = date(2026, 10, 18)
 class Harness:
     def __init__(self) -> None:
         self.assets = FakeAssets()
-        self.pricing = CalculatorPricing(self.assets)
+        self.pricing = FormulaPricing(self.assets)
         self.repository = InMemoryLedgerRepository()
         self.service = LedgerService(
             clock=FixedClock(TODAY),
@@ -203,9 +203,14 @@ async def test_a_future_entry_writes_nothing(harness: Harness) -> None:
 
 async def test_a_pricing_refusal_writes_nothing(harness: Harness) -> None:
     uow = FakeUnitOfWork()
-    # A rate so high that the PU rounds to zero at 10 places: Pricing refuses it.
-    with pytest.raises(DomainError):
+    # A rate so high that the PU rounds to zero at 10 places: Pricing refuses it on its `rate`,
+    # which Ledger reports on the request's `execution_rate`.
+    with pytest.raises(DomainError) as error:
         await harness.service.create_entry(buy_rate(execution_rate=Decimal("1E+40")), uow=uow)
+
+    assert [(e.code, e.field) for e in error.value.errors] == [
+        (ErrorCode.VALIDATION_ERROR, "execution_rate")
+    ]
 
     assert harness.repository.rows == []
     assert uow.commits == 0
