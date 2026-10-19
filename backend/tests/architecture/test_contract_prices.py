@@ -18,7 +18,7 @@ def test_price_source_matches_the_schema_check() -> None:
     assert {source.value for source in PriceSource} == {"MANUAL", "B3"}
 
 
-def test_a_reference_price_is_traceable_to_its_revision() -> None:
+def test_a_reference_price_is_frozen() -> None:
     record = ReferencePriceRecord(
         id=uuid4(),
         asset_id=uuid4(),
@@ -27,11 +27,9 @@ def test_a_reference_price_is_traceable_to_its_revision() -> None:
         input_kind=InputKind.RATE,
         pu=Decimal("98765.4321000000"),
         rate=Decimal("0.135000000000"),
-        revision=2,
         created_at=datetime(2026, 10, 16, 18, 0, tzinfo=SAO_PAULO),
-        superseded_at=None,
+        updated_at=datetime(2026, 10, 16, 18, 0, tzinfo=SAO_PAULO),
     )
 
-    assert record.revision == 2
     with pytest.raises(dataclasses.FrozenInstanceError):
         record.pu = Decimal("1")  # type: ignore[misc]
