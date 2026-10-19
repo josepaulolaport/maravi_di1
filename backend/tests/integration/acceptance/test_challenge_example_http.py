@@ -48,7 +48,7 @@ def di1f28(client: TestClient) -> str:
 
 
 def test_the_formula_gives_the_challenge_pu() -> None:
-    assert expected_pu("0.10", 365) == PU_AT_10_PERCENT
+    assert Decimal(expected_pu("0.10", 365)) == Decimal(PU_AT_10_PERCENT)
 
 
 def test_the_trade_is_priced_at_the_challenge_pu(client: TestClient, di1f28: str) -> None:
@@ -58,18 +58,21 @@ def test_the_trade_is_priced_at_the_challenge_pu(client: TestClient, di1f28: str
 
     assert response.status_code == 201, response.text
     body = response.json()
-    assert body["execution_pu"] == PU_AT_10_PERCENT
-    assert body["execution_rate"] == "0.10"  # typed, kept as typed
+    assert Decimal(body["execution_pu"]) == Decimal(PU_AT_10_PERCENT)
+    assert Decimal(body["execution_rate"]) == Decimal("0.10")  # typed, kept as typed
     assert body["input_kind"] == "RATE"
     # "Financeiro operação: −90.909,09"
     assert Decimal(body["cash_amount"]) == Decimal("-90909.0909090909")
 
 
 def test_cash_after_the_deposit_and_the_trade(client: TestClient, di1f28: str) -> None:
-    client.post("/api/ledger/entries", json=cash_body("2027-01-01", "09:00", "200000"))
-    client.post(
-        "/api/ledger/entries", json=trade_body(di1f28, "2027-01-01", "10:00", 1, rate="0.10")
-    )
+    writes = [
+        client.post("/api/ledger/entries", json=cash_body("2027-01-01", "09:00", "200000")),
+        client.post(
+            "/api/ledger/entries", json=trade_body(di1f28, "2027-01-01", "10:00", 1, rate="0.10")
+        ),
+    ]
+    assert [w.status_code for w in writes] == [201, 201], [w.text for w in writes]
 
     entries = client.get(
         "/api/ledger/entries",
@@ -88,7 +91,8 @@ def test_the_reference_price_at_10_percent(client: TestClient, di1f28: str) -> N
     )
 
     assert response.status_code == 201, response.text
-    assert (response.json()["source"], response.json()["pu"]) == ("MANUAL", PU_AT_10_PERCENT)
+    body = response.json()
+    assert (body["source"], Decimal(body["pu"])) == ("MANUAL", Decimal(PU_AT_10_PERCENT))
 
 
 def test_typing_the_pu_back_recovers_the_rate(client: TestClient, di1f28: str) -> None:
@@ -97,7 +101,9 @@ def test_typing_the_pu_back_recovers_the_rate(client: TestClient, di1f28: str) -
     )
 
     assert response.status_code == 201, response.text
-    assert response.json()["rate"] == "0.100000000000"
+    rate = Decimal(response.json()["rate"])
+    assert rate == Decimal("0.1")
+    assert rate.as_tuple().exponent == -12  # a calculated rate is stored at 12 places (OQ-3)
 
 
 def test_before_processing_the_carteira_is_not_processed(client: TestClient, di1f28: str) -> None:

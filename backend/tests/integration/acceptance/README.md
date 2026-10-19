@@ -5,6 +5,9 @@ The same proof as `tests/acceptance/` (phase 1, pure engines), now through the r
 (OQ-14; spec §15 D4), driven only through `/api`. Only the catalogue roots (instrument type,
 asset class) and B3 prices, which have no route, are inserted directly. Expected values come
 from the docs: PUs and rates are spec §4.1's formulas evaluated in `support.py` with `decimal`.
+Money, PUs and rates are compared as `Decimal` parsed from the JSON strings, never as text or
+float. A scenario that processes asserts the run's status and `processing.date_status` before
+its figures, so a failed setup run cannot pass silently.
 These tests need `TEST_DATABASE_URL`; CI sets it and runs them.
 
 | §13 case | Covered by |
@@ -14,6 +17,7 @@ These tests need `TEST_DATABASE_URL`; CI sets it and runs them.
 | 9 (partial) a write saves only the fact: no job, date status, issue, outbox message or published row. "Processed dates unchanged" waits for a run | `test_ledger_http.py`, `test_reference_prices_http.py` |
 | 16 (partial: "processed results unchanged" waits for a run) one ledger order `(date, time, seq)` across trades and cash; mixed batch hard delete, all or nothing, 404 | `test_ledger_http.py` |
 | 17 MANUAL over B3, removing MANUAL lets B3 prevail, correction in place, exact date, no carry-forward | `test_reference_prices_http.py` |
+| 17 (second half) a used price corrected then removed after a run: allowed, marks nothing, no job or pendência; the Carteira shows the current price beside the old figures, the date keeps its status, time and figures until the user reprocesses (worker run in-process, `run_worker`) | `test_price_change_after_a_run_http.py` |
 | 22 page `limit` 0 and 201 refused, ledger entries and processing history | `test_ledger_http.py` |
 | 23 Carteira summary, positions and P&L series after today refused | `test_challenge_example_http.py` |
 | OQ-42 price reads after today accepted and empty | `test_reference_prices_http.py` |
