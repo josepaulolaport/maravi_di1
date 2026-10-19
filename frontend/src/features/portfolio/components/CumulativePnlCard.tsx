@@ -1,5 +1,5 @@
 import { LineChart } from '@mantine/charts';
-import { Divider, Group, Paper, Stack, Text } from '@mantine/core';
+import { Divider, Group, Paper, Skeleton, Stack, Text } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { IconCalendar } from '@tabler/icons-react';
 
@@ -66,7 +66,12 @@ export function CumulativePnlCard({ date, start, onStartChange }: CumulativePnlC
           <Text size="sm" c="dimmed">
             P&L acumulado
           </Text>
-          <SignedMoney value={total} size="xl" fw={500} />
+          {/* While the series is read the total is not known yet: loading, never "—". */}
+          {series.isPending ? (
+            <Skeleton h={31} w={160} aria-busy="true" aria-label="Carregando total do período" />
+          ) : (
+            <SignedMoney value={total} size="xl" fw={500} />
+          )}
           <Text size="sm" c="dimmed">
             Desde {formatDate(start)}
           </Text>

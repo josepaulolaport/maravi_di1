@@ -141,6 +141,17 @@ describe('Carteira (§11.4)', () => {
     expect(card.getByText('Até 16/10/2026')).toBeInTheDocument();
   });
 
+  it('§11.4 the headline shows loading, not "—", while the series is read', async () => {
+    // The series never answers in this test.
+    server.use(http.get(url('/portfolio/pnl'), () => new Promise<Response>(() => undefined)));
+    await openCarteira('2026-10-16');
+
+    const card = within(screen.getByRole('region', { name: 'P&L acumulado' }));
+    const headline = card.getByText('P&L acumulado').nextElementSibling;
+    expect(headline).toHaveAttribute('aria-busy', 'true');
+    expect(headline).not.toHaveTextContent('—');
+  });
+
   it('§11.4 the headline reads "—" when the series has no point for the date', async () => {
     server.use(http.get(url('/portfolio/pnl'), () => HttpResponse.json({ items: [] })));
     await openCarteira('2026-10-16');
