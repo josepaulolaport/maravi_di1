@@ -62,6 +62,7 @@ backend/
     unit/
     integration/
     architecture/
+    acceptance/      # spec §13 phase 1: pure Portfolio + PnL compositions, no I/O
     e2e/
 frontend/
   src/
@@ -96,6 +97,8 @@ Recommended agents (a reviewer can be a second agent applied after each module P
 | H — Platform | `platform/**`, `workers/**` shared bootstrap | Wave 0 | Schema and dispatch contract |
 | I — Frontend | `frontend/**` | Wave 1 mock API | Drafts the HTTP response types and MSW fixtures from the spec and the Figma, as a contract proposal the integrator reconciles with the backend; backend not required |
 | X — Integrator | `composition/**`, `main.py`, migrations, global tests, shared contracts, CI, compose | Throughout | Owns all cross-module wiring |
+
+`tests/acceptance/**` (spec §13 acceptance tests, phase 1: pure Portfolio and PnL compositions, no I/O) and `tests/integration/acceptance/**` (phase 2: the same scenarios over HTTP and PostgreSQL) belong to the acceptance-tests session (user, 2026-10-19); it touches nothing else. Only phase 1 runs in the pre-commit hook; CI runs both.
 
 If fewer agents: combine A+B, C+D, E+F; **do not** combine G with platform+integration until there are stable endpoints. A coding agent should not modify another lane's folder to make its tests pass: raise a contract change request to X. A lane's integration tests may import another lane's test seed read-only (lane B imports lane A's catalogue seed from `tests/integration/asset/conftest.py`; user, 2026-10-19); the owner changes that seed, and a change that breaks an importer goes through X.
 
@@ -184,7 +187,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 **Portfolio lane E**, integrating with C, D, F and X:
 - Persist `positions(asset_id, position_date, quantity)`, `position_metrics(asset_id, metric_date, avg PU/rate, financial_total, position/trades/daily PnL, status)`, `portfolio_metrics(metric_date, positions market value, AUM, portfolio PnL/status)`, `cash_balances(balance_date, cash_balance, trades_cash_flow, deposits, withdrawals)` (OQ-21). `position_metrics` stores no reference PU or source: the position table read takes each date's PU, rate and source from the current preferred price through `PriceReader` (OQ-30).
 - `PortfolioQueryService` returns one assembled frontend table; indexed read SQL in Portfolio Infrastructure only. Join published asset records and metrics by asset+date; include processing validity status. Show the current reference price (price table) next to the last processed figures, with each chain's status and processing time (OQ-30, OQ-31).
-- `GET /portfolio/pnl` series (OQ-31 item 8): points carry only the positions chain's status and processing time (`published_at`), plus `range_cumulative_pnl` = Σ `daily_pnl` from the requested `start_date` to D, summed from the published rows on each request, `null` from the first date with a null `daily_pnl` or no published positions day; `cumulative_pnl` (since inception) stays in the point.
+- `GET /portfolio/pnl` series (OQ-31 item 8): points carry only the positions chain's status and processing time (`published_at`), plus `range_cumulative_pnl` = Σ `daily_pnl` from the requested `start_date` to D, summed from the published rows on each request; since OQ-41 one point per calendar date of [`start_date`, `end_date`], and `range_cumulative_pnl` is never null: a date adds its `daily_pnl` only when its positions status is `PROCESSED` or `PROCESSED_WITH_ISSUES` and `daily_pnl` is not null, else 0 (OQ-41 item 4); an unprocessed point has `status` `NOT_PROCESSED` and `published_at`, `pnl_status`, `daily_pnl`, `cumulative_pnl` null; a `FAILED` or `RUNNING` point has `daily_pnl`, `cumulative_pnl` and `pnl_status` null and `published_at` the stored `portfolio_processed_at` (integrator reading); `cumulative_pnl` (since inception) stays in the point and stays null from the first gap.
 - Make read output distinguish `0`, `null` and each date's chain status from `processing.date_status` (not processed, `PROCESSED`, `PROCESSED_WITH_ISSUES`, `RUNNING`, `FAILED`) and its processing time per chain (OQ-23, OQ-31).
 - Implement `PortfolioResultsWriter.write_positions_day` / `write_cash_day`, which upsert one date's published rows and its AUM; Processing calls them through `public.py` inside each date's transaction (OQ-8, OQ-23). There is no staging.
 - Tests: exact-day joins, null handling, average cost survives missing references, AUM computation, read consistency.
