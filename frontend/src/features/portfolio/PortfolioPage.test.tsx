@@ -7,7 +7,13 @@ import { summaryOf } from '@/api/mocks/handlers/portfolio';
 import { url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { todayInSaoPaulo } from '@/shared/format';
-import { renderApp } from '@/test/render';
+import { renderApp, renderUi } from '@/test/render';
+
+import { ChartTooltip } from './components/CumulativePnlCard';
+import { toChartData } from './components/chartData';
+
+const INCOMPLETE_NOTE =
+  'Há dias incompletos no período (não processados, com erro, em processamento ou sem P&L diário): eles somam zero ao acumulado.';
 
 // Expected figures are the fixture scenario's published values (src/api/mocks/fixtures.ts),
 // formatted in pt-BR. Intl puts a no-break space after "R$"; Testing Library's default
@@ -578,7 +584,7 @@ describe('Carteira (§11.4)', () => {
     });
   });
 
-  it('§11.4 says when the chosen period has no complete history', async () => {
+  it('§11.4 OQ-41 says so only when the chosen period is empty', async () => {
     server.use(http.get(url('/portfolio/pnl'), () => HttpResponse.json({ items: [] })));
     await openCarteira('2026-10-15');
 
@@ -586,6 +592,54 @@ describe('Carteira (§11.4)', () => {
       await screen.findByText('Sem histórico completo para exibir no período selecionado.'),
     ).toBeInTheDocument();
   });
+
+  it('OQ-41 item 5 notes that incomplete days add zero when the period has any', async () => {
+    // The default 30 days before 15/10 are mostly not processed.
+    await openCarteira('2026-10-15');
+
+    const card = within(screen.getByRole('region', { name: 'P&L acumulado' }));
+    expect(await card.findByText(INCOMPLETE_NOTE)).toBeInTheDocument();
+    expect(card.queryByText(/Sem histórico completo/)).not.toBeInTheDocument();
+  });
+
+  it('OQ-41 item 5 shows no note when every day of the period is complete', async () => {
+    // 14/10 to 15/10: both processed with a daily P&L.
+    const ranges = recordPnlRanges();
+    renderApp('/carteira?date=2026-10-15&pnl_start=2026-10-14');
+    const card = within(await screen.findByRole('region', { name: 'P&L acumulado' }));
+
+    await waitFor(() => {
+      expect(ranges.at(-1)).toEqual(['2026-10-14', '2026-10-15']);
+    });
+    expect(await card.findByText('P&L diário somado desde o início escolhido.')).toBeVisible();
+    expect(card.queryByText(INCOMPLETE_NOTE)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['NOT_PROCESSED', null, 'Não processado'],
+    ['FAILED', null, 'Erro'],
+    ['RUNNING', null, 'Processando'],
+    ['PROCESSED_WITH_ISSUES', null, 'P&L diário indisponível'],
+  ] as const)(
+    'OQ-41 item 5 the tooltip of a %s day says why it adds nothing',
+    (status, daily, reason) => {
+      const [point] = toChartData([
+        {
+          date: '2026-10-17',
+          status,
+          daily_pnl: daily,
+          cumulative_pnl: null,
+          pnl_status: null,
+          range_cumulative_pnl: '-8034.1345282660',
+          published_at: null,
+        },
+      ]);
+      renderUi(<ChartTooltip active payload={[{ payload: point }]} />);
+
+      expect(screen.getByText('17/10/2026')).toBeInTheDocument();
+      expect(screen.getByText(reason)).toBeInTheDocument();
+    },
+  );
 
   it('§11.4 picking a date in the calendar loads that date and puts it in the URL', async () => {
     const { user, router } = await openCarteira('2026-10-15');

@@ -7,7 +7,7 @@ import type {
 } from '../contract';
 import { assetsApi, ledgerApi, portfolioApi, pricesApi, processingApi } from '../endpoints';
 import { ApiError } from '../http';
-import { db } from './db';
+import { db, setStatus } from './db';
 import { IDS, PRICE_IDS } from './fixtures';
 
 // The MSW fake backend must honour the documented rules, so screens built against it behave
@@ -116,16 +116,39 @@ describe('mock portfolio', () => {
     expect(summary.positions.market_value).toBeNull();
   });
 
-  it('OQ-16 returns the cumulative series with the gap as null', async () => {
+  it('OQ-41 returns one point per calendar date; the stored cumulative P&L stays null on gaps', async () => {
     const { items } = await portfolioApi.getPnlSeries({
-      start_date: '2026-10-01',
+      start_date: '2026-10-12',
       end_date: '2026-10-18',
     });
 
     expect(items.map((p) => [p.date, p.cumulative_pnl])).toEqual([
+      ['2026-10-12', null],
+      ['2026-10-13', null],
       ['2026-10-14', '0.0000000000'],
       ['2026-10-15', '-8034.1345282660'],
       ['2026-10-16', null],
+      ['2026-10-17', null],
+      ['2026-10-18', null],
+    ]);
+  });
+
+  it('OQ-41 an unprocessed date reads NOT_PROCESSED with every figure null but the range sum', async () => {
+    const { items } = await portfolioApi.getPnlSeries({
+      start_date: '2026-10-17',
+      end_date: '2026-10-17',
+    });
+
+    expect(items).toEqual([
+      {
+        date: '2026-10-17',
+        status: 'NOT_PROCESSED',
+        published_at: null,
+        pnl_status: null,
+        daily_pnl: null,
+        cumulative_pnl: null,
+        range_cumulative_pnl: '0',
+      },
     ]);
   });
 });
@@ -178,39 +201,67 @@ describe('OQ-21 positions and the P&L series use the same status as the summary'
     });
   });
 
-  it('OQ-16 OQ-31 each P&L point carries its status and processing time', async () => {
+  it('OQ-16 OQ-31 OQ-41 each P&L point carries its status and processing time', async () => {
     const { items } = await portfolioApi.getPnlSeries({
       start_date: '2026-10-14',
-      end_date: '2026-10-16',
+      end_date: '2026-10-17',
     });
 
     expect(items.map((p) => [p.date, p.status, p.published_at])).toEqual([
       ['2026-10-14', 'PROCESSED', '2026-10-16T18:40:00-03:00'],
       ['2026-10-15', 'PROCESSED', '2026-10-16T18:40:00-03:00'],
       ['2026-10-16', 'PROCESSED_WITH_ISSUES', '2026-10-16T18:40:00-03:00'],
+      ['2026-10-17', 'NOT_PROCESSED', null],
     ]);
   });
 
-  it('OQ-31 range_cumulative_pnl sums the daily P&L from the start date, null from the first gap', async () => {
+  it('OQ-41 range_cumulative_pnl sums the daily P&L from the start; a missing or null day adds 0', async () => {
     const fromFifteenth = await portfolioApi.getPnlSeries({
       start_date: '2026-10-15',
-      end_date: '2026-10-16',
+      end_date: '2026-10-18',
     });
-    const fromFourteenth = await portfolioApi.getPnlSeries({
-      start_date: '2026-10-14',
+    const fromTwelfth = await portfolioApi.getPnlSeries({
+      start_date: '2026-10-12',
       end_date: '2026-10-16',
     });
 
     expect(fromFifteenth.items.map((p) => [p.date, p.range_cumulative_pnl])).toEqual([
       ['2026-10-15', '-8034.1345282660'],
-      ['2026-10-16', null],
+      // 16/10 is processed with a null daily P&L; 17 and 18/10 are not processed.
+      ['2026-10-16', '-8034.1345282660'],
+      ['2026-10-17', '-8034.1345282660'],
+      ['2026-10-18', '-8034.1345282660'],
     ]);
-    expect(fromFourteenth.items.map((p) => [p.date, p.range_cumulative_pnl])).toEqual([
+    expect(fromTwelfth.items.map((p) => [p.date, p.range_cumulative_pnl])).toEqual([
+      ['2026-10-12', '0'],
+      ['2026-10-13', '0'],
       ['2026-10-14', '0.0000000000'],
       ['2026-10-15', '-8034.1345282660'],
-      ['2026-10-16', null],
+      ['2026-10-16', '-8034.1345282660'],
     ]);
   });
+
+  it.each(['FAILED', 'RUNNING'] as const)(
+    'OQ-41 item 4 a %s day shows its status with no P&L and adds 0, even over an older published row',
+    async (status) => {
+      setStatus('2026-10-15', 'POSITIONS', status);
+
+      const { items } = await portfolioApi.getPnlSeries({
+        start_date: '2026-10-14',
+        end_date: '2026-10-15',
+      });
+
+      expect(items[1]).toEqual({
+        date: '2026-10-15',
+        status,
+        published_at: '2026-10-16T18:40:00-03:00',
+        pnl_status: null,
+        daily_pnl: null,
+        cumulative_pnl: null,
+        range_cumulative_pnl: '0.0000000000',
+      });
+    },
+  );
 });
 
 describe('OQ-35 Portfolio reads dated after today', () => {

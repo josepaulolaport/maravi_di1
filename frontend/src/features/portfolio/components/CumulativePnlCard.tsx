@@ -10,7 +10,7 @@ import { ErrorState } from '@/shared/ui/ErrorState';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
 
 import { useCumulativePnl } from '../hooks/usePortfolio';
-import { type ChartPoint, hasHistory, toChartData } from './chartData';
+import { type ChartPoint, hasIncompleteDay, incompleteReason, toChartData } from './chartData';
 
 interface CumulativePnlCardProps {
   date: IsoDate;
@@ -26,24 +26,33 @@ interface TooltipContentProps {
   payload?: readonly { payload?: unknown }[];
 }
 
-/** Tooltip text formatted from the exact decimal string, never from the plotted float. */
-function ChartTooltip({ active, payload }: TooltipContentProps) {
+/**
+ * Tooltip text formatted from the exact decimal string, never from the plotted float, with the
+ * reason a day adds nothing when it is not complete (OQ-41 item 5).
+ */
+export function ChartTooltip({ active, payload }: TooltipContentProps) {
   const point = payload?.[0]?.payload as ChartPoint | undefined;
-  if (!active || !point || point.cumulativeText === null) return null;
+  if (!active || !point) return null;
+  const reason = incompleteReason(point);
   return (
     <Paper p="xs" shadow="sm">
       <Text size="xs" c="dimmed">
         {formatDate(point.date)}
       </Text>
       <SignedMoney value={point.cumulativeText} size="sm" fw={500} />
+      {reason !== null && (
+        <Text size="xs" c="dimmed">
+          {reason}
+        </Text>
+      )}
     </Paper>
   );
 }
 
 /**
- * Compact portfolio-level cumulative P&L, drawn only where the history is complete (§11.4).
- * The user picks where the chart starts; it always ends on the selected date, so the line
- * ends at the headline figure of the same publication.
+ * Compact portfolio-level cumulative P&L (§11.4): one point per calendar day of the period
+ * (OQ-41). The user picks where the chart starts; it always ends on the selected date, so the
+ * line ends at the headline figure of the same publication.
  */
 export function CumulativePnlCard({
   date,
@@ -52,7 +61,7 @@ export function CumulativePnlCard({
   onStartChange,
 }: CumulativePnlCardProps) {
   const series = useCumulativePnl(start, date);
-  const points = series.data ? toChartData(series.data.items, start, date) : [];
+  const points = series.data ? toChartData(series.data.items) : [];
 
   return (
     <Paper p="lg" aria-label="P&L acumulado" role="region">
@@ -91,14 +100,13 @@ export function CumulativePnlCard({
         />
       )}
       {series.isSuccess &&
-        (hasHistory(points) ? (
+        (points.length > 0 ? (
           <LineChart
             h={180}
             data={points}
             dataKey="label"
             series={[{ name: 'cumulative', label: 'P&L acumulado', color: 'maravi.6' }]}
             curveType="linear"
-            connectNulls={false}
             withLegend={false}
             gridAxis="y"
             valueFormatter={(value) => formatSignedMoney(String(value))}
@@ -111,9 +119,14 @@ export function CumulativePnlCard({
           </Text>
         ))}
       <Text size="xs" c="dimmed" mt="xs">
-        P&L somado desde o início escolhido, somente com dias processados e completos. A partir de
-        uma lacuna, o acumulado do período fica indisponível.
+        P&L diário somado desde o início escolhido.
       </Text>
+      {series.isSuccess && hasIncompleteDay(points) && (
+        <Text size="xs" c="dimmed">
+          Há dias incompletos no período (não processados, com erro, em processamento ou sem P&L
+          diário): eles somam zero ao acumulado.
+        </Text>
+      )}
     </Paper>
   );
 }

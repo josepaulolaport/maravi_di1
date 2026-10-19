@@ -1,84 +1,91 @@
 import type { PnlPoint } from '@/api/contract';
 
-import { hasHistory, toChartData } from './chartData';
+import { hasIncompleteDay, incompleteReason, toChartData } from './chartData';
 
-/** A published point whose range sum is `range`; its daily and since-inception figures differ. */
-const point = (date: string, range: string | null, extra: Partial<PnlPoint> = {}): PnlPoint => ({
+/** A processed point whose range sum is `range`; its daily and since-inception figures differ. */
+const point = (date: string, range: string, extra: Partial<PnlPoint> = {}): PnlPoint => ({
   date,
-  daily_pnl: range,
+  daily_pnl: '10.00',
   cumulative_pnl: '999999.99',
   range_cumulative_pnl: range,
-  pnl_status: range === null ? 'MISSING' : 'COMPLETE',
+  pnl_status: 'COMPLETE',
   status: 'PROCESSED',
   published_at: '2026-10-16T18:40:00-03:00',
   ...extra,
 });
 
-describe('toChartData (§11.4, OQ-16, OQ-31)', () => {
+/** A day that is not processed (OQ-41 item 2): only the range sum, carried flat. */
+const unprocessed = (date: string, range: string): PnlPoint => ({
+  date,
+  daily_pnl: null,
+  cumulative_pnl: null,
+  range_cumulative_pnl: range,
+  pnl_status: null,
+  status: 'NOT_PROCESSED',
+  published_at: null,
+});
+
+describe('toChartData (§11.4, OQ-16, OQ-31, OQ-41)', () => {
   it('OQ-31 draws the range sum, never the since-inception cumulative', () => {
-    const points = toChartData(
-      [point('2026-10-15', '-8034.1345282660')],
-      '2026-10-15',
-      '2026-10-15',
-    );
+    const points = toChartData([point('2026-10-15', '-8034.1345282660')]);
 
     expect(points.map((p) => [p.cumulative, p.cumulativeText])).toEqual([
       [-8034.134528266, '-8034.1345282660'],
     ]);
   });
 
-  it('draws every day with a range sum and leaves every other calendar day as a gap', () => {
+  it('OQ-41 draws every calendar day the API returns, with no gap and no trim', () => {
     const items = [
+      unprocessed('2026-10-13', '0'),
       point('2026-10-14', '0'),
       point('2026-10-15', '-8034.1345282660'),
-      point('2026-10-16', null),
-      point('2026-10-17', null, { daily_pnl: '500.00' }),
+      point('2026-10-16', '-8034.1345282660', {
+        status: 'PROCESSED_WITH_ISSUES',
+        daily_pnl: null,
+        pnl_status: 'MISSING',
+      }),
+      unprocessed('2026-10-17', '-8034.1345282660'),
     ];
 
-    const points = toChartData(items, '2026-10-13', '2026-10-18');
+    const points = toChartData(items);
 
-    // 13/10 comes before the first published day, so the chart starts on 14/10.
     expect(points.map((p) => [p.label, p.cumulative])).toEqual([
+      ['13/10', 0],
       ['14/10', 0],
       ['15/10', -8034.134528266],
-      ['16/10', null], // incomplete
-      ['17/10', null], // after the first gap the range sum stays unavailable
-      ['18/10', null], // not published
+      ['16/10', -8034.134528266],
+      ['17/10', -8034.134528266],
     ]);
   });
 
-  it('OQ-23 draws a complete day whose positions read Processado com pendências', () => {
-    const points = toChartData(
-      [point('2026-10-14', '0', { status: 'PROCESSED_WITH_ISSUES' })],
-      '2026-10-14',
-      '2026-10-14',
-    );
+  it('OQ-41 item 5 gives the reason a day adds nothing: its status, or no daily P&L', () => {
+    const points = toChartData([
+      unprocessed('2026-10-13', '0'),
+      point('2026-10-14', '0', { status: 'FAILED', daily_pnl: null, pnl_status: null }),
+      point('2026-10-15', '0', { status: 'RUNNING', daily_pnl: null, pnl_status: null }),
+      point('2026-10-16', '0', { daily_pnl: null, pnl_status: 'MISSING' }),
+      point('2026-10-17', '10.00', { status: 'PROCESSED_WITH_ISSUES' }),
+    ]);
 
-    expect(points.map((p) => p.cumulative)).toEqual([0]);
-  });
-
-  it('§11.4 starts at the first published day, so a very early start costs nothing', () => {
-    const items = [point('2026-10-14', '0'), point('2026-10-15', '-8034.1345282660')];
-
-    const points = toChartData(items, '0001-01-01', '2026-10-16');
-
-    expect(points.map((p) => [p.label, p.cumulative])).toEqual([
-      ['14/10', 0],
-      ['15/10', -8034.134528266],
-      ['16/10', null], // not published
+    expect(points.map(incompleteReason)).toEqual([
+      'Não processado',
+      'Erro',
+      'Processando',
+      'P&L diário indisponível',
+      null,
     ]);
   });
 
-  it('§11.4 draws nothing when nothing in the range was published', () => {
-    expect(toChartData([], '0001-01-01', '2026-10-16')).toEqual([]);
+  it('OQ-41 item 5 reports whether any day of the range is not complete', () => {
+    expect(hasIncompleteDay(toChartData([point('2026-10-14', '10.00')]))).toBe(false);
+    expect(
+      hasIncompleteDay(
+        toChartData([point('2026-10-14', '10.00'), unprocessed('2026-10-15', '10.00')]),
+      ),
+    ).toBe(true);
   });
 
-  it('reports when there is no complete history to draw', () => {
-    expect(hasHistory(toChartData([point('2026-10-16', null)], '2026-10-16', '2026-10-16'))).toBe(
-      false,
-    );
-    expect(hasHistory(toChartData([point('2026-10-14', '0')], '2026-10-14', '2026-10-14'))).toBe(
-      true,
-    );
+  it('§11.4 an empty range draws nothing', () => {
+    expect(toChartData([])).toEqual([]);
   });
 });

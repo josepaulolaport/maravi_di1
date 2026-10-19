@@ -1,42 +1,50 @@
-import type { Decimal, IsoDate, PnlPoint } from '@/api/contract';
-import { addDays, formatDate } from '@/shared/format';
+import type { DateStatus, Decimal, IsoDate, PnlPoint } from '@/api/contract';
+import { formatDate } from '@/shared/format';
+import { DATE_STATUS } from '@/shared/ui/dateStatus';
 
 export interface ChartPoint {
   date: IsoDate;
   label: string;
   /** Plotting coordinate only; every figure shown as text is formatted from the string. */
-  cumulative: number | null;
+  cumulative: number;
   /** The exact published value, for the tooltip. */
-  cumulativeText: Decimal | null;
+  cumulativeText: Decimal;
+  /** The day's positions status (OQ-41 item 4). */
+  status: DateStatus;
+  /** The day's own daily P&L; null when it is not available. */
+  daily: Decimal | null;
 }
 
 /**
- * One point per calendar day from the first published day in [start, end] to `end`. The line
- * is the backend's `range_cumulative_pnl`, the daily P&L summed from the chosen start (OQ-31
- * item 8): the browser only draws it. A day without that sum (no published day, or a missing
- * daily P&L from there on) is `null`, which breaks the line, so a gap is never bridged and
- * nothing is interpolated. Days before the first publication would all be gaps, so they are
- * left out: the work is bounded by the published history, however early `start` is.
+ * One point per calendar day, as the API returns them (OQ-41 item 2). The line is the
+ * backend's `range_cumulative_pnl`, the daily P&L summed from the chosen start (OQ-31 item 8),
+ * which is never null: a day that is not complete adds 0 there, so the line never breaks. The
+ * browser only draws it: nothing is summed, filtered or interpolated here.
  */
-export function toChartData(items: PnlPoint[], start: IsoDate, end: IsoDate): ChartPoint[] {
-  const byDate = new Map(items.map((item) => [item.date, item]));
-  const published = items.map((item) => item.date).filter((date) => date >= start && date <= end);
-  if (published.length === 0) return [];
-  const first = published.reduce((a, b) => (b < a ? b : a));
-  const points: ChartPoint[] = [];
-  for (let date = first; date <= end; date = addDays(date, 1)) {
-    const item = byDate.get(date);
-    const value = item?.range_cumulative_pnl ?? null;
-    points.push({
-      date,
-      label: formatDate(date).slice(0, 5),
-      // A chart needs numbers. Converting for the pixel position only is formatting, not
-      // calculation; the exact value stays in the string.
-      cumulative: value === null ? null : Number(value),
-      cumulativeText: value,
-    });
-  }
-  return points;
+export function toChartData(items: PnlPoint[]): ChartPoint[] {
+  return items.map((item) => ({
+    date: item.date,
+    label: formatDate(item.date).slice(0, 5),
+    // A chart needs numbers. Converting for the pixel position only is formatting, not
+    // calculation; the exact value stays in the string.
+    cumulative: Number(item.range_cumulative_pnl),
+    cumulativeText: item.range_cumulative_pnl,
+    status: item.status,
+    daily: item.daily_pnl,
+  }));
 }
 
-export const hasHistory = (points: ChartPoint[]) => points.some((p) => p.cumulative !== null);
+/**
+ * Why a day adds nothing to the line (OQ-41 item 5): its status when it is not processed
+ * ("Não processado", "Erro", "Processando"), or "P&L diário indisponível" for a processed day
+ * whose daily P&L is null. Null for a complete day.
+ */
+export function incompleteReason(point: ChartPoint): string | null {
+  const processed = point.status === 'PROCESSED' || point.status === 'PROCESSED_WITH_ISSUES';
+  if (!processed) return DATE_STATUS[point.status].label;
+  return point.daily === null ? 'P&L diário indisponível' : null;
+}
+
+/** Whether any day of the range adds 0 because it is not complete (OQ-41 item 5). */
+export const hasIncompleteDay = (points: ChartPoint[]) =>
+  points.some((point) => incompleteReason(point) !== null);
