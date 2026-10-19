@@ -25,10 +25,11 @@ class PriceSource(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ReferencePriceRecord:
-    """One revision of a reference price (schema ``prices.reference_prices``).
+    """The reference price of one asset, date and source (schema ``prices.reference_prices``).
 
-    ``id`` identifies the exact revision used, for traceability (``position_metrics``
-    ``reference_price_id``). ``superseded_at`` is ``None`` for the current revision.
+    There is one per (asset, date, source); a correction updates it in place and a removal
+    deletes it (OQ-25). The price a calculation used is traced by the PU and source stored on the
+    published row, not by ``id``.
     """
 
     id: UUID
@@ -38,9 +39,8 @@ class ReferencePriceRecord:
     input_kind: InputKind
     pu: Decimal
     rate: Decimal | None
-    revision: int
     created_at: datetime
-    superseded_at: datetime | None
+    updated_at: datetime
 
 
 class PriceReader(Protocol):
@@ -49,7 +49,7 @@ class PriceReader(Protocol):
     async def get_preferred(
         self, asset_id: UUID, reference_date: date
     ) -> ReferencePriceRecord | None:
-        """The current revision for exactly ``reference_date``, MANUAL before B3; else ``None``."""
+        """The price for exactly ``reference_date``, MANUAL before B3; else ``None``."""
         ...
 
     async def get_preferred_many(

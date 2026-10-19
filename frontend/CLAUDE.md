@@ -65,29 +65,29 @@ frontend/src/
 - **Central de Controle**, with two tabs:
   - **Pendências:** actionable issues only, with "Definir preço". Only the three issue types of spec §10.3; a `FAILED` job is shown in Processamentos, not here (OQ-19).
   - **Processamentos** (OQ-20):
-    - pick a date range and preview exactly [A, B] (days to process), with the warning when the state before it is stale (OQ-11); no "período efetivo";
+    - pick a date range and a scope (Caixa, Posições, Tudo; OQ-21) and preview exactly [A, B] (days to process), with the warning when the chain's status on the day before is not current or is missing (OQ-11, OQ-23); no "período efetivo";
     - queue the job, then follow its progress ("x / y dias") and status;
     - cancel a job, or cancel and replace it;
-    - a cancelled, failed or superseded job says that no day was published, and offers "Solicitar novo processamento" with its full original range;
+    - publication is per date (OQ-23): a cancelled or failed job keeps the dates it committed, and later dates are untouched; it offers "Solicitar novo processamento", prefilled from the failed date, or the first date not reached, to the original end;
     - finished and cancelled jobs stay in the history; no "Motivo" column, no duplicate blocking.
   - No financial KPIs on this screen.
 - **Ativos:**
   - Browse type → class → product → instrument, with API data only (OQ-19).
   - The product page lists contracts with their latest reference observation, always next to its date.
   - The contract page lets you enter, inspect and correct a reference price for a date. **There is no rate ↔ PU calculator** (OQ-19).
-  - The price calendar shows days without an observation as such; it never interpolates. It has a "Fonte" column (Manual/B3), and the row menu offers Corrigir, Remover and Ver revisões.
+  - The price calendar shows days without an observation as such; it never interpolates. It has a "Fonte" column (Manual/B3), and the row menu offers Corrigir and Remover; there are no revisions (OQ-25).
 - **Lançamentos:**
   - The history of trades and cash movements, with an inclusive date range and search. Trades show both PU and rate.
-  - A cash strip: Caixa D0 = published cash on the range's end date, Caixa D−1 = the day before, each with its stale or unprocessed marker (OQ-19).
-  - Drawers for compra, venda, aporte and retirada.
+  - A cash strip: Caixa D0 = published cash on the range's end date, Caixa D−1 = the day before, each with the cash chain's status on that date (OQ-19, OQ-23).
+  - One "Novo lançamento" modal for compra, venda, aporte and retirada; one entry list for trades and cash movements (OQ-24).
   - Delete one or many entries, with confirmation. No editing.
   - Instrument type and entry type are distinct.
 - **Carteira:**
   - One date, showing published data only.
   - KPIs: Saldo em caixa, AUM/Patrimônio, P&L diário, P&L de posições, P&L de operações.
-  - A compact cumulative P&L chart, shown only where the history is complete.
+  - A compact cumulative P&L chart, shown only where the history is complete. It always ends on the selected date; the user picks only its start, which must be before that date (default: the 30 days ending on the date), kept in the URL as `?pnl_start=` and ignored when invalid (OQ-27).
   - The positions table, with the columns of spec §11.4.
-  - Stale and incomplete markers, with links to Pendências and Processamentos.
+  - Only two data-status badges, Caixa and Posições, each showing that chain's status on the date (OQ-23), with links to Pendências and Processamentos; no badge per KPI and no stale or incomplete notice cards.
   - Cash is not a position row. No realized or unrealized P&L.
 
 ## Rules
@@ -95,8 +95,8 @@ frontend/src/
 - **The backend is the only calculator.** The browser never computes PU, rate, P&L, cash or averages. Forms take PU **or** rate (a toggle and one input); there is no preview for now, and the complementary value appears once the entry is saved (OQ-19). A future preview would call the pricing endpoint.
 - **Decimals are strings end to end.** Format them with `Intl.NumberFormat('pt-BR', …)` from the string. Never use `parseFloat` or `Math.round` on money.
 - **`null` means unavailable.** Show it as unavailable ("—"), never as `0`.
-- **Distinguish the states:** valid, missing/incomplete, stale, unprocessed and `COMPLETED_WITH_ISSUES` (plan §6).
-- **Job statuses** are shown in Portuguese (spec §10.3, OQ-20): QUEUED Na fila, DISPATCHED Enviado, RUNNING Processando, CANCELLING Cancelando, CANCELLED Cancelado, COMPLETED Concluído, COMPLETED_WITH_ISSUES Concluído com pendências, FAILED Falhou, SUPERSEDED Obsoleto. There is no "Bloqueado".
+- **Distinguish the states:** each date has one status per chain (OQ-23): Atualizado, Atualizado com pendências, Desatualizado, Processando, Erro, Não processado; missing values are `null`, never zero.
+- **Job statuses** are shown in Portuguese (spec §10.3, OQ-20): QUEUED Na fila, DISPATCHED Enviado, RUNNING Processando, CANCELLING Cancelando, CANCELLED Cancelado, COMPLETED Concluído, COMPLETED_WITH_ISSUES Concluído com pendências, FAILED Falhou. There is no "Bloqueado" and, since OQ-23, no Obsoleto (SUPERSEDED).
 - **Polling:** status is polled only while a job is queued or running.
 - **All visible text is pt-BR**, with Brazilian number and date formats. Identifiers are English.
 - **Mocks:** MSW handlers follow the API contracts in `docs/interfaces.md`. When a contract is wrong, raise it to the integrator; do not freeze a wrong API to keep the mocks (spec §12).

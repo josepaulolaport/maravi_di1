@@ -10,6 +10,7 @@ import { KpiGrid } from './components/KpiGrid';
 import { PositionsTable } from './components/PositionsTable';
 import { NotProcessedNotice, PublishedNotices } from './components/StatusNotices';
 import {
+  useChartStart,
   useEvaluationDate,
   usePortfolioPositions,
   usePortfolioSummary,
@@ -21,6 +22,9 @@ import {
  */
 export function PortfolioPage() {
   const [date, setDate, today] = useEvaluationDate();
+  // Read here, not in the chart card, so a start the date has passed is dropped from the URL
+  // even on a date whose card is not shown (not processed).
+  const chartStart = useChartStart(date);
   const summary = usePortfolioSummary(date);
   const positions = usePortfolioPositions(date);
 
@@ -39,18 +43,19 @@ export function PortfolioPage() {
           w={220}
         />
       </Group>
-      <PortfolioBody date={date} summary={summary} positions={positions} />
+      <PortfolioBody chartStart={chartStart} date={date} summary={summary} positions={positions} />
     </Stack>
   );
 }
 
 interface BodyProps {
   date: IsoDate;
+  chartStart: ReturnType<typeof useChartStart>;
   summary: ReturnType<typeof usePortfolioSummary>;
   positions: ReturnType<typeof usePortfolioPositions>;
 }
 
-function PortfolioBody({ date, summary, positions }: BodyProps) {
+function PortfolioBody({ date, chartStart, summary, positions }: BodyProps) {
   if (summary.isError || positions.isError) {
     return (
       <ErrorState
@@ -85,7 +90,12 @@ function PortfolioBody({ date, summary, positions }: BodyProps) {
         incomplete={data.valuation_status === 'MISSING' || data.pnl_status === 'MISSING'}
       />
       <KpiGrid kpis={data} />
-      <CumulativePnlCard date={date} cumulative={data.cumulative_pnl} />
+      <CumulativePnlCard
+        date={date}
+        cumulative={data.cumulative_pnl}
+        start={chartStart[0]}
+        onStartChange={chartStart[1]}
+      />
       <PositionsTable rows={positions.data.items} />
     </Stack>
   );

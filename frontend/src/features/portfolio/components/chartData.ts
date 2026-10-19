@@ -11,14 +11,19 @@ export interface ChartPoint {
 }
 
 /**
- * One point per calendar day of [start, end]. A day is drawn only when its cumulative P&L is
- * published, complete and not stale (§11.4, OQ-16); any other day is `null`, which breaks the
- * line, so a gap is never bridged and nothing is interpolated.
+ * One point per calendar day from the first published day in [start, end] to `end`. A day is
+ * drawn only when its cumulative P&L is published, complete and not stale (§11.4, OQ-16); any
+ * other day is `null`, which breaks the line, so a gap is never bridged and nothing is
+ * interpolated. Days before the first publication would all be gaps, so they are left out:
+ * the work is bounded by the published history, however early `start` is.
  */
 export function toChartData(items: PnlPoint[], start: IsoDate, end: IsoDate): ChartPoint[] {
   const byDate = new Map(items.map((item) => [item.date, item]));
+  const published = items.map((item) => item.date).filter((date) => date >= start && date <= end);
+  if (published.length === 0) return [];
+  const first = published.reduce((a, b) => (b < a ? b : a));
   const points: ChartPoint[] = [];
-  for (let date = start; date <= end; date = addDays(date, 1)) {
+  for (let date = first; date <= end; date = addDays(date, 1)) {
     const item = byDate.get(date);
     const valid =
       item !== undefined &&

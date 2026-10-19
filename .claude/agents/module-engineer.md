@@ -13,11 +13,11 @@ You are a senior Python engineer: FastAPI, SQLAlchemy 2 async and PostgreSQL. Yo
 |---|---|---|---|
 | A | `asset` | 1 | type → class → product → instrument; `asset.futures` specs; case-insensitive codes; `InstrumentDescriptor` |
 | B | `pricing` | 1 | pure DI1 DC/365 calculator, PU ↔ rate, input kind |
-| C | `ledger` | 2 | immutable trades and cash movements, soft delete, PU/rate via Pricing, invalidation in the same UoW |
-| D | `prices` | 2 | `PriceService`: MANUAL/B3 observations, revisions, exact-date preferred reads, invalidation in the same UoW |
+| C | `ledger` | 2 | one immutable `ledger.entries` table for trades and cash movements (OQ-24), batch soft delete, PU/rate via Pricing, invalidation in the same UoW |
+| D | `prices` | 2 | `PriceService`: MANUAL/B3 observations, one per asset, date and source, corrected in place or removed (OQ-25), exact-date preferred reads, invalidation in the same UoW |
 | E | `portfolio` | 1 (pure accounting), 3 (persistence and read) | daily accounting engine; `positions`, `position_metrics`, `portfolio_metrics`; `PortfolioQueryService` |
 | F | `pnl` | 1 | pure per-asset attribution and portfolio aggregation, completeness states |
-| G | `processing` | 2 (request API), 4 (worker) | requests, cancellation, invalidator, dispatcher, `PortfolioRangeProcessor`, staging and publication |
+| G | `processing` | 2 (request API), 4 (worker) | requests, cancellation, invalidator, dispatcher, `PortfolioRangeProcessor`, `date_status` and per-date publication |
 
 ## You own
 
@@ -42,7 +42,7 @@ Nothing else. To change anything outside, raise a contract-change request to the
 - **Writes** (C, D) save the fact and call `FinancialResultInvalidator` in the same UoW. They never enqueue processing.
 - **Lane-specific traps:**
   - B, F and E (pure accounting) contain no persistence.
-  - G guarantees exactly one active job, overlapping queued jobs, cooperative cancellation, staging plus atomic publication with revision and claim-token checks, and `SUPERSEDED`.
+  - G guarantees exactly one active job, overlapping queued jobs, cooperative cancellation, one transaction per date with the D−1/D `date_status` row locks and the claim-token check, the predecessor rule, failure and cancellation that leave later dates untouched, and recovery from `progress_date` (OQ-23).
 - **Commits:** follow the `commit` skill, and commit only after the user approves the diff.
 - **When ready:** run `pr-ready`. It runs the `reviewer`, pushes the branch and opens a GitHub PR. Never merge.
 
