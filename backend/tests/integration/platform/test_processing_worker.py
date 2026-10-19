@@ -497,7 +497,8 @@ async def test_a_connection_made_as_the_worker_is_cancelled_is_closed(
 async def test_the_worker_process_stops_cleanly_on_sigterm(
     settings: Settings, broker_settings: BrokerSettings
 ) -> None:
-    """The process registers no consumer until Processing is wired, so it declares nothing."""
+    """The process runs the composition's startup step and its one consumer
+    (``processing.run_request``), then stops on SIGTERM."""
     environment = os.environ | {
         "DATABASE_URL": settings.database_url.get_secret_value(),
         "RABBITMQ_URL": broker_settings.rabbitmq_url.get_secret_value(),
@@ -530,7 +531,8 @@ async def test_the_worker_process_stops_cleanly_on_sigterm(
 
     output = (started + rest).decode()
     assert code == 0, output
-    assert "no consumer is configured" in output
+    assert "worker startup step done" in output
+    assert "worker started (1 consumers)" in output
     assert "worker stopped" in output
     assert broker_settings.rabbitmq_url.get_secret_value() not in output
     assert settings.database_url.get_secret_value() not in output
