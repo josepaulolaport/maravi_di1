@@ -361,3 +361,100 @@ async def test_a_row_that_is_not_an_envelope_does_not_undo_the_batch(
     assert "1.5" not in last_error
     assert also_marked == (after.message_id, True, 1, None)
     assert await _drain(queue) == [before, after]
+
+
+class _ProbesTheLocks:
+    """Publishes for real, but first tries to lock the row from another connection, as a
+    writer or a second relay would: no relay transaction may hold it while the broker
+    answers."""
+
+    def __init__(self, publisher: MessagePublisher, engine: AsyncEngine) -> None:
+        self._publisher = publisher
+        self._engine = engine
+        self.locked: list[bool] = []
+        self.open_transactions: list[int] = []
+
+    async def publish(self, envelope: Envelope) -> None:
+        async with self._engine.begin() as connection:
+            await connection.execute(text("SET LOCAL lock_timeout = '100ms'"))
+            locked = await connection.scalar(
+                text(
+                    "SELECT id FROM platform.outbox_messages"
+                    " WHERE message_id = :m FOR UPDATE NOWAIT"
+                ),
+                {"m": envelope.message_id},
+            )
+            self.locked.append(locked is not None)
+            self.open_transactions.append(
+                await connection.scalar(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity"
+                        " WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                        " AND state LIKE 'idle in transaction%'"
+                    )
+                )
+                or 0
+            )
+        await self._publisher.publish(envelope)
+
+
+async def test_no_transaction_is_open_while_the_broker_answers(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    publisher: MessagePublisher,
+    queue: AbstractQueue,
+) -> None:
+    """The rows are read in one short transaction and marked in another: a broker that takes
+    its time to confirm (up to the publish timeout per row) holds no lock and no
+    transaction open."""
+    written = await _write(session_factory, "test.command", "test.command")
+    probing = _ProbesTheLocks(publisher, engine)
+
+    assert await _relay(session_factory, probing).relay_batch() == 2
+
+    assert probing.locked == [True, True]
+    assert probing.open_transactions == [0, 0]
+    assert await _drain(queue) == written
+    assert await _state(engine) == [(envelope.message_id, True, 1, None) for envelope in written]
+
+
+class _Switch:
+    def __init__(self, current: MessagePublisher) -> None:
+        self.current = current
+
+    async def publish(self, envelope: Envelope) -> None:
+        await self.current.publish(envelope)
+
+
+async def test_an_unavailable_broker_stops_the_batch_at_its_first_row(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    broker: AbstractRobustConnection,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+    publisher: MessagePublisher,
+    queue: AbstractQueue,
+) -> None:
+    """A closed channel fails every row the same way: the relay records the first row's
+    failure and stops, leaving the others untried, and does not pause the row (the broker,
+    not the row, failed), so the next poll tries it again."""
+    written = await _write(session_factory, *["test.command"] * 3)
+    down = await MessagePublisher.create(broker, topology, settings=broker_settings)
+    await down.close()
+    switch = _Switch(down)
+    clock = _Clock()
+    relay = _relay(session_factory, switch, clock=clock)
+
+    assert await relay.relay_batch() == 0
+
+    first, *untried = await _state(engine)
+    assert first[1:3] == (False, 1)
+    assert first[3] is not None
+    assert untried == [(envelope.message_id, False, 0, None) for envelope in written[1:]]
+
+    assert await relay.relay_batch() == 0  # clock unchanged: no pause
+    assert (await _state(engine))[0][2] == 2
+
+    switch.current = publisher  # the broker is back
+    assert await relay.relay_batch() == 3
+    assert await _drain(queue) == written

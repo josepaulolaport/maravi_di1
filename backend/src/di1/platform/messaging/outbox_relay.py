@@ -1,19 +1,28 @@
 """The outbox relay: publishes committed ``platform.outbox_messages`` rows to the broker.
 
-Each batch runs in one transaction. It locks the oldest unpublished rows (``FOR UPDATE SKIP
-LOCKED``, so a second relay never takes the same rows), publishes them one by one and waits
-for each broker confirm before marking the row published. Consequences:
+A batch takes three steps, and no transaction is open while the broker answers:
 
-- a crash after the publish and before the commit leaves the row unpublished, so the next
-  relay sends it again: delivery is at least once, and consumers absorb the duplicate through
-  the inbox (interfaces.md "Transaction boundaries" 7);
-- a failed publish (no confirm, no route, broker down, a row that is not a valid envelope)
-  increments ``publish_attempts`` and keeps the error in ``last_error``; the batch goes on.
-  The broker carries no job order (PostgreSQL does: interfaces.md "Transaction boundaries" 3),
-  so publication order is not kept, and a row that keeps failing never stalls the others;
+1. one short transaction reads the oldest unpublished rows (up to ``batch_size``);
+2. outside any transaction, each row is published and its broker confirm awaited;
+3. a second short transaction marks the confirmed rows published and records the failures.
+
+Consequences:
+
+- a crash after a publish and before step 3 leaves the row unpublished, so the next batch
+  sends it again: delivery is at least once, and consumers absorb the duplicate through the
+  inbox (interfaces.md "Transaction boundaries" 7). Nothing locks the rows between steps 1 and
+  3: one relay runs (compose.yaml), and a second one would at worst publish a row twice, which
+  the inbox absorbs the same way;
+- a failed publish (no confirm, no route, a row that is not a valid envelope) increments
+  ``publish_attempts`` and keeps the error in ``last_error``; the batch goes on. The broker
+  carries no job order (PostgreSQL does: interfaces.md "Transaction boundaries" 3), so
+  publication order is not kept, and a row that keeps failing never stalls the others;
 - a failed row then pauses: it is left out of the batches for ``retry_base_delay_seconds``,
   doubled on each attempt up to ``retry_max_delay_seconds``. The pauses live in this process
-  (no schema column), so a restarted relay retries the row at once.
+  (no schema column), so a restarted relay retries the row at once;
+- an unavailable broker (`BrokerUnavailableError`: a timeout, a closed channel or connection)
+  would fail every row the same way, so the batch stops at the first one. That row's failure
+  is recorded but the row does not pause: the next poll tries it again.
 """
 
 from __future__ import annotations
@@ -23,6 +32,7 @@ import contextlib
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from pydantic import ValidationError
@@ -31,7 +41,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.platform.messaging.envelope import Envelope
-from di1.platform.messaging.publisher import PublishFailedError
+from di1.platform.messaging.publisher import BrokerUnavailableError, PublishFailedError
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +52,7 @@ _MAX_BACKOFF_EXPONENT = 30
 _SELECT_BATCH = text(
     "SELECT id, message_id, message_type, schema_version, payload, created_at, publish_attempts"
     " FROM platform.outbox_messages WHERE published_at IS NULL AND id <> ALL(:paused)"
-    " ORDER BY id LIMIT :batch_size FOR UPDATE SKIP LOCKED"
+    " ORDER BY id LIMIT :batch_size"
 ).bindparams(bindparam("paused", type_=ARRAY(BigInteger)))
 _MARK_PUBLISHED = text(
     "UPDATE platform.outbox_messages"
@@ -53,6 +63,15 @@ _MARK_FAILED = text(
     "UPDATE platform.outbox_messages"
     " SET publish_attempts = publish_attempts + 1, last_error = :last_error WHERE id = :id"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _Failure:
+    row_id: int
+    attempts: int
+    """``publish_attempts`` once this failure is recorded."""
+    error: str
+    broker_unavailable: bool
 
 
 class Publisher(Protocol):
@@ -81,35 +100,50 @@ class OutboxRelay:
 
     async def relay_batch(self) -> int:
         """Publish up to ``batch_size`` rows; return how many were published and marked."""
-        published = 0
-        failed: dict[int, int] = {}
         async with self._uow_factory() as uow:
             rows = (
                 await uow.session.execute(
                     _SELECT_BATCH, {"batch_size": self._batch_size, "paused": self._paused()}
                 )
             ).all()
-            for row in rows:
-                failure = await self._publish(row)
-                if failure is None:
-                    await uow.session.execute(_MARK_PUBLISHED, {"id": row.id})
-                    published += 1
-                    continue
-                logger.warning(
-                    "outbox row %s (message %s) not published: %s",
-                    row.id,
-                    row.message_id,
-                    failure,
-                )
-                await uow.session.execute(
-                    _MARK_FAILED, {"id": row.id, "last_error": failure[:LAST_ERROR_MAX_LENGTH]}
-                )
-                failed[row.id] = row.publish_attempts + 1
             await uow.commit()
+        published: list[int] = []
+        failed: list[_Failure] = []
+        for row in rows:
+            failure = await self._publish(row)
+            if failure is None:
+                published.append(row.id)
+                continue
+            logger.warning(
+                "outbox row %s (message %s) not published: %s",
+                row.id,
+                row.message_id,
+                failure.error,
+            )
+            failed.append(failure)
+            if failure.broker_unavailable:
+                break
+        if published or failed:
+            await self._record(published, failed)
         now = self._clock()
-        for row_id, attempts in failed.items():
-            self._paused_until[row_id] = now + self._retry_delay(attempts)
-        return published
+        for failure in failed:
+            if not failure.broker_unavailable:
+                self._paused_until[failure.row_id] = now + self._retry_delay(failure.attempts)
+        return len(published)
+
+    async def _record(self, published: list[int], failed: list[_Failure]) -> None:
+        async with self._uow_factory() as uow:
+            if published:
+                await uow.session.execute(_MARK_PUBLISHED, [{"id": row_id} for row_id in published])
+            if failed:
+                await uow.session.execute(
+                    _MARK_FAILED,
+                    [
+                        {"id": f.row_id, "last_error": f.error[:LAST_ERROR_MAX_LENGTH]}
+                        for f in failed
+                    ],
+                )
+            await uow.commit()
 
     def _paused(self) -> list[int]:
         """The rows still pausing after a failure; forgets the pauses that are over."""
@@ -124,13 +158,20 @@ class OutboxRelay:
         delay: float = self._retry_base_delay * 2**exponent
         return min(delay, self._retry_max_delay)
 
-    async def _publish(self, row: Row[Any]) -> str | None:
+    async def _publish(self, row: Row[Any]) -> _Failure | None:
         """Publish one row; return why it failed, or `None` once the broker confirmed it.
 
         Any failure is returned rather than raised, so the rows already confirmed in this batch
         are still marked: a row that is not a valid envelope, or an unexpected error, must not
-        roll the batch back and make the relay resend those rows forever.
+        make the relay resend those rows forever.
         """
+        error = await self._publish_envelope(row)
+        if error is None:
+            return None
+        message, broker_unavailable = error
+        return _Failure(row.id, row.publish_attempts + 1, message, broker_unavailable)
+
+    async def _publish_envelope(self, row: Row[Any]) -> tuple[str, bool] | None:
         try:
             envelope = Envelope(
                 message_id=row.message_id,
@@ -140,14 +181,14 @@ class OutboxRelay:
                 payload=row.payload,
             )
         except ValidationError as error:
-            return f"not a valid envelope: {error.errors(include_input=False)}"
+            return f"not a valid envelope: {error.errors(include_input=False)}", False
         try:
             await self._publisher.publish(envelope)
         except PublishFailedError as error:
-            return str(error)
+            return str(error), isinstance(error, BrokerUnavailableError)
         except Exception as error:
             logger.exception("unexpected error publishing outbox row %s", row.id)
-            return f"{type(error).__name__}: {error}"
+            return f"{type(error).__name__}: {error}", False
         return None
 
     async def run(self, stop: asyncio.Event, *, poll_interval_seconds: float) -> None:
