@@ -104,6 +104,7 @@ Uma compra/venda inclui contrato, direção, quantidade, data/hora efetiva e PU 
 
 - **Data e hora são obrigatórias** (OQ-13, OQ-24): hora em horário local de São Paulo; o formulário sugere a hora atual.
 - **Datas aceitas** (OQ-7, OQ-14): qualquer data corrida, inclusive fins de semana e feriados; nada datado **após hoje** (America/Sao_Paulo) é aceito, para operações, movimentações e preços. Vencimentos são isentos.
+- Um pedido de processamento, um cancelar-e-substituir ou uma pré-visualização cujo intervalo termina **após hoje** é recusado com 422 `FUTURE_DATE` (OQ-29).
 - **Vencimento** (OQ-1): uma operação pode ser datada até a data de vencimento, inclusive; nessa data (dias corridos = 0) o PU é digitado e a taxa é armazenada como `0`. Operações datadas após o vencimento são rejeitadas.
 
 - Cada operação é preservada individualmente, mesmo quando várias operações atingem o mesmo contrato no mesmo dia.
@@ -251,7 +252,7 @@ O usuário acessa **Central de Controle → Processamentos**, escolhe intervalo 
 
 - Podem existir **múltiplos pedidos enfileirados**, inclusive com intervalos sobrepostos.
 - **Somente um pedido é executado por vez** para a carteira única.
-- O usuário pode cancelar pedidos **na fila** imediatamente.
+- O usuário pode cancelar pedidos **na fila** imediatamente. Um pedido **enviado** (`DISPATCHED`) passa a `CANCELLING` e o worker o encerra `CANCELLED` ao reivindicá-lo, sem processar nenhuma data; cancelar um pedido já em `CANCELLING`, ou já terminado, é recusado (409 `JOB_NOT_CANCELLABLE`) (OQ-29).
 - Para pedido **em execução**, cancelar sinaliza interrupção; o worker verifica o sinal entre datas: a data em curso é concluída e publicada, as datas seguintes não são tocadas e o pedido termina `CANCELLED`. Um cancelamento que chega durante a última data deixa o pedido terminar `COMPLETED`, ou `COMPLETED_WITH_ISSUES` se alguma data gravada tem pendências (OQ-23, OQ-26).
 - O usuário pode registrar nova operação ou corrigir preço, enfileirar um novo intervalo e cancelar o job anterior. A UI oferece **Cancelar e criar novo processamento**, que faz os dois pedidos de forma coordenada (OQ-20).
 - A fila durável e os estados de jobs pertencem ao **PostgreSQL**. RabbitMQ transporta comandos de execução; não é a fonte de verdade sobre a ordem dos jobs.
@@ -266,7 +267,7 @@ Um processamento (pedido) tem **oito** status (OQ-23); não existe `SUPERSEDED` 
 - `QUEUED`: na fila.
 - `DISPATCHED`: enviado para o worker, ainda não executando.
 - `RUNNING`: em processamento.
-- `CANCELLING`: cancelamento sinalizado.
+- `CANCELLING`: cancelamento sinalizado (pedido enviado ou em execução, OQ-29).
 - `CANCELLED`: cancelado; as datas já concluídas continuam publicadas e as seguintes não são tocadas.
 - `COMPLETED`: todas as datas do intervalo publicadas como **Atualizado**.
 - `COMPLETED_WITH_ISSUES`: alguma data gravada pelo pedido ficou **Atualizado com pendências** (preço ausente ou contrato vencido com posição aberta) ou **Desatualizado**.
@@ -425,6 +426,7 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - Processamento dia a dia (OQ-23): sem estágio, cada data publicada na sua própria transação; `processing.date_status` guarda o status atual de cada data por cadeia (Atualizado, Atualizado com pendências, Desatualizado, Processando, Erro; sem status = Não processado) e é a única fonte de atualização; gravações marcam Desatualizado as datas com status a partir da sua data; sem marcadores, revisões nem `SUPERSEDED`; falha em D deixa D com Erro e não toca as datas seguintes; cancelamento publica a data em curso; recuperação a partir do último progresso.
 - Lançamento único (OQ-24): `ledger.entries` para operações e movimentações de caixa, hora obrigatória, `seq` comum, valor de caixa com sinal; exclusão lógica sem motivo; exclusão múltipla em uma única transação, com identificador de lote; rotas `/ledger/entries`.
 - AUM sem status (OQ-28): `aum` é apenas o valor (caixa + valor de mercado, `null` se um lado falta); a tela mostra os status das duas cadeias.
+- Intervalo de processamento que termina após hoje é recusado (`FUTURE_DATE`); cancelar pedido enviado o leva a `CANCELLING`, e cancelar pedido em `CANCELLING` ou terminado é recusado (409) (OQ-29).
 - Preços de referência sem revisões (OQ-25): uma observação por instrumento, data e fonte; correção no lugar, remoção apaga; rastreio pelo PU e fonte gravados em `position_metrics`.
 
 ### Aberto — requer decisão específica antes de codificar o comportamento

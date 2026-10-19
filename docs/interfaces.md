@@ -81,7 +81,7 @@ Pure domain calculators (`portfolio/domain/`, frozen dataclasses). Two independe
   - No nested RabbitMQ message per asset or per day.
 - Issue types: `MISSING_REFERENCE_PRICE`, `EXPIRED_OPEN_POSITION`, `STALE_PREDECESSOR`; a `STALE_PREDECESSOR` names its chain (`CASH` or `POSITIONS`, OQ-22).
 - Cash predecessor rule (OQ-22): a CASH or ALL job whose start−1 has no published cash while an active trade or cash movement is dated on or before start−1 publishes nothing and ends `FAILED` with `error_code = CASH_PREDECESSOR_MISSING`; stale cash at start−1 runs and its dates are `STALE`. Checked when the job starts; enqueueing is never refused for it.
-- Cancellation of queued work is immediate. A running cancellation sets `cancel_requested_at`; the worker checks it between dates: the current date commits, later dates are not touched, and the run ends `CANCELLED`. A cancel that arrives during the last date lets the run end `COMPLETED`, or `COMPLETED_WITH_ISSUES` when a date it wrote has issues (OQ-23, OQ-26). Overlapping requests allowed in PostgreSQL, one active global job.
+- Cancellation of queued work is immediate. Cancelling a `DISPATCHED` run moves it to `CANCELLING` and sets `cancel_requested_at`; the worker ends it `CANCELLED` when it claims it, processing no date. Cancelling a `CANCELLING` or finished run answers 409 `JOB_NOT_CANCELLABLE` (OQ-29). A running cancellation sets `cancel_requested_at`; the worker checks it between dates: the current date commits, later dates are not touched, and the run ends `CANCELLED`. A cancel that arrives during the last date lets the run end `COMPLETED`, or `COMPLETED_WITH_ISSUES` when a date it wrote has issues (OQ-23, OQ-26). Overlapping requests allowed in PostgreSQL, one active global job.
 
 ## Transaction boundaries and behavior
 
@@ -131,11 +131,11 @@ Every error response is RFC 9457 `application/problem+json`:
 | Code | Status | Meaning |
 |---|---|---|
 | `VALIDATION_ERROR` | 422 | Malformed or out-of-bounds input (schema CHECK rules, too many decimals) |
-| `FUTURE_DATE` | 422 | An entry or price dated after today (São Paulo) |
+| `FUTURE_DATE` | 422 | An entry or price dated after today (São Paulo), or a processing range (request, cancel-and-replace, preview) ending after today (OQ-29) |
 | `CONTRACT_MATURED` | 422 | A trade or reference price dated after the instrument's maturity |
 | `NOT_FOUND` | 404 | The resource does not exist |
 | `INVALID_RANGE` | 422 | A processing or query range with start after end |
-| `JOB_NOT_CANCELLABLE` | 409 | Cancel requested for a job that is already finished |
+| `JOB_NOT_CANCELLABLE` | 409 | Cancel requested for a job that is already `CANCELLING` or finished (OQ-29) |
 
 ## DI composition
 

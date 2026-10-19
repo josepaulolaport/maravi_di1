@@ -80,7 +80,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 - **History is immutable.** Trades and cash movements are one ledger entry (`ledger.entries`, OQ-24) and are never edited: they are soft-deleted, without a reason, and a multi-delete shares one `deletion_batch_id`, all or nothing.
 - **Dates and validation** (OQ-7, OQ-13, OQ-14):
   - Any calendar date, weekends and holidays included.
-  - Nothing dated after today (America/Sao_Paulo, through an injected clock); maturities are exempt.
+  - Nothing dated after today (America/Sao_Paulo, through an injected clock); maturities are exempt. A processing range ending after today is rejected too (OQ-29).
   - `entry_time` is required for trades and cash movements alike. Same-date order across both: `(entry_date, entry_time, seq)` (OQ-24).
   - Value bounds are only the schema's CHECKs.
 - **Maturity** (OQ-1):
