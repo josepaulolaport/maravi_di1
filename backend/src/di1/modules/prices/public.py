@@ -57,3 +57,17 @@ class PriceReader(Protocol):
     ) -> Mapping[tuple[UUID, date], ReferencePriceRecord]:
         """`get_preferred` for every (asset, date) pair; pairs without a price are absent."""
         ...
+
+
+class LatestPriceReader(Protocol):
+    """Each asset's latest observation, for `Instrument.last_reference` (OQ-48). A narrow
+    contract of its own, so `PriceReader`'s users and fakes are unaffected; the Prices reader
+    implements both."""
+
+    async def get_latest_preferred_many(
+        self, asset_ids: Collection[UUID]
+    ) -> Mapping[UUID, ReferencePriceRecord]:
+        """For each asset, the preferred price (MANUAL before B3) on the latest date that has a
+        price for it; assets without any price are absent. No cap at today is needed: no price is
+        ever dated after today (OQ-14). Shown with its own date, never as today's price (OQ-19)."""
+        ...
