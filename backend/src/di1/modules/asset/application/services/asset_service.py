@@ -11,7 +11,7 @@ route: they are registered by seeding (lane X), through this same service.
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from uuid import UUID
@@ -44,6 +44,7 @@ from di1.modules.asset.domain.rules import (
     validate_product_code,
 )
 from di1.modules.asset.domain.search import matches
+from di1.modules.prices.public import LatestPriceReader, ReferencePriceRecord
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 
@@ -103,8 +104,13 @@ async def _insert[T](insert: Awaitable[T], duplicate: ErrorDetail) -> T:
 
 
 class AssetService:
-    def __init__(self, repository: AssetRepository) -> None:
+    def __init__(
+        self, repository: AssetRepository, latest_prices: LatestPriceReader | None = None
+    ) -> None:
+        """``latest_prices`` serves `last_references`; without it (seeding, writes) no
+        instrument has one."""
         self._repository = repository
+        self._latest_prices = latest_prices
 
     # Reads (Ativos screen, spec §11.2)
 
@@ -131,6 +137,16 @@ class AssetService:
     ) -> list[Instrument]:
         instruments = await self._repository.list_instruments(product_id)
         return [i for i in instruments if matches((i.code,), search)]
+
+    async def last_references(
+        self, instruments: Sequence[Instrument]
+    ) -> Mapping[UUID, ReferencePriceRecord]:
+        """Each instrument's latest preferred reference price, MANUAL before B3, to be shown with
+        its own date (OQ-48, OQ-19 item 5); one read for all of them. Instruments without a price
+        are absent."""
+        if self._latest_prices is None or not instruments:
+            return {}
+        return await self._latest_prices.get_latest_preferred_many([i.id for i in instruments])
 
     async def get_instrument(self, instrument_id: UUID) -> Instrument:
         instrument = await self._repository.get_instrument(instrument_id)

@@ -19,7 +19,7 @@ from di1.modules.asset.domain.model import (
     Product,
 )
 from di1.modules.asset.domain.rules import FuturesTerms
-from di1.modules.prices.public import PriceSource
+from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.shared.decimals import to_plain
 
 
@@ -100,13 +100,22 @@ class ProductOut(BaseModel):
 
 
 class LastReferenceOut(BaseModel):
-    """The instrument's latest reference observation, always shown with its own date (OQ-19
-    item 5). Declared for the contract; not yet filled (see `InstrumentOut`)."""
+    """The instrument's latest preferred reference price, always shown with its own date, never
+    as today's price (OQ-48, OQ-19 item 5)."""
 
     reference_date: date
     pu: str
     rate: str | None
     source: PriceSource
+
+    @classmethod
+    def of(cls, price: ReferencePriceRecord) -> LastReferenceOut:
+        return cls(
+            reference_date=price.reference_date,
+            pu=to_plain(price.pu),
+            rate=None if price.rate is None else to_plain(price.rate),
+            source=price.source,
+        )
 
 
 class InstrumentOut(BaseModel):
@@ -115,19 +124,21 @@ class InstrumentOut(BaseModel):
     product_id: UUID
     product_code: str
     maturity_date: date | None
-    # The latest reference observation needs a Prices read that does not exist yet; until it
-    # does, the contract's field is always null (user, 2026-10-19).
-    last_reference: LastReferenceOut | None = None
+    last_reference: LastReferenceOut | None
     created_at: datetime
 
     @classmethod
-    def of(cls, instrument: Instrument) -> InstrumentOut:
+    def of(
+        cls, instrument: Instrument, last_reference: ReferencePriceRecord | None
+    ) -> InstrumentOut:
+        """``last_reference`` is ``None`` when the instrument has no price (OQ-48)."""
         return cls(
             id=instrument.id,
             code=instrument.code,
             product_id=instrument.product_id,
             product_code=instrument.product_code,
             maturity_date=instrument.maturity_date,
+            last_reference=None if last_reference is None else LastReferenceOut.of(last_reference),
             created_at=instrument.created_at,
         )
 
