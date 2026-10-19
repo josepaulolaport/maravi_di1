@@ -104,8 +104,8 @@ class PortfolioResultsWriter(Protocol):
 
         The assets of ``day.positions``, ``valuation.assets`` and ``asset_pnl`` must be the same
         set, the expected assets of the date; the writer raises ``ValueError`` otherwise.
-        ``valuation.aum`` is not stored: the written AUM is recomputed from the published cash,
-        or null when ``other_chain_processed`` is ``False`` (OQ-38)."""
+        The written AUM is recomputed from the published cash and this market value, or null
+        when ``other_chain_processed`` is ``False`` (OQ-38)."""
         ...
 
     async def write_cash_day(
