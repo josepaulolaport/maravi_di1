@@ -6,8 +6,6 @@ import { resetDb } from '@/api/mocks/db';
 import { MOCK_TODAY } from '@/api/mocks/fixtures';
 import { server } from '@/api/mocks/server';
 
-import { recordMswEvents, reportUnmocked } from './mswTrace';
-
 // The first test of a file also loads its lazy route, which can pass the default 1 s under a
 // busy machine; 3 s keeps `findBy*`/`waitFor` honest without masking real hangs.
 configure({ asyncUtilTimeout: 3_000 });
@@ -41,7 +39,6 @@ window.scrollTo = () => undefined;
 // Every request in a test must be mocked explicitly.
 beforeAll(() => {
   server.listen({ onUnhandledFrame: 'error' });
-  recordMswEvents();
 });
 
 // Tests run on the fixture scenario's day, whatever the real date: the app and the fake
@@ -58,6 +55,5 @@ afterEach(() => {
   window.localStorage.clear();
 });
 afterAll(() => {
-  reportUnmocked();
   server.close();
 });

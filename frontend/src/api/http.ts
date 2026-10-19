@@ -46,7 +46,6 @@ type QueryValue = string | number | boolean | null | undefined;
 export interface RequestOptions {
   query?: Record<string, QueryValue>;
   body?: unknown;
-  signal?: AbortSignal;
 }
 
 export function buildUrl(
@@ -94,8 +93,6 @@ async function toApiError(response: Response): Promise<ApiError> {
 async function request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   const init: RequestInit = { method, headers };
-  // Experiment (CI only fails with it): the AbortSignal is not passed to fetch, to test whether
-  // it lets reads bypass MSW on the GitHub runner. Superseded reads then complete unused.
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(options.body);
@@ -105,7 +102,6 @@ async function request<T>(method: string, path: string, options: RequestOptions 
   try {
     response = await fetch(buildUrl(path, options.query), init);
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw error;
     throw new ApiError(NETWORK_PROBLEM, { cause: error });
   }
 

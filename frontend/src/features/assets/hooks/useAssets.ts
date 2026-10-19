@@ -19,8 +19,7 @@ const assetKeys = {
 export function useProducts(instrumentType: string | undefined, search: string) {
   return useQuery({
     queryKey: assetKeys.products(instrumentType ?? '', search),
-    queryFn: ({ signal }) =>
-      assetsApi.listProducts({ instrument_type: instrumentType ?? '', search }, signal),
+    queryFn: () => assetsApi.listProducts({ instrument_type: instrumentType ?? '', search }),
     enabled: instrumentType !== undefined,
     // While a new search of the same type loads, its previous rows stay on screen; another
     // type shows its own loading state, never the previous type's products.
@@ -32,14 +31,14 @@ export function useProducts(instrumentType: string | undefined, search: string) 
 export function useProduct(productId: string) {
   return useQuery({
     queryKey: assetKeys.product(productId),
-    queryFn: ({ signal }) => assetsApi.getProduct(productId, signal),
+    queryFn: () => assetsApi.getProduct(productId),
   });
 }
 
 export function useInstruments(productId: string, search: string) {
   return useQuery({
     queryKey: assetKeys.instruments(productId, search),
-    queryFn: ({ signal }) => assetsApi.listInstruments({ product_id: productId, search }, signal),
+    queryFn: () => assetsApi.listInstruments({ product_id: productId, search }),
     placeholderData: keepPreviousData,
   });
 }
@@ -47,7 +46,7 @@ export function useInstruments(productId: string, search: string) {
 export function useInstrument(instrumentId: string) {
   return useQuery({
     queryKey: assetKeys.instrument(instrumentId),
-    queryFn: ({ signal }) => assetsApi.getInstrument(instrumentId, signal),
+    queryFn: () => assetsApi.getInstrument(instrumentId),
   });
 }
 

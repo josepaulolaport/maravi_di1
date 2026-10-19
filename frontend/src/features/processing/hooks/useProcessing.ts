@@ -22,7 +22,7 @@ const JOBS_PAGE_SIZE = 20;
 export function useIssues() {
   return useQuery({
     queryKey: processingKeys.issues(),
-    queryFn: ({ signal }) => processingApi.listIssues(signal),
+    queryFn: () => processingApi.listIssues(),
   });
 }
 
@@ -36,11 +36,11 @@ export function useProcessingRequests() {
   const queryClient = useQueryClient();
   const query = useInfiniteQuery({
     queryKey: processingKeys.requests(),
-    queryFn: ({ pageParam, signal }) =>
-      processingApi.listRequests(
-        { limit: JOBS_PAGE_SIZE, ...(pageParam ? { cursor: pageParam } : {}) },
-        signal,
-      ),
+    queryFn: ({ pageParam }) =>
+      processingApi.listRequests({
+        limit: JOBS_PAGE_SIZE,
+        ...(pageParam ? { cursor: pageParam } : {}),
+      }),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next_cursor,
     select: (data) => ({ items: data.pages.flatMap((page) => page.items) }),

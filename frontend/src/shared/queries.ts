@@ -33,7 +33,7 @@ export function useSummary(date: IsoDate) {
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: sharedKeys.summary(date),
-    queryFn: ({ signal }) => portfolioApi.getSummary(date, signal),
+    queryFn: () => portfolioApi.getSummary(date),
     refetchInterval: (q) => (isRunning(q.state.data) ? RUNNING_POLL_MS : false),
   });
   const wasRunning = useRef(false);
@@ -52,7 +52,7 @@ export function useSummary(date: IsoDate) {
 export function useInstrumentTypes() {
   return useQuery({
     queryKey: sharedKeys.instrumentTypes(),
-    queryFn: ({ signal }) => assetsApi.listInstrumentTypes(signal),
+    queryFn: () => assetsApi.listInstrumentTypes(),
   });
 }
 
@@ -60,7 +60,7 @@ export function useInstrumentTypes() {
 export function useAllProducts() {
   return useQuery({
     queryKey: sharedKeys.allProducts(),
-    queryFn: ({ signal }) => assetsApi.listProducts({}, signal),
+    queryFn: () => assetsApi.listProducts({}),
   });
 }
 
@@ -68,6 +68,6 @@ export function useAllProducts() {
 export function useAllInstruments() {
   return useQuery({
     queryKey: sharedKeys.allInstruments(),
-    queryFn: ({ signal }) => assetsApi.listInstruments({}, signal),
+    queryFn: () => assetsApi.listInstruments({}),
   });
 }

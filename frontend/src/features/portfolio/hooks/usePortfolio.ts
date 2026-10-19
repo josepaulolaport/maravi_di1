@@ -21,7 +21,7 @@ const CHART_DAYS = 30;
 export function usePortfolioPositions(date: IsoDate) {
   return useQuery({
     queryKey: portfolioKeys.positions(date),
-    queryFn: ({ signal }) => portfolioApi.getPositions(date, signal),
+    queryFn: () => portfolioApi.getPositions(date),
   });
 }
 
@@ -29,8 +29,7 @@ export function usePortfolioPositions(date: IsoDate) {
 export function useCumulativePnl(start: IsoDate, date: IsoDate) {
   return useQuery({
     queryKey: portfolioKeys.pnl(start, date),
-    queryFn: ({ signal }) =>
-      portfolioApi.getPnlSeries({ start_date: start, end_date: date }, signal),
+    queryFn: () => portfolioApi.getPnlSeries({ start_date: start, end_date: date }),
   });
 }
 

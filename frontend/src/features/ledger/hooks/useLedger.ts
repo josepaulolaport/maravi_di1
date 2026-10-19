@@ -98,18 +98,15 @@ const LEDGER_PAGE_SIZE = 50;
 export function useEntries(start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) {
   return useInfiniteQuery({
     queryKey: ledgerKeys.entries(start, end, search, order),
-    queryFn: ({ pageParam, signal }) =>
-      ledgerApi.listEntries(
-        {
-          start_date: start,
-          end_date: end,
-          ...(search ? { search } : {}),
-          order,
-          limit: LEDGER_PAGE_SIZE,
-          ...(pageParam ? { cursor: pageParam } : {}),
-        },
-        signal,
-      ),
+    queryFn: ({ pageParam }) =>
+      ledgerApi.listEntries({
+        start_date: start,
+        end_date: end,
+        ...(search ? { search } : {}),
+        order,
+        limit: LEDGER_PAGE_SIZE,
+        ...(pageParam ? { cursor: pageParam } : {}),
+      }),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next_cursor,
     select: (data) => ({ items: data.pages.flatMap((page) => page.items) }),
