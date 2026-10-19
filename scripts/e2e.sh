@@ -11,12 +11,23 @@ export DI1_API_PORT="${DI1_E2E_API_PORT:-18000}"
 export DI1_RABBITMQ_MANAGEMENT_PORT="${DI1_E2E_RABBITMQ_MANAGEMENT_PORT:-25672}"
 compose=(docker compose -p di1-e2e)
 
+# A stack left by KEEP_E2E_STACK=1 (or an interrupted run) would carry its data into this run:
+# refuse instead of reusing it, and leave it untouched.
+if [[ -n "$("${compose[@]}" ps -aq)" ]]; then
+  echo "e2e: project di1-e2e already exists; remove it with: docker compose -p di1-e2e down -v" >&2
+  exit 1
+fi
+
 cleanup() {
+  local status=$?
   if [[ "${KEEP_E2E_STACK:-0}" == "1" ]]; then
     echo "e2e: stack di1-e2e left running (KEEP_E2E_STACK=1); remove it with: docker compose -p di1-e2e down -v"
-  else
-    "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  elif ! "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1; then
+    echo "e2e: could not remove stack di1-e2e; remove it with: docker compose -p di1-e2e down -v" >&2
+    # Keep the smoke's own failure status; a passing smoke still fails when cleanup fails.
+    [[ $status -eq 0 ]] && status=1
   fi
+  exit "$status"
 }
 trap cleanup EXIT
 
