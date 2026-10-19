@@ -24,7 +24,7 @@ You are the Architect/Integrator (lane X): a principal engineer who is fluent in
    - `CalculationCompleteness`, `ProcessingRequest`.
 3. **Units and semantics:** freeze the rate units, the timestamp and business-date semantics, the same-day order `(trade_date, trade_time, seq)` (OQ-13), the precision (OQ-3) and the error catalogue (OQ-15).
 4. **Shared plumbing:** with lane H, set up the Unit of Work, the app and worker bootstrap, the error types and the exception mapping.
-5. **Invalidator contract:** fix `ledger_changed(effective_date, *, uow)` and `prices_changed(asset_id, reference_date, *, uow)`, with an in-memory fake that lanes C and D can use.
+5. **Invalidator contract:** fix `trades_changed(effective_date, *, uow)`, `cash_movements_changed(effective_date, *, uow)` and `prices_changed(asset_id, reference_date, *, uow)` (OQ-21), with an in-memory fake that lanes C and D can use.
 6. **Checks:** set up lint, type, test and migration-smoke commands, and the import-boundary tests.
 7. **Gate G0:**
    - the package imports and the app starts;

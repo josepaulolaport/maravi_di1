@@ -39,13 +39,15 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 - Preferred current source order: MANUAL, then B3. Exactly the requested calendar date; no carry-forward. One current observation per (asset, date, source), superseded rows retained. Reference price IDs are returned to consumers for reproducibility. Price writes invalidate valuation/P&L dependencies but not quantities, in the same transaction; never automatically enqueue processing. Future bulk import can call the same PriceService via a separate RabbitMQ adapter.
 
 ### Portfolio
-- `PortfolioAccounting.calculate_day(previous_state, trades, cash_movements, date) -> AccountingDay`
+- Two independent chains (OQ-21), both pure and reading the same Ledger facts:
+  - positions: `PortfolioAccounting.calculate_day(previous_state, trades, date) -> AccountingDay` (quantities, average PU/rate; no cash);
+  - cash: a cash calculator `calculate_day(previous_cash, trades, deposits, withdrawals, date)` giving `cash_balance`, `trades_cash_flow`, `deposits`, `withdrawals` for the day. It reads no positions and no prices.
 - `PortfolioReader.get_previous_valid_accounting_state(before_date) -> AccountingState`
 - `PortfolioReader.get_positions(date) -> list[Position]`
 - `PortfolioQueryService.get_position_table(date) -> PositionTableView`
 - `PortfolioQueryService.get_summary(date) -> PortfolioSummaryView`
-- `PortfolioResultsWriter.stage_day(request_id, AccountingDay, asset_metrics, portfolio_metrics, *, uow)` and `publish_range(request_id, requested_range, *, uow)`. Portfolio owns the `portfolio.staged_*` tables (OQ-8); Processing calls these through `public.py`.
-- Portfolio owns published `positions`, `position_metrics`, `portfolio_metrics` and their staging representations; daily quantities and average costs remain calculable with missing reference prices. AUM = cash + sum signed position market values, nullable when required prices missing. No exposure or `total_equity` fields. Rows exist for D exactly for expected assets: Q[D−1] ≠ 0 or a trade on D, including quantity 0 (OQ-10). The D−1 reference PU is read from D−1's `position_metrics` row (OQ-9). Published read models join documented read surfaces by date and asset; never recombine latest Prices observations with older P&L.
+- `PortfolioResultsWriter` stages per scope: the positions day (`AccountingDay`, asset metrics, portfolio metrics) and the cash day, then `publish_range(request_id, scope, requested_range, *, uow)` publishes the scope's tables and recomputes `aum` for the range from the other chain's published value (OQ-21). Portfolio owns the `portfolio.staged_*` tables (OQ-8); Processing calls these through `public.py`.
+- Portfolio owns published `positions`, `position_metrics`, `portfolio_metrics`, `cash_balances` and their staging representations; daily quantities and average costs remain calculable with missing reference prices. AUM = cash (`cash_balances`) + sum signed position market values (`portfolio_metrics`), `null` when either side is missing, stale when either side is stale. No exposure or `total_equity` fields. Rows exist for D exactly for expected assets: Q[D−1] ≠ 0 or a trade on D, including quantity 0 (OQ-10). The D−1 reference PU is read from D−1's `position_metrics` row (OQ-9). Published read models join documented read surfaces by date and asset; never recombine latest Prices observations with older P&L.
 
 ### PnL
 - `AssetPnLCalculator.calculate(previous_position, day_trades, previous_reference_pu, current_reference_pu) -> AssetPnLResult`
@@ -55,14 +57,14 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 - P&L uses daily Position P&L + Trades P&L attribution; deposits/withdrawals do not enter P&L. Missing required price => incomplete/null P&L, never silently zero or sum just available assets. Cumulative chain unavailable after an unresolved gap.
 
 ### Processing
-- `FinancialResultInvalidator.ledger_changed(effective_date, *, uow)` and `prices_changed(asset_id, reference_date, *, uow)`
-- `ProcessingService.preview_range(start_date, end_date) -> ProcessingPreview` — the range is exactly [start, end] (OQ-11); the preview flags when the state of start−1 is stale or missing.
-- `ProcessingService.enqueue_range(start_date, end_date, *, uow) -> ProcessingRequest`
+- `FinancialResultInvalidator.trades_changed(effective_date, *, uow)` (cash and positions stale from the date), `cash_movements_changed(effective_date, *, uow)` (cash only) and `prices_changed(asset_id, reference_date, *, uow)` (valuation only) (OQ-21). Each bumps the matching revision (`trades_revision`, `cash_movements_revision`, `prices_revision`) and marker.
+- `ProcessingService.preview_range(scope, start_date, end_date) -> ProcessingPreview` — the range is exactly [start, end] (OQ-11); the preview flags when the start−1 state of the scope's chain is stale or missing. `scope` ∈ {CASH, POSITIONS, ALL} (OQ-21).
+- `ProcessingService.enqueue_range(scope, start_date, end_date, *, uow) -> ProcessingRequest`
 - `ProcessingService.request_cancel(request_id, *, uow) -> ProcessingRequest`
-- `ProcessingService.cancel_and_replace(active_id, start_date, end_date, *, uow) -> ProcessingRequest`
+- `ProcessingService.cancel_and_replace(active_id, scope, start_date, end_date, *, uow) -> ProcessingRequest`
 - `ProcessingService.list_requests()`, `get_request(id)`, `get_issues(...)`
 - `ProcessingDispatcher.dispatch_next() -> Optional[request_id]`: transactionally claim singleton `calculation_state` row, set job DISPATCHED, record outbox command.
-- `PortfolioRangeProcessor.run(request_id, claim_token)`: claim/lease (60 s, renewed per day, OQ-5), capture the latest input revisions, process exactly the requested dates (if start−1 is stale or missing, still run, publish with `pnl_status = MISSING` and a `STALE_PREDECESSOR` issue: OQ-11), loop one calendar day at a time, calculate Portfolio accounting, retrieve Prices, calculate PnL, stage results/progress; check cancellation between dates and before publication; publish only with matching input revisions and active fencing token; then finish job. No nested RabbitMQ message per asset or per day.
+- `PortfolioRangeProcessor.run(request_id, claim_token)`: claim/lease (60 s, renewed per day, OQ-5), capture the latest input revisions of its scope, process exactly the requested dates (each chain checks its own start−1; if stale or missing, still run, publish flagged stale — positions with `pnl_status = MISSING` — and a `STALE_PREDECESSOR` issue: OQ-11, OQ-21), loop one calendar day at a time, calculate the scope's chains (cash; or Portfolio accounting, Prices, PnL; or both), stage results/progress; check cancellation between dates and before publication; publish only with matching input revisions and active fencing token; then finish job. No nested RabbitMQ message per asset or per day.
 - Issue types: `MISSING_REFERENCE_PRICE`, `EXPIRED_OPEN_POSITION`, `STALE_PREDECESSOR`.
 - Cancellation of queued work is immediate. Running cancellation sets a request marker; worker stops safely and discards staged data. Overlapping requests allowed in PostgreSQL, one active global job.
 
@@ -73,10 +75,10 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 3. **Dispatch:** dispatcher under row lock selects oldest eligible QUEUED request by (created_at, id), sets singleton active ID and DISPATCHED, saves outbox command in same transaction, COMMIT. Outbox relay publishes with confirms.
 4. **Execute:** worker claims specific dispatched job using claim token and time-bounded lease, starts from latest committed inputs, iterates by calendar date and saves run-scoped staged rows. Processing controls transaction durations; calculators have no DB side effects.
 5. **Cancel:** request cancel flag committed, worker checks between date commits; cancel queued jobs before dispatch; cancelled run's staging is discarded. A crash/timeout lease recovery is explicit.
-6. **Publish:** transaction obtains processing singleton lock, verifies claim token/cancellation and relevant input revisions, atomically upserts published positions and both metrics tables for the requested range, replaces stale dated rows where necessary, updates dirty status carefully, and marks job complete or with issues. On source revision mismatch, discard staging and mark SUPERSEDED. Make outputs visible together.
+6. **Publish:** transaction obtains processing singleton lock, verifies claim token/cancellation and the scope's input revisions (CASH: trades + cash movements; POSITIONS: trades + prices; ALL: all three), atomically upserts the scope's published tables for the requested range and recomputes `aum` there from the other chain's published value, replaces stale dated rows where necessary, updates dirty status carefully, and marks job complete or with issues. On source revision mismatch, discard staging and mark SUPERSEDED. Make outputs visible together.
 7. **Broker semantics:** RabbitMQ delivery at-least-once. Inbox idempotency plus request/status/claim fencing guards duplicate delivery. ACK only after durable state transition. Retries transient only; domain missing prices are `COMPLETED_WITH_ISSUES`, not retries. Relay and dispatcher recover after crashes.
 
-**Dirty marker rule (OQ-12):** after a publish of [A, B] with revisions unchanged since the start, a marker within [A, B] advances to B+1; a marker before A stays; days after B remain stale until processed.
+**Dirty marker rule (OQ-12, OQ-21):** markers are per chain — `cash_dirty_from`, `positions_dirty_from`, `valuation_dirty_from`. After a publish of [A, B] with the scope's revisions unchanged since the start, a marker of that scope within [A, B] advances to B+1 (CASH: cash; POSITIONS: positions and valuation; ALL: all three); a marker before A stays; days after B remain stale until processed.
 
 **Dirty marker caution:** If old published results are retained while stale, Portfolio query responses must include validity metadata. A single `valuation_dirty_from` may overinvalidate; later introduce asset/date-granular dependencies if needed. Clearing markers must account for any still-unprocessed dirty dates and queued work.
 
@@ -96,7 +98,8 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
   - Contract list: per instrument, its latest current reference observation `{date, pu, rate, source}`, or `null`.
   - Reference prices: the source of each observation and the revision history for an (asset, date).
   - Trades: both execution PU and execution rate.
-  - Lançamentos cash strip: `GET /portfolio/summary` for the range end date and the day before, with their stale and unprocessed flags.
+  - Lançamentos cash strip: `GET /portfolio/summary` for the range end date and the day before; the cash comes from `cash_balances`, with the cash chain's own stale and unprocessed flags (OQ-21).
+  - Processing scope: the request form and list carry `scope` (CASH, POSITIONS, ALL; UI labels Caixa, Posições, Tudo), and the summary reports cash freshness separately from positions and valuation (OQ-21).
 - All UI-facing content/labels in pt-BR; schema, internal interfaces, and Python identifiers remain English.
 
 ### Errors (OQ-15)

@@ -50,7 +50,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - Signed quantities and weighted average PU. The average rate is weighted on its own.
   - A partial reduction keeps the average.
   - A trade that crosses zero closes the old position and opens the rest at the trade's PU. The ledger row is never split.
-  - Cash: `cash[D] = cash[D−1] − Σ(signed_qty × execution_PU) + deposits − withdrawals`.
+  - Cash: `cash[D] = cash[D−1] − Σ(signed_qty × execution_PU) + deposits − withdrawals`. Cash and positions are two independent chains, processed and published separately (OQ-21); they meet only in AUM.
   - P&L is never posted to cash.
 - **P&L: compute per asset first, then aggregate.**
   - `position_pnl = Q[D−1] × (PU_D − PU_{D−1})`
@@ -59,7 +59,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - `cumulative = previous + daily`
   - Deposits and withdrawals are never P&L.
   - No realized/unrealized P&L in the default view.
-- **AUM = cash + Σ signed market value** (`financial_total = Q × reference_PU`). There are no exposure fields and no `total_equity`.
+- **AUM = cash + Σ signed market value** (`financial_total = Q × reference_PU`). There are no exposure fields and no `total_equity`. AUM is `null` when either chain is missing and stale when either is stale; whichever scope publishes recomputes it (OQ-21).
 - **Missing price:**
   - Quantity, average cost and cash are still computed.
   - The dependent figures are `null`, never zero.
@@ -68,7 +68,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - The cumulative P&L stays unavailable from the first gap onward.
   - A missing price is not a technical failure: the job ends `COMPLETED_WITH_ISSUES`.
 - **No automatic processing.**
-  - A write saves the fact and marks the dependent results stale **in the same transaction**. Nothing else.
+  - A write saves the fact and marks the dependent results stale **in the same transaction**. Nothing else. A trade makes cash and positions stale; a deposit or withdrawal only cash; a reference price only valuation (OQ-21).
   - Processing runs only when the user requests a date range.
 - **Jobs:**
   - PostgreSQL holds the queue and the job statuses; RabbitMQ only carries dispatch commands.
@@ -85,7 +85,8 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - No automatic settlement. The user closes with a normal trade, at any PU, up to the maturity date inclusive. On the maturity date the PU is typed and the rate is stored as 0.
   - The maturity-day reference price is entered by the user.
   - After maturity the reference PU is 0 by definition, and trades and prices dated after it are rejected. An open position then raises the Pendência "contrato vencido com posição aberta".
-- **Processing ranges** (OQ-11, OQ-12):
+- **Processing ranges** (OQ-11, OQ-12, OQ-21):
+  - A job has a scope: CASH, POSITIONS or ALL. Each scope checks its own A−1, fences its own input revisions and advances only its own markers; ALL publishes both chains at once.
   - A job processes exactly [A, B], with no expansion.
   - If A−1 is stale or missing, the job still publishes; those days read as stale, with `null` P&L and a `STALE_PREDECESSOR` issue.
   - After a publish, a dirty marker within [A, B] advances to B+1.

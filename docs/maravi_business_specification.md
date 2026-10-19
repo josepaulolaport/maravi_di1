@@ -120,8 +120,9 @@ Uma compra/venda inclui contrato, direção, quantidade, data/hora efetiva e PU 
 
 - Estado inicial antes do primeiro lançamento relevante: **caixa zero, posição zero, P&L zero**.
 - Calcula-se **todos os dias corridos** na faixa efetiva do processamento, inclusive fins de semana e feriados.
-- O cálculo do dia usa o estado contábil anterior válido e aplica sequencialmente as operações e movimentações daquele dia.
-- Os resultados de dias anteriores só podem ser reutilizados como pontos de partida quando seu estado contábil está válido diante das revisões atuais.
+- Há **duas cadeias diárias independentes** (OQ-21): a de **caixa** (§7.3) e a de **posições** (§7.2, com avaliação e P&L, §8). Ambas leem os mesmos fatos do Ledger e nunca a saída uma da outra; só se encontram no AUM (§8.2).
+- O cálculo do dia de cada cadeia usa o estado anterior válido **da própria cadeia** e aplica sequencialmente os fatos daquele dia.
+- Os resultados de dias anteriores só podem ser reutilizados como pontos de partida quando o estado da cadeia está válido diante das revisões atuais.
 
 ### 7.2 Posição e custo médio
 
@@ -136,7 +137,7 @@ Uma posição diária tem, por ativo, quantidade assinada de fechamento: positiv
 
 ### 7.3 Caixa simplificado
 
-Sob o modelo simplificado acordado (sem ajustes diários reais de futuros):
+Sob o modelo simplificado acordado (sem ajustes diários reais de futuros), o caixa é uma cadeia própria, **pré-calculada** e publicada em `portfolio.cash_balances` (OQ-21):
 
 ```text
 cash[D] = cash[D-1]
@@ -145,6 +146,7 @@ cash[D] = cash[D-1]
 ```
 
 - `signed_trade_quantity`: compras positivas; vendas negativas.
+- A cadeia de caixa lê operações e movimentações diretamente do Ledger; não depende de posições, custo médio nem preços de referência. Cada dia publica o saldo e seus componentes: fluxo das operações, aportes e retiradas.
 - O caixa de uma compra diminui, o de uma venda aumenta, independentemente do resultado de mercado.
 - **P&L diário de marcação a mercado não é creditado/debitado diretamente ao caixa.**
 - A aplicação **não** afirma reproduzir o fluxo de ajuste e garantias de um contrato futuro DI1 real.
@@ -191,6 +193,8 @@ positions_market_value[D]  = Σ financial_total[a,D]
 aum[D]                     = cash_balance[D] + positions_market_value[D]
 ```
 
+- `cash_balance[D]` vem da cadeia de caixa (`cash_balances`) e `positions_market_value[D]` da cadeia de posições (`portfolio_metrics`) (OQ-21). O AUM é `null` quando qualquer dos lados falta e aparece como desatualizado quando qualquer dos lados está desatualizado. Quem publica qualquer das cadeias recalcula o AUM dos seus dias na mesma transação, com o valor publicado da outra.
+
 - `financial_total` significa **valor de mercado** da posição, **não** valor histórico investido.
 - A quantidade é assinada, então uma posição vendida produz valor de mercado assinado negativo.
 - **AUM**, neste simulador, é definido como saldo de caixa mais valor de mercado líquido das posições. Não incluir `gross_exposure`, `net_exposure` nem `total_equity` como campos adicionais.
@@ -213,13 +217,14 @@ aum[D]                     = cash_balance[D] + positions_market_value[D]
 |---|---|---|
 | `portfolio.positions` | `(asset_id, position_date)` | Quantidade de fechamento assinada |
 | `portfolio.position_metrics` | `(asset_id, metric_date)` | PU/taxa médios de entrada, referência usada, `financial_total`, `position_pnl`, `trades_pnl`, `daily_pnl` e estados de completude |
-| `portfolio.portfolio_metrics` | `metric_date` | Saldo de caixa, valor de mercado total, AUM, P&L de posições, P&L de operações, P&L diário, P&L acumulado e estados de completude |
+| `portfolio.portfolio_metrics` | `metric_date` | Valor de mercado total, AUM, P&L de posições, P&L de operações, P&L diário, P&L acumulado e estados de completude |
+| `portfolio.cash_balances` | `balance_date` | Saldo de caixa do dia e seus componentes: fluxo financeiro das operações, aportes e retiradas (OQ-21) |
 
 - Não persistir uma entidade de negócio `portfolio` nem `portfolio_id`.
 - Não criar simultaneamente tabelas PnL independentes duplicando exatamente os campos de `position_metrics`.
 - O módulo PnL calcula; Portfolio armazena os resultados publicados.
 - O frontend obtém uma **visão consolidada** por ativo/data a partir do Portfolio Query Service, em uma chamada HTTP, com leitura eficiente e controle de consistência de referência.
-- Cálculos parciais de jobs são gravados em **tabelas temporárias de estágio associadas ao pedido**, no schema `portfolio` e de propriedade do módulo Portfolio (OQ-8); somente resultados coerentes são publicados para as três tabelas finais.
+- Cálculos parciais de jobs são gravados em **tabelas temporárias de estágio associadas ao pedido**, no schema `portfolio` e de propriedade do módulo Portfolio (OQ-8); somente resultados coerentes são publicados para as quatro tabelas finais.
 
 ## 10. Processamentos sob solicitação do usuário
 
@@ -227,9 +232,9 @@ aum[D]                     = cash_balance[D] + positions_market_value[D]
 
 **Cadastrar/excluir operação ou adicionar/corrigir preço apenas persiste o fato e invalida as saídas dependentes. Não inicia processamento de carteira nem manda recalcular P&L automaticamente.**
 
-O usuário acessa **Central de Controle → Processamentos**, escolhe intervalo inclusivo de datas e confirma o processamento. **O processamento cobre exatamente o intervalo solicitado [A, B]**; não há expansão automática (OQ-11).
+O usuário acessa **Central de Controle → Processamentos**, escolhe intervalo inclusivo de datas e o **escopo** — **Caixa**, **Posições** ou **Tudo** (OQ-21) — e confirma o processamento. Caixa processa só a cadeia de caixa; Posições, a de posições com avaliação e P&L; Tudo, as duas, publicadas juntas. **O processamento cobre exatamente o intervalo solicitado [A, B]**; não há expansão automática (OQ-11).
 
-- Se o estado de A−1 estiver desatualizado ou ausente, o job ainda executa e publica [A, B]: esses dias aparecem como desatualizados, o P&L fica `null` e uma pendência pede o processamento de um intervalo anterior. Sem lançamentos antes de A, o estado de A−1 é o estado zero, válido.
+- Cada escopo verifica o estado de A−1 da sua própria cadeia. Se ele estiver desatualizado ou ausente, o job ainda executa e publica [A, B]: esses dias aparecem como desatualizados (na cadeia de posições, o P&L fica `null`; na de caixa, o saldo é publicado marcado como desatualizado) e uma pendência pede o processamento de um intervalo anterior. Sem lançamentos antes de A, o estado de A−1 é o estado zero, válido.
 - A pré-visualização avisa quando o estado de A−1 está desatualizado.
 
 ### 10.2 Fila, simultaneidade e cancelamento
@@ -241,7 +246,7 @@ O usuário acessa **Central de Controle → Processamentos**, escolhe intervalo 
 - O usuário pode registrar nova operação ou corrigir preço, enfileirar um novo intervalo e cancelar o job anterior. A UI oferece **Cancelar e criar novo processamento**, que faz os dois pedidos de forma coordenada (OQ-20).
 - A fila durável e os estados de jobs pertencem ao **PostgreSQL**. RabbitMQ transporta comandos de execução; não é a fonte de verdade sobre a ordem dos jobs.
 - O worker processa cronologicamente as datas com chamadas diretas aos módulos (Portfolio, Prices, PnL); não se publica uma mensagem para cada ativo ou dia.
-- Um job calcula com versões dos inputs capturadas ao iniciar e verifica as versões antes de publicar. Se mudanças posteriores tornarem o resultado obsoleto, não pode sobrescrever dados atuais (**SUPERSEDED**).
+- Um job calcula com versões dos inputs capturadas ao iniciar e verifica as versões antes de publicar: Caixa verifica operações e movimentações; Posições, operações e preços; Tudo, as três (OQ-21). Um aporte não torna obsoleto um job de Posições; uma nova operação torna obsoletos os dois. Se mudanças posteriores tornarem o resultado obsoleto, não pode sobrescrever dados atuais (**SUPERSEDED**).
 - Reentrega de mensagens, reinicialização de worker e retomada de lease não podem gerar duas publicações concorrentes.
 
 ### 10.3 Status e pendências
@@ -265,13 +270,13 @@ A lista de **Pendências** exibe problemas acionáveis: ativo, data necessária,
 ### 10.4 Publicação e invalidação
 
 - A saída de cada dia é calculada e armazenada em estágio por `request_id`; o progresso é consultável na UI.
-- Na publicação, verificar cancelamento, revisão dos dados de origem e autorização do worker ativo; inserir/substituir coerentemente `positions`, `position_metrics` e `portfolio_metrics` em **uma operação transacional de publicação**.
+- Na publicação, verificar cancelamento, revisão dos dados de origem e autorização do worker ativo; inserir/substituir coerentemente as tabelas do escopo — `cash_balances` (Caixa); `positions`, `position_metrics` e `portfolio_metrics` (Posições); todas (Tudo) — e recalcular o AUM desses dias em **uma operação transacional de publicação**.
 - Cancelamento ou job obsoleto descarta seu estágio e mantém os resultados anteriores, com indicador de desatualização se necessário.
-- Uma alteração no Ledger invalida estados contábeis da sua data em diante e, consequentemente, resultados dependentes.
+- Uma operação criada ou excluída invalida a cadeia de caixa **e** a de posições da sua data em diante; um aporte ou retirada invalida **somente** a de caixa (OQ-21).
 - Uma alteração em Prices invalida avaliações e P&L dependentes, **sem** alterar quantidade, caixa ou custo médio.
 - Invalidação deve ocorrer na **mesma transação** que salva a alteração original.
 - Novos processamentos são uma decisão do usuário, não um efeito colateral da invalidação.
-- **Marcadores de invalidação** (OQ-12): após publicar [A, B] com as revisões inalteradas desde o início, um marcador dentro de [A, B] avança para B+1; um marcador anterior a A permanece. Dias após B continuam desatualizados até serem processados.
+- **Marcadores de invalidação** (OQ-12, OQ-21): há um por cadeia (`cash_dirty_from`, `positions_dirty_from`) e um de avaliação (`valuation_dirty_from`). Após publicar [A, B] com as revisões inalteradas desde o início, um marcador **do escopo publicado** dentro de [A, B] avança para B+1; um marcador anterior a A permanece. Dias após B continuam desatualizados até serem processados.
 - **Limites operacionais** (OQ-5): sem tamanho máximo de intervalo; jobs mantidos como histórico; estágios apagados ao publicar, cancelar ou ser `SUPERSEDED`; fila FIFO por `(created_at, id)`; lease de 60 s renovado a cada dia processado; todos os valores configuráveis.
 
 ## 11. Telas e experiência do usuário
@@ -283,7 +288,7 @@ Os designs existentes no **Aura Build** são a base visual e devem ser implement
 Duas abas: **Pendências** e **Processamentos**.
 
 - **Pendências:** problemas realmente identificados pela validação/processamento, não uma lista de todos os dias sem cotação. Somente os três tipos de §10.3; falha técnica (`FAILED`) aparece em Processamentos, não como pendência (OQ-19). Ação **Definir preço** conduz à entrada/correção da referência.
-- **Processamentos:** escolher datas, pré-visualizar o intervalo exato [A, B] (dias a processar, com aviso quando o estado anterior está desatualizado; sem "período efetivo" expandido), enfileirar, acompanhar progresso e status, ver erros, cancelar pedidos, cancelar e substituir. Os jobs continuam existindo no histórico após conclusão/cancelamento (OQ-20).
+- **Processamentos:** escolher datas e escopo (Caixa, Posições ou Tudo; OQ-21), pré-visualizar o intervalo exato [A, B] (dias a processar, com aviso quando o estado anterior está desatualizado; sem "período efetivo" expandido), enfileirar, acompanhar progresso e status, ver erros, cancelar pedidos, cancelar e substituir. Os jobs continuam existindo no histórico após conclusão/cancelamento (OQ-20).
   - Os detalhes de um job cancelado, com falha ou obsoleto informam que nenhum dia foi publicado e que os resultados anteriores ficaram inalterados (publicação tudo ou nada, §10.4).
   - Um job cancelado, com falha ou obsoleto oferece **Solicitar novo processamento**, que preenche o formulário com o intervalo original completo.
   - Pedidos sobrepostos ou repetidos continuam permitidos; não há coluna "Motivo".
@@ -304,7 +309,7 @@ Duas abas: **Pendências** e **Processamentos**.
 - Distinguir **tipo de instrumento** de **tipo de lançamento**.
 - Excluir uma operação ou múltiplas com confirmação; **não editar** trades existentes.
 - Exibir data/hora efetiva e valores com formatação brasileira. Cada operação mostra PU **e** taxa de execução: o valor informado e o calculado pelo backend ao salvar (OQ-19).
-- Faixa de caixa (OQ-19): **Caixa D0** é o saldo publicado na data final do período selecionado e **Caixa D−1** o do dia anterior, lidos do resumo da carteira e marcados como desatualizados ou não processados quando for o caso.
+- Faixa de caixa (OQ-19): **Caixa D0** é o saldo publicado na data final do período selecionado e **Caixa D−1** o do dia anterior, lidos do caixa publicado (`cash_balances`, via resumo da carteira) e marcados como desatualizados ou não processados conforme o estado da **cadeia de caixa** (OQ-21).
 
 ### 11.4 Carteira
 
@@ -352,7 +357,7 @@ Devem existir testes de unidade para calculadoras e testes de integração para 
 - Prioridade de preços MANUAL > B3, cada fonte com sua revisão ativa.
 - Ativos classificados por tipo, classe, produto e instrumento; `asset.futures` para especificações compartilhadas.
 - DC/365, processamento em **cada dia corrido**, **sem carregamento implícito** de cotação antiga.
-- Três tabelas finais de carteira: `positions`, `position_metrics`, `portfolio_metrics`.
+- Quatro tabelas finais de carteira: `positions`, `position_metrics`, `portfolio_metrics` e `cash_balances` (OQ-21).
 - `financial_total` é valor de mercado; AUM é caixa + valor de mercado assinado; sem campos de exposição ou `total_equity` redundante.
 - P&L por ativo e depois agregado; aportes/retiradas excluídos do P&L.
 - Mudanças apenas invalidam; processamento da carteira ocorre **sob comando explícito do usuário**.
@@ -376,6 +381,7 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - Erros em problem+json (RFC 9457) com catálogo de códigos (OQ-15).
 - `GET /portfolio/pnl` alimenta o gráfico de P&L acumulado (OQ-16).
 - Lane H é dona de `platform/**` (OQ-17).
+- Caixa e posições são duas cadeias processáveis separadamente (escopos Caixa, Posições e Tudo), com marcadores e revisões próprios; caixa publicado em `cash_balances`; AUM recalculado por quem publica (OQ-21).
 - Arquitetura (usuário, 18/10/2026): `infrastructure/` contém persistência e outros adaptadores de saída; consumidores e handlers RabbitMQ de um módulo ficam em `presentation/messaging/`, a infraestrutura RabbitMQ compartilhada em `platform/messaging/`, e a lógica de processamento em `application/`. O domínio é determinístico e sem I/O nem efeitos colaterais (sem arquivo, rede, banco, mensageria, ambiente ou relógio do sistema); utilitários puros da biblioteca padrão (`datetime`, `Decimal`, `Enum`, `dataclasses`) são permitidos. O domínio não faz logging (que pertence às camadas de aplicação, infraestrutura e apresentação) e comunica falhas por exceções e resultados explícitos; não gera aleatoriedade internamente: um cálculo que precise dela (ex.: Monte Carlo) recebe uma semente explícita ou um gerador injetado.
 
 - Desvios e interpretações do enunciado registrados em §15 (OQ-18).
