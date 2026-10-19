@@ -1,13 +1,20 @@
 import { Alert, Button, Modal, Group, Progress, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 
-import type { ProcessingRequest } from '@/api/contract';
-import { formatDate, formatDateTime } from '@/shared/format';
+import type { ProcessingChain, ProcessingRequest } from '@/api/contract';
+import { addDays, formatDate, formatDateTime } from '@/shared/format';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { SCOPE_LABELS } from '@/shared/processing/scope';
 
 import { formatDays, formatPeriod, shortId } from '../format';
-import { canCancel, canRequestAgain, jobStatusBadge, nextDate, progressOf } from '../jobStatus';
+import {
+  canCancel,
+  failedChainOf,
+  jobStatusBadge,
+  nextDate,
+  progressOf,
+  retryRequests,
+} from '../jobStatus';
 import { Field } from '@/shared/ui/Field';
 import type { JobActions } from './HistoryTable';
 
@@ -22,7 +29,31 @@ function publishedNotice(job: ProcessingRequest): string {
   return `As datas de ${formatPeriod(job.start_date, job.progress_date)} foram publicadas; as seguintes não foram processadas.`;
 }
 
-/** A FAILED job without its message (the contract allows `null`). */
+/**
+ * What each chain of a Tudo run with a failed chain left published (OQ-36 items 1 and 10): the
+ * failed chain stopped the day before its `failed_date`; the other went on to `progress_date`,
+ * the last date the run committed. Null for any other run, which `publishedNotice` covers.
+ */
+function chainNotices(job: ProcessingRequest): string[] | null {
+  const { failed_chain: failed, failed_date: failedDate } = job;
+  if (job.scope !== 'ALL' || failed === null || failedDate === null) return null;
+  return (['CASH', 'POSITIONS'] as const).map((chain: ProcessingChain) => {
+    const last =
+      chain === failed
+        ? failedDate > job.start_date
+          ? addDays(failedDate, -1)
+          : null
+        : job.progress_date;
+    const label = SCOPE_LABELS[chain];
+    if (last === null) return `${label}: nenhuma data foi publicada.`;
+    const published = `${label}: as datas de ${formatPeriod(job.start_date, last)} foram publicadas`;
+    return last >= job.end_date
+      ? `${published}.`
+      : `${published}; as seguintes não foram processadas.`;
+  });
+}
+
+/** A failed job without its message (the contract allows `null`). */
 const FAILED_FALLBACK = 'Falha técnica inesperada.';
 
 interface JobDetailsModalProps extends Omit<JobActions, 'onDetails'> {
@@ -37,6 +68,11 @@ interface JobDetailsModalProps extends Omit<JobActions, 'onDetails'> {
  */
 export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobDetailsModalProps) {
   const progress = job ? progressOf(job) : null;
+  const chain = job ? failedChainOf(job) : null;
+  // Falhou, or a Tudo run that kept a chain's failure when it ended Concluído com pendências or
+  // Cancelado (OQ-36 items 6 and 10).
+  const failure = job !== null && (job.status === 'FAILED' || chain !== null);
+  const perChain = job ? chainNotices(job) : null;
   return (
     <Modal
       opened={job !== null}
@@ -79,9 +115,14 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
               </Progress.Root>
             </Stack>
           )}
-          {job.status === 'FAILED' && (
+          {failure && (
             <>
-              <Field label="Data com erro">{formatDate(nextDate(job))}</Field>
+              <SimpleGrid cols={2}>
+                <Field label="Data com erro">{formatDate(job.failed_date ?? nextDate(job))}</Field>
+                {job.failed_chain !== null && (
+                  <Field label="Cadeia com erro">{SCOPE_LABELS[job.failed_chain]}</Field>
+                )}
+              </SimpleGrid>
               <Alert
                 role="alert"
                 color="red"
@@ -92,11 +133,17 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
               </Alert>
             </>
           )}
-          {canRequestAgain(job.status) && (
-            <Text size="sm" c="dimmed">
-              {publishedNotice(job)}
-            </Text>
-          )}
+          {perChain
+            ? perChain.map((notice) => (
+                <Text key={notice} size="sm" c="dimmed">
+                  {notice}
+                </Text>
+              ))
+            : (job.status === 'CANCELLED' || job.status === 'FAILED') && (
+                <Text size="sm" c="dimmed">
+                  {publishedNotice(job)}
+                </Text>
+              )}
           <Group justify="flex-end" gap="sm">
             {canCancel(job.status) && (
               <>
@@ -110,15 +157,16 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
                 </Button>
               </>
             )}
-            {canRequestAgain(job.status) && (
+            {retryRequests(job).map((retry) => (
               <Button
+                key={retry.label}
                 onClick={() => {
-                  onRequestAgain(job);
+                  onRequestAgain(retry);
                 }}
               >
-                Solicitar novo processamento
+                {retry.label}
               </Button>
-            )}
+            ))}
           </Group>
         </Stack>
       )}

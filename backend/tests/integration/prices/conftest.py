@@ -125,6 +125,13 @@ async def _seed_instruments(engine: AsyncEngine) -> None:
         )
         await connection.execute(
             text(
+                "INSERT INTO asset.futures (product_id, face_value, settlement_method)"
+                " VALUES (:id, 100000, 'CASH')"
+            ),
+            {"id": PRODUCT},
+        )
+        await connection.execute(
+            text(
                 "INSERT INTO asset.instruments (id, product_id, code, maturity_date)"
                 " VALUES (:id, :product, :code, :maturity)"
             ),

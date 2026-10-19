@@ -1,9 +1,8 @@
 import { http, HttpResponse } from 'msw';
 
-import type { Instrument, LastReference, ListResponse, Product } from '../../contract';
+import type { Instrument, ListResponse, Product } from '../../contract';
 import { db, newId } from '../db';
 import { instrumentTypes, products } from '../fixtures';
-import { preferredOf } from './prices';
 import { isIsoDate } from '../dates';
 import {
   fieldError,
@@ -16,27 +15,12 @@ import {
   url,
 } from './support';
 
-function lastReference(assetId: string): LastReference | null {
-  const dates = [
-    ...new Set(
-      db.referencePrices.filter((p) => p.asset_id === assetId).map((p) => p.reference_date),
-    ),
-  ].sort();
-  const latest = dates.at(-1);
-  if (!latest) return null;
-  const preferred = preferredOf(assetId, latest);
-  return preferred
-    ? {
-        reference_date: preferred.reference_date,
-        pu: preferred.pu,
-        rate: preferred.rate,
-        source: preferred.source,
-      }
-    : null;
-}
-
+/**
+ * `last_reference` is always null for now (OQ-33 item 4): it is filled once Prices exposes a
+ * latest-observation read. The UI shows "—".
+ */
 function toInstrument(instrument: (typeof db.instruments)[number]): Instrument {
-  return { ...instrument, last_reference: lastReference(instrument.id) };
+  return { ...instrument, last_reference: null };
 }
 
 function withCount(product: Product): Product {

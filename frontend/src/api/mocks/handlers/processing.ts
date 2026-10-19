@@ -2,6 +2,7 @@ import { http, HttpResponse } from 'msw';
 
 import type {
   FieldError,
+  Issue,
   JobStatus,
   Page,
   PredecessorState,
@@ -47,18 +48,27 @@ export function chainsOf(scope: ProcessingScope): ProcessingChain[] {
 
 const now = () => new Date().toISOString();
 
+const isProcessed = (status: PredecessorState) =>
+  status === 'PROCESSED' || status === 'PROCESSED_WITH_ISSUES';
+
 /**
- * Whether a chain is in its zero state on `date` (OQ-26 item 3): positions, when no trade is
- * dated on or before it; cash, when no entry of either type is.
+ * Whether a chain is in its zero state after `date`, the day before the one processed (OQ-40
+ * item 5): no date up to it has any status for the chain, and no entry of the chain's type is
+ * dated on or before it (positions: a trade; cash: an entry of either type, OQ-26 item 3).
  */
 function inZeroState(date: string, chain: ProcessingChain): boolean {
+  for (const [day, row] of db.dateStatus) {
+    if (day <= date && row[chain] !== null) return false;
+  }
   return !db.entries.some((e) => e.date <= date && (chain === 'CASH' || e.type === 'TRADE'));
 }
 
 /** The day before `start` for one chain (OQ-11, OQ-26): its status, or the zero state. */
 function predecessorState(start: string, chain: ProcessingChain): PredecessorState {
   const predecessor = addDays(start, -1);
-  return inZeroState(predecessor, chain) ? 'ZERO_STATE' : statusOf(predecessor, chain);
+  const status = statusOf(predecessor, chain);
+  if (status !== 'NOT_PROCESSED') return status;
+  return inZeroState(predecessor, chain) ? 'ZERO_STATE' : status;
 }
 
 /** The scenario's results for `date`, valid only while its inputs are unchanged. */
@@ -80,19 +90,67 @@ const nextDate = (job: ProcessingRequest) =>
   job.progress_date === null ? job.start_date : addDays(job.progress_date, 1);
 
 /**
- * Commits date D of a run, for each chain of its scope, in one step (OQ-23 item 4): publishes
- * D's results (their `published_at` is the chain's processing time, OQ-31), replaces D's
- * Pendências (OQ-26 item 5; both issue types are facts of positions) and sets D PROCESSED, or
- * PROCESSED_WITH_ISSUES with a missing price. Throws for a date the fake cannot compute (its
- * inputs changed since the seed). The predecessor was checked when D started.
+ * The chains a run still processes: its scope's, less the one that failed (OQ-36 item 1). A run
+ * whose every chain failed has ended.
  */
-function commitDate(job: ProcessingRequest, date: string): void {
-  const chains = chainsOf(job.scope);
-  const changed = chains.find((chain) => {
+const aliveChains = (job: ProcessingRequest): ProcessingChain[] =>
+  chainsOf(job.scope).filter((chain) => chain !== job.failed_chain);
+
+/**
+ * Records a failure of `chains` on `date` (OQ-36, OQ-40 item 3): each reads Erro on the date
+ * and stops; the run keeps its first failure's code, message, date and chain (POSITIONS when
+ * both fail at once). Returns whether a chain is still alive, so the run goes on.
+ */
+function failChains(
+  job: ProcessingRequest,
+  date: string,
+  chains: ProcessingChain[],
+  error: { code: string; message: string },
+): boolean {
+  const alive = aliveChains(job);
+  for (const chain of chains) setStatus(date, chain, 'FAILED');
+  // The first failure stays; when cash failed earlier on this same date and positions fail now,
+  // the positions error is the one kept (OQ-36 item 5, OQ-40 item 3).
+  const samePositionsDate =
+    job.failed_date === date && job.failed_chain === 'CASH' && chains.includes('POSITIONS');
+  if (job.failed_date === null || samePositionsDate) {
+    Object.assign(job, {
+      error_code: error.code,
+      error_message: error.message,
+      failed_date: date,
+      failed_chain: chains.includes('POSITIONS') ? 'POSITIONS' : chains[0],
+    });
+  }
+  const survivors = alive.filter((chain) => !chains.includes(chain));
+  if (survivors.length === 0) {
+    finish(job, { status: 'FAILED', ...(job.started_at === null ? { started_at: now() } : {}) });
+  }
+  return survivors.length > 0;
+}
+
+/**
+ * Commits date D of a run, for each chain it still processes, in one step (OQ-23 item 4):
+ * publishes D's results (their `published_at` is the chain's processing time, OQ-31), replaces
+ * D's Pendências (OQ-26 item 5; both issue types are facts of positions) and sets D PROCESSED,
+ * or PROCESSED_WITH_ISSUES with a missing price. A chain the fake cannot compute on D (its
+ * inputs changed since the seed) fails there; the others commit D (OQ-36 item 8). Returns
+ * whether a chain is still alive. The predecessor was checked when D started.
+ */
+function commitDate(job: ProcessingRequest, date: string): boolean {
+  const changed = aliveChains(job).filter((chain) => {
     const from = db.changedFrom[chain];
     return from !== null && date >= from;
   });
-  if (changed !== undefined) throw new MockCannotCompute(date);
+  if (
+    changed.length > 0 &&
+    !failChains(job, date, changed, {
+      code: 'MOCK_INPUTS_CHANGED',
+      message: `Backend simulado: ${formatDateBr(date)} depende de lançamentos ou preços alterados e só pode ser recalculado pelo backend real. As datas anteriores continuam publicadas.`,
+    })
+  ) {
+    return false;
+  }
+  const chains = aliveChains(job);
 
   const day = structuredClone(precomputedDay(date));
   const publishedAt = now();
@@ -129,45 +187,47 @@ function commitDate(job: ProcessingRequest, date: string): void {
     setStatus(date, chain, status);
     statuses.push(status);
   }
+  // AUM follows the other chain's status on the date, whichever run wrote it (OQ-38, OQ-40):
+  // with both chains written here, both are processed now.
+  const other = (['CASH', 'POSITIONS'] as const).find((chain) => !chains.includes(chain));
+  db.published.aum.set(
+    date,
+    other === undefined || isProcessed(statusOf(date, other)) ? day.summary.aum : null,
+  );
   db.written.set(job.id, statuses);
   Object.assign(job, { progress_date: date, updated_at: now() });
-}
-
-/** The fake has no engine: a date whose inputs changed since the seed cannot be computed. */
-class MockCannotCompute extends Error {
-  constructor(readonly date: string) {
-    super(date);
-  }
+  return true;
 }
 
 /**
- * Starts date D of a run (OQ-23 item 4, OQ-31 item 4): for each chain of its scope, D−1 must be
- * PROCESSED, PROCESSED_WITH_ISSUES or the chain's zero state. Otherwise nothing is written for
- * D: each failing chain's D reads Erro, the run ends FAILED with that chain's error code
- * (POSITIONS_… when both fail, OQ-31 item 7) and later dates are untouched. The fake checks
- * before marking D RUNNING, so the other chain keeps its status as the backend puts it back.
- * Returns whether D started.
+ * Starts date D of a run (OQ-23 item 4, OQ-31 item 4): for each chain it still processes, D−1
+ * must be PROCESSED, PROCESSED_WITH_ISSUES or the chain's zero state. A failing chain reads Erro
+ * on D and stops (POSITIONS_… when both fail, OQ-36 item 5); on an ALL run the other chain goes
+ * on (OQ-36 items 1 and 8), and the run ends FAILED only when no chain is left. The fake checks
+ * before marking D RUNNING, so a failing chain never reads Processando. Returns whether D
+ * started.
  */
 function startDate(job: ProcessingRequest, date: string): boolean {
-  const chains = chainsOf(job.scope);
-  const failing = chains.filter((chain) => {
-    const before = predecessorState(date, chain);
-    return before !== 'ZERO_STATE' && before !== 'PROCESSED' && before !== 'PROCESSED_WITH_ISSUES';
-  });
-  if (failing.length > 0) {
-    for (const chain of failing) setStatus(date, chain, 'FAILED');
-    finish(job, {
-      status: 'FAILED',
-      ...(job.started_at === null ? { started_at: now() } : {}),
-      error_code: failing.includes('POSITIONS')
+  const failing = aliveChains(job).filter((chain) => !isProcessedOrZero(date, chain));
+  if (
+    failing.length > 0 &&
+    !failChains(job, date, failing, {
+      code: failing.includes('POSITIONS')
         ? 'POSITIONS_PREDECESSOR_MISSING'
         : 'CASH_PREDECESSOR_MISSING',
-      error_message: 'Dia anterior não processado',
-    });
+      message: 'Dia anterior não processado',
+    })
+  ) {
     return false;
   }
-  for (const chain of chains) setStatus(date, chain, 'RUNNING');
+  for (const chain of aliveChains(job)) setStatus(date, chain, 'RUNNING');
   return true;
+}
+
+/** Whether D−1 lets a chain process D (OQ-31 item 4). */
+function isProcessedOrZero(date: string, chain: ProcessingChain): boolean {
+  const before = predecessorState(date, chain);
+  return before === 'ZERO_STATE' || isProcessed(before);
 }
 
 function finish(job: ProcessingRequest, fields: Partial<ProcessingRequest>): void {
@@ -179,8 +239,10 @@ function finish(job: ProcessingRequest, fields: Partial<ProcessingRequest>): voi
  * every status (one active run at a time, §10.2): QUEUED → DISPATCHED → RUNNING, then one date
  * per step, each published as it commits (OQ-23). A cancel is checked between dates: the date
  * being processed commits, later dates are untouched, and the run ends CANCELLED, or as it
- * would have when that date was its last (OQ-26 item 9). A failure at a date sets it FAILED,
- * keeps every earlier date published and ends the run FAILED (OQ-23 item 5).
+ * would have when that date was its last (OQ-26 item 9). A failure at a date sets it FAILED for
+ * the failing chain and keeps every earlier date published (OQ-23 item 5). On an ALL run the
+ * other chain goes on to the end and the run ends COMPLETED_WITH_ISSUES with the first failure,
+ * or CANCELLED keeping it; the run ends FAILED only when every chain failed (OQ-36, OQ-40).
  *
  * The fake cannot recalculate: a date publishes the scenario's precomputed results. A date on
  * or after a write since the seed (in a chain of the run) would get wrong results, so it fails
@@ -200,20 +262,12 @@ function tick(): void {
   }
   if (active?.status === 'RUNNING' || active?.status === 'CANCELLING') {
     const date = nextDate(active);
-    try {
-      commitDate(active, date);
-    } catch (error) {
-      if (!(error instanceof MockCannotCompute)) throw error;
-      for (const chain of chainsOf(active.scope)) setStatus(date, chain, 'FAILED');
-      finish(active, {
-        status: 'FAILED',
-        error_code: 'MOCK_INPUTS_CHANGED',
-        error_message: `Backend simulado: ${formatDateBr(date)} depende de lançamentos ou preços alterados e só pode ser recalculado pelo backend real. As datas anteriores continuam publicadas.`,
-      });
-      return;
-    }
+    if (!commitDate(active, date)) return;
     if (date >= active.end_date) {
-      const issues = (db.written.get(active.id) ?? []).some((s) => WITH_ISSUES.includes(s));
+      // A chain that failed while the other reached the end also leaves issues (OQ-36 item 4).
+      const issues =
+        active.failed_date !== null ||
+        (db.written.get(active.id) ?? []).some((s) => WITH_ISSUES.includes(s));
       finish(active, { status: issues ? 'COMPLETED_WITH_ISSUES' : 'COMPLETED' });
       return;
     }
@@ -242,6 +296,8 @@ function enqueue(start: string, end: string, scope: ProcessingScope): Processing
     progress_date: null,
     error_code: null,
     error_message: null,
+    failed_date: null,
+    failed_chain: null,
     created_at: created,
     updated_at: created,
     dispatched_at: null,
@@ -280,6 +336,23 @@ function requestErrors(start: unknown, end: unknown, scope: unknown): FieldError
     errors.push(fieldError('VALIDATION_ERROR', 'Selecione o escopo do processamento.', 'scope'));
   }
   return errors;
+}
+
+/**
+ * Pendências are deduplicated on read (OQ-37 item 1): a missing price once per (asset, needed
+ * date), an expired open position once per asset, each at its earliest affected date.
+ */
+function deduplicated(issues: Issue[]): Issue[] {
+  const byObligation = new Map<string, Issue>();
+  for (const issue of issues) {
+    const key =
+      issue.issue_type === 'MISSING_REFERENCE_PRICE'
+        ? `${issue.issue_type}|${issue.asset_id ?? ''}|${issue.required_price_date ?? ''}`
+        : `${issue.issue_type}|${issue.asset_id ?? ''}`;
+    const kept = byObligation.get(key);
+    if (!kept || issue.affected_date < kept.affected_date) byObligation.set(key, issue);
+  }
+  return [...byObligation.values()];
 }
 
 export const processingHandlers = [
@@ -344,7 +417,9 @@ export const processingHandlers = [
 
   http.get(url('/processing/issues'), async () => {
     await latency();
-    const items = [...db.issues].sort((a, b) => b.affected_date.localeCompare(a.affected_date));
+    const items = deduplicated(db.issues).sort((a, b) =>
+      b.affected_date.localeCompare(a.affected_date),
+    );
     return HttpResponse.json({ items });
   }),
 ];

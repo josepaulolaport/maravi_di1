@@ -77,8 +77,9 @@ export type CreateLedgerEntryRequest = CreateTradeEntryRequest | CreateCashEntry
 
 /**
  * `POST /ledger/entries/deletions` (lane X, 2026-10-18; a POST, since a DELETE body is not
- * reliably carried by proxies): soft-deletes the entries, whatever their type, in
- * one transaction; an unknown id deletes nothing (§6.1 "operação atômica"). 204.
+ * reliably carried by proxies): deletes the entries for good, whatever their type, in one
+ * transaction (OQ-32). An unknown or already-deleted id is 404 and deletes nothing; a repeated
+ * id counts once; an empty list is 422 on `ids`. 204.
  */
 export interface DeleteLedgerEntriesRequest {
   ids: string[];

@@ -61,6 +61,11 @@ function createDb() {
       summaries: new Map(fixtures.summaries.map((s) => [s.date, structuredClone(s)])),
       positions: new Map(fixtures.positions.map((p) => [p.date, structuredClone(p)])),
       pnl: new Map(fixtures.pnlSeries.map((p) => [p.date, structuredClone(p)])),
+      /**
+       * AUM as the publishing chain wrote it (OQ-38, OQ-40): cash + market value only when the
+       * other chain of that date was PROCESSED or PROCESSED_WITH_ISSUES, null otherwise.
+       */
+      aum: new Map(fixtures.summaries.map((s) => [s.date, s.aum])),
     },
     /** `processing.date_status`: one status per date and chain (OQ-23, OQ-31). */
     dateStatus: seedStatuses(),
