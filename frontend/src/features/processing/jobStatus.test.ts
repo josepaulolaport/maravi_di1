@@ -159,6 +159,26 @@ describe('job status (§10.3, OQ-20)', () => {
     expect(retryRequests(job).map((r) => r.start)).toEqual(['2026-10-16']);
   });
 
+  it('OQ-47 a Falhou run that failed writing its end, every date committed, is asked again in full', () => {
+    // Every date committed, then recording the run's end failed: PROCESSING_ERROR, no date.
+    const job = run({
+      status: 'FAILED',
+      start_date: '2026-10-14',
+      progress_date: '2026-10-18',
+      failed_date: null,
+      error_code: 'PROCESSING_ERROR',
+    });
+
+    expect(retryRequests(job)).toEqual([
+      {
+        label: 'Solicitar novo processamento',
+        start: '2026-10-14',
+        end: '2026-10-18',
+        scope: 'ALL',
+      },
+    ]);
+  });
+
   it('OQ-23 derives the days done and the next date from the range and progress_date', () => {
     const job = {
       start_date: '2026-10-14',

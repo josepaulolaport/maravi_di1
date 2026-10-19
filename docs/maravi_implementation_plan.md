@@ -242,7 +242,7 @@ None. OQ-1 to OQ-47 are answered (`docs/open-questions.md`); a new gap goes thro
 
 ## 12. Progress and remaining work (2026-10-19)
 
-Every lane's code is merged. Decisions OQ-1 to OQ-47 are answered and none is open. OQ-47 records the user's answer to the pre-delivery code review ("all recommended"): robustness fixes, single-sourced rules, dead code removed and one frontend fix land in their own PRs; the rest is known debt, listed in the README ("Known limitations / technical debt").
+Every lane's code is merged. Decisions OQ-1 to OQ-48 are answered and none is open. OQ-47 records the user's answer to the pre-delivery code review ("all recommended"): robustness fixes, single-sourced rules, dead code removed and one frontend fix land in their own PRs; the rest is known debt, listed in the README ("Known limitations / technical debt").
 
 ### Verified on `main` at `bbf7027`
 
@@ -280,6 +280,7 @@ Gates: G0–G5 are met (Gate 4 by `make e2e` on Compose: challenge example, run 
 | Item | State |
 |---|---|
 | Code-review follow-ups (OQ-47): robustness fixes (inbox retention among them), single-sourced rules, dead code, one frontend fix | in flight, in their own PRs |
+| Lane I UI decisions (OQ-48): `Instrument.last_reference` filled through `prices.public.LatestPriceReader` (lane D implements it, lane A fills the field, x-wiring wires it); price entry from the Ativos product page and the Carteira "P&L acumulado" headline (lane I, frontend only) | contract in `prices/public.py`; implementation in flight |
 | Known technical debt (OQ-47 item 5) | deferred by the user; listed in the README, "Known limitations / technical debt" |
 | `POST /pricing/calculate` | deliberately not built: OQ-19 keeps it "if needed", and the backend computes the complementary PU or rate when an entry is saved (OQ-19 item 7) |
 | CSV and B3 reference-price import | post-delivery TODO (§11, spec §14) |
