@@ -1,6 +1,6 @@
 -- OQ-40: a run records where it first failed. failed_chain is the chain that failed first
--- (CASH or POSITIONS); NULL with a failed_date is a failure that belongs to no chain (lease lost,
--- lock timeout, the AUM recompute), which fails the date for every chain and the run. Both stay
+-- (CASH or POSITIONS); NULL with a failed_date is a failure that belongs to no chain (outside every
+-- chain's savepoint), which fails the date for every chain still alive and the run. Both stay
 -- NULL for a run that never failed. "Solicitar novo processamento" on COMPLETED_WITH_ISSUES is
 -- prefilled from them: that chain's scope, from failed_date to the run's end.
 ALTER TABLE processing.requests
