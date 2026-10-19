@@ -9,7 +9,7 @@ the trade's cash effect is −1 × PU, so cash = 200000 − 90909.0909090909 = 1
 (109.090,91). Typing that PU back gives (100000 / 90909.0909090909) − 1 = 0.1000000000000001…,
 stored at 12 places: 0.100000000000.
 
-Positions, market value and AUM need a processing run (D3); they are in the processing scenarios.
+Positions, market value and AUM need a processing run (D3): `test_the_challenge_example_end_to_end`.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from decimal import ROUND_HALF_UP, Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.integration.acceptance.desk import Desk
 from tests.integration.acceptance.support import (
     acceptance_app,
     cash_body,
@@ -143,3 +144,42 @@ def test_carteira_reads_after_today_are_refused(
     response = client.get(path, params=params)
 
     assert problem(response, 422) == [("FUTURE_DATE", field)]  # OQ-35, spec §13 case 23
+
+
+def test_the_challenge_example_end_to_end() -> None:
+    # D3: the user requests the processing of 01/01/2027; the worker drains it (OQ-45, OQ-46).
+    # Hand values (module docstring): cash 109090.9090909091 (109.090,91); DI1F28 1 @
+    # 90909.0909090909 (90.909,09) at 10% a.a.; market value 1 × 90909.0909090909;
+    # AUM = 109090.9090909091 + 90909.0909090909 = 200000 (200.000,00); Q[D−1] = 0 so position
+    # P&L 0 (OQ-4), trades P&L 1 × (PU − PU) = 0.
+    with acceptance_app(TODAY) as (client, database_url):
+        desk = Desk(client, database_url, TODAY)
+        asset = desk.contract("DI1F28", "2028-01-01")
+        desk.cash(TODAY, "200000", at="09:00")
+        desk.trade(asset, TODAY, 1, rate="0.10", at="10:00")
+        desk.price(asset, TODAY, rate="0.10")
+
+        run = desk.process("ALL", TODAY, TODAY)
+
+        assert (run["status"], run["error_code"]) == ("COMPLETED", None), run
+        assert desk.statuses() == {TODAY: ("PROCESSED", "PROCESSED")}
+        assert desk.cash_balance(TODAY) == Decimal("109090.9090909091")
+        row = desk.positions(TODAY)["DI1F28"]
+        assert (row["quantity"], row["average_entry_pu"], row["average_entry_rate"]) == (
+            1,
+            Decimal(PU_AT_10_PERCENT),
+            Decimal("0.10"),
+        )
+        assert (row["reference_source"], row["reference_pu"], row["reference_rate"]) == (
+            "MANUAL",
+            Decimal(PU_AT_10_PERCENT),
+            Decimal("0.10"),
+        )
+        assert row["financial_total"] == Decimal(PU_AT_10_PERCENT)
+        totals = desk.portfolio_pnl(TODAY)
+        assert (totals["market_value"], totals["daily_pnl"], totals["cumulative_pnl"]) == (
+            Decimal(PU_AT_10_PERCENT),
+            Decimal(0),
+            Decimal(0),
+        )
+        assert desk.aum(TODAY) == Decimal(200000)
