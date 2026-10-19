@@ -36,10 +36,8 @@ answered yet. On a stop the worker stops consuming and cancels what is in progre
 Then it closes the broker connection and the engine. A failure is logged through the
 configured logging and ends the process with status 1.
 
-Until the composition root provides the consumers and the startup hook
-(``composition.consumers``, integrator), `main` registers none and runs no recovery: the
-worker consumes nothing, a command published meanwhile waits in its queue, and a run left
-RUNNING stays so.
+`main` takes the consumers and the startup hook from the composition root
+(``composition.consumers``): Processing's doorbell consumer, and its recovery then drain.
 """
 
 from __future__ import annotations
@@ -52,6 +50,7 @@ from dataclasses import dataclass, field
 
 from aio_pika.abc import AbstractIncomingMessage, AbstractQueue, AbstractRobustConnection
 
+from di1.composition import consumers as composition
 from di1.platform.clock import SystemClock
 from di1.platform.config import BrokerSettings, Settings, get_broker_settings, get_settings
 from di1.platform.database.engine import check_connection, create_engine
@@ -249,16 +248,15 @@ class _RunningConsumers:
                 task.exception()
 
 
-def _no_consumers(resources: WorkerResources) -> Sequence[ConsumerRegistration]:
-    """Until Processing's handler is wired: no consumer."""
-    return ()
-
-
 def main() -> None:
     run_process(
         "processing worker",
         lambda stop: run_worker(
-            get_settings(), get_broker_settings(), consumers=_no_consumers, stop=stop
+            get_settings(),
+            get_broker_settings(),
+            consumers=composition.consumers,
+            on_startup=composition.processing_startup,
+            stop=stop,
         ),
         logger,
     )
