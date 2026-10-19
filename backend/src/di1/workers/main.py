@@ -33,6 +33,10 @@ answered yet. On a stop the worker stops consuming and cancels what is in progre
   OQ-45); a run still waiting is dropped and resumed the same way;
 - a startup hook in progress is cancelled, and runs again on the next start.
 
+Work after an ack that fails (a run that could not record its end, so stays RUNNING and holds
+the queue) stops the worker the same way, then raises `AfterAckFailedError`: the process exits
+with status 1, Docker restarts it, and the startup hook resumes the run (OQ-45).
+
 Then it closes the broker connection and the engine. A failure is logged through the
 configured logging and ends the process with status 1.
 
@@ -58,6 +62,7 @@ from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.connection import connect
 from di1.platform.messaging.consumer import (
+    AfterAckFailedError,
     AfterAckRunner,
     MessageConsumer,
     open_consumer_channel,
@@ -92,8 +97,10 @@ async def run_worker(
     clock: Clock | None = None,
     on_startup: StartupHook | None = None,
 ) -> None:
-    """Run ``on_startup`` once, then consume until ``stop`` is set; then stop consuming, cancel
-    the deliveries and the run in progress, and close the broker connection and the engine."""
+    """Run ``on_startup`` once, then consume until ``stop`` is set or the work after an ack
+    fails; then stop consuming, cancel the deliveries and the run in progress, and close the
+    broker connection and the engine. A failed work after an ack is then raised as
+    `AfterAckFailedError`."""
     topology = topology if topology is not None else Topology()
     engine = create_engine(settings)
     try:
@@ -131,13 +138,25 @@ async def run_worker(
                 logger.info("worker stopped before the broker answered")
                 return
             logger.info("worker started (%d consumers)", len(registrations))
-            await stop.wait()
+            await _until_stopped_or_failed(stop, running.after_ack.failed)
         finally:
             await running.stop()
             await close_connection(connection)
     finally:
         await engine.dispose()
+    if running.after_ack.failure is not None:
+        logger.error("worker stopped: the work after an ack failed")
+        raise AfterAckFailedError("the work after an ack failed") from running.after_ack.failure
     logger.info("worker stopped")
+
+
+async def _until_stopped_or_failed(stop: asyncio.Event, failed: asyncio.Event) -> None:
+    waits = {asyncio.ensure_future(stop.wait()), asyncio.ensure_future(failed.wait())}
+    try:
+        await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for wait in waits:
+            wait.cancel()
 
 
 async def _run_startup_step(step: Awaitable[None], stop: asyncio.Event) -> bool:

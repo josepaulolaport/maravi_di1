@@ -115,3 +115,31 @@ async def test_the_runner_runs_its_work_in_order() -> None:
     await asyncio.wait_for(runner.wait_idle(), timeout=5)
 
     assert ran == [0, 1, 2]
+
+
+async def test_a_failing_work_stops_the_runner_and_drops_the_waiting_work(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Work that fails after its ack left state only a restart repairs (a run that could not
+    record its end stays RUNNING): the runner keeps the failure, runs nothing more, and the
+    worker stops on it (OQ-45: its startup recovery resumes the run)."""
+    runner = AfterAckRunner()
+    ran: list[str] = []
+
+    async def fails() -> None:
+        raise RuntimeError("the end of the run was not recorded")
+
+    async def later() -> None:
+        ran.append("later")
+
+    runner.submit(fails, "failing work")
+    runner.submit(later, "waiting work")
+    await asyncio.wait_for(runner.failed.wait(), timeout=5)
+    await runner.wait_idle()
+    runner.submit(later, "late work")
+    await asyncio.sleep(0.05)
+
+    assert ran == []
+    assert isinstance(runner.failure, RuntimeError)
+    assert "failing work failed" in caplog.text
+    assert "late work dropped" in caplog.text
