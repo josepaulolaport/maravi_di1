@@ -19,13 +19,14 @@ import pytest
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.domain.entries import EntryDraft, EntryType
 from di1.modules.ledger.domain.listing import ListOrder
+from di1.modules.pricing.public import Quote
 from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
 from tests.unit.ledger.fakes import (
     DI1F28,
     DI1F29,
-    CalculatorPricer,
+    CalculatorPricing,
     FakeAssets,
     FakeUnitOfWork,
     InMemoryLedgerRepository,
@@ -37,12 +38,12 @@ TODAY = date(2026, 10, 18)
 class Harness:
     def __init__(self) -> None:
         self.assets = FakeAssets()
-        self.pricer = CalculatorPricer(self.assets)
+        self.pricing = CalculatorPricing(self.assets)
         self.repository = InMemoryLedgerRepository()
         self.service = LedgerService(
             clock=FixedClock(TODAY),
             assets=self.assets,
-            pricer=self.pricer,
+            pricing=self.pricing,
             repository_for=lambda _uow: self.repository,
         )
 
@@ -91,9 +92,7 @@ async def test_a_rate_typed_trade_gets_its_pu_from_pricing(harness: Harness) -> 
     assert entry.input_kind is InputKind.RATE
     assert entry.cash_effect == Decimal("-890064.6254673500")
     assert (view.asset_code, view.instrument_type_code) == ("DI1F28", "FUTURE")
-    assert harness.pricer.calls == [
-        (DI1F28.id, date(2026, 10, 14), InputKind.RATE, Decimal("0.10"))
-    ]
+    assert harness.pricing.calls == [(DI1F28.id, date(2026, 10, 14), Quote.rate(Decimal("0.10")))]
 
 
 async def test_a_pu_typed_trade_gets_its_rate_from_pricing(harness: Harness) -> None:
@@ -146,7 +145,7 @@ async def test_a_cash_movement_is_saved_without_pricing(harness: Harness) -> Non
 
     assert view.entry.cash_amount == Decimal("1500000.00")
     assert view.asset_code is None
-    assert harness.pricer.calls == []
+    assert harness.pricing.calls == []
     assert uow.commits == 1
 
 

@@ -2,7 +2,7 @@
 
 A write validates, saves the fact in one Unit of Work and commits once. It touches nothing
 else: no processing state and no job (user decision 2026-10-19, staleness removed from the
-project; processing runs only when the user requests it).
+project, OQ-31; processing runs only when the user requests it).
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from datetime import date
 from uuid import UUID
 
 from di1.modules.asset.public import AssetReader, InstrumentDescriptor
-from di1.modules.ledger.application.interfaces.pricing import ExecutionPricer
 from di1.modules.ledger.application.interfaces.repository import LedgerRepository
 from di1.modules.ledger.domain.entries import (
     EntryDraft,
@@ -26,6 +25,7 @@ from di1.modules.ledger.domain.entries import (
     validate_trade,
 )
 from di1.modules.ledger.domain.listing import EntryCursor, ListOrder, validate_page_request
+from di1.modules.pricing.public import PricingService, Quote
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
 from di1.shared.input_kind import InputKind
@@ -55,12 +55,12 @@ class LedgerService:
         *,
         clock: Clock,
         assets: AssetReader,
-        pricer: ExecutionPricer,
+        pricing: PricingService,
         repository_for: Callable[[UnitOfWork], LedgerRepository],
     ) -> None:
         self._clock = clock
         self._assets = assets
-        self._pricer = pricer
+        self._pricing = pricing
         self._repository_for = repository_for
 
     async def create_entry(self, draft: EntryDraft, *, uow: UnitOfWork) -> LedgerEntryView:
@@ -77,8 +77,8 @@ class LedgerService:
         descriptor = await self._instrument(draft.asset_id)
         known = KnownInstrument(descriptor.maturity_date) if descriptor is not None else None
         trade = validate_trade(draft, today=today, instrument=known)
-        price = await self._pricer.price(
-            trade.asset_id, trade.entry_date, trade.input_kind, trade.typed_value
+        price = await self._pricing.calculate(
+            trade.asset_id, trade.entry_date, Quote(trade.input_kind, trade.typed_value)
         )
         # The typed value is stored as typed (OQ-3); only the other one comes from Pricing.
         typed_pu = trade.input_kind is InputKind.PU

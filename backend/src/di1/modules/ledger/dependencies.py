@@ -7,11 +7,11 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.asset.public import AssetReader
-from di1.modules.ledger.application.interfaces.pricing import ExecutionPricer
 from di1.modules.ledger.application.interfaces.repository import LedgerRepository
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.infrastructure.persistence.repositories import SqlLedgerRepository
 from di1.modules.ledger.public import LedgerReader
+from di1.modules.pricing.public import PricingService
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
 
@@ -30,11 +30,11 @@ def create_ledger_service(
     *,
     clock: Clock,
     assets: AssetReader,
-    pricer: ExecutionPricer,
+    pricing: PricingService,
 ) -> LedgerService:
     return LedgerService(
         clock=clock,
         assets=assets,
-        pricer=pricer,
+        pricing=pricing,
         repository_for=ledger_repository,
     )

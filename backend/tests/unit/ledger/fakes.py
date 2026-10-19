@@ -1,7 +1,8 @@
 """Test doubles for Ledger's collaborators: Asset, Pricing, the Unit of Work and persistence.
 
-`CalculatorPricer` prices with the pure DI1 calculator (lane B's domain, DC/365) until
-``pricing/public.py`` lands, so the golden values of the frontend fixtures hold.
+`CalculatorPricing` implements ``pricing.public.PricingService`` with the pure DI1 calculator
+(lane B's domain, DC/365) until lane B's service lands, so the golden values of the frontend
+fixtures hold.
 """
 
 from __future__ import annotations
@@ -16,17 +17,15 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.asset.public import InstrumentDescriptor
-from di1.modules.ledger.application.interfaces.pricing import ExecutionPrice
 from di1.modules.ledger.domain.entries import EntryType, LedgerEntry, NewCashMovement, NewTrade
 from di1.modules.ledger.domain.listing import ListOrder, PageRequest
 from di1.modules.ledger.public import CashMovementRecord, TradeRecord
 from di1.modules.pricing.domain.errors import PricingError
 from di1.modules.pricing.domain.futures.di1 import DI1Calculator
-from di1.modules.pricing.domain.futures.model import FuturesTerms, Quote
-from di1.modules.pricing.domain.futures.model import InputKind as PricingInputKind
+from di1.modules.pricing.domain.futures.model import FuturesTerms
+from di1.modules.pricing.public import Price, Quote
 from di1.shared.clock import SAO_PAULO
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
-from di1.shared.input_kind import InputKind
 
 PRODUCT_ID = UUID("6f1c2a10-0000-4000-8000-000000000001")
 
@@ -77,25 +76,22 @@ class FakeAssets:
 
 
 @dataclass
-class CalculatorPricer:
-    """`ExecutionPricer` over the pure DI1 calculator, reading the contract from ``assets``."""
+class CalculatorPricing:
+    """`PricingService` over the pure DI1 calculator, reading the contract from ``assets``, as
+    the real service does through `AssetReader`."""
 
     assets: FakeAssets
-    calls: list[tuple[UUID, date, InputKind, Decimal]] = field(default_factory=list)
+    calls: list[tuple[UUID, date, Quote]] = field(default_factory=list)
 
-    async def price(
-        self, instrument_id: UUID, trade_date: date, input_kind: InputKind, typed_value: Decimal
-    ) -> ExecutionPrice:
-        self.calls.append((instrument_id, trade_date, input_kind, typed_value))
+    async def calculate(self, instrument_id: UUID, reference_date: date, quote: Quote) -> Price:
+        self.calls.append((instrument_id, reference_date, quote))
         descriptor = await self.assets.get_instrument(instrument_id)
         assert descriptor.maturity_date is not None and descriptor.face_value is not None
         terms = FuturesTerms(descriptor.maturity_date, descriptor.face_value)
-        quote = Quote(PricingInputKind(input_kind.value), typed_value)
         try:
-            price = DI1Calculator().calculate(terms, trade_date, quote)
+            return DI1Calculator().calculate(terms, reference_date, quote)
         except PricingError as exc:
             raise DomainError(ErrorDetail(ErrorCode(exc.code), str(exc), exc.field)) from exc
-        return ExecutionPrice(pu=price.pu, rate=price.rate)
 
 
 class FakeUnitOfWork:

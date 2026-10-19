@@ -21,7 +21,7 @@ from di1.platform.database.session import create_session_factory
 from di1.shared.clock import FixedClock
 from tests.integration.databases import fresh_database_url
 from tests.integration.ledger.support import TODAY, seed_contracts
-from tests.unit.ledger.fakes import CalculatorPricer, FakeAssets
+from tests.unit.ledger.fakes import CalculatorPricing, FakeAssets
 
 BACKEND = Path(__file__).resolve().parents[3]
 
@@ -62,5 +62,5 @@ def service() -> LedgerService:
     return create_ledger_service(
         clock=FixedClock(TODAY),
         assets=assets,
-        pricer=CalculatorPricer(assets),
+        pricing=CalculatorPricing(assets),
     )
