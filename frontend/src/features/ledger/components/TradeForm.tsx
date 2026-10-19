@@ -1,25 +1,19 @@
-import {
-  Alert,
-  Button,
-  Group,
-  NumberInput,
-  SegmentedControl,
-  Select,
-  Stack,
-  Text,
-  TextInput,
-} from '@mantine/core';
+import { Button, Group, NumberInput, Select, Stack } from '@mantine/core';
 import { DateInput, TimeInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconAlertTriangle } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
+import { useAllInstruments, useAllProducts } from '@/shared/queries';
+import { MessageAlert } from '@/shared/ui/MessageAlert';
+import { PriceInput, typedPrice } from '@/shared/ui/PriceInput';
 import type { CreateTradeEntryRequest, InputKind, IsoDate } from '@/api/contract';
-import { formatDate, parsePtBrDecimal, percentToFraction } from '@/shared/format';
+import { formatDate, parsePtBrDate } from '@/shared/format';
 
-import { useCreateEntry, useInstruments, useProducts } from '../hooks/useLedger';
-import { nowInSaoPaulo, parsePtBrDate, splitErrors, toIsoTime } from './formSupport';
+import { useCreateEntry } from '../hooks/useLedger';
+import { splitProblem } from '@/shared/ui/problemMessages';
+
+import { nowInSaoPaulo, toIsoTime } from './formSupport';
 
 export type TradeSide = 'BUY' | 'SELL';
 
@@ -48,29 +42,13 @@ const LABELS = {
   SELL: { submit: 'Registrar venda', done: 'Venda registrada.' },
 } as const;
 
-const PRICE_LABEL: Record<InputKind, string> = { PU: 'PU', RATE: 'Taxa a.a. (%)' };
-
-// OQ-3: a typed PU has at most 10 places; a typed rate at most 12 as a fraction, which is 10
-// in the percent the user types. More places are rejected by the backend, never rounded.
-const PRICE_DESCRIPTION: Record<InputKind, string> = {
-  PU: 'Até 10 casas decimais',
-  RATE: 'Em % ao ano, até 10 casas decimais',
-};
-
-/** The typed PU, or the typed percent as a fraction (10,45 → 0.1045); `null` if invalid. */
-function typedPrice(values: TradeValues): string | null {
-  return values.inputKind === 'PU'
-    ? parsePtBrDecimal(values.price)
-    : percentToFraction(values.price);
-}
-
 /**
  * The contract picker's options: every contract, or those whose product is of the chosen
  * asset class. The class names come from the products, so only classes with a product show.
  */
 function useContractOptions(assetClassId: string | null) {
-  const instruments = useInstruments();
-  const products = useProducts();
+  const instruments = useAllInstruments();
+  const products = useAllProducts();
   const classOf = useMemo(
     () => new Map((products.data?.items ?? []).map((p) => [p.id, String(p.asset_class.id)])),
     [products.data],
@@ -139,13 +117,15 @@ export function TradeForm({
           : 'Informe uma quantidade inteira maior que zero.',
       price: (value, values) => {
         if (!value.trim()) return values.inputKind === 'PU' ? 'Informe o PU.' : 'Informe a taxa.';
-        return typedPrice(values) === null ? 'Informe um número válido, como 1.234,56.' : null;
+        return typedPrice(values.inputKind, values.price) === null
+          ? 'Informe um número válido, como 1.234,56.'
+          : null;
       },
     },
   });
 
   const submit = form.onSubmit((values) => {
-    const price = typedPrice(values);
+    const price = typedPrice(values.inputKind, values.price);
     if (!values.assetId || !values.date || typeof values.quantity !== 'number' || !price) return;
     const base = {
       type: 'TRADE' as const,
@@ -168,7 +148,7 @@ export function TradeForm({
         onDone();
       },
       onError: (error) => {
-        const { fields, page } = splitErrors(error, FIELD_MAP);
+        const { fields, page } = splitProblem(error, FIELD_MAP);
         form.setErrors(fields);
         setPageErrors(page);
       },
@@ -178,17 +158,7 @@ export function TradeForm({
   return (
     <form onSubmit={submit} noValidate>
       <Stack gap="md">
-        {pageErrors.length > 0 && (
-          <Alert role="alert" color="red" variant="light" icon={<IconAlertTriangle size={18} />}>
-            <Stack gap={4}>
-              {pageErrors.map((message, index) => (
-                <Text key={`${String(index)}-${message}`} size="sm">
-                  {message}
-                </Text>
-              ))}
-            </Stack>
-          </Alert>
-        )}
+        <MessageAlert messages={pageErrors} />
         <Group grow align="flex-start">
           <Select
             label="Classe de ativo"
@@ -247,30 +217,14 @@ export function TradeForm({
           hideControls
           {...form.getInputProps('quantity')}
         />
-        <Stack gap={6}>
-          <Text size="sm" fw={500} id="trade-input-kind">
-            Forma de entrada
-          </Text>
-          <SegmentedControl
-            aria-labelledby="trade-input-kind"
-            data={[
-              { value: 'PU', label: PRICE_LABEL.PU },
-              { value: 'RATE', label: PRICE_LABEL.RATE },
-            ]}
-            value={form.values.inputKind}
-            onChange={(value) => {
-              form.setValues({ inputKind: value, price: '' });
-              form.clearFieldError('price');
-            }}
-          />
-        </Stack>
-        <TextInput
-          label={PRICE_LABEL[form.values.inputKind]}
-          description={PRICE_DESCRIPTION[form.values.inputKind]}
-          withAsterisk
-          inputMode="decimal"
-          placeholder={form.values.inputKind === 'PU' ? '89.006,46' : '10,45'}
-          {...form.getInputProps('price')}
+        <PriceInput
+          kind={form.values.inputKind}
+          onKindChange={(inputKind) => {
+            form.setValues({ inputKind, price: '' });
+            form.clearFieldError('price');
+          }}
+          inputProps={form.getInputProps('price')}
+          placeholder={{ PU: '89.006,46', RATE: '10,45' }}
         />
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={onDone} disabled={createTrade.isPending}>

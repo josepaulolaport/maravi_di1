@@ -6,7 +6,7 @@ import type { IsoDate } from '@/api/contract';
 import { controlCenterLinks } from '@/app/paths';
 import { formatDate } from '@/shared/format';
 
-// A date with nothing published on either chain (§11.4). Stale or partly processed dates show
+// A date with nothing published on either chain (§11.4). Failed or partly processed dates show
 // no card: the two DataStatus badges tell the state (user, 2026-10-18), and missing figures
 // read "—" with the asset marked in the table (§8.3).
 

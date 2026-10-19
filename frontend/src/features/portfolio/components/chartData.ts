@@ -11,11 +11,12 @@ export interface ChartPoint {
 }
 
 /**
- * One point per calendar day from the first published day in [start, end] to `end`. A day is
- * drawn only when its cumulative P&L is published, complete and not stale (§11.4, OQ-16); any
- * other day is `null`, which breaks the line, so a gap is never bridged and nothing is
- * interpolated. Days before the first publication would all be gaps, so they are left out:
- * the work is bounded by the published history, however early `start` is.
+ * One point per calendar day from the first published day in [start, end] to `end`. The line
+ * is the backend's `range_cumulative_pnl`, the daily P&L summed from the chosen start (OQ-31
+ * item 8): the browser only draws it. A day without that sum (no published day, or a missing
+ * daily P&L from there on) is `null`, which breaks the line, so a gap is never bridged and
+ * nothing is interpolated. Days before the first publication would all be gaps, so they are
+ * left out: the work is bounded by the published history, however early `start` is.
  */
 export function toChartData(items: PnlPoint[], start: IsoDate, end: IsoDate): ChartPoint[] {
   const byDate = new Map(items.map((item) => [item.date, item]));
@@ -25,18 +26,14 @@ export function toChartData(items: PnlPoint[], start: IsoDate, end: IsoDate): Ch
   const points: ChartPoint[] = [];
   for (let date = first; date <= end; date = addDays(date, 1)) {
     const item = byDate.get(date);
-    const valid =
-      item !== undefined &&
-      item.pnl_status === 'COMPLETE' &&
-      (item.status === 'FRESH' || item.status === 'FRESH_WITH_ISSUES') &&
-      item.cumulative_pnl !== null;
+    const value = item?.range_cumulative_pnl ?? null;
     points.push({
       date,
       label: formatDate(date).slice(0, 5),
       // A chart needs numbers. Converting for the pixel position only is formatting, not
       // calculation; the exact value stays in the string.
-      cumulative: valid ? Number(item.cumulative_pnl) : null,
-      cumulativeText: valid ? item.cumulative_pnl : null,
+      cumulative: value === null ? null : Number(value),
+      cumulativeText: value,
     });
   }
   return points;

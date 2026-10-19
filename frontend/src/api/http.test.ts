@@ -113,6 +113,14 @@ describe('http client', () => {
     );
   });
 
+  it('keeps the original fetch error as the cause of a network failure, for diagnosis', async () => {
+    server.use(mock.get(url, () => HttpResponse.error()));
+
+    const error = await captureError(http.get(path));
+
+    expect(error.cause).toBeInstanceOf(TypeError);
+  });
+
   it('P1 keeps the base path of an absolute API URL, with or without a trailing slash', () => {
     expect(buildUrl('/ledger/entries', {}, 'https://api.example.com/api')).toBe(
       'https://api.example.com/api/ledger/entries',

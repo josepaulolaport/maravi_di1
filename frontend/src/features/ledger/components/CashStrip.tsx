@@ -1,48 +1,47 @@
-import { Button, Group, Paper, SimpleGrid, Skeleton, Stack, Text } from '@mantine/core';
+import { Button, Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconPlayerPlay } from '@tabler/icons-react';
 
+import { Loading } from '@/shared/ui/Loading';
 import type { IsoDate } from '@/api/contract';
 import { addDays, formatDate, formatMoney, UNAVAILABLE } from '@/shared/format';
-import { DATE_STATUS, isBehind } from '@/shared/ui/dateStatus';
+import { DATE_STATUS, needsProcessing, processedAt } from '@/shared/ui/dateStatus';
+import { useSummary } from '@/shared/queries';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
-import { useCashSummary } from '../hooks/useLedger';
-
-// OQ-19 item 3, amended by OQ-21 (draft): Caixa D0 is the published cash on the range's end
+// OQ-19 item 3, amended by OQ-21: Caixa D0 is the published cash on the range's end
 // date, Caixa D−1 the one on the day before, each read from the cash chain of the portfolio
-// summary with its own freshness, apart from positions. Nothing is computed from the rows.
+// summary with its own status and processing time (OQ-31), apart from positions. Nothing is
+// computed from the rows.
 
-/** A day's cash is behind when it is stale, failed or was never processed (OQ-23). */
+/** A day's cash needs processing when its last attempt failed or it was never processed. */
 function useCashBehind(date: IsoDate): boolean {
-  const status = useCashSummary(date).data?.cash.status;
-  return status !== undefined && isBehind(status);
+  const status = useSummary(date).data?.cash.status;
+  return status !== undefined && needsProcessing(status);
 }
 
 function CashCard({ label, date }: { label: string; date: IsoDate }) {
-  const summary = useCashSummary(date);
+  const summary = useSummary(date);
 
   let value: React.ReactNode;
   let marker: React.ReactNode = null;
+  let time: string | null = null;
   if (summary.isPending) {
-    value = (
-      <div role="status" aria-label={`Carregando ${label}`}>
-        <Skeleton h={24} w={140} />
-      </div>
-    );
+    value = <Loading label={`Carregando ${label}`} h={24} w={140} />;
   } else if (summary.isError) {
     value = <span title="Indisponível">{UNAVAILABLE}</span>;
     marker = <StatusBadge label="Erro ao carregar" color="red" />;
   } else {
-    // The published cash, if any (a failed date keeps what it had); every status but
-    // Atualizado is marked.
+    // The published cash, if any (a failed date keeps what it had), with its processing time
+    // (OQ-31); every status but Processado is marked.
     const status = summary.data.cash.status;
+    time = processedAt(summary.data.cash.published_at);
     value =
       status === 'NOT_PROCESSED' ? (
         <span title="Indisponível">{UNAVAILABLE}</span>
       ) : (
         formatMoney(summary.data.cash.balance)
       );
-    if (status !== 'FRESH') {
+    if (status !== 'PROCESSED') {
       marker = <StatusBadge label={DATE_STATUS[status].label} color={DATE_STATUS[status].color} />;
     }
   }
@@ -63,6 +62,11 @@ function CashCard({ label, date }: { label: string; date: IsoDate }) {
         </Text>
         {marker}
       </Group>
+      {time && (
+        <Text size="xs" c="dimmed" mt={2}>
+          {time}
+        </Text>
+      )}
     </Paper>
   );
 }

@@ -1,16 +1,19 @@
-import { Button, Group, List, Paper, Skeleton, Stack, Text, TextInput } from '@mantine/core';
+import { Button, Group, List, Paper, Stack, Text } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
-import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { IconCalendar, IconPlayerPlay, IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
-import { useEffect, useMemo, useState } from 'react';
+import { IconCalendar, IconPlayerPlay, IconPlus, IconTrash } from '@tabler/icons-react';
+import { useMemo, useState } from 'react';
 
+import { PageTitle } from '@/shared/ui/PageTitle';
+import { SearchInput } from '@/shared/ui/SearchInput';
+import { useInstrumentTypes } from '@/shared/queries';
+import { Loading } from '@/shared/ui/Loading';
 import type { IsoDate } from '@/api/contract';
 import {
   type ProcessingDraft,
   ProcessingRequestModal,
 } from '@/shared/processing/ProcessingRequestModal';
-import { formatQuantity } from '@/shared/format';
+import { countLabel } from '@/shared/format';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { LoadMore } from '@/shared/ui/LoadMore';
@@ -18,11 +21,10 @@ import { LoadMore } from '@/shared/ui/LoadMore';
 import { CashStrip } from './components/CashStrip';
 import { EntriesTable, entryLabel } from './components/EntriesTable';
 import { NewEntryModal } from './components/NewEntryModal';
-import { type LedgerEntry, type SortDirection, toRow } from './entries';
+import { type LedgerEntry, toRow } from './entries';
 import {
   useDeleteEntries,
   useEntries,
-  useInstrumentTypes,
   useIsSavingEntry,
   useLedgerFilters,
 } from './hooks/useLedger';
@@ -30,15 +32,13 @@ import { processCashDraft, processDraft } from './processingDraft';
 
 type DeleteTarget = { mode: 'one'; entry: LedgerEntry } | { mode: 'many'; entries: LedgerEntry[] };
 
-const SEARCH_DEBOUNCE_MS = 300;
-
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
 /** "encontrados" once every page is read; "exibidos" while the backend has more (P21). */
-const countLabel = (n: number, more: boolean) => {
-  if (more) return `${formatQuantity(n)} lançamentos exibidos`;
-  return n === 1 ? '1 lançamento encontrado' : `${formatQuantity(n)} lançamentos encontrados`;
-};
+const entriesLabel = (n: number, more: boolean) =>
+  more
+    ? countLabel(n, 'lançamento exibido', 'lançamentos exibidos')
+    : countLabel(n, 'lançamento encontrado', 'lançamentos encontrados');
 
 /**
  * Lançamentos (spec §11.3): trades and cash movements in an inclusive range, with a search;
@@ -48,7 +48,7 @@ const countLabel = (n: number, more: boolean) => {
 export function LedgerPage() {
   const filters = useLedgerFilters();
   const { start, end, search, today } = filters;
-  const [sort, setSort] = useState<SortDirection>('desc');
+  const { order: sort } = filters;
   const list = useEntries(start, end, search, sort);
   const instrumentTypes = useInstrumentTypes();
   const saving = useIsSavingEntry();
@@ -93,6 +93,7 @@ export function LedgerPage() {
 
   return (
     <Stack gap="md">
+      <PageTitle>Lançamentos</PageTitle>
       <Group justify="space-between" align="flex-end" wrap="wrap">
         <Group align="flex-end" gap="sm" wrap="wrap">
           <RangePicker
@@ -104,7 +105,10 @@ export function LedgerPage() {
               filters.setRange(nextStart, nextEnd);
             }}
           />
-          <SearchBox
+          <SearchInput
+            label="Buscar"
+            placeholder="Buscar ativo ou lançamento..."
+            w={300}
             value={search}
             onChange={(next) => {
               filters.setSearch(next);
@@ -162,9 +166,7 @@ export function LedgerPage() {
           }}
         />
       ) : list.isPending ? (
-        <div role="status" aria-label="Carregando lançamentos">
-          <Skeleton h={320} />
-        </div>
+        <Loading label="Carregando lançamentos" h={320} />
       ) : (
         <Paper>
           <EntriesTable
@@ -172,7 +174,7 @@ export function LedgerPage() {
             instrumentTypeNames={typeNames}
             sort={sort}
             onToggleSort={() => {
-              setSort((current) => (current === 'desc' ? 'asc' : 'desc'));
+              filters.setOrder(sort === 'desc' ? 'asc' : 'desc');
             }}
             selected={visibleSelection}
             onToggle={toggle}
@@ -194,7 +196,7 @@ export function LedgerPage() {
             }}
           />
           <Text size="sm" c="dimmed" p="md" role="status">
-            {countLabel(entries.length, list.hasNextPage)}
+            {entriesLabel(entries.length, list.hasNextPage)}
           </Text>
         </Paper>
       )}
@@ -261,43 +263,7 @@ function RangePicker({
   );
 }
 
-/**
- * The search box follows the URL (`busca`): typing is debounced into it, and a change from
- * outside (a link, the sidebar) replaces what was typed instead of being overwritten by it.
- */
-function SearchBox({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const [text, setText] = useState(value);
-  const [seen, setSeen] = useState(value);
-  // Whether the box holds the user's own typing (not yet in the URL, or already pushed).
-  const [typing, setTyping] = useState(false);
-  if (value !== seen) {
-    setSeen(value);
-    if (value !== text.trim()) {
-      setText(value);
-      setTyping(false);
-    }
-  }
-  const [debounced] = useDebouncedValue(text, SEARCH_DEBOUNCE_MS);
-  // Push only the user's typing once it has settled, so a stale debounced value is never
-  // written back over a change from outside.
-  useEffect(() => {
-    if (typing && debounced === text && debounced.trim() !== value) onChange(debounced);
-  }, [typing, debounced, text, value, onChange]);
-  return (
-    <TextInput
-      aria-label="Buscar"
-      placeholder="Buscar ativo ou lançamento..."
-      leftSection={<IconSearch size={16} stroke={1.5} />}
-      value={text}
-      onChange={(event) => {
-        setText(event.currentTarget.value);
-        setTyping(true);
-      }}
-      w={300}
-    />
-  );
-}
-
+/** Deletes one entry or the selected ones, after confirmation (§6.1). */
 function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClose: () => void }) {
   // One request for one entry or many, of either type (`POST /ledger/entries/deletions`).
   const mutation = useDeleteEntries();
@@ -356,8 +322,8 @@ function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClos
           </>
         )}
         <Text inherit c="dimmed">
-          Lançamentos não são editados nem restaurados por esta tela. Os resultados publicados a
-          partir da data afetada ficam desatualizados até um novo processamento.
+          Lançamentos não são editados nem restaurados por esta tela. Os resultados já processados
+          não mudam até um novo processamento a partir da data afetada.
         </Text>
       </Stack>
     </ConfirmModal>
