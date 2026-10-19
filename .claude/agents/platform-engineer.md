@@ -28,11 +28,11 @@ You change root configuration and `compose.yaml` only together with the integrat
 - inbox idempotency in `platform.inbox_messages`;
 - aio-pika consumers;
 - the retry and failure policy;
-- SQL-controlled dispatch leases and fencing.
+- SQL-controlled dispatch (one active run; one worker, no lease or fencing, OQ-45).
 
 **Wave 4, with lanes G and E:**
 - the worker, dispatcher and relay processes;
-- recovery after a crash or an expired lease.
+- recovery at worker start after a crash: restore `RUNNING` dates, resume after `progress_date`, end a `CANCELLING` run (OQ-45).
 
 ## Rules
 
@@ -46,5 +46,5 @@ You change root configuration and `compose.yaml` only together with the integrat
   - a duplicate delivery;
   - acknowledgement only after durability;
   - a broker reconnect;
-  - lease expiry with an injected clock.
+  - recovery at worker start (OQ-45).
 - **Commits:** prepare the change, get the user's approval, then commit. Push and open a GitHub PR with `pr-ready`. Never merge.
