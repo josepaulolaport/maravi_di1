@@ -1,8 +1,11 @@
-"""The reference PU and source leave position_metrics: prices live only in the price table (OQ-30).
+"""Results without copies or staleness: the reference PU and source leave position_metrics, since
+prices live only in the price table (OQ-30); the STALE status, the STALE_PREDECESSOR issue and the
+issue chain go, the date statuses are renamed and get processing times (OQ-31).
 
-Upgrade and downgrade run the reviewed SQL in ``migrations/sql/0004_no_reference_copy*.sql``.
+Upgrade and downgrade run the reviewed SQL in ``migrations/sql/0004_*.sql``, in that order up and
+in reverse order down.
 `tests/integration/test_migrations_match_schema.py` checks that the revisions build exactly what
-`docs/schema.sql` builds. The downgrade restores the columns empty.
+`docs/schema.sql` builds. The downgrade restores the dropped columns empty.
 
 Revision ID: 0004
 Revises: 0003
@@ -22,8 +25,8 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 SQL = Path(__file__).resolve().parents[1] / "sql"
-UPGRADE = SQL / "0004_no_reference_copy.sql"
-DOWNGRADE = SQL / "0004_no_reference_copy_downgrade.sql"
+UPGRADES = (SQL / "0004_no_reference_copy.sql", SQL / "0004_no_staleness.sql")
+DOWNGRADES = (SQL / "0004_no_staleness_downgrade.sql", SQL / "0004_no_reference_copy_downgrade.sql")
 
 
 def _run(path: Path) -> None:
@@ -35,8 +38,10 @@ def _run(path: Path) -> None:
 
 
 def upgrade() -> None:
-    _run(UPGRADE)
+    for path in UPGRADES:
+        _run(path)
 
 
 def downgrade() -> None:
-    _run(DOWNGRADE)
+    for path in DOWNGRADES:
+        _run(path)
