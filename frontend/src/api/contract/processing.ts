@@ -90,6 +90,10 @@ export interface Issue {
   issue_type: IssueType;
   asset_id: string | null;
   asset_code: string | null;
+  /**
+   * The earliest affected date of the deduplicated row (OQ-37): one row per (asset, needed date)
+   * for a missing price, one per asset for an expired open position.
+   */
   affected_date: IsoDate;
   /** For MISSING_REFERENCE_PRICE: the exact date whose price is needed ("Definir preço"). */
   required_price_date: IsoDate | null;

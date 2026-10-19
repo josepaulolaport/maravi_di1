@@ -2,6 +2,7 @@ import { http, HttpResponse } from 'msw';
 
 import type {
   FieldError,
+  Issue,
   JobStatus,
   Page,
   PredecessorState,
@@ -282,6 +283,23 @@ function requestErrors(start: unknown, end: unknown, scope: unknown): FieldError
   return errors;
 }
 
+/**
+ * Pendências are deduplicated on read (OQ-37 item 1): a missing price once per (asset, needed
+ * date), an expired open position once per asset, each at its earliest affected date.
+ */
+function deduplicated(issues: Issue[]): Issue[] {
+  const byObligation = new Map<string, Issue>();
+  for (const issue of issues) {
+    const key =
+      issue.issue_type === 'MISSING_REFERENCE_PRICE'
+        ? `${issue.issue_type}|${issue.asset_id ?? ''}|${issue.required_price_date ?? ''}`
+        : `${issue.issue_type}|${issue.asset_id ?? ''}`;
+    const kept = byObligation.get(key);
+    if (!kept || issue.affected_date < kept.affected_date) byObligation.set(key, issue);
+  }
+  return [...byObligation.values()];
+}
+
 export const processingHandlers = [
   // Newest first, by (created_at, id), paged by keyset (P21).
   http.get(url('/processing/requests'), async ({ request }) => {
@@ -344,7 +362,9 @@ export const processingHandlers = [
 
   http.get(url('/processing/issues'), async () => {
     await latency();
-    const items = [...db.issues].sort((a, b) => b.affected_date.localeCompare(a.affected_date));
+    const items = deduplicated(db.issues).sort((a, b) =>
+      b.affected_date.localeCompare(a.affected_date),
+    );
     return HttpResponse.json({ items });
   }),
 ];

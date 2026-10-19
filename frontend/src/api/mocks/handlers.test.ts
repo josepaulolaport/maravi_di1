@@ -1,6 +1,7 @@
 import type { PortfolioPositions, PortfolioSummary, ProcessingRequest } from '../contract';
 import { assetsApi, ledgerApi, portfolioApi, pricesApi, processingApi } from '../endpoints';
 import { ApiError } from '../http';
+import { db } from './db';
 import { IDS, PRICE_IDS } from './fixtures';
 
 // The MSW fake backend must honour the documented rules, so screens built against it behave
@@ -754,6 +755,45 @@ describe('mock processing', () => {
     );
 
     expect(problem.errors?.[0]).toMatchObject({ code: 'INVALID_RANGE', field: 'start_date' });
+  });
+
+  it('OQ-37 a missing price shows once per (asset, needed date), at its earliest affected date', async () => {
+    const base = db.issues[0];
+    if (!base) throw new Error('the fixtures have one issue');
+    // 17/10's P&L needs the same 16/10 DI1F29 price as 16/10's valuation.
+    db.issues.push(
+      { ...base, id: 'dup-1', affected_date: '2026-10-17' },
+      { ...base, id: 'other-date', affected_date: '2026-10-17', required_price_date: '2026-10-17' },
+    );
+
+    const { items } = await processingApi.listIssues();
+
+    expect(items.map((i) => [i.asset_code, i.required_price_date, i.affected_date])).toEqual([
+      ['DI1F29', '2026-10-17', '2026-10-17'],
+      ['DI1F29', '2026-10-16', '2026-10-16'],
+    ]);
+  });
+
+  it('OQ-37 an expired open position shows once per asset, at its earliest affected date', async () => {
+    const expired = (id: string, date: string) => ({
+      id,
+      issue_type: 'EXPIRED_OPEN_POSITION' as const,
+      asset_id: IDS.di1f27,
+      asset_code: 'DI1F27',
+      affected_date: date,
+      required_price_date: null,
+      request_id: 'r',
+    });
+    db.issues.push(
+      expired('e3', '2027-01-07'),
+      expired('e1', '2027-01-05'),
+      expired('e2', '2027-01-06'),
+    );
+
+    const { items } = await processingApi.listIssues();
+
+    const rows = items.filter((i) => i.issue_type === 'EXPIRED_OPEN_POSITION');
+    expect(rows.map((i) => [i.asset_code, i.affected_date])).toEqual([['DI1F27', '2027-01-05']]);
   });
 
   it('§10.3 lists the missing price as the only Pendência', async () => {
