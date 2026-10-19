@@ -108,3 +108,16 @@ def test_a_table_is_dated_and_carries_its_chain_status() -> None:
 
 def test_the_previous_day_carries_no_reference_pus() -> None:
     assert _fields(PreviousPositionsDay) == ["state", "cumulative_pnl"]
+
+
+def test_each_pnl_point_carries_the_range_sum_and_the_positions_processing_time() -> None:
+    # OQ-31 item 8: positions chain only; the chart sums daily P&L from the start date.
+    assert _fields(PnLPointView) == [
+        "date",
+        "daily_pnl",
+        "cumulative_pnl",
+        "range_cumulative_pnl",
+        "pnl_status",
+        "status",
+        "published_at",
+    ]

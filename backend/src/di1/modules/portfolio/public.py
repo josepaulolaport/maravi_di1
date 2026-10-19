@@ -2,9 +2,11 @@
 the published read models (interfaces.md "Portfolio"; OQ-21, OQ-23, OQ-25, OQ-26, OQ-28).
 
 Frozen in W0.3c. Lane E implements the writer, the readers and the query service. The read models
-mirror the frozen HTTP contract (`frontend/src/api/contract/portfolio.ts` at 57b4df0); the HTTP
-layer only renames and formats. A chain status of ``None`` is "not processed". Changes go through
-the integrator.
+mirror the frozen HTTP contract (`frontend/src/api/contract/portfolio.ts` at 57b4df0, with the
+OQ-31 status names, which lane I applies); the HTTP layer only renames and formats. A chain
+status of ``None`` is "not processed"; each ``published_at`` is that chain's ``*_processed_at`` in
+``processing.date_status`` ("Processado em dd/mm/aaaa hh:mm", OQ-31). Changes go through the
+integrator.
 """
 
 from __future__ import annotations
@@ -121,18 +123,22 @@ class PreviousPositionsDay:
 
 
 class PortfolioReader(Protocol):
-    """Published state of D−1, for Processing. Whether it is current is read from
-    ``processing.date_status``, not from Portfolio (OQ-23)."""
+    """Published state of D−1, for Processing. Whether D−1 was processed is read from
+    ``processing.date_status``, not from Portfolio (OQ-23, OQ-31): a published D−1 whose status
+    is ``FAILED`` or absent is not used; Processing's status check decides."""
 
     async def get_previous_positions(self, before_date: date) -> PreviousPositionsDay | None:
         """The positions chain published for ``before_date − 1``, or ``None`` if not published.
         ``None`` is a usable start only in the zero state (no trade dated on or before
-        ``before_date − 1``); otherwise the run is refused with ``POSITIONS_PREDECESSOR_MISSING``
-        (OQ-30)."""
+        ``before_date − 1``); otherwise ``before_date`` fails with
+        ``POSITIONS_PREDECESSOR_MISSING`` and the run stops (OQ-31)."""
         ...
 
     async def get_previous_cash(self, before_date: date) -> CashBalance | None:
-        """The cash balance published for ``before_date − 1``, or ``None`` if not published."""
+        """The cash balance published for ``before_date − 1``, or ``None`` if not published.
+        ``None`` is a usable start only in the cash zero state (no active entry dated on or before
+        ``before_date − 1``); otherwise ``before_date`` fails with ``CASH_PREDECESSOR_MISSING``
+        and the run stops (OQ-31)."""
         ...
 
 
@@ -178,7 +184,7 @@ class PositionRowView:
     """``reference_source``, ``reference_pu`` and ``reference_rate`` are the current preferred
     price of the date (MANUAL, else B3, exact date; PU 0 after maturity), read from the price
     table; the stored figures are those of the last processing, so after a price correction the
-    two may differ and the date reads stale until reprocessed (OQ-30)."""
+    two may differ until the user processes the date again (OQ-30, OQ-31)."""
 
     asset_id: UUID
     asset_code: str
@@ -207,12 +213,22 @@ class PositionTableView:
 
 @dataclass(frozen=True, slots=True)
 class PnLPointView:
+    """One date of the positions chain for the Carteira chart (OQ-16, OQ-27, OQ-31 item 8).
+    ``cumulative_pnl`` is the stored since-inception figure; ``range_cumulative_pnl`` is
+    Σ ``daily_pnl`` from the requested start date to this date, summed in the backend on
+    request."""
+
     date: date
     daily_pnl: Decimal | None
     cumulative_pnl: Decimal | None
+    range_cumulative_pnl: Decimal | None
+    """``None`` from the first date of the range whose ``daily_pnl`` is ``None`` or that has no
+    published positions day."""
     pnl_status: CalculationCompleteness
     status: ChainStatus
     """A published day always has a status (never "not processed")."""
+    published_at: datetime
+    """When the positions chain of the date was last processed (OQ-31)."""
 
 
 class PortfolioQueryService(Protocol):
@@ -226,5 +242,7 @@ class PortfolioQueryService(Protocol):
     async def get_position_table(self, on: date) -> PositionTableView: ...
 
     async def get_pnl_series(self, start_date: date, end_date: date) -> tuple[PnLPointView, ...]:
-        """The published days of [start_date, end_date], in date order (OQ-16, OQ-27)."""
+        """The published positions days of [start_date, end_date], in date order (OQ-16,
+        OQ-27), each with its positions status and processing time only (OQ-31 item 8) and the
+        running sum of ``daily_pnl`` from ``start_date``."""
         ...
