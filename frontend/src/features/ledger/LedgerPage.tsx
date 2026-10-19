@@ -2,7 +2,7 @@ import { Button, Group, List, Paper, Stack, Text } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
 import { IconCalendar, IconPlayerPlay, IconPlus, IconTrash } from '@tabler/icons-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { PageTitle } from '@/shared/ui/PageTitle';
 import { SearchInput } from '@/shared/ui/SearchInput';
@@ -16,6 +16,8 @@ import {
 import { countLabel } from '@/shared/format';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorState } from '@/shared/ui/ErrorState';
+import { ApiError } from '@/api/http';
+import { problemMessages } from '@/shared/ui/problemMessages';
 import { LoadMore } from '@/shared/ui/LoadMore';
 
 import { CashStrip } from './components/CashStrip';
@@ -225,6 +227,11 @@ export function LedgerPage() {
         onClose={() => {
           setDeleting(null);
         }}
+        onRetarget={setDeleting}
+        refreshListed={async () => {
+          const result = await list.refetch();
+          return new Set((result.data?.items ?? []).map((item) => item.id));
+        }}
       />
     </Stack>
   );
@@ -263,8 +270,26 @@ function RangePicker({
   );
 }
 
-/** Deletes one entry or the selected ones, after confirmation (§6.1). */
-function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClose: () => void }) {
+/** Ids of the entries the list shows once it is read again. */
+type RefreshListed = () => Promise<ReadonlySet<string>>;
+
+/**
+ * Deletes one entry or the selected ones, after confirmation (§6.1). A 404 means an entry is
+ * already gone (deleted elsewhere) and nothing was deleted (OQ-32): the list is read again and
+ * the dialog keeps only the entries still listed, so "Excluir" can be retried; when none is
+ * left, it closes and says so.
+ */
+function DeleteDialog({
+  target,
+  onClose,
+  onRetarget,
+  refreshListed,
+}: {
+  target: DeleteTarget | null;
+  onClose: () => void;
+  onRetarget: (target: DeleteTarget) => void;
+  refreshListed: RefreshListed;
+}) {
   // One request for one entry or many, of either type (`POST /ledger/entries/deletions`).
   const mutation = useDeleteEntries();
   // The last target stays on screen while the dialog closes, so its text does not flicker.
@@ -276,8 +301,16 @@ function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClos
     onClose();
   };
 
+  // A 404 is followed by a new read of the list; meanwhile "Excluir" waits, and a dialog closed
+  // or changed in that time is left alone.
+  const [refreshing, setRefreshing] = useState(false);
+  const current = useRef(target);
+  useEffect(() => {
+    current.current = target;
+  }, [target]);
+
   const confirm = () => {
-    if (!target) return;
+    if (!target || refreshing) return;
     const entries = target.mode === 'one' ? [target.entry] : target.entries;
     mutation.mutate(entries, {
       onSuccess: () => {
@@ -288,7 +321,44 @@ function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClos
         });
         close();
       },
+      onError: (error) => {
+        if (error instanceof ApiError && error.status === 404) {
+          void dropVanished(target, problemMessages(error).join(' '));
+        }
+      },
     });
+  };
+
+  const dropVanished = async (stale: DeleteTarget, message: string) => {
+    setRefreshing(true);
+    const listed = await refreshListed().finally(() => {
+      setRefreshing(false);
+    });
+    if (current.current !== stale) return;
+    const entries = stale.mode === 'one' ? [stale.entry] : stale.entries;
+    const left = entries.filter((e) => listed.has(e.id));
+    if (left.length === entries.length) return;
+    if (left.length === 0) {
+      notifications.show({
+        color: 'red',
+        message:
+          entries.length === 1
+            ? `${message} Ele já havia sido excluído; a lista foi atualizada.`
+            : `${message} Eles já haviam sido excluídos; a lista foi atualizada.`,
+      });
+      close();
+      return;
+    }
+    // The 404 does not name the missing entry: the ones no longer listed are named here.
+    const gone = entries.filter((e) => !listed.has(e.id)).map(entryLabel);
+    notifications.show({
+      color: 'yellow',
+      message:
+        gone.length === 1
+          ? `Retirado da exclusão por já não existir: ${gone.join('')}.`
+          : `Retirados da exclusão por já não existirem: ${gone.join('; ')}.`,
+    });
+    onRetarget({ mode: 'many', entries: left });
   };
 
   const many = shown?.mode === 'many' ? shown.entries : [];
@@ -300,7 +370,7 @@ function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClos
       onConfirm={confirm}
       title={shown?.mode === 'many' ? 'Excluir lançamentos' : 'Excluir lançamento'}
       confirmLabel="Excluir"
-      loading={mutation.isPending}
+      loading={mutation.isPending || refreshing}
       error={mutation.error}
     >
       <Stack gap="xs">
