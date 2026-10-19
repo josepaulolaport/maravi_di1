@@ -7,7 +7,7 @@ import { server } from '@/api/mocks/server';
 import { renderApp } from '@/test/render';
 
 // Expected values come from the fixture scenario (src/api/mocks/fixtures.ts). Each contract's
-// latest observation: DI1F27 none; DI1F28 16/10 MANUAL revision 2 (PU 89250.3147019396, rate
+// latest observation: DI1F27 none; DI1F28 16/10 MANUAL, corrected (PU 89250.3147019396, rate
 // 0.0980, preferred over B3); DI1F29 15/10 MANUAL (PU 80206.1333187932, rate 0.1045); DI1F30
 // none.
 
@@ -43,16 +43,13 @@ describe('Ativos: produto (§11.2)', () => {
     ).toBeInTheDocument();
   });
 
-  it('§3 §4.1 shows the shared futures specification', async () => {
+  it('§11.2 shows no specification card (user, 2026-10-18)', async () => {
     await openProduct();
 
-    const specs = within(screen.getByRole('region', { name: 'Especificações' }));
-    expect(specs.getByText('Valor de referência')).toBeInTheDocument();
-    expect(specs.getByText('R$ 100.000,00')).toBeInTheDocument();
-    expect(specs.getByText('Contagem de dias')).toBeInTheDocument();
-    expect(specs.getByText('Dias corridos / 365')).toBeInTheDocument();
-    expect(specs.getByText('Precificação')).toBeInTheDocument();
-    expect(specs.getByText('PU e taxa anual')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Especificações' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Valor de referência')).not.toBeInTheDocument();
+    expect(screen.queryByText('Contagem de dias')).not.toBeInTheDocument();
+    expect(screen.queryByText('Precificação')).not.toBeInTheDocument();
   });
 
   it('§11.2 §5 lists each contract with its latest observation next to its own date', async () => {
@@ -105,19 +102,19 @@ describe('Ativos: produto (§11.2)', () => {
     const { user } = await openProduct();
 
     await user.click(screen.getByRole('button', { name: 'Novo contrato' }));
-    const drawer = within(await screen.findByRole('dialog', { name: 'Novo contrato' }));
-    await user.click(drawer.getByRole('button', { name: 'Cadastrar contrato' }));
-    expect(await drawer.findByText('Informe o código do contrato.')).toBeInTheDocument();
-    expect(drawer.getByText('Informe o vencimento.')).toBeInTheDocument();
+    const modal = within(await screen.findByRole('dialog', { name: 'Novo contrato' }));
+    await user.click(modal.getByRole('button', { name: 'Cadastrar contrato' }));
+    expect(await modal.findByText('Informe o código do contrato.')).toBeInTheDocument();
+    expect(modal.getByText('Informe o vencimento.')).toBeInTheDocument();
 
-    await user.type(drawer.getByRole('textbox', { name: 'Código' }), 'DI1F28');
-    await user.type(drawer.getByRole('textbox', { name: 'Vencimento' }), '02/01/2031');
-    await user.click(drawer.getByRole('button', { name: 'Cadastrar contrato' }));
-    expect(await drawer.findByText('Já existe um contrato com este código.')).toBeInTheDocument();
+    await user.type(modal.getByRole('textbox', { name: 'Código' }), 'DI1F28');
+    await user.type(modal.getByRole('textbox', { name: 'Vencimento' }), '02/01/2031');
+    await user.click(modal.getByRole('button', { name: 'Cadastrar contrato' }));
+    expect(await modal.findByText('Já existe um contrato com este código.')).toBeInTheDocument();
 
-    await user.clear(drawer.getByRole('textbox', { name: 'Código' }));
-    await user.type(drawer.getByRole('textbox', { name: 'Código' }), 'DI1F31');
-    await user.click(drawer.getByRole('button', { name: 'Cadastrar contrato' }));
+    await user.clear(modal.getByRole('textbox', { name: 'Código' }));
+    await user.type(modal.getByRole('textbox', { name: 'Código' }), 'DI1F31');
+    await user.click(modal.getByRole('button', { name: 'Cadastrar contrato' }));
 
     expect(await screen.findByText('DI1F31', { selector: 'td *' })).toBeInTheDocument();
     expect(cellTexts('DI1F31').slice(0, 5)).toEqual(['DI1F31', '02/01/2031', '—', '—', '—']);

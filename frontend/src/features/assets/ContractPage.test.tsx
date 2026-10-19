@@ -9,7 +9,7 @@ import { renderApp } from '@/test/render';
 // Expected values come from the fixture scenario (src/api/mocks/fixtures.ts), with today fixed
 // at MOCK_TODAY (18/10/2026, São Paulo). DI1F28 matures on 03/01/2028, so its calendar is
 // 19/09–18/10. Its current observations in that window: 24/09 B3, 30/09 MANUAL, 05/10 MANUAL,
-// 08/10 B3, 09/10 MANUAL, 14/10 MANUAL, 15/10 B3, 16/10 MANUAL revision 2 (89250.3147019396,
+// 08/10 B3, 09/10 MANUAL, 14/10 MANUAL, 15/10 B3, 16/10 MANUAL, corrected (89250.3147019396,
 // 0.0980) and B3 (89240.4279488087, 0.0981). Nothing on 17/10 or 18/10.
 
 beforeEach(() => {
@@ -116,35 +116,29 @@ describe('Ativos: contrato (§11.2)', () => {
     ).toBeInTheDocument();
   });
 
-  it('§5 "Ver revisões" lists every revision of both sources, newest first', async () => {
+  it('§5 the row menu offers Corrigir and Remover; there is no "Ver revisões"', async () => {
     const { user } = await openContract();
 
-    await rowAction(user, '16/10/2026', 'Ver revisões');
+    await user.click(dayRow('16/10/2026').getByRole('button', { name: 'Ações de 16/10/2026' }));
 
-    const modal = within(await screen.findByRole('dialog', { name: 'Revisões de 16/10/2026' }));
-    const rows = (await modal.findAllByRole('row')).slice(1).map((row) =>
-      within(row)
-        .getAllByRole('cell')
-        .map((cell) => cell.textContent),
-    );
-    expect(rows).toEqual([
-      ['Manual', '2', '89.250,31', '9,80%', '17/10/2026 10:00', 'Atual'],
-      ['B3', '1', '89.240,43', '9,81%', '16/10/2026 19:00', 'Atual'],
-      ['Manual', '1', '89.200,90', '9,85%', '16/10/2026 18:00', '17/10/2026 10:00'],
-    ]);
+    expect(await screen.findByRole('menuitem', { name: 'Corrigir' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Remover' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Ver revisões' })).not.toBeInTheDocument();
   });
 
-  it('§5 a correction appends a new revision (revision 3) and is shown at once', async () => {
+  it('§5 OQ-26 a correction replaces the price and is shown at once', async () => {
     const { user } = await openContract();
 
     await rowAction(user, '16/10/2026', 'Corrigir');
-    const drawer = within(
+    const priceModal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
-    expect(drawer.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('16/10/2026');
-    await user.click(drawer.getByRole('radio', { name: 'Taxa a.a.' }));
-    await user.type(drawer.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '9,75');
-    await user.click(drawer.getByRole('button', { name: 'Salvar' }));
+    expect(priceModal.getByRole('textbox', { name: 'Data de referência' })).toHaveValue(
+      '16/10/2026',
+    );
+    await user.click(priceModal.getByRole('radio', { name: 'Taxa a.a.' }));
+    await user.type(priceModal.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '9,75');
+    await user.click(priceModal.getByRole('button', { name: 'Salvar' }));
 
     await waitFor(() => {
       expect(cells('16/10/2026')[2]).toBe('9,75%');
@@ -154,15 +148,7 @@ describe('Ativos: contrato (§11.2)', () => {
         screen.queryByRole('dialog', { name: 'Registrar preço de referência' }),
       ).not.toBeInTheDocument();
     });
-    await rowAction(user, '16/10/2026', 'Ver revisões');
-    const modal = within(await screen.findByRole('dialog', { name: 'Revisões de 16/10/2026' }));
-    const first = (await modal.findAllByRole('row'))[1] as HTMLElement;
-    const firstCells = within(first)
-      .getAllByRole('cell')
-      .map((cell) => cell.textContent);
-    expect(firstCells.slice(0, 2)).toEqual(['Manual', '3']);
-    expect(firstCells[3]).toBe('9,75%');
-    expect(firstCells[5]).toBe('Atual');
+    expect(cells('16/10/2026')[3]).toBe('Manual');
   });
 
   it('§5 Remover lists each current observation of the date; removing MANUAL lets B3 prevail', async () => {
@@ -265,47 +251,47 @@ describe('Ativos: contrato (§11.2)', () => {
 });
 
 describe('Ativos: registrar preço (§11.2, §5)', () => {
-  it('§11.2 "Registrar preço" opens the drawer: contract, date, PU | Taxa a.a., one input', async () => {
+  it('§11.2 "Registrar preço" opens the modal: contract, date, PU | Taxa a.a., one input', async () => {
     const { user } = await openContract();
 
     await user.click(screen.getByRole('button', { name: 'Registrar preço' }));
-    const drawer = within(
+    const modal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
-    expect(drawer.getByRole('textbox', { name: 'Contrato' })).toHaveValue('DI1F28');
-    expect(drawer.getByRole('textbox', { name: 'Contrato' })).toHaveAttribute('readonly');
-    expect(drawer.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('18/10/2026');
-    const kind = within(drawer.getByRole('radiogroup', { name: 'Forma de entrada' }));
+    expect(modal.getByRole('textbox', { name: 'Contrato' })).toHaveValue('DI1F28');
+    expect(modal.getByRole('textbox', { name: 'Contrato' })).toHaveAttribute('readonly');
+    expect(modal.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('18/10/2026');
+    const kind = within(modal.getByRole('radiogroup', { name: 'Forma de entrada' }));
     expect(kind.getByRole('radio', { name: 'PU' })).toBeChecked();
-    expect(drawer.getByRole('textbox', { name: 'PU' })).toBeInTheDocument();
-    expect(drawer.queryByRole('textbox', { name: 'Taxa a.a. (%)' })).not.toBeInTheDocument();
+    expect(modal.getByRole('textbox', { name: 'PU' })).toBeInTheDocument();
+    expect(modal.queryByRole('textbox', { name: 'Taxa a.a. (%)' })).not.toBeInTheDocument();
     expect(
-      drawer.getByText(
+      modal.getByText(
         'O registro não inicia um recálculo. Solicite um processamento para atualizar a carteira.',
       ),
     ).toBeInTheDocument();
   });
 
-  it('§11.2 the "+" of an empty day opens the drawer on that date', async () => {
+  it('§11.2 the "+" of an empty day opens the modal on that date', async () => {
     const { user } = await openContract();
 
     await user.click(screen.getByRole('button', { name: 'Registrar preço em 17/10/2026' }));
 
-    const drawer = within(
+    const modal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
-    expect(drawer.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('17/10/2026');
+    expect(modal.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('17/10/2026');
   });
 
-  it('§11.1 ?registrar= opens the drawer on that date; saving fills the calendar', async () => {
+  it('§11.1 ?registrar= opens the modal on that date; saving fills the calendar', async () => {
     const { user, router } = await openContract(`${F28}?registrar=2026-10-17`);
 
-    const drawer = within(
+    const modal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
-    expect(drawer.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('17/10/2026');
-    await user.type(drawer.getByRole('textbox', { name: 'PU' }), '89.300,00');
-    await user.click(drawer.getByRole('button', { name: 'Salvar' }));
+    expect(modal.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('17/10/2026');
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '89.300,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
 
     await waitFor(() => {
       expect(cells('17/10/2026').slice(0, 2)).toEqual(['17/10/2026', '89.300,00']);
@@ -318,25 +304,25 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
   it('§4.1 rejects a value that is not a pt-BR number, without a request', async () => {
     const { user } = await openContract(`${F28}?registrar=2026-10-17`);
 
-    const drawer = within(
+    const modal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
-    await user.type(drawer.getByRole('textbox', { name: 'PU' }), 'abc');
-    await user.click(drawer.getByRole('button', { name: 'Salvar' }));
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), 'abc');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
 
-    expect(await drawer.findByText('Informe um número válido.')).toBeInTheDocument();
+    expect(await modal.findByText('Informe um número válido.')).toBeInTheDocument();
   });
 
   it('§4.1 shows the API decimal-places error on the value field (OQ-3)', async () => {
     const { user } = await openContract(`${F28}?registrar=2026-10-17`);
 
-    const drawer = within(
+    const modal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
-    await user.type(drawer.getByRole('textbox', { name: 'PU' }), '89.300,12345678901');
-    await user.click(drawer.getByRole('button', { name: 'Salvar' }));
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '89.300,12345678901');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
 
-    expect(await drawer.findByText('Use no máximo 10 casas decimais.')).toBeInTheDocument();
+    expect(await modal.findByText('Use no máximo 10 casas decimais.')).toBeInTheDocument();
   });
 
   it('§12 shows every error the API gives for the value input (pu, rate, input_kind)', async () => {
@@ -350,29 +336,29 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
     );
     const { user } = await openContract(`${F28}?registrar=2026-10-17`);
 
-    const drawer = within(
+    const modal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
-    await user.type(drawer.getByRole('textbox', { name: 'PU' }), '89.300,00');
-    await user.click(drawer.getByRole('button', { name: 'Salvar' }));
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '89.300,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
 
     expect(
-      await drawer.findByText('O valor deve ser maior que zero.', { exact: false }),
+      await modal.findByText('O valor deve ser maior que zero.', { exact: false }),
     ).toBeInTheDocument();
-    expect(drawer.getByText('Forma de entrada inválida.', { exact: false })).toBeInTheDocument();
+    expect(modal.getByText('Forma de entrada inválida.', { exact: false })).toBeInTheDocument();
   });
 
   it('OQ-14 shows FUTURE_DATE on the date field', async () => {
     const { user } = await openContract(`${F28}?registrar=2026-10-19`);
 
-    const drawer = within(
+    const modal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
-    expect(drawer.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('19/10/2026');
-    await user.type(drawer.getByRole('textbox', { name: 'PU' }), '89.300,00');
-    await user.click(drawer.getByRole('button', { name: 'Salvar' }));
+    expect(modal.getByRole('textbox', { name: 'Data de referência' })).toHaveValue('19/10/2026');
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '89.300,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
 
-    expect(await drawer.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+    expect(await modal.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
   });
 
   it('OQ-1 shows CONTRACT_MATURED on the date field', async () => {
@@ -389,13 +375,13 @@ describe('Ativos: registrar preço (§11.2, §5)', () => {
     );
     const { user } = await openContract(`${F28}?registrar=2026-10-17`);
 
-    const drawer = within(
+    const modal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
-    await user.type(drawer.getByRole('textbox', { name: 'PU' }), '89.300,00');
-    await user.click(drawer.getByRole('button', { name: 'Salvar' }));
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '89.300,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
 
-    expect(await drawer.findByText('O contrato já venceu nesta data.')).toBeInTheDocument();
+    expect(await modal.findByText('O contrato já venceu nesta data.')).toBeInTheDocument();
   });
 });
 
@@ -431,12 +417,12 @@ describe('Ativos: período do calendário (§11.2)', () => {
   it('§11.1 "registrar" on an older date opens the calendar on it, and the saved price stays in view', async () => {
     const { user, router } = await openContract(`${F28}?registrar=2026-08-20`);
 
-    const drawer = within(
+    const modal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
     expect(cells('20/08/2026')).toEqual(['20/08/2026', '—', '—', '—']);
-    await user.type(drawer.getByRole('textbox', { name: 'PU' }), '88.000,00');
-    await user.click(drawer.getByRole('button', { name: 'Salvar' }));
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '88.000,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
 
     await waitFor(() => {
       expect(router.state.location.search).not.toContain('registrar');
@@ -448,13 +434,13 @@ describe('Ativos: período do calendário (§11.2)', () => {
     });
   });
 
-  it('§11.1 cancelling a "registrar" drawer keeps the period it opened on', async () => {
+  it('§11.1 cancelling a "registrar" modal keeps the period it opened on', async () => {
     const { user, router } = await openContract(`${F28}?registrar=2026-08-20`);
 
-    const drawer = within(
+    const modal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
-    await user.click(drawer.getByRole('button', { name: 'Cancelar' }));
+    await user.click(modal.getByRole('button', { name: 'Cancelar' }));
 
     await waitFor(() => {
       expect(router.state.location.search).not.toContain('registrar');
@@ -467,14 +453,14 @@ describe('Ativos: período do calendário (§11.2)', () => {
     const { user, router } = await openContract();
 
     await user.click(screen.getByRole('button', { name: 'Registrar preço' }));
-    const drawer = within(
+    const modal = within(
       await screen.findByRole('dialog', { name: 'Registrar preço de referência' }),
     );
-    const date = drawer.getByRole('textbox', { name: 'Data de referência' });
+    const date = modal.getByRole('textbox', { name: 'Data de referência' });
     await user.clear(date);
     await user.type(date, '01/09/2026');
-    await user.type(drawer.getByRole('textbox', { name: 'PU' }), '88.100,00');
-    await user.click(drawer.getByRole('button', { name: 'Salvar' }));
+    await user.type(modal.getByRole('textbox', { name: 'PU' }), '88.100,00');
+    await user.click(modal.getByRole('button', { name: 'Salvar' }));
 
     await waitFor(() => {
       expect(cells('01/09/2026').slice(0, 2)).toEqual(['01/09/2026', '88.100,00']);
@@ -525,20 +511,6 @@ describe('Ativos: contrato, estados (§12)', () => {
     const rows = table.getAllByRole('row').slice(1);
     expect(within(rows[0] as HTMLElement).getByText('01/10/2026')).toBeInTheDocument();
     expect(within(rows[29] as HTMLElement).getByText('02/09/2026')).toBeInTheDocument();
-  });
-
-  it('§12 shows the revisions error in the modal', async () => {
-    server.use(
-      http.get(url('/reference-prices/revisions'), () =>
-        problem(500, [{ code: 'VALIDATION_ERROR', message: 'Serviço indisponível.', field: null }]),
-      ),
-    );
-    const { user } = await openContract();
-
-    await rowAction(user, '16/10/2026', 'Ver revisões');
-
-    const modal = within(await screen.findByRole('dialog', { name: 'Revisões de 16/10/2026' }));
-    expect(await modal.findByText('Serviço indisponível.')).toBeInTheDocument();
   });
 
   it('§12 shows "não encontrado" for an unknown contract', async () => {

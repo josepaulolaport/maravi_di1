@@ -1,20 +1,37 @@
 import type { Decimal, InputKind, IsoDate, IsoDateTime, IsoTime } from './common';
 
 // Ledger (spec §6, schema `ledger.*`). Lançamentos screen (§11.3, OQ-19).
+//
+// One kind of record, the ledger entry (user, 2026-10-18: "Their separation should be their
+// type only"). A TRADE moves a position and cash; a CASH entry (aporte or retirada) moves only
+// cash. Both live under `/ledger/entries`: listed, created and deleted the same way.
 
-/** `GET /trades?start_date&end_date&search` — active (not deleted) trades, inclusive range. */
-export interface Trade {
+/** TRADE: compra or venda (the sign of the quantity). CASH: aporte or retirada (the sign of the amount). */
+export type LedgerEntryType = 'TRADE' | 'CASH';
+
+interface LedgerEntryBase {
   id: string;
-  asset_id: string;
-  /** Proposal: denormalised instrument code (e.g. DI1F28) for the table and search. */
-  asset_code: string;
-  /** Proposal: the instrument type (e.g. FUTURE), shown as "Tipo de ativo" (§11.3). */
-  instrument_type_code: string;
-  trade_date: IsoDate;
-  /** São Paulo local time (OQ-13). */
-  trade_time: IsoTime;
-  /** Tie-breaker within (trade_date, trade_time). */
+  type: LedgerEntryType;
+  date: IsoDate;
+  /** São Paulo local time, required on every entry (OQ-13; user 2026-10-18, closes GAP-I-1). */
+  time: IsoTime;
+  /** Tie-breaker within (date, time), shared by both types. */
   seq: number;
+  /**
+   * The entry's signed cash effect, from the backend: −signed_quantity × execution_pu for a
+   * trade (§7.3); for a cash entry, the amount itself, + aporte, − retirada (§6.2).
+   */
+  cash_amount: Decimal;
+  created_at: IsoDateTime;
+}
+
+export interface TradeLedgerEntry extends LedgerEntryBase {
+  type: 'TRADE';
+  asset_id: string;
+  /** Denormalised instrument code (e.g. DI1F28) for the table and search. */
+  asset_code: string;
+  /** The instrument type (e.g. FUTURE), shown as "Tipo de ativo" (§11.3). */
+  instrument_type_code: string;
   /** Positive = compra, negative = venda. */
   signed_quantity: number;
   execution_pu: Decimal;
@@ -22,50 +39,47 @@ export interface Trade {
   execution_rate: Decimal;
   /** Which value the user typed; the other was computed on save (OQ-19 item 7). */
   input_kind: InputKind;
-  /**
-   * Proposal: the trade's cash effect, `−signed_quantity × execution_pu` (§7.3), computed by
-   * the backend so the browser never multiplies money ("Valor financeiro").
-   */
-  cash_amount: Decimal;
-  created_at: IsoDateTime;
 }
 
-export type CashMovementType = 'DEPOSIT' | 'WITHDRAWAL';
-
-/** `GET /cash-movements?start_date&end_date&search`. */
-export interface CashMovement {
-  id: string;
-  movement_date: IsoDate;
-  movement_type: CashMovementType;
-  /** Always positive; the type gives the direction (§6.2). */
-  amount: Decimal;
-  description: string | null;
-  created_at: IsoDateTime;
+/** Aporte (positive `cash_amount`) or retirada (negative). No description (GAP-I-2). */
+export interface CashLedgerEntry extends LedgerEntryBase {
+  type: 'CASH';
 }
 
-/** `POST /trades`: exactly one of PU or rate is typed (§4.1). */
-export type CreateTradeRequest = {
+export type LedgerEntry = TradeLedgerEntry | CashLedgerEntry;
+
+/**
+ * `GET /ledger/entries?start_date&end_date&search&order&limit&cursor` (P18, P21): both types
+ * in one list, filtered and ordered by the backend, by (date, time, seq); `desc` (default)
+ * newest first, `asc` the exact reverse. Returns a `Page<LedgerEntry>`.
+ */
+export type LedgerOrder = 'asc' | 'desc';
+
+/** `POST /ledger/entries`, TRADE: exactly one of PU or rate is typed (§4.1). */
+export type CreateTradeEntryRequest = {
+  type: 'TRADE';
   asset_id: string;
-  trade_date: IsoDate;
-  trade_time: IsoTime;
+  date: IsoDate;
+  time: IsoTime;
   signed_quantity: number;
 } & ({ input_kind: 'PU'; execution_pu: Decimal } | { input_kind: 'RATE'; execution_rate: Decimal });
 
-/** `POST /cash-movements`. */
-export interface CreateCashMovementRequest {
-  movement_date: IsoDate;
-  movement_type: CashMovementType;
-  amount: Decimal;
-  description?: string;
+/** `POST /ledger/entries`, CASH: the signed amount, at most 2 places, never zero (§6.2, OQ-3). */
+export interface CreateCashEntryRequest {
+  type: 'CASH';
+  date: IsoDate;
+  time: IsoTime;
+  cash_amount: Decimal;
 }
 
+/** `POST /ledger/entries` returns the created `LedgerEntry` (201). */
+export type CreateLedgerEntryRequest = CreateTradeEntryRequest | CreateCashEntryRequest;
+
 /**
- * Proposal: `POST /ledger/deletions` soft-deletes several entries in one transaction
- * (§6.1 "exclusão múltipla com confirmação e operação atômica"). Single deletes keep using
- * `DELETE /trades/{id}` and `DELETE /cash-movements/{id}`.
+ * `POST /ledger/entries/deletions` (lane X, 2026-10-18; a POST, since a DELETE body is not
+ * reliably carried by proxies): soft-deletes the entries, whatever their type, in
+ * one transaction; an unknown id deletes nothing (§6.1 "operação atômica"). 204.
  */
-export interface DeleteEntriesRequest {
-  trade_ids: string[];
-  cash_movement_ids: string[];
-  reason?: string;
+export interface DeleteLedgerEntriesRequest {
+  ids: string[];
 }

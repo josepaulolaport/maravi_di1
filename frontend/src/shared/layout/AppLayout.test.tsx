@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 
 import { renderApp } from '@/test/render';
 
@@ -64,5 +64,42 @@ describe('AppLayout', () => {
     expect(
       await screen.findByRole('heading', { name: 'Página não encontrada' }),
     ).toBeInTheDocument();
+  });
+
+  describe('scroll', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('§11 opens each screen at its top, not at the scroll position of the previous one', async () => {
+      const scrollTo = vi.fn();
+      vi.stubGlobal('scrollTo', scrollTo);
+      const { user } = renderApp('/carteira');
+      scrollTo.mockClear();
+
+      await user.click(screen.getByRole('link', { name: 'Lançamentos' }));
+
+      await waitFor(() => {
+        expect(scrollTo).toHaveBeenCalledWith(0, 0);
+      });
+    });
+
+    it('§11 keeps the position when a screen only changes its query (search, date, range)', async () => {
+      const scrollTo = vi.fn();
+      vi.stubGlobal('scrollTo', scrollTo);
+      // An explicit range, so the rows on screen do not depend on the day the test runs.
+      const range = '/lancamentos?inicio=2026-10-14&fim=2026-10-16';
+      const { router } = renderApp(range);
+      await screen.findByText(/lançamentos? encontrados?$/);
+      // jsdom never scrolls: without a position, restoring it and resetting to the top would
+      // be the same call, scrollTo(0, 0).
+      vi.stubGlobal('scrollY', 480);
+      scrollTo.mockClear();
+
+      await router.navigate(`${range}&busca=DI1F28`, { replace: true });
+      await screen.findByText(/lançamentos? encontrados?$/);
+
+      expect(scrollTo).not.toHaveBeenCalledWith(0, 0);
+    });
   });
 });

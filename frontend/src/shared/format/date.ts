@@ -57,8 +57,27 @@ export function addDays(value: IsoDate, amount: number): IsoDate {
   return new Date(Date.parse(`${value}T00:00:00Z`) + amount * DAY_MS).toISOString().slice(0, 10);
 }
 
+/** Calendar days from `start` to `end`, both included (a count of days, never money). */
+export function daysInclusive(start: IsoDate, end: IsoDate): number {
+  return (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / DAY_MS + 1;
+}
+
 export function isIsoDate(value: string | null | undefined): value is IsoDate {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const time = Date.parse(`${value}T00:00:00Z`);
   return !Number.isNaN(time) && new Date(time).toISOString().startsWith(value);
+}
+
+/** The inclusive range [A, B] (OQ-11): 14/10/2026 a 16/10/2026. */
+export function formatPeriod(start: IsoDate, end: IsoDate): string {
+  return `${formatDate(start)} a ${formatDate(end)}`;
+}
+
+/** A typed DD/MM/AAAA date → YYYY-MM-DD; `null` for anything else. */
+export function parsePtBrDate(text: string): IsoDate | null {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text.trim());
+  if (!match) return null;
+  const [, day, month, year] = match;
+  const iso = `${year ?? ''}-${month ?? ''}-${day ?? ''}`;
+  return isIsoDate(iso) ? iso : null;
 }

@@ -1,7 +1,7 @@
 import { Stack, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
-/** A labelled read-only value in a drawer or dialog, exposed as a named group. */
+/** A labelled read-only value in a modal, exposed as a named group. */
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <Stack gap={2} role="group" aria-label={label}>

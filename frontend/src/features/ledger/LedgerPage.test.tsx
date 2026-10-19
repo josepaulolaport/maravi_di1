@@ -9,7 +9,9 @@ import {
 import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
-import { cashMovements, IDS, trades } from '@/api/mocks/fixtures';
+import { cashEntries, IDS, instruments, products, tradeEntries } from '@/api/mocks/fixtures';
+import { ledgerApi } from '@/api/endpoints';
+import { setStatus } from '@/api/mocks/db';
 import { fieldError, problem, url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { addDays, formatDate, todayInSaoPaulo } from '@/shared/format';
@@ -60,10 +62,20 @@ function captureBodies(method: 'post', path: string) {
   return bodies;
 }
 
-async function openNew(user: ReturnType<typeof renderApp>['user'], item: string) {
+const ENTRY_GROUP = {
+  Compra: 'Operação',
+  Venda: 'Operação',
+  Aporte: 'Caixa',
+  Retirada: 'Caixa',
+} as const;
+
+/** "Novo lançamento" → the modal, set to the given kind of entry (Operação or Caixa first). */
+async function openNew(user: ReturnType<typeof renderApp>['user'], item: keyof typeof ENTRY_GROUP) {
   await user.click(screen.getByRole('button', { name: 'Novo lançamento' }));
-  await user.click(await screen.findByRole('menuitem', { name: item }));
-  return within(await screen.findByRole('dialog'));
+  const modal = within(await screen.findByRole('dialog', { name: 'Novo lançamento' }));
+  await user.click(modal.getByRole('radio', { name: ENTRY_GROUP[item] }));
+  await user.click(modal.getByRole('radio', { name: item }));
+  return modal;
 }
 
 async function typeDate(
@@ -78,10 +90,10 @@ async function typeDate(
 
 async function chooseContract(
   user: ReturnType<typeof renderApp>['user'],
-  drawer: BoundFunctions<typeof queries>,
+  modal: BoundFunctions<typeof queries>,
   code: string,
 ) {
-  const select = drawer.getByRole('combobox', { name: 'Contrato' });
+  const select = modal.getByRole('combobox', { name: 'Contrato' });
   await waitFor(() => {
     expect(select).toBeEnabled();
   });
@@ -127,11 +139,12 @@ describe('Lançamentos (§11.3)', () => {
       ]);
     });
 
-    it('§11.3 merges trades and cash movements, newest first, in pt-BR formats', async () => {
+    it('§11.3 lists trades and cash entries in one order, newest first, in pt-BR formats', async () => {
       await openLedger();
       await screen.findAllByText('Futuros');
 
       expect(bodyRows().map(cellTexts)).toEqual([
+        ['', '16/10/2026 17:30', 'Caixa', 'Retirada', '—', '—', '—', '—', '-R$ 50.000,00', ''],
         [
           '',
           '16/10/2026 15:00',
@@ -144,7 +157,6 @@ describe('Lançamentos (§11.3)', () => {
           '+R$ 356.408,89',
           '',
         ],
-        ['', '16/10/2026', 'Caixa', 'Retirada', '—', '—', '—', '—', '-R$ 50.000,00', ''],
         [
           '',
           '15/10/2026 10:30',
@@ -169,11 +181,18 @@ describe('Lançamentos (§11.3)', () => {
           '-R$ 890.064,63',
           '',
         ],
-        ['', '14/10/2026', 'Caixa', 'Aporte', '—', '—', '—', '—', '+R$ 1.500.000,00', ''],
+        ['', '14/10/2026 09:00', 'Caixa', 'Aporte', '—', '—', '—', '—', '+R$ 1.500.000,00', ''],
       ]);
     });
 
     it('§11.3 sorts by Data e hora, descending by default, ascending on click', async () => {
+      const orders: (string | null)[] = [];
+      server.use(
+        http.get(url('/ledger/entries'), ({ request }) => {
+          orders.push(new URL(request.url).searchParams.get('order'));
+          return undefined;
+        }),
+      );
       const { user } = await openLedger();
       const header = screen.getByRole('columnheader', { name: 'Data e hora' });
       expect(header).toHaveAttribute('aria-sort', 'descending');
@@ -181,8 +200,33 @@ describe('Lançamentos (§11.3)', () => {
       await user.click(within(header).getByRole('button'));
 
       expect(header).toHaveAttribute('aria-sort', 'ascending');
-      expect(cellTexts(bodyRows()[0] as HTMLElement)[1]).toBe('14/10/2026');
-      expect(cellTexts(bodyRows()[4] as HTMLElement)[1]).toBe('16/10/2026 15:00');
+      // The order is the backend's: the screen asks for it, it never sorts the rows itself.
+      await waitFor(() => {
+        expect(orders).toEqual(['desc', 'asc']);
+      });
+      await waitFor(() => {
+        expect(cellTexts(bodyRows()[0] as HTMLElement)[1]).toBe('14/10/2026 09:00');
+      });
+      expect(cellTexts(bodyRows()[4] as HTMLElement)[1]).toBe('16/10/2026 17:30');
+    });
+
+    it('§11.3 a new range shows the loading state, never the rows of the previous range', async () => {
+      let release: () => void = () => undefined;
+      const { router } = await openLedger();
+      server.use(
+        http.get(url('/ledger/entries'), async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return undefined;
+        }),
+      );
+
+      await router.navigate('/lancamentos?inicio=2026-10-01&fim=2026-10-05');
+
+      expect(await screen.findByLabelText('Carregando lançamentos')).toBeInTheDocument();
+      expect(screen.queryByText('5 lançamentos encontrados')).not.toBeInTheDocument();
+      release();
     });
 
     it('§11.3 the range is inclusive on both ends', async () => {
@@ -190,8 +234,8 @@ describe('Lançamentos (§11.3)', () => {
 
       expect(screen.getByText('3 lançamentos encontrados')).toBeInTheDocument();
       expect(bodyRows().map((row) => cellTexts(row)[1])).toEqual([
+        '16/10/2026 17:30',
         '16/10/2026 15:00',
-        '16/10/2026',
         '15/10/2026 10:30',
       ]);
     });
@@ -225,19 +269,41 @@ describe('Lançamentos (§11.3)', () => {
       const start = addDays(today, -29);
       const seen: string[] = [];
       server.use(
-        http.get(url('/trades'), ({ request }) => {
+        http.get(url('/ledger/entries'), ({ request }) => {
           seen.push(new URL(request.url).search);
-          return HttpResponse.json({ items: [] });
+          return HttpResponse.json({ items: [], next_cursor: null });
         }),
-        http.get(url('/cash-movements'), () => HttpResponse.json({ items: [] })),
       );
 
       await openLedger('/lancamentos?busca=DI1F29');
 
-      expect(seen[0]).toBe(`?start_date=${start}&end_date=${today}&search=DI1F29`);
+      expect(seen[0]).toBe(
+        `?start_date=${start}&end_date=${today}&search=DI1F29&order=desc&limit=50`,
+      );
       expect(screen.getByRole('button', { name: 'Período' })).toHaveTextContent(
         `${formatDate(start)} – ${formatDate(today)}`,
       );
+    });
+
+    it('P21 reads the list page by page: "Carregar mais" asks for the next cursor', async () => {
+      const seen: (string | null)[] = [];
+      server.use(
+        http.get(url('/ledger/entries'), ({ request }) => {
+          const cursor = new URL(request.url).searchParams.get('cursor');
+          seen.push(cursor);
+          return cursor === 'page-2'
+            ? HttpResponse.json({ items: tradeEntries.slice(0, 2), next_cursor: null })
+            : HttpResponse.json({ items: cashEntries, next_cursor: 'page-2' });
+        }),
+      );
+      const { user } = renderApp(FULL_RANGE);
+
+      expect(await screen.findByText('2 lançamentos exibidos')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Carregar mais' }));
+
+      expect(await screen.findByText('4 lançamentos encontrados')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Carregar mais' })).not.toBeInTheDocument();
+      expect(seen.slice(0, 2)).toEqual([null, 'page-2']);
     });
 
     it('§11.3 shows the empty state for a range without entries', async () => {
@@ -249,7 +315,7 @@ describe('Lançamentos (§11.3)', () => {
 
     it('§12 shows the API error with a retry', async () => {
       server.use(
-        http.get(url('/trades'), () =>
+        http.get(url('/ledger/entries'), () =>
           problem(422, [fieldError('INVALID_RANGE', 'Período inválido para a consulta.', null)]),
         ),
       );
@@ -270,7 +336,8 @@ describe('Lançamentos (§11.3)', () => {
       await openLedger();
 
       expect(screen.queryByText('FUTURE')).not.toBeInTheDocument();
-      expect(cellTexts(bodyRows()[0] as HTMLElement)[2]).toBe('—');
+      // Row 1 is the 16/10 venda (row 0 is the 17:30 retirada, whose type is always Caixa).
+      expect(cellTexts(bodyRows()[1] as HTMLElement)[2]).toBe('—');
     });
 
     it('§11.3 clearing busca in the URL clears the search box and keeps it cleared', async () => {
@@ -287,17 +354,48 @@ describe('Lançamentos (§11.3)', () => {
   });
 
   describe('cash strip (OQ-19 item 3)', () => {
-    it('§11.3 shows Caixa D−1 and Caixa D0 for the range end, with the stale marker', async () => {
+    it('§11.3 OQ-21 shows the published cash of the range end and the day before, with its own freshness', async () => {
       await openLedger();
 
       const before = within(screen.getByRole('group', { name: 'Caixa D−1' }));
       const end = within(screen.getByRole('group', { name: 'Caixa D0' }));
       expect(before.getByText('15/10/2026')).toBeInTheDocument();
       expect(await before.findByText('R$ 199.650,37')).toBeInTheDocument();
-      expect(before.queryByText('Desatualizado')).not.toBeInTheDocument();
       expect(end.getByText('16/10/2026')).toBeInTheDocument();
       expect(await end.findByText('R$ 506.059,27')).toBeInTheDocument();
-      expect(end.getByText('Desatualizado')).toBeInTheDocument();
+      // The 16/10 price correction makes positions stale, never the cash (OQ-21).
+      expect(before.queryByText('Desatualizado')).not.toBeInTheDocument();
+      expect(end.queryByText('Desatualizado')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Processar caixa' })).not.toBeInTheDocument();
+    });
+
+    it('OQ-21 a deposit marks the cash stale and offers "Processar caixa" from that day, scope Caixa', async () => {
+      await ledgerApi.createEntry({
+        type: 'CASH',
+        date: '2026-10-15',
+        time: '12:00:00',
+        cash_amount: '1000.00',
+      });
+      const { user } = await openLedger();
+
+      const end = within(screen.getByRole('group', { name: 'Caixa D0' }));
+      expect(await end.findByText('Desatualizado')).toBeInTheDocument();
+      await user.click(await screen.findByRole('button', { name: 'Processar caixa' }));
+
+      const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
+      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('15/10/2026');
+      expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('16/10/2026');
+      expect(modal.getByRole('radio', { name: 'Caixa' })).toBeChecked();
+    });
+
+    it('OQ-23 a failed cash date keeps its published cash, reads "Erro" and offers "Processar caixa"', async () => {
+      setStatus('2026-10-16', 'CASH', 'FAILED');
+      await openLedger();
+
+      const end = within(screen.getByRole('group', { name: 'Caixa D0' }));
+      expect(await end.findByText('R$ 506.059,27')).toBeInTheDocument();
+      expect(end.getByText('Erro')).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Processar caixa' })).toBeInTheDocument();
     });
 
     it('§11.3 shows unprocessed dates as unavailable, never as zero', async () => {
@@ -334,35 +432,40 @@ describe('Lançamentos (§11.3)', () => {
     expect(await end.findByText('R$ 199.650,37')).toBeInTheDocument();
     expect(end.queryByText('Desatualizado')).not.toBeInTheDocument();
 
-    const drawer = await openNew(user, 'Aporte');
-    await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '15/10/2026');
-    await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
-    await user.click(drawer.getByRole('button', { name: 'Registrar aporte' }));
+    const modal = await openNew(user, 'Aporte');
+    await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
+    await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
+    await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
     expect(await end.findByText('Desatualizado')).toBeInTheDocument();
   });
 
-  describe('Compra / Venda drawer (§6.1)', () => {
+  describe('Compra / Venda (§6.1)', () => {
     it('§6.1 registers a compra typed as PU, positive quantity', async () => {
-      const bodies = captureBodies('post', '/trades');
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F29');
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '16/10/2026');
-      fireEvent.change(drawer.getByLabelText('Hora', { exact: false }), {
+      await chooseContract(user, modal, 'DI1F29');
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
+      fireEvent.change(modal.getByLabelText('Hora', { exact: false }), {
         target: { value: '16:45' },
       });
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '3');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '80.000,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '3');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '80.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await screen.findByText('Compra registrada.')).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          /^Compra registrada\. Caixa e posições precisam ser processados a partir de \d{2}\/\d{2}\/\d{4}: use o escopo Tudo\.$/,
+        ),
+      ).toBeInTheDocument();
       expect(bodies).toEqual([
         {
+          type: 'TRADE',
           asset_id: IDS.di1f29,
-          trade_date: '2026-10-16',
-          trade_time: '16:45:00',
+          date: '2026-10-16',
+          time: '16:45:00',
           signed_quantity: 3,
           input_kind: 'PU',
           execution_pu: '80000.00',
@@ -375,26 +478,31 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.1 registers a venda typed as a rate, sent as a fraction with a negative quantity', async () => {
-      const bodies = captureBodies('post', '/trades');
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Venda');
+      const modal = await openNew(user, 'Venda');
 
-      await chooseContract(user, drawer, 'DI1F28');
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '16/10/2026');
-      fireEvent.change(drawer.getByLabelText('Hora', { exact: false }), {
+      await chooseContract(user, modal, 'DI1F28');
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
+      fireEvent.change(modal.getByLabelText('Hora', { exact: false }), {
         target: { value: '17:05' },
       });
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '2');
-      await user.click(drawer.getByRole('radio', { name: 'Taxa a.a. (%)' }));
-      await user.type(drawer.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,45');
-      await user.click(drawer.getByRole('button', { name: 'Registrar venda' }));
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '2');
+      await user.click(modal.getByRole('radio', { name: 'Taxa a.a. (%)' }));
+      await user.type(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,45');
+      await user.click(modal.getByRole('button', { name: 'Registrar venda' }));
 
-      expect(await screen.findByText('Venda registrada.')).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          /^Venda registrada\. Caixa e posições precisam ser processados a partir de \d{2}\/\d{2}\/\d{4}: use o escopo Tudo\.$/,
+        ),
+      ).toBeInTheDocument();
       expect(bodies).toEqual([
         {
+          type: 'TRADE',
           asset_id: IDS.di1f28,
-          trade_date: '2026-10-16',
-          trade_time: '17:05:00',
+          date: '2026-10-16',
+          time: '17:05:00',
           signed_quantity: -2,
           input_kind: 'RATE',
           execution_rate: '0.1045',
@@ -404,23 +512,23 @@ describe('Lançamentos (§11.3)', () => {
 
     it('OQ-13 suggests today and the current time, and has no PU/rate preview', async () => {
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      expect(drawer.getByRole('textbox', { name: 'Data' })).toHaveValue(
+      expect(modal.getByRole('textbox', { name: 'Data' })).toHaveValue(
         formatDate(todayInSaoPaulo()),
       );
-      expect(drawer.getByLabelText<HTMLInputElement>('Hora', { exact: false }).value).toMatch(
+      expect(modal.getByLabelText<HTMLInputElement>('Hora', { exact: false }).value).toMatch(
         /^\d{2}:\d{2}$/,
       );
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '89.006,46');
-      expect(drawer.queryByRole('textbox', { name: 'Taxa a.a. (%)' })).not.toBeInTheDocument();
-      expect(drawer.queryByText(/%$/)).not.toBeInTheDocument();
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '89.006,46');
+      expect(modal.queryByRole('textbox', { name: 'Taxa a.a. (%)' })).not.toBeInTheDocument();
+      expect(modal.queryByText(/%$/)).not.toBeInTheDocument();
     });
 
-    it('OQ-15 keeps the drawer open while saving, so the result is never lost', async () => {
+    it('OQ-15 keeps the modal open while saving, so the result is never lost', async () => {
       let release: () => void = () => undefined;
       server.use(
-        http.post(url('/trades'), async () => {
+        http.post(url('/ledger/entries'), async () => {
           await new Promise<void>((resolve) => {
             release = resolve;
           });
@@ -428,66 +536,68 @@ describe('Lançamentos (§11.3)', () => {
         }),
       );
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
-      await chooseContract(user, drawer, 'DI1F29');
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '16/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '80.000,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      const modal = await openNew(user, 'Compra');
+      await chooseContract(user, modal, 'DI1F29');
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '80.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
       await user.keyboard('{Escape}');
-      // Past the drawer's close transition: a closing drawer would be gone by now.
+      // Past the modal's close transition: a closing modal would be gone by now.
       await new Promise((resolve) => setTimeout(resolve, 400));
-      expect(drawer.queryByRole('button', { name: 'Fechar' })).not.toBeInTheDocument();
+      expect(modal.queryByRole('button', { name: 'Fechar' })).not.toBeInTheDocument();
       expect(screen.getByRole('dialog')).toBeInTheDocument();
-      expect(drawer.getByRole('button', { name: 'Registrar compra' })).toBeInTheDocument();
+      expect(modal.getByRole('button', { name: 'Registrar compra' })).toBeInTheDocument();
       release();
-      expect(await screen.findByText('Compra registrada.')).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          /^Compra registrada\. Caixa e posições precisam ser processados a partir de \d{2}\/\d{2}\/\d{4}: use o escopo Tudo\.$/,
+        ),
+      ).toBeInTheDocument();
     });
 
     it('§6.1 checks the required fields before sending', async () => {
-      const bodies = captureBodies('post', '/trades');
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(drawer.getByText('Selecione um contrato.')).toBeInTheDocument();
-      expect(
-        drawer.getByText('Informe uma quantidade inteira maior que zero.'),
-      ).toBeInTheDocument();
-      expect(drawer.getByText('Informe o PU.')).toBeInTheDocument();
+      expect(modal.getByText('Selecione um contrato.')).toBeInTheDocument();
+      expect(modal.getByText('Informe uma quantidade inteira maior que zero.')).toBeInTheDocument();
+      expect(modal.getByText('Informe o PU.')).toBeInTheDocument();
       expect(bodies).toEqual([]);
     });
 
     it('OQ-3 shows the decimal-place error of a PU on its field', async () => {
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F29');
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '16/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '80.000,12345678901');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await chooseContract(user, modal, 'DI1F29');
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '80.000,12345678901');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await drawer.findByText('Use no máximo 10 casas decimais.')).toBeInTheDocument();
-      expect(drawer.getByRole('textbox', { name: 'PU' })).toHaveAttribute('aria-invalid', 'true');
+      expect(await modal.findByText('Use no máximo 10 casas decimais.')).toBeInTheDocument();
+      expect(modal.getByRole('textbox', { name: 'PU' })).toHaveAttribute('aria-invalid', 'true');
     });
 
     it('OQ-3 shows the decimal-place error of a rate on its field', async () => {
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F29');
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '16/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.click(drawer.getByRole('radio', { name: 'Taxa a.a. (%)' }));
+      await chooseContract(user, modal, 'DI1F29');
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '16/10/2026');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.click(modal.getByRole('radio', { name: 'Taxa a.a. (%)' }));
       // 10,12345678901% = 0.1012345678901: 13 places, one more than OQ-3 allows.
-      await user.type(drawer.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,12345678901');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await user.type(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' }), '10,12345678901');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await drawer.findByText('Use no máximo 12 casas decimais.')).toBeInTheDocument();
-      expect(drawer.getByRole('textbox', { name: 'Taxa a.a. (%)' })).toHaveAttribute(
+      expect(await modal.findByText('Use no máximo 12 casas decimais.')).toBeInTheDocument();
+      expect(modal.getByRole('textbox', { name: 'Taxa a.a. (%)' })).toHaveAttribute(
         'aria-invalid',
         'true',
       );
@@ -498,24 +608,24 @@ describe('Lançamentos (§11.3)', () => {
       ['CONTRACT_MATURED', 'O contrato já venceu nesta data.'],
     ] as const)('OQ-14 / OQ-1 shows %s on the Data field', async (code, message) => {
       server.use(
-        http.post(url('/trades'), () => problem(422, [fieldError(code, message, 'trade_date')])),
+        http.post(url('/ledger/entries'), () => problem(422, [fieldError(code, message, 'date')])),
       );
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F27');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '99.000,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await chooseContract(user, modal, 'DI1F27');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '99.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await drawer.findByText(message)).toBeInTheDocument();
-      expect(drawer.getByRole('textbox', { name: 'Data' })).toHaveAttribute('aria-invalid', 'true');
+      expect(await modal.findByText(message)).toBeInTheDocument();
+      expect(modal.getByRole('textbox', { name: 'Data' })).toHaveAttribute('aria-invalid', 'true');
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
 
     it('OQ-15 shows every message when two API fields belong to the same input', async () => {
       server.use(
-        http.post(url('/trades'), () =>
+        http.post(url('/ledger/entries'), () =>
           problem(422, [
             fieldError('VALIDATION_ERROR', 'Informe um número válido.', 'execution_rate'),
             fieldError('VALIDATION_ERROR', 'Informe o PU ou a taxa.', 'input_kind'),
@@ -523,80 +633,110 @@ describe('Lançamentos (§11.3)', () => {
         ),
       );
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F27');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '99.000,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await chooseContract(user, modal, 'DI1F27');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '99.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await drawer.findByText(/Informe um número válido\./)).toBeInTheDocument();
-      expect(drawer.getByText(/Informe o PU ou a taxa\./)).toBeInTheDocument();
+      expect(await modal.findByText(/Informe um número válido\./)).toBeInTheDocument();
+      expect(modal.getByText(/Informe o PU ou a taxa\./)).toBeInTheDocument();
     });
 
     it('OQ-15 shows an error without a field above the form', async () => {
       server.use(
-        http.post(url('/trades'), () =>
+        http.post(url('/ledger/entries'), () =>
           problem(409, [fieldError('VALIDATION_ERROR', 'Lançamentos bloqueados no momento.')]),
         ),
       );
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Compra');
+      const modal = await openNew(user, 'Compra');
 
-      await chooseContract(user, drawer, 'DI1F27');
-      await user.type(drawer.getByRole('textbox', { name: 'Quantidade' }), '1');
-      await user.type(drawer.getByRole('textbox', { name: 'PU' }), '99.000,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar compra' }));
+      await chooseContract(user, modal, 'DI1F27');
+      await user.type(modal.getByRole('textbox', { name: 'Quantidade' }), '1');
+      await user.type(modal.getByRole('textbox', { name: 'PU' }), '99.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar compra' }));
 
-      expect(await drawer.findByRole('alert')).toHaveTextContent(
+      expect(await modal.findByRole('alert')).toHaveTextContent(
         'Lançamentos bloqueados no momento.',
       );
     });
   });
 
-  describe('Aporte / Retirada drawer (§6.2)', () => {
-    it('§6.2 registers an aporte with a positive amount', async () => {
-      const bodies = captureBodies('post', '/cash-movements');
+  describe('Aporte / Retirada (§6.2)', () => {
+    it('§6.2 registers an aporte with its time and a positive amount', async () => {
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Aporte');
+      const modal = await openNew(user, 'Aporte');
 
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '15/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '2.500,50');
-      await user.click(drawer.getByRole('button', { name: 'Registrar aporte' }));
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
+      fireEvent.change(modal.getByLabelText('Hora', { exact: false }), {
+        target: { value: '11:20' },
+      });
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '2.500,50');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
-      expect(await screen.findByText('Aporte registrado.')).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          /^Aporte registrado\. O caixa precisa ser processado a partir de \d{2}\/\d{2}\/\d{4}: use o escopo Caixa\.$/,
+        ),
+      ).toBeInTheDocument();
       expect(bodies).toEqual([
-        { movement_date: '2026-10-15', movement_type: 'DEPOSIT', amount: '2500.50' },
+        { type: 'CASH', date: '2026-10-15', time: '11:20:00', cash_amount: '2500.50' },
       ]);
       expect(await screen.findByText('+R$ 2.500,50')).toBeInTheDocument();
     });
 
-    it('§6.2 registers a retirada; the amount is sent positive', async () => {
-      const bodies = captureBodies('post', '/cash-movements');
+    it('§6.2 registers a retirada: typed positive, sent as a negative amount', async () => {
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Retirada');
+      const modal = await openNew(user, 'Retirada');
 
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '15/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '1.000');
-      await user.click(drawer.getByRole('button', { name: 'Registrar retirada' }));
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
+      fireEvent.change(modal.getByLabelText('Hora', { exact: false }), {
+        target: { value: '09:05' },
+      });
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '1.000');
+      await user.click(modal.getByRole('button', { name: 'Registrar retirada' }));
 
-      expect(await screen.findByText('Retirada registrada.')).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          /^Retirada registrada\. O caixa precisa ser processado a partir de \d{2}\/\d{2}\/\d{4}: use o escopo Caixa\.$/,
+        ),
+      ).toBeInTheDocument();
       expect(bodies).toEqual([
-        { movement_date: '2026-10-15', movement_type: 'WITHDRAWAL', amount: '1000' },
+        { type: 'CASH', date: '2026-10-15', time: '09:05:00', cash_amount: '-1000' },
       ]);
       expect(await screen.findByText('-R$ 1.000,00')).toBeInTheDocument();
     });
 
+    it('§6.2 never sends a negative or zero amount: the side gives the sign', async () => {
+      const bodies = captureBodies('post', '/ledger/entries');
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Aporte');
+
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '-1.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
+      expect(modal.getByText('Informe um valor maior que zero.')).toBeInTheDocument();
+
+      await user.clear(modal.getByRole('textbox', { name: 'Valor (R$)' }));
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '0,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
+      expect(modal.getByText('Informe um valor maior que zero.')).toBeInTheDocument();
+      expect(bodies).toEqual([]);
+    });
+
     it('OQ-3 shows the decimal-place error of an amount on its field', async () => {
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Aporte');
+      const modal = await openNew(user, 'Aporte');
 
-      await typeDate(user, drawer.getByRole('textbox', { name: 'Data' }), '15/10/2026');
-      await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '10,505');
-      await user.click(drawer.getByRole('button', { name: 'Registrar aporte' }));
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '10,505');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
-      expect(await drawer.findByText('Use no máximo 2 casas decimais.')).toBeInTheDocument();
-      expect(drawer.getByRole('textbox', { name: 'Valor (R$)' })).toHaveAttribute(
+      expect(await modal.findByText('Use no máximo 2 casas decimais.')).toBeInTheDocument();
+      expect(modal.getByRole('textbox', { name: 'Valor (R$)' })).toHaveAttribute(
         'aria-invalid',
         'true',
       );
@@ -604,41 +744,300 @@ describe('Lançamentos (§11.3)', () => {
 
     it('OQ-14 shows FUTURE_DATE on the Data field', async () => {
       server.use(
-        http.post(url('/cash-movements'), () =>
+        http.post(url('/ledger/entries'), () =>
           problem(422, [
-            fieldError('FUTURE_DATE', 'A data não pode ser posterior a hoje.', 'movement_date'),
+            fieldError('FUTURE_DATE', 'A data não pode ser posterior a hoje.', 'date'),
           ]),
         ),
       );
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Aporte');
+      const modal = await openNew(user, 'Aporte');
 
-      await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
-      await user.click(drawer.getByRole('button', { name: 'Registrar aporte' }));
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
-      expect(await drawer.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
-      expect(drawer.getByRole('textbox', { name: 'Data' })).toHaveAttribute('aria-invalid', 'true');
+      expect(await modal.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+      expect(modal.getByRole('textbox', { name: 'Data' })).toHaveAttribute('aria-invalid', 'true');
     });
 
     it('§6.2 rejects a value that is not a pt-BR number before sending', async () => {
-      const bodies = captureBodies('post', '/cash-movements');
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
-      const drawer = await openNew(user, 'Aporte');
+      const modal = await openNew(user, 'Aporte');
 
-      await user.type(drawer.getByRole('textbox', { name: 'Valor (R$)' }), '1,000.50');
-      await user.click(drawer.getByRole('button', { name: 'Registrar aporte' }));
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '1,000.50');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
-      expect(drawer.getByText('Informe um valor válido, como 1.234,56.')).toBeInTheDocument();
+      expect(modal.getByText('Informe um valor válido, como 1.234,56.')).toBeInTheDocument();
       expect(bodies).toEqual([]);
+    });
+  });
+
+  describe('Novo lançamento modal (§11.3)', () => {
+    it('§11.3 opens one modal that switches between Operação and Caixa', async () => {
+      const { user } = await openLedger();
+
+      await user.click(screen.getByRole('button', { name: 'Novo lançamento' }));
+      const modal = within(await screen.findByRole('dialog', { name: 'Novo lançamento' }));
+
+      expect(screen.queryByRole('menuitem')).not.toBeInTheDocument();
+      expect(modal.getByRole('radio', { name: 'Operação' })).toBeChecked();
+      expect(modal.getByRole('radio', { name: 'Compra' })).toBeChecked();
+      expect(modal.getByRole('radio', { name: 'Venda' })).not.toBeChecked();
+      expect(modal.getByRole('combobox', { name: 'Contrato' })).toBeInTheDocument();
+      expect(modal.getByRole('button', { name: 'Registrar compra' })).toBeInTheDocument();
+
+      await user.click(modal.getByRole('radio', { name: 'Caixa' }));
+
+      expect(modal.getByRole('radio', { name: 'Aporte' })).toBeChecked();
+      expect(modal.getByRole('radio', { name: 'Retirada' })).not.toBeChecked();
+      expect(modal.getByRole('textbox', { name: 'Valor (R$)' })).toBeInTheDocument();
+      expect(modal.queryByRole('combobox', { name: 'Contrato' })).not.toBeInTheDocument();
+      expect(modal.getByRole('button', { name: 'Registrar aporte' })).toBeInTheDocument();
+
+      await user.click(modal.getByRole('radio', { name: 'Retirada' }));
+      expect(modal.getByRole('button', { name: 'Registrar retirada' })).toBeInTheDocument();
+    });
+
+    it('§11.3 filters the contracts by asset class and finds one by its code', async () => {
+      // A second class, so the filter has something to leave out.
+      const dollar = {
+        ...products[0],
+        id: 'b0000000-0000-4000-8000-000000000001',
+        code: 'DOL',
+        name: 'Futuro de Dólar Comercial',
+        asset_class: { id: 2, code: 'FX_FUTURE', name: 'Futuros de Moeda' },
+        instrument_count: 1,
+      };
+      server.use(
+        http.get(url('/products'), () => HttpResponse.json({ items: [...products, dollar] })),
+        http.get(url('/instruments'), () =>
+          HttpResponse.json({
+            items: [
+              ...instruments.map((i) => ({ ...i, last_reference: null })),
+              {
+                id: 'b0000000-0000-4000-8000-0000000000d1',
+                code: 'DOLX26',
+                product_id: dollar.id,
+                product_code: 'DOL',
+                maturity_date: '2026-12-01',
+                created_at: '2026-10-01T09:00:00-03:00',
+                last_reference: null,
+              },
+            ],
+          }),
+        ),
+      );
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Compra');
+      const contract = modal.getByRole('combobox', { name: 'Contrato' });
+      await waitFor(() => {
+        expect(contract).toBeEnabled();
+      });
+      const option = (code: string) => screen.queryByRole('option', { name: code, hidden: true });
+
+      await user.click(contract);
+      expect(option('DOLX26')).toBeInTheDocument();
+      expect(option('DI1F28')).toBeInTheDocument();
+      await user.click(screen.getByRole('option', { name: 'DOLX26', hidden: true }));
+      expect(contract).toHaveValue('DOLX26');
+
+      await user.click(modal.getByRole('combobox', { name: 'Classe de ativo' }));
+      await user.click(
+        await screen.findByRole('option', { name: 'Futuros de Taxa de Juros', hidden: true }),
+      );
+      // DOLX26 is not of that class: it is cleared and no longer offered.
+      expect(contract).toHaveValue('');
+      await user.click(contract);
+      expect(option('DOLX26')).not.toBeInTheDocument();
+      expect(option('DI1F28')).toBeInTheDocument();
+
+      await user.type(contract, 'F29');
+      expect(option('DI1F29')).toBeInTheDocument();
+      expect(option('DI1F28')).not.toBeInTheDocument();
+    });
+
+    it('§11.3 a class change keeps a contract of the chosen class', async () => {
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Compra');
+      await chooseContract(user, modal, 'DI1F28');
+
+      await user.click(modal.getByRole('combobox', { name: 'Classe de ativo' }));
+      await user.click(
+        await screen.findByRole('option', { name: 'Futuros de Taxa de Juros', hidden: true }),
+      );
+
+      expect(modal.getByRole('combobox', { name: 'Contrato' })).toHaveValue('DI1F28');
+    });
+  });
+
+  describe('Processar (OQ-21 draft, user 2026-10-18)', () => {
+    async function openProcessar(user: ReturnType<typeof renderApp>['user']) {
+      await user.click(screen.getByRole('button', { name: 'Processar' }));
+      return within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
+    }
+
+    it('§10.1 prefills the whole period with Tudo, also after a trade (P19 dropped)', async () => {
+      await ledgerApi.createEntry({
+        type: 'TRADE',
+        asset_id: IDS.di1f28,
+        date: '2026-10-15',
+        time: '10:00:00',
+        signed_quantity: 1,
+        input_kind: 'PU',
+        execution_pu: '89000.00',
+      });
+      const { user } = await openLedger();
+
+      const modal = await openProcessar(user);
+
+      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('14/10/2026');
+      expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('16/10/2026');
+      expect(modal.getByRole('radio', { name: 'Tudo' })).toBeChecked();
+    });
+
+    it('§11.3 "Processar caixa" starts at Caixa D0 when only D0 is behind', async () => {
+      await ledgerApi.createEntry({
+        type: 'CASH',
+        date: '2026-10-16',
+        time: '12:00:00',
+        cash_amount: '-10.00',
+      });
+      const { user } = await openLedger();
+
+      await user.click(await screen.findByRole('button', { name: 'Processar caixa' }));
+
+      const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
+      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('16/10/2026');
+      expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('16/10/2026');
+      expect(modal.getByRole('radio', { name: 'Caixa' })).toBeChecked();
+    });
+
+    it('§11.3 "Processar caixa" is offered when Caixa D0 was never processed', async () => {
+      const { user } = await openLedger('/lancamentos?inicio=2026-10-14&fim=2026-10-17');
+
+      await user.click(await screen.findByRole('button', { name: 'Processar caixa' }));
+
+      const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
+      expect(modal.getByRole('textbox', { name: 'Data inicial' })).toHaveValue('17/10/2026');
+      expect(modal.getByRole('textbox', { name: 'Data final' })).toHaveValue('17/10/2026');
+    });
+
+    it('§10.1 previews and queues the job without leaving Lançamentos', async () => {
+      const bodies: unknown[] = [];
+      server.use(
+        http.post(url('/processing/requests'), async ({ request }) => {
+          bodies.push(await request.clone().json());
+          return undefined;
+        }),
+      );
+      const { user, router } = await openLedger('/lancamentos?inicio=2026-10-14&fim=2026-10-15');
+      const modal = await openProcessar(user);
+      await user.click(modal.getByRole('radio', { name: 'Caixa' }));
+
+      expect(
+        await modal.findByRole('group', { name: 'Estado anterior do caixa' }),
+      ).toHaveTextContent('Estado inicial (sem lançamentos anteriores)');
+      expect(modal.queryByRole('group', { name: 'Estado anterior das posições' })).toBeNull();
+      await user.click(modal.getByRole('button', { name: 'Confirmar processamento' }));
+
+      expect(
+        await screen.findByText(
+          'Processamento colocado na fila. Acompanhe em Central de Controle.',
+        ),
+      ).toBeInTheDocument();
+      expect(bodies).toEqual([{ start_date: '2026-10-14', end_date: '2026-10-15', scope: 'CASH' }]);
+      expect(router.state.location.pathname).toBe('/lancamentos');
+    });
+  });
+
+  describe('Processar: API errors (OQ-15)', () => {
+    it('OQ-15 shows an error on scope under the Escopo group', async () => {
+      server.use(
+        http.post(url('/processing/requests'), () =>
+          problem(422, [fieldError('VALIDATION_ERROR', 'Escopo não aceito.', 'scope')]),
+        ),
+      );
+      const { user } = await openLedger();
+      await user.click(screen.getByRole('button', { name: 'Processar' }));
+      const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
+      await modal.findByRole('group', { name: 'Estado anterior do caixa' });
+
+      await user.click(modal.getByRole('button', { name: 'Confirmar processamento' }));
+
+      const scope = await modal.findByRole('radiogroup', { name: 'Escopo' });
+      await waitFor(() => {
+        expect(scope).toHaveAccessibleDescription('Escopo não aceito.');
+      });
+    });
+  });
+
+  describe('Novo lançamento modal: state (§11.3)', () => {
+    it('§11.3 each opening starts again at Operação → Compra with blank fields', async () => {
+      const { user } = await openLedger();
+      let modal = await openNew(user, 'Retirada');
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '1.000,00');
+      await user.click(modal.getByRole('button', { name: 'Fechar' }));
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', { name: 'Novo lançamento' }));
+      modal = within(await screen.findByRole('dialog', { name: 'Novo lançamento' }));
+
+      expect(modal.getByRole('radio', { name: 'Operação' })).toBeChecked();
+      expect(modal.getByRole('radio', { name: 'Compra' })).toBeChecked();
+      await user.click(modal.getByRole('radio', { name: 'Caixa' }));
+      expect(modal.getByRole('radio', { name: 'Aporte' })).toBeChecked();
+      expect(modal.getByRole('textbox', { name: 'Valor (R$)' })).toHaveValue('');
+    });
+
+    it('OQ-15 locks the kind of entry while a save runs', async () => {
+      let release: () => void = () => undefined;
+      server.use(
+        http.post(url('/ledger/entries'), async () => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return undefined;
+        }),
+      );
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Aporte');
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '1.000,00');
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
+
+      await waitFor(() => {
+        expect(modal.getByRole('radio', { name: 'Operação' })).toBeDisabled();
+      });
+      expect(modal.getByRole('radio', { name: 'Retirada' })).toBeDisabled();
+      release();
+    });
+
+    it('§12 says so on Classe de ativo when the classes fail to load; contracts still work', async () => {
+      server.use(
+        http.get(url('/products'), () =>
+          problem(500, [fieldError('VALIDATION_ERROR', 'Erro interno.')]),
+        ),
+      );
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Compra');
+
+      expect(
+        await modal.findByText('Não foi possível carregar as classes de ativo.'),
+      ).toBeInTheDocument();
+      expect(modal.queryByText('Não foi possível carregar os contratos.')).not.toBeInTheDocument();
+      await chooseContract(user, modal, 'DI1F28');
     });
   });
 
   describe('delete (§6.1)', () => {
     const sale = 'Venda DI1F28 -4 16/10/2026 15:00 PU 89.102,22';
     // Accessible names keep the no-break space Intl puts after "R$".
-    const withdrawal = 'Retirada 16/10/2026 -R$\u00a050.000,00 registrada às 17:30';
+    const withdrawal = 'Retirada 16/10/2026 17:30 -R$\u00a050.000,00';
 
-    it('§6.1 deletes one trade after confirmation; there is no edit action', async () => {
+    it('§6.1 deletes one trade after confirmation, by its id; there is no edit action', async () => {
+      const bodies = captureBodies('post', '/ledger/entries/deletions');
       const { user } = await openLedger();
 
       await user.click(rowNamed(sale).getByRole('button', { name: `Ações de ${sale}` }));
@@ -649,13 +1048,14 @@ describe('Lançamentos (§11.3)', () => {
       await user.click(dialog.getByRole('button', { name: 'Excluir' }));
 
       expect(await screen.findByText('Lançamento excluído.')).toBeInTheDocument();
+      expect(bodies).toEqual([{ ids: [tradeEntries[2]?.id] }]);
       expect(await screen.findByText('4 lançamentos encontrados')).toBeInTheDocument();
       expect(
         screen.queryByRole('checkbox', { name: `Selecionar ${sale}` }),
       ).not.toBeInTheDocument();
     });
 
-    it('§6.1 deletes one cash movement after confirmation', async () => {
+    it('§6.1 deletes one cash entry after confirmation', async () => {
       const { user } = await openLedger();
 
       await user.click(
@@ -673,7 +1073,7 @@ describe('Lançamentos (§11.3)', () => {
 
     it('§6.1 a failed single delete keeps the entry and shows why', async () => {
       server.use(
-        http.delete(url('/trades/:id'), () =>
+        http.post(url('/ledger/entries/deletions'), () =>
           problem(404, [fieldError('NOT_FOUND', 'Lançamento não encontrado.')]),
         ),
       );
@@ -713,11 +1113,12 @@ describe('Lançamentos (§11.3)', () => {
       expect(screen.getByRole('checkbox', { name: `Selecionar ${sale}` })).not.toBeChecked();
     });
 
-    it('§6.1 tells apart two same-day cash movements of the same amount', async () => {
-      const twin = { ...cashMovements[1], id: 'twin', created_at: '2026-10-16T18:05:00-03:00' };
+    it('§6.1 tells apart two same-day cash entries of the same amount by their time', async () => {
+      const withdrawalEntry = cashEntries[1];
+      const twin = { ...withdrawalEntry, id: 'twin', time: '18:05:00' };
       server.use(
-        http.get(url('/cash-movements'), () =>
-          HttpResponse.json({ items: [twin, cashMovements[1]] }),
+        http.get(url('/ledger/entries'), () =>
+          HttpResponse.json({ items: [twin, withdrawalEntry], next_cursor: null }),
         ),
       );
       await openLedger();
@@ -727,7 +1128,7 @@ describe('Lançamentos (§11.3)', () => {
       ).toBeInTheDocument();
       expect(
         screen.getByRole('checkbox', {
-          name: 'Selecionar Retirada 16/10/2026 -R$\u00a050.000,00 registrada às 18:05',
+          name: 'Selecionar Retirada 16/10/2026 18:05 -R$\u00a050.000,00',
         }),
       ).toBeInTheDocument();
     });
@@ -745,8 +1146,8 @@ describe('Lançamentos (§11.3)', () => {
       expect(screen.getByText('5 lançamentos encontrados')).toBeInTheDocument();
     });
 
-    it('§6.1 deletes the selected entries in one atomic request', async () => {
-      const bodies = captureBodies('post', '/ledger/deletions');
+    it('§6.1 deletes the selected entries, of both types, in one atomic request', async () => {
+      const bodies = captureBodies('post', '/ledger/entries/deletions');
       const { user } = await openLedger();
 
       expect(
@@ -758,15 +1159,13 @@ describe('Lançamentos (§11.3)', () => {
       const dialog = within(await screen.findByRole('dialog', { name: 'Excluir lançamentos' }));
       expect(dialog.getByText(/2 lançamentos selecionados/)).toBeInTheDocument();
       expect(dialog.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
-        sale,
         withdrawal,
+        sale,
       ]);
       await user.click(dialog.getByRole('button', { name: 'Excluir' }));
 
       expect(await screen.findByText('2 lançamentos excluídos.')).toBeInTheDocument();
-      expect(bodies).toEqual([
-        { trade_ids: [trades[2]?.id], cash_movement_ids: [cashMovements[1]?.id] },
-      ]);
+      expect(bodies).toEqual([{ ids: [cashEntries[1]?.id, tradeEntries[2]?.id] }]);
       expect(await screen.findByText('3 lançamentos encontrados')).toBeInTheDocument();
     });
 
@@ -782,7 +1181,7 @@ describe('Lançamentos (§11.3)', () => {
 
     it('§6.1 a failed multiple delete removes nothing and shows the error', async () => {
       server.use(
-        http.post(url('/ledger/deletions'), () =>
+        http.post(url('/ledger/entries/deletions'), () =>
           problem(404, [fieldError('NOT_FOUND', 'Lançamento não encontrado.')]),
         ),
       );

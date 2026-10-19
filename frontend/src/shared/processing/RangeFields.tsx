@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import type { IsoDate } from '@/api/contract';
 
-import { parseDateInput } from '../format';
+import { parsePtBrDate } from '@/shared/format';
 
 export const INVALID_RANGE_MESSAGE = 'A data inicial deve ser anterior ou igual à data final.';
 
@@ -87,7 +87,7 @@ function DateField({ label, value, onChange, maxDate, error }: DateFieldProps) {
         onChange(next);
       }}
       valueFormat="DD/MM/YYYY"
-      dateParser={parseDateInput}
+      dateParser={parsePtBrDate}
       maxDate={maxDate}
       allowDeselect
       fixOnBlur

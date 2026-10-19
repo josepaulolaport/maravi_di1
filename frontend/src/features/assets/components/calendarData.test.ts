@@ -17,11 +17,9 @@ function day(date: string, pu: string, rate: string | null): ReferencePriceDay {
     input_kind: 'PU',
     pu,
     rate,
-    revision: 1,
     created_at: `${date}T18:00:00-03:00`,
-    superseded_at: null,
   };
-  return { reference_date: date, preferred, current: [preferred] };
+  return { reference_date: date, preferred, sources: [preferred] };
 }
 
 describe('calendarWindow', () => {

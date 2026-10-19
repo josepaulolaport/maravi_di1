@@ -98,3 +98,6 @@ function compareMagnitude(a: string, b: string): number {
   if (padA === padB) return 0;
   return padA < padB ? -1 : 1;
 }
+
+/** A count of days in pt-BR: 1.000. */
+export const formatDays = (days: number) => formatQuantity(days);

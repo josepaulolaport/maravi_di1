@@ -3,7 +3,10 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 
 import { problemMessages } from '@/shared/ui/problemMessages';
 
-/** A failed action in a drawer or dialog: its problem+json messages (`problemMessages`). */
+/**
+ * A failed action in a modal (OQ-15): its problem+json messages (`problemMessages`), except
+ * those bound to a field in `shownOnFields`, which the form shows on its own inputs.
+ */
 export function ActionError({
   error,
   shownOnFields = [],

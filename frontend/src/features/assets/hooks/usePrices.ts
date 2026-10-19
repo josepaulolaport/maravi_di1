@@ -10,8 +10,6 @@ export const priceKeys = {
   all: queryRoots.prices,
   days: (assetId: string, start: IsoDate, end: IsoDate) =>
     [...priceKeys.all, 'reference-prices', assetId, start, end] as const,
-  revisions: (assetId: string, date: IsoDate) =>
-    [...priceKeys.all, 'revisions', assetId, date] as const,
 };
 
 export function useReferencePriceDays(assetId: string, start: IsoDate, end: IsoDate) {
@@ -22,16 +20,8 @@ export function useReferencePriceDays(assetId: string, start: IsoDate, end: IsoD
   });
 }
 
-export function useRevisions(assetId: string, date: IsoDate | null) {
-  return useQuery({
-    queryKey: priceKeys.revisions(assetId, date ?? ''),
-    queryFn: () => pricesApi.listRevisions({ asset_id: assetId, reference_date: date ?? '' }),
-    enabled: date !== null,
-  });
-}
-
 /**
- * Records a MANUAL observation; a correction is the same call and appends a new revision (§5).
+ * Records the MANUAL price of a date; a correction is the same call and replaces it (OQ-26).
  * The write marks results stale and starts no processing (§10.1), so only the views refresh.
  */
 export function useSetReferencePrice() {
@@ -43,7 +33,7 @@ export function useSetReferencePrice() {
 }
 
 /**
- * Audit-preserving removal of the current revisions the user selected, of any source (§5;
+ * Deletes the prices the user selected, of any source (§5;
  * user decision 2026-10-18). There is no batch endpoint, so each id is one DELETE, in order;
  * the views refresh even after a partial failure, so they show what was removed.
  */

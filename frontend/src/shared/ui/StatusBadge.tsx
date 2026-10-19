@@ -6,7 +6,7 @@ interface StatusBadgeProps extends Omit<BadgeProps, 'color' | 'children'> {
   color: MantineColor;
   /**
    * Announce changes to screen readers (`role="status"`). Only for a badge being followed,
-   * such as the job in the details drawer; a table of badges stays silent while polling.
+   * such as the job in the details modal; a table of badges stays silent while polling.
    */
   live?: boolean;
 }

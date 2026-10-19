@@ -19,9 +19,7 @@ import {
 function lastReference(assetId: string): LastReference | null {
   const dates = [
     ...new Set(
-      db.referencePrices
-        .filter((p) => p.asset_id === assetId && p.superseded_at === null)
-        .map((p) => p.reference_date),
+      db.referencePrices.filter((p) => p.asset_id === assetId).map((p) => p.reference_date),
     ),
   ].sort();
   const latest = dates.at(-1);

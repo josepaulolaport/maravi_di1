@@ -1,71 +1,32 @@
-import {
-  Button,
-  Drawer,
-  Group,
-  List,
-  Menu,
-  Paper,
-  Skeleton,
-  Stack,
-  Text,
-  TextInput,
-} from '@mantine/core';
+import { Button, Group, List, Paper, Skeleton, Stack, Text, TextInput } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useDebouncedValue } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import {
-  IconCalendar,
-  IconChevronDown,
-  IconPlus,
-  IconSearch,
-  IconTrash,
-} from '@tabler/icons-react';
+import { IconCalendar, IconPlayerPlay, IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
 import { useEffect, useMemo, useState } from 'react';
 
 import type { IsoDate } from '@/api/contract';
+import {
+  type ProcessingDraft,
+  ProcessingRequestModal,
+} from '@/shared/processing/ProcessingRequestModal';
+import { formatQuantity } from '@/shared/format';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorState } from '@/shared/ui/ErrorState';
+import { LoadMore } from '@/shared/ui/LoadMore';
 
-import { CashMovementForm } from './components/CashMovementForm';
 import { CashStrip } from './components/CashStrip';
 import { EntriesTable, entryLabel } from './components/EntriesTable';
-import { TradeForm } from './components/TradeForm';
-import { type LedgerEntry, mergeEntries, type SortDirection, sortEntries } from './entries';
+import { NewEntryModal } from './components/NewEntryModal';
+import { type LedgerEntry, type SortDirection, toRow } from './entries';
 import {
-  useCashMovements,
   useDeleteEntries,
-  useDeleteEntry,
+  useEntries,
   useInstrumentTypes,
   useIsSavingEntry,
   useLedgerFilters,
-  useTrades,
 } from './hooks/useLedger';
-
-type NewEntry = 'BUY' | 'SELL' | 'DEPOSIT' | 'WITHDRAWAL';
-
-const DRAWER_TITLES: Record<NewEntry, string> = {
-  BUY: 'Nova compra',
-  SELL: 'Nova venda',
-  DEPOSIT: 'Novo aporte',
-  WITHDRAWAL: 'Nova retirada',
-};
-
-const NEW_ENTRY_MENU: { label: string; items: { value: NewEntry; label: string }[] }[] = [
-  {
-    label: 'Operações',
-    items: [
-      { value: 'BUY', label: 'Compra' },
-      { value: 'SELL', label: 'Venda' },
-    ],
-  },
-  {
-    label: 'Caixa',
-    items: [
-      { value: 'DEPOSIT', label: 'Aporte' },
-      { value: 'WITHDRAWAL', label: 'Retirada' },
-    ],
-  },
-];
+import { processCashDraft, processDraft } from './processingDraft';
 
 type DeleteTarget = { mode: 'one'; entry: LedgerEntry } | { mode: 'many'; entries: LedgerEntry[] };
 
@@ -73,24 +34,27 @@ const SEARCH_DEBOUNCE_MS = 300;
 
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
-const countLabel = (n: number) =>
-  n === 1 ? '1 lançamento encontrado' : `${String(n)} lançamentos encontrados`;
+/** "encontrados" once every page is read; "exibidos" while the backend has more (P21). */
+const countLabel = (n: number, more: boolean) => {
+  if (more) return `${formatQuantity(n)} lançamentos exibidos`;
+  return n === 1 ? '1 lançamento encontrado' : `${formatQuantity(n)} lançamentos encontrados`;
+};
 
 /**
  * Lançamentos (spec §11.3): trades and cash movements in an inclusive range, with a search;
- * the cash strip for the range's end; drawers for compra, venda, aporte and retirada; single
+ * the cash strip for the range's end; one modal for compra, venda, aporte and retirada; single
  * and multiple delete with confirmation. There is no editing (§6.1).
  */
 export function LedgerPage() {
   const filters = useLedgerFilters();
   const { start, end, search, today } = filters;
-  const trades = useTrades(start, end, search);
-  const movements = useCashMovements(start, end, search);
+  const [sort, setSort] = useState<SortDirection>('desc');
+  const list = useEntries(start, end, search, sort);
   const instrumentTypes = useInstrumentTypes();
   const saving = useIsSavingEntry();
 
-  const [sort, setSort] = useState<SortDirection>('desc');
-  const [creating, setCreating] = useState<NewEntry | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [processing, setProcessing] = useState<ProcessingDraft | null>(null);
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null);
 
   // A selection belongs to one range and search: a new filter starts with nothing selected,
@@ -103,16 +67,11 @@ export function LedgerPage() {
     setSelection({ scope, keys });
   };
 
-  const entries = useMemo(
-    () =>
-      trades.data && movements.data
-        ? sortEntries(mergeEntries(trades.data.items, movements.data.items), sort)
-        : [],
-    [trades.data, movements.data, sort],
-  );
+  // The backend filters and orders the rows (GET /ledger/entries); they are only mapped here.
+  const entries = useMemo(() => (list.data ? list.data.items.map(toRow) : []), [list.data]);
   // Only listed entries count: a deleted row leaves the selection with the refetch.
   const visibleSelection = useMemo(
-    () => new Set(entries.filter((e) => selected.has(e.key)).map((e) => e.key)),
+    () => new Set(entries.filter((e) => selected.has(e.id)).map((e) => e.id)),
     [entries, selected],
   );
   const typeNames = useMemo(
@@ -128,7 +87,7 @@ export function LedgerPage() {
   };
   const toggleAll = () => {
     setSelected(
-      visibleSelection.size === entries.length ? NO_SELECTION : new Set(entries.map((e) => e.key)),
+      visibleSelection.size === entries.length ? NO_SELECTION : new Set(entries.map((e) => e.id)),
     );
   };
 
@@ -161,52 +120,48 @@ export function LedgerPage() {
               onClick={() => {
                 setDeleting({
                   mode: 'many',
-                  entries: entries.filter((e) => visibleSelection.has(e.key)),
+                  entries: entries.filter((e) => visibleSelection.has(e.id)),
                 });
               }}
             >
               Excluir selecionados
             </Button>
           )}
-          <Menu position="bottom-end" withinPortal>
-            <Menu.Target>
-              <Button
-                leftSection={<IconPlus size={16} stroke={1.5} />}
-                rightSection={<IconChevronDown size={16} stroke={1.5} />}
-              >
-                Novo lançamento
-              </Button>
-            </Menu.Target>
-            <Menu.Dropdown>
-              {NEW_ENTRY_MENU.map((group) => [
-                <Menu.Label key={group.label}>{group.label}</Menu.Label>,
-                ...group.items.map((item) => (
-                  <Menu.Item
-                    key={item.value}
-                    onClick={() => {
-                      setCreating(item.value);
-                    }}
-                  >
-                    {item.label}
-                  </Menu.Item>
-                )),
-              ])}
-            </Menu.Dropdown>
-          </Menu>
+          <Button
+            variant="default"
+            leftSection={<IconPlayerPlay size={16} stroke={1.5} />}
+            onClick={() => {
+              setProcessing(processDraft(start, end));
+            }}
+          >
+            Processar
+          </Button>
+          <Button
+            leftSection={<IconPlus size={16} stroke={1.5} />}
+            onClick={() => {
+              setCreating(true);
+            }}
+          >
+            Novo lançamento
+          </Button>
         </Group>
       </Group>
 
-      <CashStrip end={end} />
+      <CashStrip
+        end={end}
+        onProcessCash={(from) => {
+          setProcessing(processCashDraft(from, end));
+        }}
+      />
 
-      {trades.isError || movements.isError ? (
+      {list.isError ? (
         <ErrorState
-          error={trades.error ?? movements.error}
+          error={list.error}
           onRetry={() => {
-            void trades.refetch();
-            void movements.refetch();
+            void list.refetch();
           }}
         />
-      ) : trades.isPending || movements.isPending ? (
+      ) : list.isPending ? (
         <div role="status" aria-label="Carregando lançamentos">
           <Skeleton h={320} />
         </div>
@@ -231,47 +186,37 @@ export function LedgerPage() {
               Nenhum lançamento no período.
             </Text>
           )}
+          <LoadMore
+            hasMore={list.hasNextPage}
+            loading={list.isFetchingNextPage}
+            onLoad={() => {
+              void list.fetchNextPage();
+            }}
+          />
           <Text size="sm" c="dimmed" p="md" role="status">
-            {countLabel(entries.length)}
+            {countLabel(entries.length, list.hasNextPage)}
           </Text>
         </Paper>
       )}
 
-      {/* While a save runs the drawer stays open: its result (notification or errors) belongs
+      {/* While a save runs the modal stays open: its result (notification or errors) belongs
           to the form, which closing would unmount. */}
-      <Drawer
-        opened={creating !== null}
+      <NewEntryModal
+        opened={creating}
         onClose={() => {
-          setCreating(null);
+          setCreating(false);
         }}
-        title={creating ? DRAWER_TITLES[creating] : ''}
-        position="right"
-        closeOnEscape={!saving}
-        closeOnClickOutside={!saving}
-        withCloseButton={!saving}
-        closeButtonProps={{ 'aria-label': 'Fechar' }}
-      >
-        {(creating === 'BUY' || creating === 'SELL') && (
-          <TradeForm
-            key={creating}
-            side={creating}
-            today={today}
-            onDone={() => {
-              setCreating(null);
-            }}
-          />
-        )}
-        {(creating === 'DEPOSIT' || creating === 'WITHDRAWAL') && (
-          <CashMovementForm
-            key={creating}
-            type={creating}
-            today={today}
-            onDone={() => {
-              setCreating(null);
-            }}
-          />
-        )}
-      </Drawer>
+        today={today}
+        saving={saving}
+      />
+
+      <ProcessingRequestModal
+        draft={processing}
+        onClose={() => {
+          setProcessing(null);
+        }}
+        today={today}
+      />
 
       <DeleteDialog
         target={deleting}
@@ -354,40 +299,30 @@ function SearchBox({ value, onChange }: { value: string; onChange: (value: strin
 }
 
 function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClose: () => void }) {
-  const deleteOne = useDeleteEntry();
-  const deleteMany = useDeleteEntries();
+  // One request for one entry or many, of either type (`POST /ledger/entries/deletions`).
+  const mutation = useDeleteEntries();
   // The last target stays on screen while the dialog closes, so its text does not flicker.
   const [shown, setShown] = useState(target);
   if (target !== null && target !== shown) setShown(target);
-  const mutation = shown?.mode === 'many' ? deleteMany : deleteOne;
 
   const close = () => {
-    deleteOne.reset();
-    deleteMany.reset();
+    mutation.reset();
     onClose();
   };
 
   const confirm = () => {
     if (!target) return;
-    if (target.mode === 'one') {
-      deleteOne.mutate(target.entry, {
-        onSuccess: () => {
-          notifications.show({ color: 'teal', message: 'Lançamento excluído.' });
-          close();
-        },
-      });
-    } else {
-      deleteMany.mutate(target.entries, {
-        onSuccess: () => {
-          const n = target.entries.length;
-          notifications.show({
-            color: 'teal',
-            message: n === 1 ? 'Lançamento excluído.' : `${String(n)} lançamentos excluídos.`,
-          });
-          close();
-        },
-      });
-    }
+    const entries = target.mode === 'one' ? [target.entry] : target.entries;
+    mutation.mutate(entries, {
+      onSuccess: () => {
+        const n = entries.length;
+        notifications.show({
+          color: 'teal',
+          message: n === 1 ? 'Lançamento excluído.' : `${String(n)} lançamentos excluídos.`,
+        });
+        close();
+      },
+    });
   };
 
   const many = shown?.mode === 'many' ? shown.entries : [];
@@ -415,7 +350,7 @@ function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClos
             </Text>
             <List size="sm" spacing={2}>
               {many.map((entry) => (
-                <List.Item key={entry.key}>{entryLabel(entry)}</List.Item>
+                <List.Item key={entry.id}>{entryLabel(entry)}</List.Item>
               ))}
             </List>
           </>

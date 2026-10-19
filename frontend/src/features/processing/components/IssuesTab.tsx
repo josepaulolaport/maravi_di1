@@ -50,10 +50,13 @@ function issueAction(issue: Issue): { label: string; to: string } | null {
         ? { label: 'Ver lançamentos', to: ledgerLinks.list({ search: issue.asset_code }) }
         : null;
     case 'STALE_PREDECESSOR':
-      // A range ending the day before the affected one (OQ-11).
+      // A range ending the day before the affected one (OQ-11), for the chain that is behind.
       return {
         label: 'Processar intervalo anterior',
-        to: controlCenterLinks.processing({ end: addDays(issue.affected_date, -1) }),
+        to: controlCenterLinks.processing({
+          end: addDays(issue.affected_date, -1),
+          ...(issue.chain ? { scope: issue.chain } : {}),
+        }),
       };
   }
 }
@@ -141,8 +144,12 @@ export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
   );
 }
 
+/** STALE_PREDECESSOR says which chain is behind (OQ-21 draft); the other types do not. */
+const CHAIN_SUFFIX = { CASH: ' (caixa)', POSITIONS: ' (posições)' } as const;
+
 function IssueRow({ issue }: { issue: Issue }) {
-  const { text, icon } = ISSUE_TEXT[issue.issue_type];
+  const { icon } = ISSUE_TEXT[issue.issue_type];
+  const text = `${ISSUE_TEXT[issue.issue_type].text}${issue.chain ? CHAIN_SUFFIX[issue.chain] : ''}`;
   const action = issueAction(issue);
   return (
     <Table.Tr>

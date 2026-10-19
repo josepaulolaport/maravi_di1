@@ -1,8 +1,9 @@
 import type { MantineColor } from '@mantine/core';
 
-import type { JobStatus } from '@/api/contract';
+import type { IsoDate, JobStatus, ProcessingRequest } from '@/api/contract';
+import { addDays, daysInclusive } from '@/shared/format';
 
-// Job statuses (spec §10.3) with their pt-BR labels (OQ-20) and the colours of the
+// Run statuses (spec §10.3, eight since OQ-23) with their pt-BR labels (OQ-20) and the colours of the
 // Central de Controle design. The label is always shown: colour is never the only signal.
 
 const BADGES: Record<JobStatus, { label: string; color: MantineColor }> = {
@@ -14,7 +15,6 @@ const BADGES: Record<JobStatus, { label: string; color: MantineColor }> = {
   COMPLETED: { label: 'Concluído', color: 'teal' },
   COMPLETED_WITH_ISSUES: { label: 'Concluído com pendências', color: 'yellow' },
   FAILED: { label: 'Falhou', color: 'red' },
-  SUPERSEDED: { label: 'Obsoleto', color: 'gray' },
 };
 
 export function jobStatusBadge(status: JobStatus): { label: string; color: MantineColor } {
@@ -23,8 +23,8 @@ export function jobStatusBadge(status: JobStatus): { label: string; color: Manti
 
 const ACTIVE: readonly JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING', 'CANCELLING'];
 const CANCELLABLE: readonly JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING'];
-/** All or nothing (§10.4): these published no day, so the same range may be asked again. */
-const UNPUBLISHED: readonly JobStatus[] = ['CANCELLED', 'FAILED', 'SUPERSEDED'];
+/** Ended before their last date: what is left of the range may be asked again (OQ-23). */
+const UNFINISHED: readonly JobStatus[] = ['CANCELLED', 'FAILED'];
 
 /** Work still to happen: the history is polled while any job is active (§12). */
 export const isActive = (status: JobStatus) => ACTIVE.includes(status);
@@ -34,8 +34,20 @@ export const isFinal = (status: JobStatus) => !isActive(status);
 /** Cancel, and cancel and replace (§10.2). */
 export const canCancel = (status: JobStatus) => CANCELLABLE.includes(status);
 
-/** "Solicitar novo processamento" with the full original range (OQ-20 item 4). */
-export const canRequestAgain = (status: JobStatus) => UNPUBLISHED.includes(status);
+/** "Solicitar novo processamento" from where the run stopped (OQ-20 item 4, OQ-23 item 10). */
+export const canRequestAgain = (status: JobStatus) => UNFINISHED.includes(status);
 
-/** A finished job that published nothing; earlier results stay as they were (§10.4). */
-export const publishedNothing = canRequestAgain;
+/**
+ * The date a run processes next, or failed on: the day after its last commit, or its start
+ * (OQ-23). For a cancelled run, the first date it did not reach.
+ */
+export const nextDate = (job: ProcessingRequest): IsoDate =>
+  job.progress_date === null ? job.start_date : addDays(job.progress_date, 1);
+
+/** Days of the range and days committed, derived from the range and `progress_date` (OQ-23). */
+export function progressOf(job: ProcessingRequest): { done: number; total: number } {
+  return {
+    done: job.progress_date === null ? 0 : daysInclusive(job.start_date, job.progress_date),
+    total: daysInclusive(job.start_date, job.end_date),
+  };
+}

@@ -15,13 +15,16 @@ import { IconDots, IconSearch } from '@tabler/icons-react';
 import type { ProcessingRequest } from '@/api/contract';
 import { formatQuantity } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
+import { LoadMore } from '@/shared/ui/LoadMore';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+
+import { SCOPE_LABELS } from '@/shared/processing/scope';
 
 import { formatPeriod, formatProgress, shortId } from '../format';
 import type { useProcessingRequests } from '../hooks/useProcessing';
-import { canCancel, canRequestAgain, jobStatusBadge } from '../jobStatus';
+import { canCancel, canRequestAgain, jobStatusBadge, progressOf } from '../jobStatus';
 
-/** What the user can do with a job, from its row menu or its details drawer (OQ-20). */
+/** What the user can do with a job, from its row menu or its details modal (OQ-20). */
 export interface JobActions {
   onDetails: (job: ProcessingRequest) => void;
   onCancel: (job: ProcessingRequest) => void;
@@ -34,13 +37,17 @@ function matchesSearch(job: ProcessingRequest, search: string): boolean {
   if (!needle) return true;
   return [
     shortId(job.id),
-    formatPeriod(job.requested_start_date, job.requested_end_date),
+    formatPeriod(job.start_date, job.end_date),
+    SCOPE_LABELS[job.scope],
     jobStatusBadge(job.status).label,
   ].some((value) => value.toLocaleLowerCase('pt-BR').includes(needle));
 }
 
-const countLabel = (n: number) =>
-  n === 1 ? '1 processamento encontrado' : `${formatQuantity(n)} processamentos encontrados`;
+/** "encontrados" once every page is read; "exibidos" while the backend has more (P21). */
+const countLabel = (n: number, more: boolean) => {
+  if (more) return `${formatQuantity(n)} processamentos exibidos`;
+  return n === 1 ? '1 processamento encontrado' : `${formatQuantity(n)} processamentos encontrados`;
+};
 
 interface HistoryTableProps extends JobActions {
   requests: ReturnType<typeof useProcessingRequests>;
@@ -85,6 +92,7 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
   if (requests.isPending) {
     return <Skeleton h={220} aria-busy="true" aria-label="Carregando processamentos" />;
   }
+  // The search filters the pages read so far; "Carregar mais" reads older jobs.
   const rows = requests.data.items.filter((job) => matchesSearch(job, search));
   return (
     <>
@@ -94,6 +102,7 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
             <Table.Tr>
               <Table.Th>Processamento</Table.Th>
               <Table.Th>Período</Table.Th>
+              <Table.Th>Escopo</Table.Th>
               <Table.Th>Progresso</Table.Th>
               <Table.Th>Status</Table.Th>
               <Table.Th>
@@ -104,7 +113,7 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
           <Table.Tbody>
             {rows.length === 0 ? (
               <Table.Tr>
-                <Table.Td colSpan={5}>
+                <Table.Td colSpan={6}>
                   <Text size="sm" c="dimmed" ta="center" py="md">
                     Nenhum processamento encontrado.
                   </Text>
@@ -116,8 +125,15 @@ function HistoryBody({ requests, search, actions }: HistoryBodyProps) {
           </Table.Tbody>
         </Table>
       </Table.ScrollContainer>
+      <LoadMore
+        hasMore={requests.hasNextPage}
+        loading={requests.isFetchingNextPage}
+        onLoad={() => {
+          void requests.fetchNextPage();
+        }}
+      />
       <Text size="sm" c="dimmed">
-        {countLabel(rows.length)}
+        {countLabel(rows.length, requests.hasNextPage)}
       </Text>
     </>
   );
@@ -129,8 +145,9 @@ function JobRow({ job, actions }: { job: ProcessingRequest; actions: JobActions 
   return (
     <Table.Tr>
       <Table.Td ff="monospace">{id}</Table.Td>
-      <Table.Td>{formatPeriod(job.requested_start_date, job.requested_end_date)}</Table.Td>
-      <Table.Td>{formatProgress(job.processed_days, job.total_days)}</Table.Td>
+      <Table.Td>{formatPeriod(job.start_date, job.end_date)}</Table.Td>
+      <Table.Td>{SCOPE_LABELS[job.scope]}</Table.Td>
+      <Table.Td>{formatProgress(progressOf(job).done, progressOf(job).total)}</Table.Td>
       <Table.Td>
         <StatusBadge label={badge.label} color={badge.color} />
       </Table.Td>

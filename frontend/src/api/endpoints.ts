@@ -1,15 +1,17 @@
 import type {
   CancelAndReplaceResponse,
-  CashMovement,
-  CreateCashMovementRequest,
   CreateInstrumentRequest,
-  CreateTradeRequest,
-  DeleteEntriesRequest,
+  CreateLedgerEntryRequest,
+  DeleteLedgerEntriesRequest,
+  LedgerEntry,
+  LedgerOrder,
   Instrument,
   InstrumentType,
   IsoDate,
   Issue,
   ListResponse,
+  Page,
+  PageQuery,
   PnlPoint,
   PortfolioPositions,
   PortfolioSummary,
@@ -20,7 +22,6 @@ import type {
   ReferencePrice,
   ReferencePriceDay,
   SetReferencePriceRequest,
-  Trade,
 } from './contract';
 import { http } from './http';
 
@@ -44,23 +45,18 @@ export const assetsApi = {
 };
 
 export const ledgerApi = {
-  listTrades: (query: DateRange & { search?: string }) =>
-    http.get<ListResponse<Trade>>('/trades', { query }),
-  createTrade: (body: CreateTradeRequest) => http.post<Trade>('/trades', body),
-  deleteTrade: (tradeId: string) => http.delete(`/trades/${id(tradeId)}`),
-  listCashMovements: (query: DateRange & { search?: string }) =>
-    http.get<ListResponse<CashMovement>>('/cash-movements', { query }),
-  createCashMovement: (body: CreateCashMovementRequest) =>
-    http.post<CashMovement>('/cash-movements', body),
-  deleteCashMovement: (movementId: string) => http.delete(`/cash-movements/${id(movementId)}`),
-  deleteEntries: (body: DeleteEntriesRequest) => http.post<undefined>('/ledger/deletions', body),
+  /** The Lançamentos list: both types, filtered and ordered by the backend (P18). */
+  listEntries: (query: DateRange & PageQuery & { search?: string; order?: LedgerOrder }) =>
+    http.get<Page<LedgerEntry>>('/ledger/entries', { query }),
+  createEntry: (body: CreateLedgerEntryRequest) => http.post<LedgerEntry>('/ledger/entries', body),
+  /** All or nothing (§6.1); one entry is a list of one. */
+  deleteEntries: (body: DeleteLedgerEntriesRequest) =>
+    http.post<undefined>('/ledger/entries/deletions', body),
 };
 
 export const pricesApi = {
   listReferencePrices: (query: DateRange & { asset_id: string }) =>
     http.get<ListResponse<ReferencePriceDay>>('/reference-prices', { query }),
-  listRevisions: (query: { asset_id: string; reference_date: IsoDate }) =>
-    http.get<ListResponse<ReferencePrice>>('/reference-prices/revisions', { query }),
   setReferencePrice: (body: SetReferencePriceRequest) =>
     http.post<ReferencePrice>('/reference-prices', body),
   removeReferencePrice: (priceId: string) => http.delete(`/reference-prices/${id(priceId)}`),
@@ -75,7 +71,9 @@ export const portfolioApi = {
 };
 
 export const processingApi = {
-  listRequests: () => http.get<ListResponse<ProcessingRequest>>('/processing/requests'),
+  /** Newest first, by (created_at, id). */
+  listRequests: (query: PageQuery = {}) =>
+    http.get<Page<ProcessingRequest>>('/processing/requests', { query: { ...query } }),
   getRequest: (requestId: string) =>
     http.get<ProcessingRequest>(`/processing/requests/${id(requestId)}`),
   preview: (query: ProcessingRangeRequest) =>

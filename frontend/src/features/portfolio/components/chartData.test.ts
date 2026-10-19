@@ -11,7 +11,7 @@ const point = (
   daily_pnl: cumulative,
   cumulative_pnl: cumulative,
   pnl_status: cumulative === null ? 'MISSING' : 'COMPLETE',
-  stale: false,
+  status: 'FRESH',
   ...extra,
 });
 
@@ -21,7 +21,7 @@ describe('toChartData (§11.4, OQ-16)', () => {
       point('2026-10-14', '0'),
       point('2026-10-15', '-8034.1345282660'),
       point('2026-10-16', null),
-      point('2026-10-17', '500.00', { stale: true }),
+      point('2026-10-17', '500.00', { status: 'STALE' }),
     ];
 
     const points = toChartData(items, '2026-10-13', '2026-10-18');
@@ -35,6 +35,16 @@ describe('toChartData (§11.4, OQ-16)', () => {
       ['17/10', null], // stale
       ['18/10', null], // not published
     ]);
+  });
+
+  it('OQ-23 draws a complete day whose positions read Atualizado com pendências', () => {
+    const points = toChartData(
+      [point('2026-10-14', '0', { status: 'FRESH_WITH_ISSUES' })],
+      '2026-10-14',
+      '2026-10-14',
+    );
+
+    expect(points.map((p) => p.cumulative)).toEqual([0]);
   });
 
   it('§11.4 starts at the first published day, so a very early start costs nothing', () => {

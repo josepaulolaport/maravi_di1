@@ -13,10 +13,9 @@ import { PageHeader } from './components/PageHeader';
 import { PeriodPicker } from './components/PeriodPicker';
 import { PriceCalendar } from './components/PriceCalendar';
 import { calendarRows, calendarWindow, resolveRange } from './components/calendarData';
-import { PriceDrawer } from './components/PriceDrawer';
+import { PriceModal } from './components/PriceModal';
 import { PriceHistoryCard } from './components/PriceHistoryCard';
 import { RemovePriceModal } from './components/RemovePriceModal';
-import { RevisionsModal } from './components/RevisionsModal';
 import { useInstrument, useProduct } from './hooks/useAssets';
 import { useReferencePriceDays } from './hooks/usePrices';
 
@@ -24,7 +23,7 @@ import { useReferencePriceDays } from './hooks/usePrices';
  * A contract (spec §11.2, design 2:340): its reference-price history and calendar, where a
  * price for one date is registered, inspected, corrected or removed. There is no rate ↔ PU
  * calculator here (OQ-19 item 7). The period (`?inicio=&fim=`, default the last 30 days) drives
- * both the chart and the calendar. `?registrar=YYYY-MM-DD` opens the price drawer on that date
+ * both the chart and the calendar. `?registrar=YYYY-MM-DD` opens the price modal on that date
  * ("Definir preço" from Pendências, §11.1).
  */
 export function ContractPage() {
@@ -62,26 +61,26 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
       { replace: true },
     );
   };
-  // The drawer's date: the URL's `?registrar=` while it is there, otherwise UI state.
-  const [drawer, setDrawer] = useState<{ date: IsoDate | null; session: number }>({
+  // The modal's date: the URL's `?registrar=` while it is there, otherwise UI state.
+  const [modal, setModal] = useState<{ date: IsoDate | null; session: number }>({
     date: null,
     session: 0,
   });
-  const drawerDate = isIsoDate(requested) ? requested : drawer.date;
-  const openDrawer = (date: IsoDate) => {
-    setDrawer((current) => ({ date, session: current.session + 1 }));
+  const modalDate = isIsoDate(requested) ? requested : modal.date;
+  const openModal = (date: IsoDate) => {
+    setModal((current) => ({ date, session: current.session + 1 }));
   };
   // One URL update: drop `?registrar=` and, when the saved date is outside the period, move
   // the period to end on it, so the new observation is always in view.
-  const closeDrawer = (saved?: IsoDate) => {
-    setDrawer((current) => ({ date: null, session: current.session + 1 }));
+  const closeModal = (saved?: IsoDate) => {
+    setModal((current) => ({ date: null, session: current.session + 1 }));
     const outside = saved !== undefined && (saved < start || saved > end);
     if (requested === null && !outside) return;
     setParams(
       (current) => {
         current.delete('registrar');
         // Without an explicit period, `?registrar=` chose the window; keep it in the URL so
-        // closing the drawer never moves the calendar away from that date.
+        // closing the modal never moves the calendar away from that date.
         if (!current.has('inicio') || !current.has('fim')) {
           current.set('inicio', start);
           current.set('fim', end);
@@ -97,7 +96,6 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
     );
   };
 
-  const [revisionsDate, setRevisionsDate] = useState<IsoDate | null>(null);
   // Only the date is UI state; its observations are read from the query, so the modal always
   // lists what is current (also after a partial failure).
   const [removingDate, setRemovingDate] = useState<IsoDate | null>(null);
@@ -120,7 +118,7 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
           <Button
             leftSection={<IconPlus size={16} />}
             onClick={() => {
-              openDrawer(end);
+              openModal(end);
             }}
           >
             Registrar preço
@@ -142,27 +140,19 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
           <PriceHistoryCard items={days.data.items} start={start} end={end} />
           <PriceCalendar
             rows={calendarRows(days.data.items, start, end)}
-            onRegister={openDrawer}
-            onCorrect={openDrawer}
+            onRegister={openModal}
+            onCorrect={openModal}
             onRemove={(day: ReferencePriceDay) => {
               setRemovingDate(day.reference_date);
             }}
-            onRevisions={setRevisionsDate}
           />
         </>
       )}
-      <PriceDrawer
+      <PriceModal
         instrument={instrument}
-        date={drawerDate}
-        session={drawer.session}
-        onClose={closeDrawer}
-      />
-      <RevisionsModal
-        assetId={instrument.id}
-        date={revisionsDate}
-        onClose={() => {
-          setRevisionsDate(null);
-        }}
+        date={modalDate}
+        session={modal.session}
+        onClose={closeModal}
       />
       <RemovePriceModal
         day={removing}
