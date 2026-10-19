@@ -56,6 +56,9 @@ export const theme = createTheme({
     Paper: { defaultProps: { withBorder: true, radius: 'md' } },
     Card: { defaultProps: { withBorder: true, radius: 'md' } },
     Tooltip: { defaultProps: { withArrow: true } },
+    // Menus and date pickers open from table rows and fields: keep them open while in use,
+    // even when the row or field scrolls out of view (Floating UI's "hide" would close them).
+    Popover: { defaultProps: { hideDetached: false } },
   },
 });
 

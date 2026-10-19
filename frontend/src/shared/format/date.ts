@@ -1,4 +1,4 @@
-import type { IsoDate, IsoTime } from '@/api/contract';
+import type { IsoDate, IsoDateTime, IsoTime } from '@/api/contract';
 
 import { UNAVAILABLE } from './number';
 
@@ -10,6 +10,28 @@ export function formatDate(value: IsoDate | null | undefined): string {
   if (!value) return UNAVAILABLE;
   const [year, month, day] = value.split('-');
   return `${day ?? ''}/${month ?? ''}/${year ?? ''}`;
+}
+
+const dateTimeParts = new Intl.DateTimeFormat('pt-BR', {
+  timeZone: 'America/Sao_Paulo',
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/**
+ * An instant (job or revision timestamp) in São Paulo time, where the business day is
+ * defined: 2026-10-16T21:35:00Z → 16/10/2026 18:35.
+ */
+export function formatDateTime(value: IsoDateTime | null | undefined): string {
+  if (!value) return UNAVAILABLE;
+  const parts = Object.fromEntries(
+    dateTimeParts.formatToParts(new Date(value)).map((part) => [part.type, part.value]),
+  );
+  return `${parts.day ?? ''}/${parts.month ?? ''}/${parts.year ?? ''} ${parts.hour ?? ''}:${parts.minute ?? ''}`;
 }
 
 /** 14:10:00 → 14:10 */

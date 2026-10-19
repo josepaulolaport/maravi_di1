@@ -2,7 +2,7 @@ import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { type ReactNode, useEffect, useRef } from 'react';
 
-import { ApiError } from '@/api/http';
+import { problemMessages } from './problemMessages';
 
 interface ConfirmModalProps {
   opened: boolean;
@@ -63,10 +63,10 @@ export function ConfirmModal({
         <Text component="div" size="sm">
           {children}
         </Text>
-        {messages(error).length > 0 && (
+        {problemMessages(error).length > 0 && (
           <Alert role="alert" color="red" variant="light" icon={<IconAlertTriangle size={18} />}>
             <Stack gap={4}>
-              {messages(error).map((message) => (
+              {problemMessages(error).map((message) => (
                 <Text key={message} size="sm">
                   {message}
                 </Text>
@@ -85,12 +85,4 @@ export function ConfirmModal({
       </Stack>
     </Modal>
   );
-}
-
-/** A dialog has no fields, so every message of the problem is shown in it. */
-function messages(error: unknown): string[] {
-  if (error === undefined || error === null) return [];
-  if (!(error instanceof ApiError)) return ['Ocorreu um erro inesperado. Tente novamente.'];
-  const all = (error.problem.errors ?? []).map((e) => e.message);
-  return all.length > 0 ? all : [error.message];
 }

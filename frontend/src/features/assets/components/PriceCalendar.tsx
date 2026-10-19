@@ -65,13 +65,7 @@ export function PriceCalendar({ rows, onRegister, onCorrect, onRemove }: PriceCa
                   <Table.Td>{preferred ? SOURCE_LABELS[preferred.source] : UNAVAILABLE}</Table.Td>
                   <Table.Td ta="right">
                     {day ? (
-                      <Menu
-                        position="bottom-end"
-                        withinPortal
-                        // The menu opens from a row; it stays open while it is in use even if
-                        // the row scrolls out of view.
-                        hideDetached={false}
-                      >
+                      <Menu position="bottom-end" withinPortal>
                         <Menu.Target>
                           <ActionIcon
                             variant="subtle"

@@ -152,8 +152,7 @@ function JobRow({ job, actions }: { job: ProcessingRequest; actions: JobActions 
         <StatusBadge label={badge.label} color={badge.color} />
       </Table.Td>
       <Table.Td ta="right">
-        {/* hideDetached off: the menu stays with its row (and works where there is no layout). */}
-        <Menu position="bottom-end" withinPortal hideDetached={false}>
+        <Menu position="bottom-end" withinPortal>
           <Menu.Target>
             <ActionIcon variant="subtle" color="gray" aria-label={`Ações do processamento ${id}`}>
               <IconDots size={16} stroke={1.5} />

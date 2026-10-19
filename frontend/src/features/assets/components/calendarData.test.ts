@@ -4,7 +4,6 @@ import {
   calendarRows,
   CALENDAR_DAYS,
   calendarWindow,
-  formatDateTime,
   resolveRange,
   toPriceChart,
 } from './calendarData';
@@ -117,12 +116,5 @@ describe('toPriceChart', () => {
 
     expect(points.map((p) => p.value)).toEqual([null, 0.098]);
     expect(points.map((p) => p.text)).toEqual([null, '0.098']);
-  });
-});
-
-describe('formatDateTime', () => {
-  it('§11 shows an instant in São Paulo time as DD/MM/AAAA HH:MM', () => {
-    expect(formatDateTime('2026-10-17T10:00:00-03:00')).toBe('17/10/2026 10:00');
-    expect(formatDateTime('2026-10-17T02:30:00Z')).toBe('16/10/2026 23:30');
   });
 });

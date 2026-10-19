@@ -64,6 +64,7 @@ export function resetDb(): void {
  */
 export function newId(): string {
   const n = db.nextId++;
+  // The counter is in the first block too: the history shows a job by its first 8 characters.
   return `9a${String(n).padStart(6, '0')}-0000-4000-8000-${String(n).padStart(12, '0')}`;
 }
 
