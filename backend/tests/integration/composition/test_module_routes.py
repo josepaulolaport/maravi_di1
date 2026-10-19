@@ -3,8 +3,10 @@ registered under ``/api`` and reaches its service with the composition's provide
 "DI composition", "HTTP endpoints"; the frontend's ``API_BASE``).
 
 One smoke path per router, with no fakes: Asset over its repository; Ledger over Asset's reader,
-the real Pricing and the app's clock (OQ-14). The expected PU is the frontend fixture's
-(``frontend/src/api/mocks/fixtures.ts``: DI1F28 at 10% a.a. on 14/10/2026). The behaviour of each
+the real Pricing and the app's clock (OQ-14). The expected PU is spec §4.1's
+``PU = 100000 / (1 + taxa)^(dias_corridos/365)`` for DI1F28 (maturity 03/01/2028) at 10% a.a. on
+14/10/2026: 446 calendar days, 100000 / 1.10^(446/365) = 89006.4625467350 at 10 dp (OQ-3), the
+same as the frontend fixture (``frontend/src/api/mocks/fixtures.ts``). The behaviour of each
 route is the modules' own tests' business; these tests only prove the wiring.
 """
 
