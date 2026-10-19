@@ -12,8 +12,8 @@ type PerChain<T> = Record<ProcessingChain, T>;
 function createDb() {
   return {
     instruments: structuredClone(fixtures.instruments),
-    trades: structuredClone(fixtures.trades),
-    cashMovements: structuredClone(fixtures.cashMovements),
+    /** Trades and cash entries, one list (§6). */
+    entries: structuredClone(fixtures.ledgerEntries),
     referencePrices: structuredClone(fixtures.referencePrices),
     requests: structuredClone(fixtures.processingRequests),
     issues: structuredClone(fixtures.issues),
@@ -47,7 +47,7 @@ function createDb() {
     revision: { CASH: 0, POSITIONS: 0 } as PerChain<number>,
     /** The revisions each job saw when it started running. */
     startRevision: new Map<string, PerChain<number>>(),
-    nextSeq: fixtures.trades.length + 1,
+    nextSeq: fixtures.ledgerEntries.length + 1,
     nextId: 1,
   };
 }

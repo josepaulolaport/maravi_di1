@@ -1,10 +1,8 @@
 import type {
   CancelAndReplaceResponse,
-  CashMovement,
-  CreateCashMovementRequest,
   CreateInstrumentRequest,
-  CreateTradeRequest,
-  DeleteEntriesRequest,
+  CreateLedgerEntryRequest,
+  DeleteLedgerEntriesRequest,
   LedgerEntry,
   LedgerOrder,
   Instrument,
@@ -22,7 +20,6 @@ import type {
   ReferencePrice,
   ReferencePriceDay,
   SetReferencePriceRequest,
-  Trade,
 } from './contract';
 import { http } from './http';
 
@@ -46,19 +43,12 @@ export const assetsApi = {
 };
 
 export const ledgerApi = {
-  /** The Lançamentos list: both kinds of entry, filtered and ordered by the backend (P18). */
+  /** The Lançamentos list: both types, filtered and ordered by the backend (P18). */
   listEntries: (query: DateRange & { search?: string; order?: LedgerOrder }) =>
     http.get<ListResponse<LedgerEntry>>('/ledger/entries', { query }),
-  listTrades: (query: DateRange & { search?: string }) =>
-    http.get<ListResponse<Trade>>('/trades', { query }),
-  createTrade: (body: CreateTradeRequest) => http.post<Trade>('/trades', body),
-  deleteTrade: (tradeId: string) => http.delete(`/trades/${id(tradeId)}`),
-  listCashMovements: (query: DateRange & { search?: string }) =>
-    http.get<ListResponse<CashMovement>>('/cash-movements', { query }),
-  createCashMovement: (body: CreateCashMovementRequest) =>
-    http.post<CashMovement>('/cash-movements', body),
-  deleteCashMovement: (movementId: string) => http.delete(`/cash-movements/${id(movementId)}`),
-  deleteEntries: (body: DeleteEntriesRequest) => http.post<undefined>('/ledger/deletions', body),
+  createEntry: (body: CreateLedgerEntryRequest) => http.post<LedgerEntry>('/ledger/entries', body),
+  /** All or nothing (§6.1); one entry is a list of one. */
+  deleteEntries: (body: DeleteLedgerEntriesRequest) => http.delete('/ledger/entries', { body }),
 };
 
 export const pricesApi = {

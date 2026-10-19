@@ -104,7 +104,8 @@ export const portfolioHandlers = [
 
 /** The earliest date with any ledger entry (the day before it is the zero state). */
 export function firstEntryDate(): string | undefined {
-  return [...db.trades.map((t) => t.trade_date), ...db.cashMovements.map((m) => m.movement_date)]
+  return db.entries
+    .map((e) => e.date)
     .sort()
     .at(0);
 }

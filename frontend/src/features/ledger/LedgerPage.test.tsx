@@ -9,10 +9,8 @@ import {
 import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
-import type { CashMovement } from '@/api/contract';
-import { cashMovements, IDS, instruments, products, trades } from '@/api/mocks/fixtures';
+import { cashEntries, IDS, instruments, products, tradeEntries } from '@/api/mocks/fixtures';
 import { ledgerApi } from '@/api/endpoints';
-import { cashEntry } from '@/api/mocks/handlers/ledger';
 import { fieldError, problem, url } from '@/api/mocks/handlers/support';
 import { server } from '@/api/mocks/server';
 import { addDays, formatDate, todayInSaoPaulo } from '@/shared/format';
@@ -52,7 +50,7 @@ function cellTexts(row: HTMLElement) {
 }
 
 /** Records the JSON body of every request to `path`, then lets the mock answer it. */
-function captureBodies(method: 'post', path: string) {
+function captureBodies(method: 'post' | 'delete', path: string) {
   const bodies: unknown[] = [];
   server.use(
     http[method](url(path), async ({ request }) => {
@@ -140,11 +138,12 @@ describe('Lançamentos (§11.3)', () => {
       ]);
     });
 
-    it('§11.3 merges trades and cash movements, newest first, in pt-BR formats', async () => {
+    it('§11.3 lists trades and cash entries in one order, newest first, in pt-BR formats', async () => {
       await openLedger();
       await screen.findAllByText('Futuros');
 
       expect(bodyRows().map(cellTexts)).toEqual([
+        ['', '16/10/2026 17:30', 'Caixa', 'Retirada', '—', '—', '—', '—', '-R$ 50.000,00', ''],
         [
           '',
           '16/10/2026 15:00',
@@ -157,7 +156,6 @@ describe('Lançamentos (§11.3)', () => {
           '+R$ 356.408,89',
           '',
         ],
-        ['', '16/10/2026', 'Caixa', 'Retirada', '—', '—', '—', '—', '-R$ 50.000,00', ''],
         [
           '',
           '15/10/2026 10:30',
@@ -182,7 +180,7 @@ describe('Lançamentos (§11.3)', () => {
           '-R$ 890.064,63',
           '',
         ],
-        ['', '14/10/2026', 'Caixa', 'Aporte', '—', '—', '—', '—', '+R$ 1.500.000,00', ''],
+        ['', '14/10/2026 09:00', 'Caixa', 'Aporte', '—', '—', '—', '—', '+R$ 1.500.000,00', ''],
       ]);
     });
 
@@ -206,9 +204,9 @@ describe('Lançamentos (§11.3)', () => {
         expect(orders).toEqual(['desc', 'asc']);
       });
       await waitFor(() => {
-        expect(cellTexts(bodyRows()[0] as HTMLElement)[1]).toBe('14/10/2026');
+        expect(cellTexts(bodyRows()[0] as HTMLElement)[1]).toBe('14/10/2026 09:00');
       });
-      expect(cellTexts(bodyRows()[4] as HTMLElement)[1]).toBe('16/10/2026 15:00');
+      expect(cellTexts(bodyRows()[4] as HTMLElement)[1]).toBe('16/10/2026 17:30');
     });
 
     it('§11.3 a new range shows the loading state, never the rows of the previous range', async () => {
@@ -235,8 +233,8 @@ describe('Lançamentos (§11.3)', () => {
 
       expect(screen.getByText('3 lançamentos encontrados')).toBeInTheDocument();
       expect(bodyRows().map((row) => cellTexts(row)[1])).toEqual([
+        '16/10/2026 17:30',
         '16/10/2026 15:00',
-        '16/10/2026',
         '15/10/2026 10:30',
       ]);
     });
@@ -314,7 +312,8 @@ describe('Lançamentos (§11.3)', () => {
       await openLedger();
 
       expect(screen.queryByText('FUTURE')).not.toBeInTheDocument();
-      expect(cellTexts(bodyRows()[0] as HTMLElement)[2]).toBe('—');
+      // Row 1 is the 16/10 venda (row 0 is the 17:30 retirada, whose type is always Caixa).
+      expect(cellTexts(bodyRows()[1] as HTMLElement)[2]).toBe('—');
     });
 
     it('§11.3 clearing busca in the URL clears the search box and keeps it cleared', async () => {
@@ -347,10 +346,11 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('OQ-21 a deposit marks the cash stale and offers "Processar caixa" from that day, scope Caixa', async () => {
-      await ledgerApi.createCashMovement({
-        movement_date: '2026-10-15',
-        movement_type: 'DEPOSIT',
-        amount: '1000.00',
+      await ledgerApi.createEntry({
+        type: 'CASH',
+        date: '2026-10-15',
+        time: '12:00:00',
+        cash_amount: '1000.00',
       });
       const { user } = await openLedger();
 
@@ -408,7 +408,7 @@ describe('Lançamentos (§11.3)', () => {
 
   describe('Compra / Venda (§6.1)', () => {
     it('§6.1 registers a compra typed as PU, positive quantity', async () => {
-      const bodies = captureBodies('post', '/trades');
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Compra');
 
@@ -428,9 +428,10 @@ describe('Lançamentos (§11.3)', () => {
       ).toBeInTheDocument();
       expect(bodies).toEqual([
         {
+          type: 'TRADE',
           asset_id: IDS.di1f29,
-          trade_date: '2026-10-16',
-          trade_time: '16:45:00',
+          date: '2026-10-16',
+          time: '16:45:00',
           signed_quantity: 3,
           input_kind: 'PU',
           execution_pu: '80000.00',
@@ -443,7 +444,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.1 registers a venda typed as a rate, sent as a fraction with a negative quantity', async () => {
-      const bodies = captureBodies('post', '/trades');
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Venda');
 
@@ -464,9 +465,10 @@ describe('Lançamentos (§11.3)', () => {
       ).toBeInTheDocument();
       expect(bodies).toEqual([
         {
+          type: 'TRADE',
           asset_id: IDS.di1f28,
-          trade_date: '2026-10-16',
-          trade_time: '17:05:00',
+          date: '2026-10-16',
+          time: '17:05:00',
           signed_quantity: -2,
           input_kind: 'RATE',
           execution_rate: '0.1045',
@@ -492,7 +494,7 @@ describe('Lançamentos (§11.3)', () => {
     it('OQ-15 keeps the modal open while saving, so the result is never lost', async () => {
       let release: () => void = () => undefined;
       server.use(
-        http.post(url('/trades'), async () => {
+        http.post(url('/ledger/entries'), async () => {
           await new Promise<void>((resolve) => {
             release = resolve;
           });
@@ -522,7 +524,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.1 checks the required fields before sending', async () => {
-      const bodies = captureBodies('post', '/trades');
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Compra');
 
@@ -572,7 +574,7 @@ describe('Lançamentos (§11.3)', () => {
       ['CONTRACT_MATURED', 'O contrato já venceu nesta data.'],
     ] as const)('OQ-14 / OQ-1 shows %s on the Data field', async (code, message) => {
       server.use(
-        http.post(url('/trades'), () => problem(422, [fieldError(code, message, 'trade_date')])),
+        http.post(url('/ledger/entries'), () => problem(422, [fieldError(code, message, 'date')])),
       );
       const { user } = await openLedger();
       const modal = await openNew(user, 'Compra');
@@ -589,7 +591,7 @@ describe('Lançamentos (§11.3)', () => {
 
     it('OQ-15 shows every message when two API fields belong to the same input', async () => {
       server.use(
-        http.post(url('/trades'), () =>
+        http.post(url('/ledger/entries'), () =>
           problem(422, [
             fieldError('VALIDATION_ERROR', 'Informe um número válido.', 'execution_rate'),
             fieldError('VALIDATION_ERROR', 'Informe o PU ou a taxa.', 'input_kind'),
@@ -610,7 +612,7 @@ describe('Lançamentos (§11.3)', () => {
 
     it('OQ-15 shows an error without a field above the form', async () => {
       server.use(
-        http.post(url('/trades'), () =>
+        http.post(url('/ledger/entries'), () =>
           problem(409, [fieldError('VALIDATION_ERROR', 'Lançamentos bloqueados no momento.')]),
         ),
       );
@@ -629,12 +631,15 @@ describe('Lançamentos (§11.3)', () => {
   });
 
   describe('Aporte / Retirada (§6.2)', () => {
-    it('§6.2 registers an aporte with a positive amount', async () => {
-      const bodies = captureBodies('post', '/cash-movements');
+    it('§6.2 registers an aporte with its time and a positive amount', async () => {
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Aporte');
 
       await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
+      fireEvent.change(modal.getByLabelText('Hora', { exact: false }), {
+        target: { value: '11:20' },
+      });
       await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '2.500,50');
       await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
@@ -644,17 +649,20 @@ describe('Lançamentos (§11.3)', () => {
         ),
       ).toBeInTheDocument();
       expect(bodies).toEqual([
-        { movement_date: '2026-10-15', movement_type: 'DEPOSIT', amount: '2500.50' },
+        { type: 'CASH', date: '2026-10-15', time: '11:20:00', cash_amount: '2500.50' },
       ]);
       expect(await screen.findByText('+R$ 2.500,50')).toBeInTheDocument();
     });
 
-    it('§6.2 registers a retirada; the amount is sent positive', async () => {
-      const bodies = captureBodies('post', '/cash-movements');
+    it('§6.2 registers a retirada: typed positive, sent as a negative amount', async () => {
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Retirada');
 
       await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
+      fireEvent.change(modal.getByLabelText('Hora', { exact: false }), {
+        target: { value: '09:05' },
+      });
       await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '1.000');
       await user.click(modal.getByRole('button', { name: 'Registrar retirada' }));
 
@@ -664,7 +672,7 @@ describe('Lançamentos (§11.3)', () => {
         ),
       ).toBeInTheDocument();
       expect(bodies).toEqual([
-        { movement_date: '2026-10-15', movement_type: 'WITHDRAWAL', amount: '1000' },
+        { type: 'CASH', date: '2026-10-15', time: '09:05:00', cash_amount: '-1000' },
       ]);
       expect(await screen.findByText('-R$ 1.000,00')).toBeInTheDocument();
     });
@@ -686,9 +694,9 @@ describe('Lançamentos (§11.3)', () => {
 
     it('OQ-14 shows FUTURE_DATE on the Data field', async () => {
       server.use(
-        http.post(url('/cash-movements'), () =>
+        http.post(url('/ledger/entries'), () =>
           problem(422, [
-            fieldError('FUTURE_DATE', 'A data não pode ser posterior a hoje.', 'movement_date'),
+            fieldError('FUTURE_DATE', 'A data não pode ser posterior a hoje.', 'date'),
           ]),
         ),
       );
@@ -703,7 +711,7 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§6.2 rejects a value that is not a pt-BR number before sending', async () => {
-      const bodies = captureBodies('post', '/cash-movements');
+      const bodies = captureBodies('post', '/ledger/entries');
       const { user } = await openLedger();
       const modal = await openNew(user, 'Aporte');
 
@@ -820,10 +828,11 @@ describe('Lançamentos (§11.3)', () => {
     }
 
     it('§10.1 prefills the whole period with Tudo, also after a trade (P19 dropped)', async () => {
-      await ledgerApi.createTrade({
+      await ledgerApi.createEntry({
+        type: 'TRADE',
         asset_id: IDS.di1f28,
-        trade_date: '2026-10-15',
-        trade_time: '10:00:00',
+        date: '2026-10-15',
+        time: '10:00:00',
         signed_quantity: 1,
         input_kind: 'PU',
         execution_pu: '89000.00',
@@ -838,10 +847,11 @@ describe('Lançamentos (§11.3)', () => {
     });
 
     it('§11.3 "Processar caixa" starts at Caixa D0 when only D0 is behind', async () => {
-      await ledgerApi.createCashMovement({
-        movement_date: '2026-10-16',
-        movement_type: 'WITHDRAWAL',
-        amount: '10.00',
+      await ledgerApi.createEntry({
+        type: 'CASH',
+        date: '2026-10-16',
+        time: '12:00:00',
+        cash_amount: '-10.00',
       });
       const { user } = await openLedger();
 
@@ -914,7 +924,7 @@ describe('Lançamentos (§11.3)', () => {
     it('OQ-15 locks the kind of entry while a save runs', async () => {
       let release: () => void = () => undefined;
       server.use(
-        http.post(url('/cash-movements'), async () => {
+        http.post(url('/ledger/entries'), async () => {
           await new Promise<void>((resolve) => {
             release = resolve;
           });
@@ -953,9 +963,10 @@ describe('Lançamentos (§11.3)', () => {
   describe('delete (§6.1)', () => {
     const sale = 'Venda DI1F28 -4 16/10/2026 15:00 PU 89.102,22';
     // Accessible names keep the no-break space Intl puts after "R$".
-    const withdrawal = 'Retirada 16/10/2026 -R$\u00a050.000,00 registrada às 17:30';
+    const withdrawal = 'Retirada 16/10/2026 17:30 -R$\u00a050.000,00';
 
-    it('§6.1 deletes one trade after confirmation; there is no edit action', async () => {
+    it('§6.1 deletes one trade after confirmation, by its id; there is no edit action', async () => {
+      const bodies = captureBodies('delete', '/ledger/entries');
       const { user } = await openLedger();
 
       await user.click(rowNamed(sale).getByRole('button', { name: `Ações de ${sale}` }));
@@ -966,13 +977,14 @@ describe('Lançamentos (§11.3)', () => {
       await user.click(dialog.getByRole('button', { name: 'Excluir' }));
 
       expect(await screen.findByText('Lançamento excluído.')).toBeInTheDocument();
+      expect(bodies).toEqual([{ ids: [tradeEntries[2]?.id] }]);
       expect(await screen.findByText('4 lançamentos encontrados')).toBeInTheDocument();
       expect(
         screen.queryByRole('checkbox', { name: `Selecionar ${sale}` }),
       ).not.toBeInTheDocument();
     });
 
-    it('§6.1 deletes one cash movement after confirmation', async () => {
+    it('§6.1 deletes one cash entry after confirmation', async () => {
       const { user } = await openLedger();
 
       await user.click(
@@ -990,7 +1002,7 @@ describe('Lançamentos (§11.3)', () => {
 
     it('§6.1 a failed single delete keeps the entry and shows why', async () => {
       server.use(
-        http.delete(url('/trades/:id'), () =>
+        http.delete(url('/ledger/entries'), () =>
           problem(404, [fieldError('NOT_FOUND', 'Lançamento não encontrado.')]),
         ),
       );
@@ -1030,9 +1042,9 @@ describe('Lançamentos (§11.3)', () => {
       expect(screen.getByRole('checkbox', { name: `Selecionar ${sale}` })).not.toBeChecked();
     });
 
-    it('§6.1 tells apart two same-day cash movements of the same amount', async () => {
-      const withdrawalEntry = cashEntry(cashMovements[1] as CashMovement);
-      const twin = { ...withdrawalEntry, id: 'twin', created_at: '2026-10-16T18:05:00-03:00' };
+    it('§6.1 tells apart two same-day cash entries of the same amount by their time', async () => {
+      const withdrawalEntry = cashEntries[1];
+      const twin = { ...withdrawalEntry, id: 'twin', time: '18:05:00' };
       server.use(
         http.get(url('/ledger/entries'), () =>
           HttpResponse.json({ items: [twin, withdrawalEntry] }),
@@ -1045,7 +1057,7 @@ describe('Lançamentos (§11.3)', () => {
       ).toBeInTheDocument();
       expect(
         screen.getByRole('checkbox', {
-          name: 'Selecionar Retirada 16/10/2026 -R$\u00a050.000,00 registrada às 18:05',
+          name: 'Selecionar Retirada 16/10/2026 18:05 -R$\u00a050.000,00',
         }),
       ).toBeInTheDocument();
     });
@@ -1063,8 +1075,8 @@ describe('Lançamentos (§11.3)', () => {
       expect(screen.getByText('5 lançamentos encontrados')).toBeInTheDocument();
     });
 
-    it('§6.1 deletes the selected entries in one atomic request', async () => {
-      const bodies = captureBodies('post', '/ledger/deletions');
+    it('§6.1 deletes the selected entries, of both types, in one atomic request', async () => {
+      const bodies = captureBodies('delete', '/ledger/entries');
       const { user } = await openLedger();
 
       expect(
@@ -1076,15 +1088,13 @@ describe('Lançamentos (§11.3)', () => {
       const dialog = within(await screen.findByRole('dialog', { name: 'Excluir lançamentos' }));
       expect(dialog.getByText(/2 lançamentos selecionados/)).toBeInTheDocument();
       expect(dialog.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
-        sale,
         withdrawal,
+        sale,
       ]);
       await user.click(dialog.getByRole('button', { name: 'Excluir' }));
 
       expect(await screen.findByText('2 lançamentos excluídos.')).toBeInTheDocument();
-      expect(bodies).toEqual([
-        { trade_ids: [trades[2]?.id], cash_movement_ids: [cashMovements[1]?.id] },
-      ]);
+      expect(bodies).toEqual([{ ids: [cashEntries[1]?.id, tradeEntries[2]?.id] }]);
       expect(await screen.findByText('3 lançamentos encontrados')).toBeInTheDocument();
     });
 
@@ -1100,7 +1110,7 @@ describe('Lançamentos (§11.3)', () => {
 
     it('§6.1 a failed multiple delete removes nothing and shows the error', async () => {
       server.use(
-        http.post(url('/ledger/deletions'), () =>
+        http.delete(url('/ledger/entries'), () =>
           problem(404, [fieldError('NOT_FOUND', 'Lançamento não encontrado.')]),
         ),
       );

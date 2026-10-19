@@ -22,17 +22,19 @@ async function run(start: string, end: string, scope: ProcessingScope): Promise<
 }
 
 const deposit = (date: string) =>
-  ledgerApi.createCashMovement({
-    movement_date: date,
-    movement_type: 'DEPOSIT',
-    amount: '1000.00',
+  ledgerApi.createEntry({
+    type: 'CASH',
+    date: date,
+    time: '12:00:00',
+    cash_amount: '1000.00',
   });
 
 const trade = (date: string) =>
-  ledgerApi.createTrade({
+  ledgerApi.createEntry({
+    type: 'TRADE',
     asset_id: IDS.di1f28,
-    trade_date: date,
-    trade_time: '10:00:00',
+    date: date,
+    time: '10:00:00',
     signed_quantity: 1,
     input_kind: 'PU',
     execution_pu: '89000.00',

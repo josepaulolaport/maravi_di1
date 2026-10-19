@@ -1,16 +1,17 @@
 import type {
-  CashMovement,
+  CashLedgerEntry,
   CompletenessStatus,
   Decimal,
   Instrument,
   InstrumentType,
   Issue,
+  LedgerEntry,
   PnlPoint,
   PortfolioPositions,
   ProcessingRequest,
   Product,
   ReferencePrice,
-  Trade,
+  TradeLedgerEntry,
 } from '../contract';
 
 // One coherent demo scenario for the MSW mocks. Every figure was computed offline with the
@@ -81,15 +82,20 @@ export const instruments: Omit<Instrument, 'last_reference'>[] = [
   created_at: '2026-10-01T09:00:00-03:00',
 }));
 
-export const trades: Trade[] = [
+/**
+ * The ledger (§6): trades and cash entries in one list, `seq` in the order they were recorded.
+ * Cash entries carry a time like trades (user, 2026-10-18).
+ */
+export const tradeEntries: TradeLedgerEntry[] = [
   {
+    type: 'TRADE',
     id: '7a000000-0000-4000-8000-000000000001',
     asset_id: IDS.di1f28,
     asset_code: 'DI1F28',
     instrument_type_code: 'FUTURE',
-    trade_date: '2026-10-14',
-    trade_time: '14:10:00',
-    seq: 1,
+    date: '2026-10-14',
+    time: '14:10:00',
+    seq: 2,
     signed_quantity: 10,
     execution_pu: '89006.4625467350',
     execution_rate: '0.10',
@@ -98,13 +104,14 @@ export const trades: Trade[] = [
     created_at: '2026-10-14T14:11:02-03:00',
   },
   {
+    type: 'TRADE',
     id: '7a000000-0000-4000-8000-000000000002',
     asset_id: IDS.di1f29,
     asset_code: 'DI1F29',
     instrument_type_code: 'FUTURE',
-    trade_date: '2026-10-15',
-    trade_time: '10:30:00',
-    seq: 2,
+    date: '2026-10-15',
+    time: '10:30:00',
+    seq: 3,
     signed_quantity: 5,
     execution_pu: '82057.00',
     execution_rate: '0.093203413834',
@@ -113,13 +120,14 @@ export const trades: Trade[] = [
     created_at: '2026-10-15T10:31:40-03:00',
   },
   {
+    type: 'TRADE',
     id: '7a000000-0000-4000-8000-000000000003',
     asset_id: IDS.di1f28,
     asset_code: 'DI1F28',
     instrument_type_code: 'FUTURE',
-    trade_date: '2026-10-16',
-    trade_time: '15:00:00',
-    seq: 3,
+    date: '2026-10-16',
+    time: '15:00:00',
+    seq: 4,
     signed_quantity: -4,
     execution_pu: '89102.2226533433',
     execution_rate: '0.0995',
@@ -129,24 +137,29 @@ export const trades: Trade[] = [
   },
 ];
 
-export const cashMovements: CashMovement[] = [
+/** Aporte: positive `cash_amount`; retirada: negative. */
+export const cashEntries: CashLedgerEntry[] = [
   {
+    type: 'CASH',
     id: '7c000000-0000-4000-8000-000000000001',
-    movement_date: '2026-10-14',
-    movement_type: 'DEPOSIT',
-    amount: '1500000.00',
-    description: 'Aporte inicial',
+    date: '2026-10-14',
+    time: '09:00:00',
+    seq: 1,
+    cash_amount: '1500000.00',
     created_at: '2026-10-14T09:00:00-03:00',
   },
   {
+    type: 'CASH',
     id: '7c000000-0000-4000-8000-000000000002',
-    movement_date: '2026-10-16',
-    movement_type: 'WITHDRAWAL',
-    amount: '50000.00',
-    description: 'Retirada parcial',
+    date: '2026-10-16',
+    time: '17:30:00',
+    seq: 5,
+    cash_amount: '-50000.00',
     created_at: '2026-10-16T17:30:00-03:00',
   },
 ];
+
+export const ledgerEntries: LedgerEntry[] = [...tradeEntries, ...cashEntries];
 
 function price(
   n: number,

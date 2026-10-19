@@ -1,9 +1,9 @@
 import { Modal, SegmentedControl, Stack } from '@mantine/core';
 import { useState } from 'react';
 
-import type { CashMovementType, IsoDate } from '@/api/contract';
+import type { IsoDate } from '@/api/contract';
 
-import { CashMovementForm } from './CashMovementForm';
+import { CashMovementForm, type CashSide } from './CashMovementForm';
 import { TradeForm, type TradeSide } from './TradeForm';
 
 type EntryGroup = 'TRADE' | 'CASH';
@@ -50,7 +50,7 @@ function NewEntry({
 }) {
   const [group, setGroup] = useState<EntryGroup>('TRADE');
   const [side, setSide] = useState<TradeSide>('BUY');
-  const [cashType, setCashType] = useState<CashMovementType>('DEPOSIT');
+  const [cashType, setCashType] = useState<CashSide>('DEPOSIT');
 
   return (
     <Stack gap="md">

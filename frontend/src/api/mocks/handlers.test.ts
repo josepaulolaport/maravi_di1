@@ -242,29 +242,39 @@ describe('mock reference prices', () => {
 describe('mock ledger validation', () => {
   const trade = {
     asset_id: IDS.di1f28,
-    trade_date: '2026-10-17',
-    trade_time: '10:00:00',
+    date: '2026-10-17',
+    time: '10:00:00',
     signed_quantity: 1,
     input_kind: 'PU' as const,
     execution_pu: '89000.00',
   };
 
   it('OQ-14 rejects a date after today with FUTURE_DATE on the field', async () => {
-    const problem = await problemOf(ledgerApi.createTrade({ ...trade, trade_date: '2026-10-19' }));
+    const problem = await problemOf(
+      ledgerApi.createEntry({
+        type: 'TRADE',
+        ...trade,
+        date: '2026-10-19',
+      }),
+    );
 
     expect(problem.status).toBe(422);
     expect(problem.errors).toEqual([
       {
         code: 'FUTURE_DATE',
         message: 'A data não pode ser posterior a hoje.',
-        field: 'trade_date',
+        field: 'date',
       },
     ]);
   });
 
   it('OQ-3 rejects a PU with more than 10 decimals instead of rounding it', async () => {
     const problem = await problemOf(
-      ledgerApi.createTrade({ ...trade, execution_pu: '89000.12345678901' }),
+      ledgerApi.createEntry({
+        type: 'TRADE',
+        ...trade,
+        execution_pu: '89000.12345678901',
+      }),
     );
 
     expect(problem.errors?.[0]).toMatchObject({ code: 'VALIDATION_ERROR', field: 'execution_pu' });
@@ -272,7 +282,8 @@ describe('mock ledger validation', () => {
 
   it('OQ-3 rejects a typed rate with more than 12 decimals', async () => {
     const problem = await problemOf(
-      ledgerApi.createTrade({
+      ledgerApi.createEntry({
+        type: 'TRADE',
         ...trade,
         input_kind: 'RATE',
         execution_rate: '0.1234567890123',
@@ -292,9 +303,15 @@ describe('mock ledger validation', () => {
       maturity_date: '2026-10-01',
     });
 
-    const problem = await problemOf(ledgerApi.createTrade({ ...trade, asset_id: matured.id }));
+    const problem = await problemOf(
+      ledgerApi.createEntry({
+        type: 'TRADE',
+        ...trade,
+        asset_id: matured.id,
+      }),
+    );
 
-    expect(problem.errors?.[0]).toMatchObject({ code: 'CONTRACT_MATURED', field: 'trade_date' });
+    expect(problem.errors?.[0]).toMatchObject({ code: 'CONTRACT_MATURED', field: 'date' });
   });
 
   it('OQ-1 on the maturity date takes the PU and stores the rate as 0', async () => {
@@ -305,14 +322,16 @@ describe('mock ledger validation', () => {
     });
 
     const byRate = await problemOf(
-      ledgerApi.createTrade({
+      ledgerApi.createEntry({
+        type: 'TRADE',
         ...trade,
         asset_id: maturing.id,
         input_kind: 'RATE',
         execution_rate: '0.10',
       }),
     );
-    const byPu = await ledgerApi.createTrade({
+    const byPu = await ledgerApi.createEntry({
+      type: 'TRADE',
       ...trade,
       asset_id: maturing.id,
       execution_pu: '100000',
@@ -324,20 +343,25 @@ describe('mock ledger validation', () => {
 
   it('OQ-3 rejects a cash amount with more than 2 decimals', async () => {
     const problem = await problemOf(
-      ledgerApi.createCashMovement({
-        movement_date: '2026-10-17',
-        movement_type: 'DEPOSIT',
-        amount: '10.001',
+      ledgerApi.createEntry({
+        type: 'CASH',
+        date: '2026-10-17',
+        time: '12:00:00',
+        cash_amount: '10.001',
       }),
     );
 
-    expect(problem.errors?.[0]).toMatchObject({ code: 'VALIDATION_ERROR', field: 'amount' });
+    expect(problem.errors?.[0]).toMatchObject({ code: 'VALIDATION_ERROR', field: 'cash_amount' });
   });
 
   it('§10.1 a new trade only marks results stale; it never starts a job', async () => {
     const before = (await processingApi.listRequests()).items.length;
 
-    await ledgerApi.createTrade({ ...trade, trade_date: '2026-10-15' });
+    await ledgerApi.createEntry({
+      type: 'TRADE',
+      ...trade,
+      date: '2026-10-15',
+    });
 
     expect(await chainStatus('2026-10-15')).toEqual({ cash: 'STALE', positions: 'STALE' });
     expect((await processingApi.listRequests()).items).toHaveLength(before);
@@ -345,14 +369,47 @@ describe('mock ledger validation', () => {
 
   it('§6.1 deletes several entries atomically: one unknown id deletes nothing', async () => {
     const range = { start_date: '2026-10-01', end_date: '2026-10-18' };
-    const [first] = (await ledgerApi.listTrades(range)).items;
+    const [first] = (await ledgerApi.listEntries(range)).items;
 
-    const problem = await problemOf(
-      ledgerApi.deleteEntries({ trade_ids: [first?.id ?? '', 'missing'], cash_movement_ids: [] }),
-    );
+    const problem = await problemOf(ledgerApi.deleteEntries({ ids: [first?.id ?? '', 'missing'] }));
 
     expect(problem.status).toBe(404);
-    expect((await ledgerApi.listTrades(range)).items).toHaveLength(3);
+    expect((await ledgerApi.listEntries(range)).items).toHaveLength(5);
+  });
+
+  it('§6.1 deletes a trade and a cash entry in one request, by id alone', async () => {
+    const range = { start_date: '2026-10-01', end_date: '2026-10-18' };
+
+    await ledgerApi.deleteEntries({
+      ids: ['7a000000-0000-4000-8000-000000000003', '7c000000-0000-4000-8000-000000000002'],
+    });
+
+    expect((await ledgerApi.listEntries(range)).items.map((e) => e.id)).not.toEqual(
+      expect.arrayContaining([
+        '7a000000-0000-4000-8000-000000000003',
+        '7c000000-0000-4000-8000-000000000002',
+      ]),
+    );
+    expect((await ledgerApi.listEntries(range)).items).toHaveLength(3);
+  });
+
+  it('§6.2 a cash entry needs a time and a non-zero amount with at most 2 places', async () => {
+    const problem = await problemOf(
+      ledgerApi.createEntry({ type: 'CASH', date: '2026-10-17', time: '', cash_amount: '0' }),
+    );
+
+    expect(problem.errors?.map((e) => e.field)).toEqual(['time', 'cash_amount']);
+  });
+
+  it('§6.2 records a retirada as a negative amount, with its time', async () => {
+    const entry = await ledgerApi.createEntry({
+      type: 'CASH',
+      date: '2026-10-17',
+      time: '11:05',
+      cash_amount: '-250.50',
+    });
+
+    expect(entry).toMatchObject({ type: 'CASH', time: '11:05:00', cash_amount: '-250.50' });
   });
 });
 
@@ -433,10 +490,11 @@ describe('mock processing', () => {
     await poll(job.id); // DISPATCHED
     await poll(job.id); // RUNNING
 
-    await ledgerApi.createCashMovement({
-      movement_date: '2026-10-15',
-      movement_type: 'DEPOSIT',
-      amount: '1000.00',
+    await ledgerApi.createEntry({
+      type: 'CASH',
+      date: '2026-10-15',
+      time: '12:00:00',
+      cash_amount: '1000.00',
     });
     await poll(job.id);
 
@@ -702,10 +760,11 @@ describe('mock publication (a finished job publishes the precomputed results of 
   });
 
   it('§10.4 a range before the first changed day still publishes', async () => {
-    await ledgerApi.createCashMovement({
-      movement_date: '2026-10-17',
-      movement_type: 'DEPOSIT',
-      amount: '1000.00',
+    await ledgerApi.createEntry({
+      type: 'CASH',
+      date: '2026-10-17',
+      time: '12:00:00',
+      cash_amount: '1000.00',
     });
 
     expect((await run('2026-10-14', '2026-10-16')).status).toBe('COMPLETED_WITH_ISSUES');
@@ -752,12 +811,13 @@ describe('mock publication (a finished job publishes the precomputed results of 
 
   it.each<[string, () => Promise<unknown>, string]>([
     [
-      'POST /trades',
+      'POST /ledger/entries (TRADE)',
       () =>
-        ledgerApi.createTrade({
+        ledgerApi.createEntry({
+          type: 'TRADE',
           asset_id: IDS.di1f28,
-          trade_date: '2026-10-17',
-          trade_time: '10:00:00',
+          date: '2026-10-17',
+          time: '10:00:00',
           signed_quantity: 1,
           input_kind: 'PU',
           execution_pu: '89000.00',
@@ -765,17 +825,13 @@ describe('mock publication (a finished job publishes the precomputed results of 
       '17/10/2026',
     ],
     [
-      'DELETE /trades/:id',
-      () => ledgerApi.deleteTrade('7a000000-0000-4000-8000-000000000003'),
+      'DELETE /ledger/entries (a trade)',
+      () => ledgerApi.deleteEntries({ ids: ['7a000000-0000-4000-8000-000000000003'] }),
       '16/10/2026',
     ],
     [
-      'POST /ledger/deletions',
-      () =>
-        ledgerApi.deleteEntries({
-          trade_ids: [],
-          cash_movement_ids: ['7c000000-0000-4000-8000-000000000002'],
-        }),
+      'DELETE /ledger/entries (a cash entry)',
+      () => ledgerApi.deleteEntries({ ids: ['7c000000-0000-4000-8000-000000000002'] }),
       '16/10/2026',
     ],
     [
@@ -810,10 +866,11 @@ describe('mock publication (a finished job publishes the precomputed results of 
       end_date: '2026-10-18',
       scope: 'ALL',
     });
-    await ledgerApi.createCashMovement({
-      movement_date: '2026-10-17',
-      movement_type: 'DEPOSIT',
-      amount: '1000.00',
+    await ledgerApi.createEntry({
+      type: 'CASH',
+      date: '2026-10-17',
+      time: '12:00:00',
+      cash_amount: '1000.00',
     });
 
     let current = job;
@@ -830,10 +887,11 @@ describe('mock publication (a finished job publishes the precomputed results of 
   ])(
     '§10.4 the mock fails a job whose range depends on a day changed since the seed (%s)',
     async (changed, start, end, shown) => {
-      await ledgerApi.createCashMovement({
-        movement_date: changed,
-        movement_type: 'DEPOSIT',
-        amount: '1000.00',
+      await ledgerApi.createEntry({
+        type: 'CASH',
+        date: changed,
+        time: '12:00:00',
+        cash_amount: '1000.00',
       });
       const issuesBefore = (await processingApi.listIssues()).items;
 
@@ -865,36 +923,40 @@ describe('mock ids', () => {
 describe('mock ledger entries (GET /ledger/entries)', () => {
   const FULL = { start_date: '2026-10-14', end_date: '2026-10-16' };
 
-  it('§11.3 merges trades and cash movements: newest date first, trades before cash in a date', async () => {
+  it('§11.3 lists both types in one order, by date and time, newest first', async () => {
     const { items } = await ledgerApi.listEntries(FULL);
 
-    expect(items.map((e) => [e.kind, e.date, e.time])).toEqual([
+    expect(items.map((e) => [e.type, e.date, e.time])).toEqual([
+      ['CASH', '2026-10-16', '17:30:00'],
       ['TRADE', '2026-10-16', '15:00:00'],
-      ['CASH_MOVEMENT', '2026-10-16', null],
       ['TRADE', '2026-10-15', '10:30:00'],
       ['TRADE', '2026-10-14', '14:10:00'],
-      ['CASH_MOVEMENT', '2026-10-14', null],
+      ['CASH', '2026-10-14', '09:00:00'],
     ]);
   });
 
-  it('§6.1 orders the trades of one date by time, then seq, newest first', async () => {
+  it('§6.1 orders the entries of one date by time, then seq, newest first', async () => {
     const trade = {
       asset_id: IDS.di1f28,
-      trade_date: '2026-10-16',
+      date: '2026-10-16',
       signed_quantity: 1,
       input_kind: 'PU',
       execution_pu: '89000.00',
     } as const;
-    const early = await ledgerApi.createTrade({ ...trade, trade_time: '10:00:00' });
-    const later = await ledgerApi.createTrade({ ...trade, trade_time: '10:00:00' });
+    const early = await ledgerApi.createEntry({
+      type: 'TRADE',
+      ...trade,
+      time: '10:00:00',
+    });
+    const later = await ledgerApi.createEntry({
+      type: 'TRADE',
+      ...trade,
+      time: '10:00:00',
+    });
 
     const { items } = await ledgerApi.listEntries({ ...FULL, start_date: '2026-10-16' });
 
-    expect(items.flatMap((e) => (e.kind === 'TRADE' ? [e.seq] : []))).toEqual([
-      3,
-      later.seq,
-      early.seq,
-    ]);
+    expect(items.map((e) => e.seq)).toEqual([5, 4, later.seq, early.seq]);
   });
 
   it('§11.3 order=asc is the exact reverse of the default order', async () => {
@@ -904,12 +966,12 @@ describe('mock ledger entries (GET /ledger/entries)', () => {
     expect(asc).toEqual([...desc].reverse());
   });
 
-  it('§11.3 gives every row its signed cash effect: the trade cash_amount, ±amount for cash', async () => {
+  it('§11.3 gives every row its signed cash effect, trade or cash', async () => {
     const { items } = await ledgerApi.listEntries(FULL);
 
     expect(items.map((e) => e.cash_amount)).toEqual([
-      '356408.8906133732',
       '-50000.00',
+      '356408.8906133732',
       '-410285.00',
       '-890064.6254673500',
       '1500000.00',
@@ -925,13 +987,11 @@ describe('mock ledger entries (GET /ledger/entries)', () => {
     const byType = await ledgerApi.listEntries({ ...FULL, search: 'retirada' });
 
     expect(oneDay.items).toHaveLength(2);
-    expect(byAsset.items.map((e) => e.kind === 'TRADE' && e.asset_code)).toEqual([
+    expect(byAsset.items.map((e) => e.type === 'TRADE' && e.asset_code)).toEqual([
       'DI1F28',
       'DI1F28',
     ]);
-    expect(byType.items.map((e) => e.kind === 'CASH_MOVEMENT' && e.movement_type)).toEqual([
-      'WITHDRAWAL',
-    ]);
+    expect(byType.items.map((e) => e.cash_amount)).toEqual(['-50000.00']);
   });
 
   it('OQ-11 rejects a range that starts after it ends', async () => {

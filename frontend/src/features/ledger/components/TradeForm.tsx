@@ -15,10 +15,10 @@ import { notifications } from '@mantine/notifications';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 
-import type { CreateTradeRequest, InputKind, IsoDate } from '@/api/contract';
+import type { CreateTradeEntryRequest, InputKind, IsoDate } from '@/api/contract';
 import { formatDate, parsePtBrDecimal, percentToFraction } from '@/shared/format';
 
-import { useCreateTrade, useInstruments, useProducts } from '../hooks/useLedger';
+import { useCreateEntry, useInstruments, useProducts } from '../hooks/useLedger';
 import { nowInSaoPaulo, parsePtBrDate, splitErrors, toIsoTime } from './formSupport';
 
 export type TradeSide = 'BUY' | 'SELL';
@@ -35,8 +35,8 @@ interface TradeValues {
 // API field → form field, for the problem+json errors (OQ-15).
 const FIELD_MAP: Record<string, keyof TradeValues> = {
   asset_id: 'assetId',
-  trade_date: 'date',
-  trade_time: 'time',
+  date: 'date',
+  time: 'time',
   signed_quantity: 'quantity',
   execution_pu: 'price',
   execution_rate: 'price',
@@ -115,7 +115,7 @@ export function TradeForm({
   today: IsoDate;
   onDone: () => void;
 }) {
-  const createTrade = useCreateTrade();
+  const createTrade = useCreateEntry();
   const [pageErrors, setPageErrors] = useState<string[]>([]);
   const [assetClassId, setAssetClassId] = useState<string | null>(null);
   const contracts = useContractOptions(assetClassId);
@@ -148,12 +148,13 @@ export function TradeForm({
     const price = typedPrice(values);
     if (!values.assetId || !values.date || typeof values.quantity !== 'number' || !price) return;
     const base = {
+      type: 'TRADE' as const,
       asset_id: values.assetId,
-      trade_date: values.date,
-      trade_time: toIsoTime(values.time),
+      date: values.date,
+      time: toIsoTime(values.time),
       signed_quantity: side === 'BUY' ? values.quantity : -values.quantity,
     };
-    const body: CreateTradeRequest =
+    const body: CreateTradeEntryRequest =
       values.inputKind === 'PU'
         ? { ...base, input_kind: 'PU', execution_pu: price }
         : { ...base, input_kind: 'RATE', execution_rate: price };
@@ -162,7 +163,7 @@ export function TradeForm({
       onSuccess: () => {
         notifications.show({
           color: 'teal',
-          message: `${LABELS[side].done} Caixa e posições precisam ser processados a partir de ${formatDate(body.trade_date)}: use o escopo Tudo.`,
+          message: `${LABELS[side].done} Caixa e posições precisam ser processados a partir de ${formatDate(body.date)}: use o escopo Tudo.`,
         });
         onDone();
       },

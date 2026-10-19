@@ -1,13 +1,7 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 
-import type {
-  CreateCashMovementRequest,
-  CreateTradeRequest,
-  DeleteEntriesRequest,
-  IsoDate,
-  LedgerOrder,
-} from '@/api/contract';
+import type { CreateLedgerEntryRequest, IsoDate, LedgerOrder } from '@/api/contract';
 import { assetsApi, ledgerApi, portfolioApi } from '@/api/endpoints';
 import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
 import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
@@ -149,32 +143,18 @@ function useLedgerWrite<TVariables, TResult>(
   });
 }
 
-export const useCreateTrade = () =>
-  useLedgerWrite((body: CreateTradeRequest) => ledgerApi.createTrade(body), ledgerKeys.create());
-
-export const useCreateCashMovement = () =>
+/** Compra, venda, aporte or retirada: `POST /ledger/entries`. */
+export const useCreateEntry = () =>
   useLedgerWrite(
-    (body: CreateCashMovementRequest) => ledgerApi.createCashMovement(body),
+    (body: CreateLedgerEntryRequest) => ledgerApi.createEntry(body),
     ledgerKeys.create(),
   );
 
 /** A new entry's save is running: the modal must stay open until its result is shown. */
 export const useIsSavingEntry = () => useIsMutating({ mutationKey: ledgerKeys.create() }) > 0;
 
-/** One entry: `DELETE /trades/{id}` or `DELETE /cash-movements/{id}`. */
-export const useDeleteEntry = () =>
-  useLedgerWrite((entry: LedgerEntry) =>
-    entry.kind === 'trade'
-      ? ledgerApi.deleteTrade(entry.id)
-      : ledgerApi.deleteCashMovement(entry.id),
-  );
-
-/** Several entries, all or nothing (§6.1). */
+/** One or several entries, of either type, all or nothing (§6.1): `DELETE /ledger/entries`. */
 export const useDeleteEntries = () =>
-  useLedgerWrite((entries: LedgerEntry[]) => {
-    const body: DeleteEntriesRequest = {
-      trade_ids: entries.filter((e) => e.kind === 'trade').map((e) => e.id),
-      cash_movement_ids: entries.filter((e) => e.kind === 'cash').map((e) => e.id),
-    };
-    return ledgerApi.deleteEntries(body);
-  });
+  useLedgerWrite((entries: LedgerEntry[]) =>
+    ledgerApi.deleteEntries({ ids: entries.map((e) => e.id) }),
+  );

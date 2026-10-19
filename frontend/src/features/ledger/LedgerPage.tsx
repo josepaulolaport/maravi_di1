@@ -19,7 +19,6 @@ import { NewEntryModal } from './components/NewEntryModal';
 import { type LedgerEntry, type SortDirection, toRow } from './entries';
 import {
   useDeleteEntries,
-  useDeleteEntry,
   useEntries,
   useInstrumentTypes,
   useIsSavingEntry,
@@ -67,7 +66,7 @@ export function LedgerPage() {
   const entries = useMemo(() => (list.data ? list.data.items.map(toRow) : []), [list.data]);
   // Only listed entries count: a deleted row leaves the selection with the refetch.
   const visibleSelection = useMemo(
-    () => new Set(entries.filter((e) => selected.has(e.key)).map((e) => e.key)),
+    () => new Set(entries.filter((e) => selected.has(e.id)).map((e) => e.id)),
     [entries, selected],
   );
   const typeNames = useMemo(
@@ -83,7 +82,7 @@ export function LedgerPage() {
   };
   const toggleAll = () => {
     setSelected(
-      visibleSelection.size === entries.length ? NO_SELECTION : new Set(entries.map((e) => e.key)),
+      visibleSelection.size === entries.length ? NO_SELECTION : new Set(entries.map((e) => e.id)),
     );
   };
 
@@ -116,7 +115,7 @@ export function LedgerPage() {
               onClick={() => {
                 setDeleting({
                   mode: 'many',
-                  entries: entries.filter((e) => visibleSelection.has(e.key)),
+                  entries: entries.filter((e) => visibleSelection.has(e.id)),
                 });
               }}
             >
@@ -288,40 +287,30 @@ function SearchBox({ value, onChange }: { value: string; onChange: (value: strin
 }
 
 function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClose: () => void }) {
-  const deleteOne = useDeleteEntry();
-  const deleteMany = useDeleteEntries();
+  // One request for one entry or many, of either type (`DELETE /ledger/entries`).
+  const mutation = useDeleteEntries();
   // The last target stays on screen while the dialog closes, so its text does not flicker.
   const [shown, setShown] = useState(target);
   if (target !== null && target !== shown) setShown(target);
-  const mutation = shown?.mode === 'many' ? deleteMany : deleteOne;
 
   const close = () => {
-    deleteOne.reset();
-    deleteMany.reset();
+    mutation.reset();
     onClose();
   };
 
   const confirm = () => {
     if (!target) return;
-    if (target.mode === 'one') {
-      deleteOne.mutate(target.entry, {
-        onSuccess: () => {
-          notifications.show({ color: 'teal', message: 'Lançamento excluído.' });
-          close();
-        },
-      });
-    } else {
-      deleteMany.mutate(target.entries, {
-        onSuccess: () => {
-          const n = target.entries.length;
-          notifications.show({
-            color: 'teal',
-            message: n === 1 ? 'Lançamento excluído.' : `${String(n)} lançamentos excluídos.`,
-          });
-          close();
-        },
-      });
-    }
+    const entries = target.mode === 'one' ? [target.entry] : target.entries;
+    mutation.mutate(entries, {
+      onSuccess: () => {
+        const n = entries.length;
+        notifications.show({
+          color: 'teal',
+          message: n === 1 ? 'Lançamento excluído.' : `${String(n)} lançamentos excluídos.`,
+        });
+        close();
+      },
+    });
   };
 
   const many = shown?.mode === 'many' ? shown.entries : [];
@@ -349,7 +338,7 @@ function DeleteDialog({ target, onClose }: { target: DeleteTarget | null; onClos
             </Text>
             <List size="sm" spacing={2}>
               {many.map((entry) => (
-                <List.Item key={entry.key}>{entryLabel(entry)}</List.Item>
+                <List.Item key={entry.id}>{entryLabel(entry)}</List.Item>
               ))}
             </List>
           </>

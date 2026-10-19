@@ -43,8 +43,8 @@ describe('http client', () => {
       }),
     );
 
-    await expect(http.post(path, { trade_ids: ['a'] })).resolves.toBeUndefined();
-    expect(received).toEqual({ trade_ids: ['a'] });
+    await expect(http.post(path, { ids: ['a'] })).resolves.toBeUndefined();
+    expect(received).toEqual({ ids: ['a'] });
   });
 
   it('§12 OQ-15 turns problem+json into an ApiError with field and page messages', async () => {
@@ -114,11 +114,11 @@ describe('http client', () => {
   });
 
   it('P1 keeps the base path of an absolute API URL, with or without a trailing slash', () => {
-    expect(buildUrl('/trades', {}, 'https://api.example.com/api')).toBe(
-      'https://api.example.com/api/trades',
+    expect(buildUrl('/ledger/entries', {}, 'https://api.example.com/api')).toBe(
+      'https://api.example.com/api/ledger/entries',
     );
-    expect(buildUrl('/trades', {}, 'https://api.example.com/api/')).toBe(
-      'https://api.example.com/api/trades',
+    expect(buildUrl('/ledger/entries', {}, 'https://api.example.com/api/')).toBe(
+      'https://api.example.com/api/ledger/entries',
     );
   });
 
