@@ -95,6 +95,8 @@ function seedJob(changes: Partial<ProcessingRequest>): ProcessingRequest {
     progress_date: null,
     error_code: null,
     error_message: null,
+    failed_date: null,
+    failed_chain: null,
     created_at: '2026-10-18T10:00:00-03:00',
     updated_at: '2026-10-18T10:00:00-03:00',
     dispatched_at: null,

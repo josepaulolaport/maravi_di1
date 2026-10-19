@@ -1,4 +1,10 @@
-import type { PortfolioPositions, PortfolioSummary, ProcessingRequest } from '../contract';
+import type {
+  PortfolioPositions,
+  PortfolioSummary,
+  ProcessingChain,
+  ProcessingRequest,
+  ProcessingScope,
+} from '../contract';
 import { assetsApi, ledgerApi, portfolioApi, pricesApi, processingApi } from '../endpoints';
 import { ApiError } from '../http';
 import { db } from './db';
@@ -813,8 +819,12 @@ describe('mock publication (a finished job publishes the precomputed results of 
   const FINAL = ['COMPLETED', 'COMPLETED_WITH_ISSUES', 'CANCELLED', 'FAILED'];
 
   /** Queues [start, end] and polls it until it reaches a final status. */
-  async function run(start: string, end: string): Promise<ProcessingRequest> {
-    const job = await processingApi.enqueue({ start_date: start, end_date: end, scope: 'ALL' });
+  async function run(
+    start: string,
+    end: string,
+    scope: ProcessingScope = 'ALL',
+  ): Promise<ProcessingRequest> {
+    const job = await processingApi.enqueue({ start_date: start, end_date: end, scope });
     for (let i = 0; i < 50; i += 1) {
       const current = await processingApi.getRequest(job.id);
       if (FINAL.includes(current.status)) return current;
@@ -1032,7 +1042,9 @@ describe('mock publication (a finished job publishes the precomputed results of 
     expect(await missingPrices()).toHaveLength(5);
   });
 
-  it.each<[string, () => Promise<unknown>, string]>([
+  // A trade changes both chains, so an ALL run fails; a cash entry or a price changes one, so
+  // the other chain goes on to the end (OQ-36).
+  it.each<[string, () => Promise<unknown>, string, string, ProcessingChain]>([
     [
       'POST /ledger/entries (TRADE)',
       () =>
@@ -1046,16 +1058,22 @@ describe('mock publication (a finished job publishes the precomputed results of 
           execution_pu: '89000.00',
         }),
       '17/10/2026',
+      'FAILED',
+      'POSITIONS',
     ],
     [
       'POST /ledger/entries/deletions (a trade)',
       () => ledgerApi.deleteEntries({ ids: ['7a000000-0000-4000-8000-000000000003'] }),
       '16/10/2026',
+      'FAILED',
+      'POSITIONS',
     ],
     [
       'POST /ledger/entries/deletions (a cash entry)',
       () => ledgerApi.deleteEntries({ ids: ['7c000000-0000-4000-8000-000000000002'] }),
       '16/10/2026',
+      'COMPLETED_WITH_ISSUES',
+      'CASH',
     ],
     [
       'POST /reference-prices',
@@ -1067,27 +1085,32 @@ describe('mock publication (a finished job publishes the precomputed results of 
           pu: '80300.00',
         }),
       '16/10/2026',
+      'COMPLETED_WITH_ISSUES',
+      'POSITIONS',
     ],
     [
       'DELETE /reference-prices/:id',
       () => pricesApi.removeReferencePrice(PRICE_IDS.f28_1016),
       '16/10/2026',
+      'COMPLETED_WITH_ISSUES',
+      'POSITIONS',
     ],
   ])(
-    'OQ-23 the mock fails a run at the first date a write through %s changed',
-    async (_path, write, shown) => {
+    'OQ-23 OQ-36 the mock fails a chain at the first date a write through %s changed',
+    async (_path, write, shown, ending, chain) => {
       await write();
 
       const job = await run('2026-10-16', '2026-10-18');
 
-      expect(job.status).toBe('FAILED');
+      expect(job).toMatchObject({ status: ending, failed_chain: chain });
       expect(job.error_message).toContain(`Backend simulado: ${shown} depende`);
-      // Later dates are untouched (OQ-23 item 5).
-      expect((await portfolioApi.getSummary('2026-10-18')).positions.status).toBe('NOT_PROCESSED');
+      // The failed chain's later dates are untouched (OQ-23 item 5, OQ-36 item 1).
+      const after = await portfolioApi.getSummary('2026-10-18');
+      expect(chain === 'CASH' ? after.cash.status : after.positions.status).toBe('NOT_PROCESSED');
     },
   );
 
-  it('OQ-23 a write made while the job is queued fails it at that date (fake backend)', async () => {
+  it('OQ-36 a cash write made while an ALL job is queued fails its cash there; positions go on', async () => {
     const job = await processingApi.enqueue({
       start_date: '2026-10-16',
       end_date: '2026-10-18',
@@ -1105,14 +1128,20 @@ describe('mock publication (a finished job publishes the precomputed results of 
       current = await processingApi.getRequest(job.id);
     }
 
-    expect(current.status).toBe('FAILED');
+    expect(current).toMatchObject({
+      status: 'COMPLETED_WITH_ISSUES',
+      progress_date: '2026-10-18',
+      failed_date: '2026-10-17',
+      failed_chain: 'CASH',
+    });
+    expect((await chainStatus('2026-10-18')).cash).toBe('NOT_PROCESSED');
   });
 
   it.each([
     ['2026-10-17', '2026-10-16', '2026-10-18', '17/10/2026', '2026-10-16'],
     ['2026-10-15', '2026-10-16', '2026-10-16', '16/10/2026', null],
   ])(
-    'OQ-23 the mock fails a run at the first date changed since the seed (%s): earlier dates stay',
+    'OQ-23 the mock fails a cash run at the first date changed since the seed (%s): earlier dates stay',
     async (changed, start, end, shown, committed) => {
       await ledgerApi.createEntry({
         type: 'CASH',
@@ -1121,7 +1150,7 @@ describe('mock publication (a finished job publishes the precomputed results of 
         cash_amount: '1000.00',
       });
 
-      const job = await run(start, end);
+      const job = await run(start, end, 'CASH');
 
       expect(job).toMatchObject({
         status: 'FAILED',
