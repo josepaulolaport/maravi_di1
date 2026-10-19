@@ -6,10 +6,10 @@ publishes daily positions and P&L for one portfolio on request. The specificatio
 
 ## Setup in 30 seconds
 
-Needs [uv](https://docs.astral.sh/uv/) 0.13+, Docker and GNU Make (Node 24 once `frontend/` exists).
+Needs [uv](https://docs.astral.sh/uv/) 0.13+, Node 24 LTS with npm, Docker and GNU Make.
 
 ```bash
-make install   # cd backend && uv sync --frozen; npm ci once frontend/package.json exists
+make install   # cd backend && uv sync --frozen; cd frontend && npm ci
 make lint      # uv lock --check, ruff check, ruff format --check, mypy (strict);
                # frontend: eslint, tsc --noEmit, prettier --check
 make test      # one Alembic head, alembic upgrade head, pytest with coverage on PostgreSQL 16
@@ -152,6 +152,32 @@ processing on request (§10).
 - **Reference prices are typed by hand:** there is no CSV or B3 price import yet; the B3 source
   exists in the model and the MANUAL > B3 precedence is implemented.
 - Open questions and every decision taken are in [docs/open-questions.md](docs/open-questions.md).
+
+## Known limitations / technical debt
+
+A staff review of the whole repository before delivery found these. The user chose to record them
+rather than refactor before delivery (OQ-47); none changes a business result.
+
+- **Two repositories for `processing.requests` (M1):** `SqlRequestRepository` (HTTP side) and the
+  worker's run store both read and write the table.
+- **Import cycle and no processing domain (M8):** portfolio and processing import each other's
+  `public.py`, and processing's run state machine lives in `application/`, with no `domain/` package.
+- **Wiring differs per module (M10):** routers and dependency providers are not built the same way
+  in every module.
+- **Three decimal-string types (M11):** the HTTP schemas of asset, ledger and prices each define
+  their own decimal-string type instead of sharing one.
+- **Two `FuturesTerms` classes (M12):** one in asset's domain, one in pricing's.
+- **Timestamp types (M13):** timestamps are not typed the same way across modules.
+- **A migrated database per test (M14):** integration tests migrate a fresh database each, which
+  makes the backend suite slow.
+- **Sleep-based race tests (M15):** some concurrency tests rely on `sleep` for ordering instead of
+  explicit synchronisation, so they are slower and could flake on a loaded machine.
+- **The MSW mock reimplements backend rules (H6):** the dev mocks in `frontend/src/api/mocks/`
+  recompute pricing, the cash and positions chains, the predecessor rule and date statuses; they
+  can drift from the backend, which is the authority (the production build has no mocks).
+- **Unused schema columns and statuses (H5):** `DISPATCHED`, `CANCELLING`, `claim_token`,
+  `lease_expires_at`, `attempt_count`, `dispatched_at` and `calculation_state` stay in the schema,
+  unused, with no migration to drop them (OQ-45, OQ-46, OQ-47; [docs/schema.md](docs/schema.md)).
 
 ## CI
 
