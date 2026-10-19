@@ -80,7 +80,7 @@ frontend/src/
   - The history of trades and cash movements, with an inclusive date range and search. Trades show both PU and rate.
   - A cash strip: Caixa D0 = published cash on the range's end date, Caixa D−1 = the day before, each with the cash chain's status on that date (OQ-19, OQ-23).
   - One "Novo lançamento" modal for compra, venda, aporte and retirada; one entry list for trades and cash movements (OQ-24).
-  - Delete one or many entries, with confirmation. No editing.
+  - Delete one or many entries, with confirmation. The deletion is permanent, all or nothing, with no reason (OQ-32). No editing.
   - Instrument type and entry type are distinct.
 - **Carteira:**
   - One date, showing published data only.
