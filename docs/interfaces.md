@@ -39,9 +39,7 @@ Single portfolio (no `portfolio_id`). Modular monolith: `asset`, `ledger`, `pric
 - Preferred current source order: MANUAL, then B3. Exactly the requested calendar date; no carry-forward. One current observation per (asset, date, source), superseded rows retained. Reference price IDs are returned to consumers for reproducibility. Price writes invalidate valuation/P&L dependencies but not quantities, in the same transaction; never automatically enqueue processing. Future bulk import can call the same PriceService via a separate RabbitMQ adapter.
 
 ### Portfolio
-- `PortfolioAccounting.calculate_day(previous_state, trades: Sequence[Trade], deposits: Decimal, withdrawals: Decimal, date) -> AccountingDay`. `Trade` is Portfolio's own domain input (asset, date, time, seq, signed quantity, execution PU and rate); Portfolio's application layer maps Ledger's `TradeRecord` onto it. Cash movements are Ledger facts: Portfolio receives only the day's deposit and withdrawal totals (`0` when none, never negative), summed by the caller from `LedgerReader.get_cash_movements`.
-- `PortfolioAccounting.calculate_range(previous_state, trades: Sequence[Trade], deposits: Mapping[date, Decimal], withdrawals: Mapping[date, Decimal], end_date) -> tuple[AccountingDay, ...]`: every calendar day from `previous_state.as_of + 1` to `end_date`, each from the previous day's closing state; a date missing from the maps means 0; events outside the range are rejected.
-- Average entry PU and rate are rounded at each day's close as stored (PU 10 dp, rate 12 dp, OQ-3), and the next day starts from the rounded values, so one job over [A, B] equals several jobs that read the previous day back from `position_metrics`.
+- `PortfolioAccounting.calculate_day(previous_state, trades, cash_movements, date) -> AccountingDay`
 - `PortfolioReader.get_previous_valid_accounting_state(before_date) -> AccountingState`
 - `PortfolioReader.get_positions(date) -> list[Position]`
 - `PortfolioQueryService.get_position_table(date) -> PositionTableView`
