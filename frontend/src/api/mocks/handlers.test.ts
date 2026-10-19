@@ -206,6 +206,44 @@ describe('OQ-21 positions and the P&L series use the same status as the summary'
   });
 });
 
+describe('OQ-35 Portfolio reads dated after today', () => {
+  it('OQ-35 a summary or positions read after today is 422 FUTURE_DATE on date', async () => {
+    const summary = await problemOf(portfolioApi.getSummary('2026-10-19'));
+    const positions = await problemOf(portfolioApi.getPositions('2026-10-19'));
+
+    for (const problem of [summary, positions]) {
+      expect(problem.status).toBe(422);
+      expect(problem.errors?.map((e) => [e.code, e.field])).toEqual([['FUTURE_DATE', 'date']]);
+    }
+  });
+
+  it('OQ-35 a P&L series ending after today is 422 FUTURE_DATE on end_date only', async () => {
+    const problem = await problemOf(
+      portfolioApi.getPnlSeries({ start_date: '2026-10-19', end_date: '2026-10-20' }),
+    );
+
+    expect(problem.status).toBe(422);
+    expect(problem.errors?.map((e) => [e.code, e.field])).toEqual([['FUTURE_DATE', 'end_date']]);
+  });
+
+  it('OQ-35 a P&L series starting after today but ending today is INVALID_RANGE', async () => {
+    const problem = await problemOf(
+      portfolioApi.getPnlSeries({ start_date: '2026-10-19', end_date: '2026-10-18' }),
+    );
+
+    expect(problem.errors?.map((e) => [e.code, e.field])).toEqual([
+      ['INVALID_RANGE', 'start_date'],
+    ]);
+  });
+
+  it('OQ-35 today is read as published; a date not processed reads Não processado', async () => {
+    const summary = await portfolioApi.getSummary('2026-10-18');
+
+    expect(summary.cash.status).toBe('NOT_PROCESSED');
+    expect(summary.positions.status).toBe('NOT_PROCESSED');
+  });
+});
+
 describe('mock assets', () => {
   it('§4.1 the futures spec carries no pricing methodology: DC/365 is the only convention', async () => {
     const product = await assetsApi.getProduct(IDS.di1);

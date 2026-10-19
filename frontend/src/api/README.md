@@ -58,6 +58,7 @@ Recorded by lane X in PR #54; the mock follows them.
 
 - OQ-32: a ledger deletion is permanent. An unknown or already-deleted id is 404 and deletes nothing; a repeated id counts once; an empty `ids` is 422 on `ids`.
 - OQ-33: a contract code is trimmed and upper-cased; an unknown id in a body is 422 on that field (404 only for a path id); `search` ignores case and accents; `Instrument.last_reference` is always `null` for now, shown as "—".
+- OQ-35: Portfolio reads after today are 422 `FUTURE_DATE`: on `date` for the summary and the positions, on `end_date` only for the P&L series (a later `start_date` is `INVALID_RANGE`).
 
 ## Decided gap
 

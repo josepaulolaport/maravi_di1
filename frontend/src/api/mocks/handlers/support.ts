@@ -116,8 +116,17 @@ export async function readJson(request: Request): Promise<Record<string, unknown
   }
 }
 
-export function rangeErrors(start: unknown, end: unknown): FieldError[] {
-  const errors = [...dateErrors(start, 'start_date'), ...dateErrors(end, 'end_date')];
+/**
+ * Errors for an inclusive [start, end] range. With `futureOnEndOnly`, only `end_date` is checked
+ * against today (OQ-35 item 2): a start after today is then after the end too (INVALID_RANGE).
+ */
+export function rangeErrors(
+  start: unknown,
+  end: unknown,
+  { futureOnEndOnly = false }: { futureOnEndOnly?: boolean } = {},
+): FieldError[] {
+  const startErrors = futureOnEndOnly && isIsoDate(start) ? [] : dateErrors(start, 'start_date');
+  const errors = [...startErrors, ...dateErrors(end, 'end_date')];
   if (errors.length === 0 && (start as string) > (end as string)) {
     errors.push(
       fieldError(
