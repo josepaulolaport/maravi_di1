@@ -8,10 +8,12 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import typing
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 
 import pytest
 
+from di1.modules.pnl.public import CalculationCompleteness
 from di1.modules.portfolio.public import (
     CashSummaryView,
     PnLPointView,
@@ -22,6 +24,7 @@ from di1.modules.portfolio.public import (
     PositionTableView,
     PreviousPositionsDay,
 )
+from di1.modules.processing.public import ChainStatus
 
 VIEWS = [
     CashSummaryView,
@@ -139,3 +142,12 @@ def test_each_pnl_point_carries_the_range_sum_and_the_positions_processing_time(
         "status",
         "published_at",
     ]
+
+
+def test_every_day_of_the_range_is_a_point_and_the_range_sum_never_breaks() -> None:
+    # OQ-41: an unprocessed day is a point with no status; a missing day counts as 0.
+    hints = typing.get_type_hints(PnLPointView)
+    assert hints["range_cumulative_pnl"] is Decimal
+    assert hints["status"] == ChainStatus | None
+    assert hints["published_at"] == datetime | None
+    assert hints["pnl_status"] == CalculationCompleteness | None

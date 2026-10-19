@@ -1,6 +1,6 @@
 """The reviewed SQL of the Alembic revisions (skill `db-migration`; plan §3).
 
-Released revisions never change, so the SQL of 0001 to 0004 is pinned here by hash.
+Released revisions never change, so the SQL of 0001 to 0005 is pinned here by hash.
 `docs/schema.sql` is the result of all revisions, not the text of one;
 `tests/integration/test_migrations_match_schema.py` checks on PostgreSQL that the revisions build
 exactly what `docs/schema.sql` builds. No database is needed here, so this runs in the pre-commit
@@ -35,6 +35,10 @@ RELEASED_SHA256 = {
     "0004_no_staleness.sql": "b9b4e9a1ba0c33b293ea3d3c1caa8ff2f9239ef96b8e0885d5bcc9c392bcc3fb",
     "0004_no_staleness_downgrade.sql": (
         "355a6566ed7716131299e88535c3c3d33f20fb0cd2a9745f81a3326f6b62e430"
+    ),
+    "0005_hard_delete.sql": "200bc793e884ac332c3299990a94cbd306a4e2494cabe97d359c094c5062acd0",
+    "0005_hard_delete_downgrade.sql": (
+        "cafabdaedbc1b5c126b299c8db9b0fdd903f3093a01d69c5b57578de4652cbf3"
     ),
 }
 
