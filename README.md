@@ -74,15 +74,12 @@ request from PostgreSQL under a row lock, runs it, and repeats until none is lef
 ## Demo: the challenge example, end to end
 
 ```bash
-make e2e   # throwaway stack (project di1-e2e, API on :18000): run the example, check, remove
+make e2e   # throwaway stack (project di1-e2e-<hash>, free ports, printed): run the example, check, remove
 ```
 
-To run two at once (for example from two worktrees), give the second its own project and ports, or
-the runs tear down each other's stack:
-
-```bash
-DI1_E2E_PROJECT=di1-e2e-2 DI1_E2E_API_PORT=18100 DI1_E2E_WEB_PORT=18180 DI1_E2E_RABBITMQ_MANAGEMENT_PORT=25772 make e2e
-```
+Two runs at once (for example from two worktrees) need nothing extra: each checkout gets its own
+project (`di1-e2e-<hash of its path>`), image tags and free ports. To fix them instead, set
+`DI1_E2E_PROJECT`, `DI1_E2E_API_PORT`, `DI1_E2E_WEB_PORT` and `DI1_E2E_RABBITMQ_MANAGEMENT_PORT`.
 
 `scripts/e2e_smoke.py` runs the challenge example (§5 of the challenge) through the HTTP API,
 dated **today** rather than 01/01/2027 (deviation D4 below):
