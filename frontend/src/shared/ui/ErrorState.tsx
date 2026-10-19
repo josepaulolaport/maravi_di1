@@ -1,7 +1,7 @@
 import { Alert, Button, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 
-import { ApiError } from '@/api/http';
+import { problemMessages } from './problemMessages';
 
 interface ErrorStateProps {
   error: unknown;
@@ -15,12 +15,16 @@ export function ErrorState({
   onRetry,
   title = 'Não foi possível carregar os dados',
 }: ErrorStateProps) {
-  const messages =
-    error instanceof ApiError
-      ? error.pageErrors()
-      : ['Ocorreu um erro inesperado. Tente novamente.'];
+  // Every message, field-bound ones included: a read has no form to show them on (OQ-15).
+  const messages = problemMessages(error);
   return (
-    <Alert color="red" variant="light" icon={<IconAlertTriangle size={18} />} title={title}>
+    <Alert
+      role="alert"
+      color="red"
+      variant="light"
+      icon={<IconAlertTriangle size={18} />}
+      title={title}
+    >
       <Stack gap="xs" align="flex-start">
         {messages.map((message) => (
           <Text key={message} size="sm">

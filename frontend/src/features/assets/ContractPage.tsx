@@ -1,8 +1,9 @@
-import { Button, Group, Skeleton, Stack } from '@mantine/core';
+import { Button, Group, Stack } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router';
 
+import { Loading } from '@/shared/ui/Loading';
 import type { Instrument, IsoDate, ReferencePriceDay } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
 import { formatDate, isIsoDate, todayInSaoPaulo } from '@/shared/format';
@@ -34,7 +35,7 @@ export function ContractPage() {
     return <ErrorState error={instrument.error} onRetry={() => void instrument.refetch()} />;
   }
   if (instrument.isPending) {
-    return <Skeleton h={320} role="status" aria-label="Carregando contrato" />;
+    return <Loading label="Carregando contrato" h={320} />;
   }
   return <ContractBody key={instrument.data.id} instrument={instrument.data} />;
 }
@@ -131,10 +132,7 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
       {days.isError ? (
         <ErrorState error={days.error} onRetry={() => void days.refetch()} />
       ) : days.isPending ? (
-        <Stack gap="lg" aria-busy="true" aria-label="Carregando preços">
-          <Skeleton h={240} />
-          <Skeleton h={480} />
-        </Stack>
+        <Loading label="Carregando preços" h={[240, 480]} />
       ) : (
         <>
           <PriceHistoryCard items={days.data.items} start={start} end={end} />

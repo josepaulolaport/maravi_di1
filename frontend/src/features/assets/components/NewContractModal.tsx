@@ -1,16 +1,15 @@
-import { Alert, Button, Modal, Group, Stack, Text, TextInput } from '@mantine/core';
+import { Button, Modal, Group, Stack, TextInput } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
-import { IconAlertTriangle, IconCalendar } from '@tabler/icons-react';
-import { useState } from 'react';
+import { IconCalendar } from '@tabler/icons-react';
+import { useForm } from '@mantine/form';
 
-import type { Product } from '@/api/contract';
+import { parsePtBrDate } from '@/shared/format';
+import { MessageAlert } from '@/shared/ui/MessageAlert';
+import type { IsoDate, Product } from '@/api/contract';
 
 import { useCreateInstrument } from '../hooks/useAssets';
-import { parsePtBrDate } from './dateInput';
-import { formErrors } from './formErrors';
-
-const SHOWN_FIELDS = ['code', 'maturity_date'] as const;
+import { splitProblem } from '@/shared/ui/problemMessages';
 
 interface NewContractModalProps {
   product: Product;
@@ -22,33 +21,45 @@ interface NewContractModalProps {
  * "Novo contrato" (§3): a contract of this product with its own maturity. The backend
  * validates it (unique code, case-insensitive); its messages are shown on their fields.
  */
+interface ContractValues {
+  code: string;
+  maturity: IsoDate | null;
+}
+
+// API field → form field, for the problem+json errors (OQ-15).
+const FIELD_MAP = { code: 'code', maturity_date: 'maturity' };
+
 export function NewContractModal({ product, opened, onClose }: NewContractModalProps) {
-  const [code, setCode] = useState('');
-  const [maturity, setMaturity] = useState<string | null>(null);
   const create = useCreateInstrument();
+  // No client validation: the backend validates (required fields, unique code) and its
+  // messages are shown on their fields (OQ-15).
+  const form = useForm<ContractValues>({ initialValues: { code: '', maturity: null } });
 
   // While a save runs the modal stays open, so its confirmation is never lost.
   const close = () => {
     if (create.isPending) return;
-    setCode('');
-    setMaturity(null);
+    form.reset();
     create.reset();
     onClose();
   };
 
-  const submit = () => {
+  const submit = form.onSubmit((values) => {
     create.mutate(
-      { product_id: product.id, code: code.trim(), maturity_date: maturity ?? '' },
+      { product_id: product.id, code: values.code.trim(), maturity_date: values.maturity ?? '' },
       {
         onSuccess: (instrument) => {
-          notifications.show({ message: `Contrato ${instrument.code} cadastrado.` });
+          notifications.show({ color: 'teal', message: `Contrato ${instrument.code} cadastrado.` });
           close();
+        },
+        // On the form, so editing a field clears its message (Mantine clears on change).
+        onError: (error) => {
+          form.setErrors(splitProblem(error, FIELD_MAP).fields);
         },
       },
     );
-  };
+  });
 
-  const { fields: fieldErrors, page: pageErrors } = formErrors(create.error, SHOWN_FIELDS);
+  const { page } = splitProblem(create.error, FIELD_MAP);
 
   return (
     <Modal
@@ -62,42 +73,25 @@ export function NewContractModal({ product, opened, onClose }: NewContractModalP
       withCloseButton={!create.isPending}
       closeButtonProps={{ 'aria-label': 'Fechar' }}
     >
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit();
-        }}
-      >
+      <form onSubmit={submit} noValidate>
         <Stack gap="md">
           <TextInput label="Produto" value={product.code} readOnly />
           <TextInput
             label="Código"
             placeholder="DI1F31"
-            value={code}
-            onChange={(event) => {
-              setCode(event.currentTarget.value);
-            }}
-            error={fieldErrors.code}
+            withAsterisk
+            {...form.getInputProps('code')}
           />
           <DateInput
             label="Vencimento"
             placeholder="DD/MM/AAAA"
             valueFormat="DD/MM/YYYY"
             dateParser={parsePtBrDate}
-            value={maturity}
-            onChange={setMaturity}
+            withAsterisk
             leftSection={<IconCalendar size={16} stroke={1.5} />}
-            error={fieldErrors.maturity_date}
+            {...form.getInputProps('maturity')}
           />
-          {pageErrors.length > 0 && (
-            <Alert role="alert" color="red" variant="light" icon={<IconAlertTriangle size={18} />}>
-              {pageErrors.map((message) => (
-                <Text key={message} size="sm">
-                  {message}
-                </Text>
-              ))}
-            </Alert>
-          )}
+          <MessageAlert messages={page} />
           <Group justify="flex-end" gap="sm">
             <Button variant="default" onClick={close} disabled={create.isPending}>
               Cancelar

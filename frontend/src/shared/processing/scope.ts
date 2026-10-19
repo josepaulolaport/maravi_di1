@@ -1,6 +1,6 @@
 import type { ProcessingChain, ProcessingScope } from '@/api/contract';
 
-// The two daily chains and the scope of a processing request (OQ-21 draft), in pt-BR.
+// The two daily chains and the scope of a processing request (OQ-21), in pt-BR.
 
 export const SCOPE_LABELS: Record<ProcessingScope, string> = {
   CASH: 'Caixa',

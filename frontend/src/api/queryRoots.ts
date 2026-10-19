@@ -21,8 +21,9 @@ function invalidate(client: QueryClient, roots: readonly QueryRoot[]): Promise<v
 }
 
 /**
- * After a ledger or price write: the write marks published days stale and changes the
- * pendências and the range preview (§10.1, §10.4), and a contract's latest reference (§11.2).
+ * After a ledger or price write: the write changes the facts behind the pendências and the
+ * range preview (§10.1, §10.4), the reference prices shown on positions (OQ-30), and a
+ * contract's latest reference (§11.2).
  */
 export function invalidateAfterWrite(client: QueryClient): Promise<void> {
   return invalidate(client, [

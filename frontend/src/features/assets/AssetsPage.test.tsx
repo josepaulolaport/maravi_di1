@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { delay, http, HttpResponse } from 'msw';
 
 import { IDS, instrumentTypes } from '@/api/mocks/fixtures';
@@ -52,8 +52,11 @@ describe('Ativos: catálogo (§11.2)', () => {
     const search = screen.getByRole('textbox', { name: 'Buscar produtos' });
     expect(search).toHaveAttribute('placeholder', 'Buscar por código, produto ou classe...');
     await user.type(search, 'juros');
+    // Once the typing settles (SearchInput), the search reaches the URL and the request.
+    await waitFor(() => {
+      expect(router.state.location.search).toContain('busca=juros');
+    });
     expect(await screen.findByText('1 produto encontrado')).toBeInTheDocument();
-    expect(router.state.location.search).toContain('busca=juros');
 
     await user.clear(search);
     await user.type(search, 'xyz');

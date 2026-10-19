@@ -1,21 +1,13 @@
-import {
-  Button,
-  Group,
-  Paper,
-  Skeleton,
-  Stack,
-  Table,
-  Text,
-  TextInput,
-  VisuallyHidden,
-} from '@mantine/core';
-import { IconAlertTriangle, IconCalendarX, IconHistory, IconSearch } from '@tabler/icons-react';
+import { Button, Group, Paper, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
+import { IconAlertTriangle, IconCalendarX } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
+import { SearchInput } from '@/shared/ui/SearchInput';
+import { Loading } from '@/shared/ui/Loading';
 import type { Issue, IssueType } from '@/api/contract';
-import { assetLinks, controlCenterLinks, ledgerLinks } from '@/app/paths';
-import { addDays, formatDate, formatQuantity, UNAVAILABLE } from '@/shared/format';
+import { assetLinks, ledgerLinks } from '@/app/paths';
+import { UNAVAILABLE, countLabel, formatDate } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
 import type { useIssues } from '../hooks/useProcessing';
@@ -28,10 +20,6 @@ const ISSUE_TEXT: Record<IssueType, { text: string; icon: ReactNode }> = {
   EXPIRED_OPEN_POSITION: {
     text: 'Contrato vencido com posição aberta',
     icon: <IconCalendarX size={16} stroke={1.5} />,
-  },
-  STALE_PREDECESSOR: {
-    text: 'Estado anterior desatualizado',
-    icon: <IconHistory size={16} stroke={1.5} />,
   },
 };
 
@@ -49,15 +37,6 @@ function issueAction(issue: Issue): { label: string; to: string } | null {
       return issue.asset_code
         ? { label: 'Ver lançamentos', to: ledgerLinks.list({ search: issue.asset_code }) }
         : null;
-    case 'STALE_PREDECESSOR':
-      // A range ending the day before the affected one (OQ-11), for the chain that is behind.
-      return {
-        label: 'Processar intervalo anterior',
-        to: controlCenterLinks.processing({
-          end: addDays(issue.affected_date, -1),
-          ...(issue.chain ? { scope: issue.chain } : {}),
-        }),
-      };
   }
 }
 
@@ -77,40 +56,34 @@ function matchesSearch(issue: Issue, search: string): boolean {
   );
 }
 
-const countLabel = (n: number) =>
-  n === 1 ? '1 pendência encontrada' : `${formatQuantity(n)} pendências encontradas`;
-
 interface IssuesTabProps {
   issues: ReturnType<typeof useIssues>;
   search: string;
   onSearchChange: (text: string) => void;
 }
 
-/** Pendências (§11.1, §10.3): the current actionable issues, three types only (OQ-19). */
+/** Pendências (§11.1, §10.3): the current actionable issues, two types only (OQ-31). */
 export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
   if (issues.isError) {
     return <ErrorState error={issues.error} onRetry={() => void issues.refetch()} />;
   }
   if (issues.isPending) {
-    return <Skeleton h={220} aria-busy="true" aria-label="Carregando pendências" />;
+    return <Loading label="Carregando pendências" h={220} />;
   }
   const rows = issues.data.items.filter((issue) => matchesSearch(issue, search));
 
   return (
     <Paper p="md">
       <Stack gap="md">
-        <TextInput
-          aria-label="Buscar pendência"
+        <SearchInput
+          label="Buscar pendência"
           placeholder="Buscar ativo ou data..."
-          leftSection={<IconSearch size={16} stroke={1.5} />}
           value={search}
-          onChange={(event) => {
-            onSearchChange(event.currentTarget.value);
-          }}
+          onChange={onSearchChange}
           maw={360}
         />
         <Table.ScrollContainer minWidth={640}>
-          <Table verticalSpacing="sm">
+          <Table verticalSpacing="sm" aria-label="Pendências">
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Data</Table.Th>
@@ -137,19 +110,15 @@ export function IssuesTab({ issues, search, onSearchChange }: IssuesTabProps) {
           </Table>
         </Table.ScrollContainer>
         <Text size="sm" c="dimmed">
-          {countLabel(rows.length)}
+          {countLabel(rows.length, 'pendência encontrada', 'pendências encontradas')}
         </Text>
       </Stack>
     </Paper>
   );
 }
 
-/** STALE_PREDECESSOR says which chain is behind (OQ-21 draft); the other types do not. */
-const CHAIN_SUFFIX = { CASH: ' (caixa)', POSITIONS: ' (posições)' } as const;
-
 function IssueRow({ issue }: { issue: Issue }) {
-  const { icon } = ISSUE_TEXT[issue.issue_type];
-  const text = `${ISSUE_TEXT[issue.issue_type].text}${issue.chain ? CHAIN_SUFFIX[issue.chain] : ''}`;
+  const { icon, text } = ISSUE_TEXT[issue.issue_type];
   const action = issueAction(issue);
   return (
     <Table.Tr>

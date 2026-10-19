@@ -23,10 +23,14 @@ function dataStatus() {
   return group.getAllByText(/^(Caixa|Posições): /).map((badge) => badge.textContent);
 }
 
-/** No KPI carries a status badge of its own; freshness belongs to the chains. */
+/** No KPI carries a status badge of its own; the status belongs to the chains. */
 function expectNoKpiBadge() {
   for (const label of KPIS) {
-    expect(kpi(label).queryByText(/Desatualizado|Não processado|Atualizado/)).toBeNull();
+    expect(
+      kpi(label).queryByText(
+        /^(Processado|Processado com pendências|Processando|Erro|Não processado)$/,
+      ),
+    ).toBeNull();
   }
 }
 
@@ -52,7 +56,7 @@ interface SummaryChanges {
 
 /**
  * Serves 15/10 (complete and current for both chains in the fixtures) with the given changes
- * to one chain or both, to isolate one state (OQ-21 draft: cash and positions apart).
+ * to one chain or both, to isolate one state (OQ-21: cash and positions apart).
  */
 function override15(changes: SummaryChanges, positionsChanges: Partial<PortfolioPositions> = {}) {
   const rows = positions.find((p) => p.date === '2026-10-15');
@@ -68,7 +72,7 @@ function override15(changes: SummaryChanges, positionsChanges: Partial<Portfolio
       return HttpResponse.json(body);
     }),
     http.get(url('/portfolio/positions'), () =>
-      HttpResponse.json({ ...rows, status: 'FRESH', ...positionsChanges }),
+      HttpResponse.json({ ...rows, status: 'PROCESSED', ...positionsChanges }),
     ),
   );
 }
@@ -93,6 +97,13 @@ async function openCarteira(date: string) {
 }
 
 describe('Carteira (§11.4)', () => {
+  it('§11 names the page and the browser tab', async () => {
+    await openCarteira('2026-10-15');
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Carteira' })).toBeInTheDocument();
+    expect(document.title).toBe('Carteira · Maravi Backoffice');
+  });
+
   it('§11.4 shows the five KPIs of a complete day, formatted in pt-BR', async () => {
     await openCarteira('2026-10-15');
 
@@ -101,7 +112,7 @@ describe('Carteira (§11.4)', () => {
     expect(kpi('P&L diário').getByText('-R$ 8.034,13')).toBeInTheDocument();
     expect(kpi('P&L posições').getByText('+R$ 1.220,20')).toBeInTheDocument();
     expect(kpi('P&L operações').getByText('-R$ 9.254,33')).toBeInTheDocument();
-    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Atualizado']);
+    expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Processado']);
     expectNoKpiBadge();
     expectNoCard();
   });
@@ -182,26 +193,42 @@ describe('Carteira (§11.4)', () => {
     expect(rowOf('DI1F29').getByText('Sem preço')).toBeInTheDocument();
   });
 
-  it('§10.4 OQ-21 a corrected price: only the Posições badge says it', async () => {
+  it('OQ-31 a price corrected after processing changes no badge', async () => {
     await openCarteira('2026-10-16');
 
     expectNoCard();
-    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Desatualizado']);
+    expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Processado com pendências']);
     expectNoKpiBadge();
   });
 
-  it('§11.4 OQ-21 stale cash shows on the Caixa badge; positions stay current', async () => {
-    override15({ cash: { status: 'STALE' } });
+  it('OQ-31 each badge shows when its chain was processed, in Brasília time', async () => {
+    override15({ cash: { published_at: '2026-10-18T12:05:00-03:00' } });
     await openCarteira('2026-10-15');
 
-    expectNoCard();
-    expect(dataStatus()).toEqual(['Caixa: Desatualizado', 'Posições: Atualizado']);
-    expectNoKpiBadge();
+    const status = within(screen.getByRole('group', { name: 'Situação dos dados' }));
+    expect(status.getAllByText(/^Processado em /).map((time) => time.textContent)).toEqual([
+      'Processado em 18/10/2026 12:05',
+      'Processado em 16/10/2026 18:40',
+    ]);
+  });
+
+  it('OQ-30 a position shows the current reference price, even one corrected after processing', async () => {
+    await openCarteira('2026-10-16');
+
+    const row = rowOf('DI1F28');
+    expect(row.getByText('89.250,31')).toBeInTheDocument();
+    expect(row.getByText('9,80%')).toBeInTheDocument();
+    // The market value is the processed one (89.200,90 × 6).
+    expect(row.getByText('R$ 535.205,41')).toBeInTheDocument();
   });
 
   it.each([
     ['RUNNING', 'FAILED', ['Caixa: Processando', 'Posições: Erro']],
-    ['FRESH', 'FRESH_WITH_ISSUES', ['Caixa: Atualizado', 'Posições: Atualizado com pendências']],
+    [
+      'PROCESSED',
+      'PROCESSED_WITH_ISSUES',
+      ['Caixa: Processado', 'Posições: Processado com pendências'],
+    ],
   ] as const)(
     "OQ-23 each badge shows the date's chain status (cash %s, positions %s)",
     async (cash, positions, badges) => {
@@ -213,15 +240,138 @@ describe('Carteira (§11.4)', () => {
     },
   );
 
-  it('§11.4 OQ-21 both chains stale: both badges say so, no card', async () => {
+  it('OQ-23 a date being processed is read again until it is done, without a reload', async () => {
+    let reads = 0;
+    server.use(
+      http.get(url('/portfolio/summary'), () => {
+        reads += 1;
+        const summary = summaryOf('2026-10-15');
+        const running = { ...summary.positions, status: 'RUNNING' as const };
+        return HttpResponse.json<PortfolioSummary>(
+          reads === 1 ? { ...summary, positions: running } : summary,
+        );
+      }),
+    );
+    await openCarteira('2026-10-15');
+    expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Processando']);
+
+    // Polled every 2 s while a chain is RUNNING (§12); the wait allows one poll under load.
+    await waitFor(
+      () => {
+        expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Processado']);
+      },
+      { timeout: 5_000 },
+    );
+    expect(reads).toBeGreaterThanOrEqual(2);
+  });
+
+  it('OQ-23 when a date finishes processing, its positions are read again too', async () => {
+    let summaryReads = 0;
+    let positionsReads = 0;
+    const rows = positions.find((p) => p.date === '2026-10-15');
+    server.use(
+      http.get(url('/portfolio/summary'), () => {
+        summaryReads += 1;
+        const summary = summaryOf('2026-10-15');
+        const running = { ...summary.positions, status: 'RUNNING' as const };
+        return HttpResponse.json<PortfolioSummary>(
+          summaryReads === 1 ? { ...summary, positions: running } : summary,
+        );
+      }),
+      // Before the run commits, the date had no positions published.
+      http.get(url('/portfolio/positions'), () => {
+        positionsReads += 1;
+        const body: PortfolioPositions =
+          positionsReads === 1
+            ? { date: '2026-10-15', status: 'RUNNING', published_at: null, items: [] }
+            : {
+                date: '2026-10-15',
+                status: 'PROCESSED',
+                published_at: null,
+                items: rows?.items ?? [],
+              };
+        return HttpResponse.json(body);
+      }),
+    );
+    await openCarteira('2026-10-15');
+
+    expect(
+      await screen.findByText('DI1F28', { selector: 'td *' }, { timeout: 5_000 }),
+    ).toBeInTheDocument();
+    expect(positionsReads).toBeGreaterThanOrEqual(2);
+  });
+
+  it('OQ-23 moving from a date being processed to another date reads the new date once', async () => {
+    const summaryReads: string[] = [];
+    server.use(
+      http.get(url('/portfolio/summary'), ({ request }) => {
+        const date = new URL(request.url).searchParams.get('date') ?? '';
+        summaryReads.push(date);
+        const summary = summaryOf(date);
+        return HttpResponse.json<PortfolioSummary>(
+          date === '2026-10-15'
+            ? { ...summary, positions: { ...summary.positions, status: 'RUNNING' } }
+            : summary,
+        );
+      }),
+    );
+    const { router } = await openCarteira('2026-10-15');
+    expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Processando']);
+
+    await router.navigate('/carteira?date=2026-10-16');
+
+    await waitFor(() => {
+      expect(screen.getByText('DI1F29', { selector: 'td *' })).toBeInTheDocument();
+    });
+    // Leaving a RUNNING date is not "the date finished processing": nothing is re-read.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(summaryReads.filter((date) => date === '2026-10-16')).toHaveLength(1);
+  });
+
+  it("§11.4 a failed chain's badge leads to Processamentos for that date and chain", async () => {
+    override15({ positions: { status: 'FAILED' } });
+    await openCarteira('2026-10-15');
+
+    const status = within(screen.getByRole('group', { name: 'Situação dos dados' }));
+    expect(
+      status.getByRole('link', { name: 'Posições: Erro. Ir para Processamentos' }),
+    ).toHaveAttribute(
+      'href',
+      '/central-de-controle?tab=processamentos&inicio=2026-10-15&fim=2026-10-15&escopo=posicoes',
+    );
+    // A current chain needs nothing: its badge is no link.
+    expect(status.queryByRole('link', { name: /^Caixa/ })).not.toBeInTheDocument();
+  });
+
+  it('OQ-21 shows what moved the cash on the date under Saldo em caixa', async () => {
+    await openCarteira('2026-10-16');
+
+    const movement = within(
+      kpi('Saldo em caixa').getByRole('group', { name: 'Movimentação do caixa no dia' }),
+    );
+    expect(movement.getByText('Operações').nextSibling).toHaveTextContent('+R$ 356.408,89');
+    expect(movement.getByText('Aportes').nextSibling).toHaveTextContent('R$ 0,00');
+    expect(movement.getByText('Retiradas').nextSibling).toHaveTextContent('R$ 50.000,00');
+  });
+
+  it('§11.4 a badge with issues leads to Pendências', async () => {
+    override15({ positions: { status: 'PROCESSED_WITH_ISSUES' } });
+    await openCarteira('2026-10-15');
+
+    expect(
+      screen.getByRole('link', { name: 'Posições: Processado com pendências. Ver pendências' }),
+    ).toHaveAttribute('href', '/central-de-controle?tab=pendencias');
+  });
+
+  it('§11.4 OQ-21 both chains failed: both badges say so, no card', async () => {
     override15({
-      cash: { status: 'STALE' },
-      positions: { status: 'STALE' },
+      cash: { status: 'FAILED' },
+      positions: { status: 'FAILED' },
     });
     await openCarteira('2026-10-15');
 
     expectNoCard();
-    expect(dataStatus()).toEqual(['Caixa: Desatualizado', 'Posições: Desatualizado']);
+    expect(dataStatus()).toEqual(['Caixa: Erro', 'Posições: Erro']);
   });
 
   it('§11.4 OQ-21 cash processed but positions not: cash shows, AUM and positions do not', async () => {
@@ -247,7 +397,7 @@ describe('Carteira (§11.4)', () => {
     expectNoCard();
     expect(kpi('Saldo em caixa').getByText('R$ 199.650,37')).toBeInTheDocument();
     expect(kpi('Patrimônio total').getByText('—')).toBeInTheDocument();
-    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Não processado']);
+    expect(dataStatus()).toEqual(['Caixa: Processado', 'Posições: Não processado']);
     expectNoKpiBadge();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
@@ -294,20 +444,37 @@ describe('Carteira (§11.4)', () => {
     expect(await screen.findByRole('group', { name: 'Saldo em caixa' })).toBeInTheDocument();
   });
 
-  it('§11.4 filters positions by asset code', async () => {
-    const { user } = await openCarteira('2026-10-15');
+  it('§11.4 filters positions by asset code, with the search in the URL', async () => {
+    const { user, router } = await openCarteira('2026-10-15');
 
     await user.type(screen.getByRole('textbox', { name: 'Buscar ativo' }), 'f29');
 
+    await waitFor(() => {
+      expect(screen.queryByText('DI1F28', { selector: 'td *' })).not.toBeInTheDocument();
+    });
     expect(screen.getByText('DI1F29', { selector: 'td *' })).toBeInTheDocument();
-    expect(screen.queryByText('DI1F28', { selector: 'td *' })).not.toBeInTheDocument();
+    expect(router.state.location.search).toContain('busca=f29');
     await user.clear(screen.getByRole('textbox', { name: 'Buscar ativo' }));
     await user.type(screen.getByRole('textbox', { name: 'Buscar ativo' }), 'DI1F99');
-    expect(screen.getByText('Nenhum ativo encontrado.')).toBeInTheDocument();
+    expect(await screen.findByText('Nenhum ativo encontrado.')).toBeInTheDocument();
+  });
+
+  it('§11.4 reads the positions search and order from the URL (a linked view)', async () => {
+    renderApp('/carteira?date=2026-10-15&busca=f2&ordem=-financial_total');
+    await screen.findByRole('group', { name: 'Saldo em caixa' });
+
+    expect(screen.getByRole('textbox', { name: 'Buscar ativo' })).toHaveValue('f2');
+    expect(screen.getByRole('columnheader', { name: 'Valor de mercado' })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    );
+    expect(
+      screen.getAllByText(/^DI1F\d\d$/, { selector: 'td *' }).map((el) => el.textContent),
+    ).toEqual(['DI1F28', 'DI1F29']);
   });
 
   it('§11.4 sorts positions by market value, exactly from the decimal strings', async () => {
-    const { user } = await openCarteira('2026-10-15');
+    const { user, router } = await openCarteira('2026-10-15');
     const assetOrder = () =>
       screen.getAllByText(/^DI1F\d\d$/, { selector: 'td *' }).map((el) => el.textContent);
 
@@ -320,6 +487,7 @@ describe('Carteira (§11.4)', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Valor de mercado' }));
     expect(assetOrder()).toEqual(['DI1F28', 'DI1F29']);
+    expect(router.state.location.search).toContain('ordem=-financial_total');
   });
 
   it('§11.4 OQ-16 starts the cumulative P&L chart 30 days back and ends it on the date', async () => {
@@ -440,13 +608,6 @@ describe('Carteira (§11.4)', () => {
       );
     });
     expect(router.state.location.search).toBe(`?date=${todayInSaoPaulo()}`);
-  });
-  it('§10.4 a stale but complete day: the Posições badge only', async () => {
-    override15({ positions: { status: 'STALE' } }, { status: 'STALE' });
-    await openCarteira('2026-10-15');
-
-    expectNoCard();
-    expect(dataStatus()).toEqual(['Caixa: Atualizado', 'Posições: Desatualizado']);
   });
 
   it('§8.3 P&L missing: no card, the asset is marked', async () => {

@@ -1,25 +1,16 @@
-import {
-  Alert,
-  Button,
-  Modal,
-  Group,
-  Input,
-  SegmentedControl,
-  Stack,
-  Text,
-  TextInput,
-} from '@mantine/core';
+import { Alert, Button, Group, Modal, Stack, Text, TextInput } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
-import { IconAlertTriangle, IconCalendar, IconInfoCircle } from '@tabler/icons-react';
-import { useId, useState } from 'react';
+import { IconCalendar, IconInfoCircle } from '@tabler/icons-react';
+import { useForm } from '@mantine/form';
 
+import { MessageAlert } from '@/shared/ui/MessageAlert';
 import type { InputKind, Instrument, IsoDate } from '@/api/contract';
-import { parsePtBrDecimal, percentToFraction } from '@/shared/format';
+import { parsePtBrDate, todayInSaoPaulo } from '@/shared/format';
+import { PriceInput, typedPrice } from '@/shared/ui/PriceInput';
 
 import { useSetReferencePrice } from '../hooks/usePrices';
-import { parsePtBrDate } from './dateInput';
-import { formErrors } from './formErrors';
+import { splitProblem } from '@/shared/ui/problemMessages';
 
 interface PriceModalProps {
   instrument: Instrument;
@@ -78,56 +69,58 @@ interface PriceFormProps {
   onDone: (saved?: IsoDate) => void;
 }
 
-const SHOWN_FIELDS = ['reference_date', 'pu', 'rate', 'input_kind'] as const;
+interface PriceValues {
+  date: IsoDate | null;
+  kind: InputKind;
+  price: string;
+}
+
+// API field → form field, for the problem+json errors (OQ-15); the value input owns pu, rate
+// and input_kind, so every one of their messages is shown on it.
+const FIELD_MAP = { reference_date: 'date', pu: 'price', rate: 'price', input_kind: 'price' };
 
 function PriceForm({ instrument, initialDate, save, onDone }: PriceFormProps) {
-  const [date, setDate] = useState<string | null>(initialDate);
-  const [kind, setKind] = useState<InputKind>('PU');
-  const [text, setText] = useState('');
-  const [invalidValue, setInvalidValue] = useState(false);
-  const kindLabelId = useId();
+  // Nothing after today (OQ-14), nor after the contract's maturity (OQ-1).
+  const today = todayInSaoPaulo();
+  const maturity = instrument.maturity_date;
+  const maxDate = maturity !== null && maturity < today ? maturity : today;
+  const form = useForm<PriceValues>({
+    initialValues: { date: initialDate, kind: 'PU', price: '' },
+    validate: {
+      date: (value) => (value ? null : 'Informe a data.'),
+      price: (value, values) => {
+        if (!value.trim()) return values.kind === 'PU' ? 'Informe o PU.' : 'Informe a taxa.';
+        return typedPrice(values.kind, value) === null ? 'Informe um número válido.' : null;
+      },
+    },
+  });
 
-  const submit = () => {
-    const value = kind === 'PU' ? parsePtBrDecimal(text) : percentToFraction(text);
-    if (value === null) {
-      setInvalidValue(true);
-      return;
-    }
-    setInvalidValue(false);
-    // DateInput restores the last valid date when the field is left empty, so `date` is set.
-    const base = { asset_id: instrument.id, reference_date: date ?? '' };
+  const submit = form.onSubmit((values) => {
+    const value = typedPrice(values.kind, values.price);
+    if (!values.date || value === null) return;
+    const base = { asset_id: instrument.id, reference_date: values.date };
     save.mutate(
-      kind === 'PU'
+      values.kind === 'PU'
         ? { ...base, input_kind: 'PU', pu: value }
         : { ...base, input_kind: 'RATE', rate: value },
       {
         onSuccess: (price) => {
-          notifications.show({ message: 'Preço de referência registrado.' });
+          notifications.show({ color: 'teal', message: 'Preço de referência registrado.' });
           save.reset();
           onDone(price.reference_date);
         },
+        // On the form, so editing a field clears its message (Mantine clears on change).
+        onError: (error) => {
+          form.setErrors(splitProblem(error, FIELD_MAP).fields);
+        },
       },
     );
-  };
+  });
 
-  const { fields, page: pageErrors } = formErrors(save.error, SHOWN_FIELDS);
-  // The value input owns the pu, rate and input_kind errors: every one of them is shown.
-  const valueMessages = [fields.pu, fields.rate, fields.input_kind].filter(
-    (message): message is string => message !== undefined,
-  );
-  const valueError = invalidValue
-    ? 'Informe um número válido.'
-    : valueMessages.length > 0
-      ? valueMessages.join(' ')
-      : undefined;
+  const { page } = splitProblem(save.error, FIELD_MAP);
 
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        submit();
-      }}
-    >
+    <form onSubmit={submit} noValidate>
       <Stack gap="md">
         <TextInput label="Contrato" value={instrument.code} readOnly />
         <DateInput
@@ -135,52 +128,25 @@ function PriceForm({ instrument, initialDate, save, onDone }: PriceFormProps) {
           placeholder="DD/MM/AAAA"
           valueFormat="DD/MM/YYYY"
           dateParser={parsePtBrDate}
-          value={date}
-          onChange={setDate}
+          maxDate={maxDate}
           leftSection={<IconCalendar size={16} stroke={1.5} />}
-          error={fields.reference_date}
+          {...form.getInputProps('date')}
         />
-        <Input.Wrapper label="Forma de entrada" labelProps={{ id: kindLabelId }}>
-          <SegmentedControl
-            fullWidth
-            role="radiogroup"
-            aria-labelledby={kindLabelId}
-            value={kind}
-            onChange={(value) => {
-              setKind(value);
-              setText('');
-              setInvalidValue(false);
-            }}
-            data={[
-              { value: 'PU', label: 'PU' },
-              { value: 'RATE', label: 'Taxa a.a.' },
-            ]}
-          />
-        </Input.Wrapper>
-        <TextInput
-          label={kind === 'PU' ? 'PU' : 'Taxa a.a. (%)'}
-          placeholder={kind === 'PU' ? '89.250,31' : '9,80'}
-          inputMode="decimal"
-          value={text}
-          onChange={(event) => {
-            setText(event.currentTarget.value);
+        <PriceInput
+          kind={form.values.kind}
+          onKindChange={(kind) => {
+            form.setValues({ kind, price: '' });
+            form.clearFieldError('price');
           }}
-          error={valueError}
+          inputProps={form.getInputProps('price')}
+          placeholder={{ PU: '89.250,31', RATE: '9,80' }}
         />
         <Alert color="gray" variant="light" icon={<IconInfoCircle size={18} />}>
           <Text size="sm">
             O registro não inicia um recálculo. Solicite um processamento para atualizar a carteira.
           </Text>
         </Alert>
-        {pageErrors.length > 0 && (
-          <Alert role="alert" color="red" variant="light" icon={<IconAlertTriangle size={18} />}>
-            {pageErrors.map((message) => (
-              <Text key={message} size="sm">
-                {message}
-              </Text>
-            ))}
-          </Alert>
-        )}
+        <MessageAlert messages={page} />
         <Group justify="flex-end" gap="sm">
           <Button
             variant="default"
