@@ -1,4 +1,5 @@
-"""Each enum stored in a column has exactly the values of that column's CHECK (`docs/schema.sql`).
+"""Each enum stored in a column with an ``IN`` CHECK has exactly that CHECK's values
+(`docs/schema.sql`). ``processing.issues.issue_type`` has no such CHECK, so it is not compared.
 
 The values are read from the schema file, so adding a value to one side alone fails here, in the
 pre-commit hook, before any database test runs. `docs/schema.sql` is the revisions' result
