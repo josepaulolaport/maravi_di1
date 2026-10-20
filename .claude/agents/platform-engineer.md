@@ -28,7 +28,7 @@ You change root configuration and `compose.yaml` only together with the integrat
 - inbox idempotency in `platform.inbox_messages`;
 - aio-pika consumers;
 - the retry and failure policy;
-- the doorbell outbox message written with each request, and the worker's SQL take of the oldest `QUEUED` request (one worker, so one active run; no dispatcher, no lease or fencing; OQ-45, OQ-46).
+- the outbox message written with each request (its `request_id` is for tracing only), the worker's periodic sweep, and its SQL take of the oldest `QUEUED` request (one worker, so one active run; no dispatcher, no lease or fencing; OQ-45, OQ-46, OQ-50).
 
 **Wave 4, with lanes G and E:**
 - the worker and relay processes (no dispatcher, OQ-46);
@@ -36,14 +36,14 @@ You change root configuration and `compose.yaml` only together with the integrat
 
 ## Rules
 
-- **The database is the source of truth** for job order and status. RabbitMQ only transports dispatch commands: one doorbell per request that carries no data (OQ-46). Never publish a message per asset or per day.
+- **The database is the source of truth** for job order and status. RabbitMQ only transports dispatch commands: one message per request, a hint that work is waiting (OQ-50). Never publish a message per asset or per day.
 - **Delivery is at least once.**
-  - Acknowledge only after the durable state change commits; the processing doorbell carries no data and may be ACKed on receipt, since recovery at worker start covers a crash (OQ-46).
+  - Acknowledge only after the durable state change commits; a processing message is only a hint and is acknowledged on every delivery, since the sweep and recovery at worker start cover a lost message or a crash (OQ-45, OQ-50).
   - A duplicate delivery never causes a second publication.
 - **No business logic.** Keep the messaging adapters outside the business services.
 - **Required tests:**
   - a relay crash and resend;
-  - a duplicate delivery, and a lost doorbell covered by a later one or a restart (OQ-46);
+  - a duplicate delivery, and a lost message covered by the sweep or a restart (OQ-50);
   - acknowledgement only after durability;
   - a broker reconnect;
   - recovery at worker start (OQ-45).

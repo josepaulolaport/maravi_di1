@@ -1,6 +1,6 @@
 # Maravi DI1 — Module contracts and execution boundaries
 
-**Status:** implemented on `main` (decisions up to OQ-46, 2026-10-19). **OQ-50 (2026-10-19) is decided and implemented on `simplify` (#128, #130, #132, #134):** AUM computed at read time, one RabbitMQ message per request plus a periodic sweep (no doorbell, no inbox), a stale-price mark in Carteira, and "Processando" derived instead of stored. The passages it changes carry a "Since OQ-50" note, which is what the code does. Consistent with `schema.md` (2026-10-19). This document specifies service ownership and call semantics, not actual Python implementations.
+**Status:** implemented on `main` (decisions up to OQ-46, 2026-10-19). **OQ-50 (2026-10-19) is implemented (#128, #130, #132, #134; merged to `main` in #144):** AUM computed at read time, one RabbitMQ message per request plus a periodic sweep (no doorbell, no inbox), a stale-price mark in Carteira, and "Processando" derived instead of stored. The passages it changes carry a "Since OQ-50" note, which is what the code does. Consistent with `schema.md` (2026-10-19). This document specifies service ownership and call semantics, not actual Python implementations.
 
 ## Scope and structural rules
 
