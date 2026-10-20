@@ -101,6 +101,28 @@ def test_after_maturity_the_value_is_zero_and_the_open_position_loses_its_pu(
     assert (totals["cumulative_pnl"], totals["pnl_status"]) == (Decimal(-99960), "COMPLETE")
 
 
+def test_a_price_dated_after_maturity_is_never_used(desk: Desk, di1f27: str) -> None:
+    # OQ-1: after maturity the reference PU is 0 by definition. Prices refuses such a price over
+    # HTTP; a stray B3 row (B3 has no route, so it is inserted like the import would) is not read.
+    desk.price(di1f27, MATURITY, pu="100000")
+    desk.sql(
+        "INSERT INTO prices.reference_prices (asset_id, reference_date, source, input_kind, pu,"
+        " rate) VALUES (%s, %s, 'B3', 'PU', 1, 0)",
+        (di1f27, THU),
+    )
+
+    run = desk.process("ALL", TUE, THU)
+
+    assert desk.sql("SELECT pu FROM prices.reference_prices WHERE reference_date = %s", (THU,)) == [
+        (Decimal(1),)
+    ]
+    assert run["status"] == "COMPLETED_WITH_ISSUES", run  # the expired open position (OQ-1)
+    thursday = desk.positions(THU)["DI1F27"]
+    assert (thursday["reference_pu"], thursday["financial_total"]) == (Decimal(0), Decimal(0))
+    # 1 × (0 − 100000), not 1 × (1 − 100000).
+    assert thursday["position_pnl"] == Decimal(-100000)
+
+
 def test_without_the_maturity_day_price_the_figures_are_null(desk: Desk, di1f27: str) -> None:
     # The maturity-day price is the user's: none is assumed (OQ-1).
     run = desk.process("ALL", TUE, THU)
