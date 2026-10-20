@@ -1,50 +1,60 @@
-// The API contract (lane I's shapes, adopted as the HTTP contract, OQ-26 item 8). Field names follow docs/schema.sql; anything the docs do not
-// name is a contract proposal for the integrator, listed in the PR. At Wave 5 these
-// hand-written types are replaced by types generated from the backend's OpenAPI.
+import type { components } from '../generated/schema';
+
+// The HTTP contract, as the app uses it. Every response and request type is the backend's
+// OpenAPI schema (src/api/generated, `npm run gen:api`; user decision, 2026-10-19), under the
+// names the app uses. Where the backend's schema is looser than the contract (a status the
+// backend types as `string`), `Narrow` says so, and the compiler checks that the narrowed type
+// still fits the generated one. Only what the OpenAPI schema does not describe is written by
+// hand here: the problem+json errors (`composition.errors`) and the string aliases below.
+
+/** The backend's OpenAPI schemas, by their backend names. */
+export type Schemas = components['schemas'];
 
 /**
- * A decimal number as a JSON string ("89006.4625467350"), never a float (CLAUDE.md §2).
- * The frontend only formats it; it never does arithmetic on it.
+ * `Base` with some fields narrowed. Each field must exist in `Base` and fit its type there, so a
+ * field renamed or retyped by the backend breaks the build instead of drifting.
  */
-export type Decimal = string;
+export type Narrow<
+  Base,
+  Fields extends { [K in keyof Fields]: K extends keyof Base ? Base[K] : never },
+> = Omit<Base, keyof Fields> & Fields;
 
+/** A hand-narrowed request (a union the schema flattens), checked to fit the generated body. */
+export type Fits<Narrowed extends Generated, Generated> = Narrowed;
+
+/** A decimal number as a JSON string ("89006.4625467350"), never a float (CLAUDE.md §2). */
+export type Decimal = string;
 /** A calendar date, `YYYY-MM-DD`. */
 export type IsoDate = string;
-
-/** A local São Paulo time, `HH:MM:SS`. */
+/** A time of day, `HH:MM:SS`. */
 export type IsoTime = string;
-
-/** An instant with offset, ISO 8601. */
+/** An instant with its offset, e.g. `2026-10-16T18:40:00-03:00` or `…Z`. */
 export type IsoDateTime = string;
 
-/** Proposal: every list response is wrapped, so metadata can be added without a break. */
+/** A list response (P2). */
 export interface ListResponse<T> {
   items: T[];
 }
 
-/**
- * A page of a keyset-paginated list (lane X, approved by the user 2026-10-18): the ledger
- * entries, ordered by (date, time, seq), and the jobs, by (created_at, id). `next_cursor` is
- * opaque; `null` on the last page. There is no total count.
- */
+/** A keyset-paginated list (P21): `next_cursor` is `null` on the last page. */
 export interface Page<T> {
   items: T[];
   next_cursor: string | null;
 }
 
-/** `?limit=&cursor=`: the page size, and the `next_cursor` of the previous page. */
-// A type alias (not an interface) so it is assignable to the client's query record.
+/** A type alias (not an interface) so it is assignable to the client's query record. */
 export type PageQuery = {
   limit?: number;
   cursor?: string;
 };
 
-/** One entry of `errors` in a problem+json body (docs/interfaces.md "Errors"). */
+export type InputKind = Schemas['InputKind'];
+
+// RFC 9457 problem+json (OQ-15), answered by the app's own handlers, not in the OpenAPI schema.
+
 export interface FieldError {
   code: ErrorCode;
-  /** pt-BR, shown to the user as is. */
   message: string;
-  /** The request field it belongs to, or `null` for a page-level error. */
   field: string | null;
 }
 
@@ -56,7 +66,6 @@ export type ErrorCode =
   | 'INVALID_RANGE'
   | 'JOB_NOT_CANCELLABLE';
 
-/** RFC 9457 `application/problem+json` (OQ-15). */
 export interface Problem {
   type: string;
   title: string;
@@ -64,6 +73,3 @@ export interface Problem {
   detail?: string;
   errors?: FieldError[];
 }
-
-/** PU or rate: which one the user typed; the other is computed by the backend (§4.1). */
-export type InputKind = 'PU' | 'RATE';

@@ -11,7 +11,7 @@
 }
 
 .header {
-  height: 96px;
+  height: 56px;
   margin-inline: 12px;
   padding-inline: 12px;
   border-bottom: 1px solid var(--app-sidebar-divider);
@@ -20,22 +20,6 @@
 .headerCollapsed {
   margin-inline: 8px;
   padding-inline: 0;
-}
-
-.brand {
-  color: var(--mantine-color-white);
-  font-size: 20px;
-  font-weight: 500;
-  line-height: 24px;
-  letter-spacing: 0.14em;
-}
-
-.brandSub {
-  margin-top: 4px;
-  color: var(--app-sidebar-muted);
-  font-size: 12px;
-  line-height: 16px;
-  letter-spacing: 0.2em;
 }
 
 .toggle {

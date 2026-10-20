@@ -7,7 +7,16 @@ import pickle
 
 import pytest
 
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
+from di1.shared.errors import (
+    DomainError,
+    ErrorCode,
+    ErrorDetail,
+    future_date,
+    invalid_cursor,
+    invalid_range,
+    limit_out_of_range,
+    unknown_asset,
+)
 
 
 def test_the_catalogue_has_exactly_the_six_documented_codes() -> None:
@@ -91,3 +100,19 @@ def test_a_domain_error_survives_copy_and_pickle(detail: str | None) -> None:
         assert clone.errors == error.errors
         assert clone.detail == error.detail
         assert str(clone) == str(error)
+
+
+def test_the_shared_factories_carry_the_catalogue_messages() -> None:
+    assert invalid_range() == ErrorDetail(
+        ErrorCode.INVALID_RANGE,
+        "A data inicial deve ser anterior ou igual à data final.",
+        "start_date",
+    )
+    assert future_date("date") == ErrorDetail(
+        ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", "date"
+    )
+    assert unknown_asset() == ErrorDetail.validation("Selecione um contrato.", "asset_id")
+    assert invalid_cursor() == ErrorDetail.validation("Cursor inválido.", "cursor")
+    assert limit_out_of_range(200) == ErrorDetail.validation(
+        "Use um limite entre 1 e 200.", "limit"
+    )

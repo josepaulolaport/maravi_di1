@@ -2,7 +2,6 @@ import { SegmentedControl, Stack, Text, TextInput, type TextInputProps } from '@
 import { useId } from 'react';
 
 import type { InputKind } from '@/api/contract';
-import { parsePtBrDecimal, percentToFraction } from '@/shared/format';
 
 const KIND_LABEL: Record<InputKind, string> = { PU: 'PU', RATE: 'Taxa a.a.' };
 const INPUT_LABEL: Record<InputKind, string> = { PU: 'PU', RATE: 'Taxa a.a. (%)' };
@@ -13,11 +12,6 @@ const DESCRIPTION: Record<InputKind, string> = {
   PU: 'Até 10 casas decimais',
   RATE: 'Em % ao ano, até 10 casas decimais',
 };
-
-/** The typed PU, or the typed percent as a fraction (10,45 → "0.1045"); `null` if invalid. */
-export function typedPrice(kind: InputKind, text: string): string | null {
-  return kind === 'PU' ? parsePtBrDecimal(text) : percentToFraction(text);
-}
 
 interface PriceInputProps {
   kind: InputKind;

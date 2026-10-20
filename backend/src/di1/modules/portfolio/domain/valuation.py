@@ -24,7 +24,6 @@ from uuid import UUID
 from di1.modules.portfolio.domain.errors import AccountingError
 from di1.modules.portfolio.domain.maturity import is_past_maturity, reference_pu_on
 from di1.shared.decimals import financial_context
-from di1.shared.quotes import PriceSource as PriceSource
 
 ZERO = Decimal("0")
 

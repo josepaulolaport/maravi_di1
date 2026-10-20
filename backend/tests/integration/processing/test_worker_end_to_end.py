@@ -16,17 +16,17 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from di1.modules.asset.dependencies import asset_reader
-from di1.modules.ledger.dependencies import ledger_reader
+from di1.modules.asset.dependencies import build_asset_reader
+from di1.modules.ledger.dependencies import build_ledger_reader
 from di1.modules.portfolio.dependencies import (
     portfolio_query_service,
     portfolio_reader,
     results_writer,
 )
-from di1.modules.prices.dependencies import price_reader
+from di1.modules.prices.dependencies import build_price_reader
 from di1.modules.processing.dependencies import make_date_status_reader, make_range_processor
 from di1.platform.database.unit_of_work import unit_of_work_factory
-from di1.shared.clock import FixedClock
+from tests.fakes.clock import FixedClock
 from tests.integration.processing.support import seed_instrument
 from tests.integration.processing.worker_support import MutableClock
 
@@ -42,9 +42,9 @@ class RealWorker:
         self.processor = make_range_processor(  # the worker's wiring
             uow_factory=uow_factory,
             clock=self.clock,
-            ledger_reader=ledger_reader,
-            price_reader=price_reader,
-            asset_reader=asset_reader,
+            ledger_reader=build_ledger_reader,
+            price_reader=build_price_reader,
+            asset_reader=build_asset_reader,
             portfolio_reader=portfolio_reader,
             writer=results_writer(),
         )
@@ -79,8 +79,8 @@ class RealWorker:
             async with self.uow_factory() as uow:
                 summary = await portfolio_query_service(
                     uow,
-                    assets=asset_reader(uow.session),
-                    prices=price_reader(uow.session),
+                    assets=build_asset_reader(uow.session),
+                    prices=build_price_reader(uow.session),
                     date_statuses=make_date_status_reader(),
                     clock=FixedClock(D3),
                 ).get_summary(day)

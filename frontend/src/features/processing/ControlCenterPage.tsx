@@ -6,7 +6,7 @@ import { countLabel, formatQuantity } from '@/shared/format';
 import { IssuesTab } from './components/IssuesTab';
 import { ProcessingTab } from './components/ProcessingTab';
 import { type ControlCenterTab, useControlCenterParams } from './hooks/useControlCenterParams';
-import { useIssues, useProcessingRequests } from './hooks/useProcessing';
+import { useIssues } from './hooks/useProcessing';
 
 /**
  * Central de Controle (spec §11.1): Pendências and Processamentos, with the tab, the range
@@ -15,9 +15,6 @@ import { useIssues, useProcessingRequests } from './hooks/useProcessing';
 export function ControlCenterPage() {
   const params = useControlCenterParams();
   const issues = useIssues();
-  // Read here, not in the tab, so the history stays loaded while Pendências is open. The
-  // polling and the refresh at a job's end belong to the app-wide JobWatcher.
-  const requests = useProcessingRequests();
 
   return (
     <Stack gap="md">
@@ -54,19 +51,7 @@ export function ControlCenterPage() {
           <IssuesTab issues={issues} search={params.search} onSearchChange={params.setSearch} />
         </Tabs.Panel>
         <Tabs.Panel value="processamentos">
-          <ProcessingTab
-            requests={requests}
-            start={params.start}
-            end={params.end}
-            onStartChange={params.setStart}
-            onEndChange={params.setEnd}
-            scope={params.scope}
-            onScopeChange={params.setScope}
-            onRequestAgain={params.setRange}
-            search={params.search}
-            onSearchChange={params.setSearch}
-            today={params.today}
-          />
+          <ProcessingTab />
         </Tabs.Panel>
       </Tabs>
     </Stack>

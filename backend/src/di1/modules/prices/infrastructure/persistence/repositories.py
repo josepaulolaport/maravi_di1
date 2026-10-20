@@ -5,26 +5,19 @@ from __future__ import annotations
 from collections.abc import Collection, Sequence
 from datetime import date
 from decimal import Decimal
-from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from di1.modules.prices.domain.reference_price import PriceSource, ReferencePriceRecord
+from di1.modules.prices.infrastructure.persistence.models import ReferencePriceRow
 from di1.modules.prices.infrastructure.persistence.queries import reference_prices as queries
-from di1.modules.prices.public import PriceSource, ReferencePriceRecord
-from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.input_kind import InputKind
 
 
 class SqlReferencePriceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-
-    @classmethod
-    def of(cls, uow: UnitOfWork) -> SqlReferencePriceRepository:
-        """The repository over ``uow``'s session (a `RepositoryFactory`)."""
-        return cls(uow.session)
 
     async def replace(
         self,
@@ -36,52 +29,42 @@ class SqlReferencePriceRepository:
         pu: Decimal,
         rate: Decimal | None,
     ) -> ReferencePriceRecord:
-        result = await self._session.execute(
-            queries.replace_price(
-                asset_id=asset_id,
-                reference_date=reference_date,
-                source=source.value,
-                input_kind=input_kind.value,
-                pu=pu,
-                rate=rate,
-            )
+        statement = queries.replace_price(
+            asset_id=asset_id,
+            reference_date=reference_date,
+            source=source.value,
+            input_kind=input_kind.value,
+            pu=pu,
+            rate=rate,
         )
-        return _record(result.one())
-
-    async def get(self, price_id: UUID) -> ReferencePriceRecord | None:
-        result = await self._session.execute(queries.select_price(price_id))
-        return _optional(result.one_or_none())
+        return _to_record((await self._session.scalars(statement)).one())
 
     async def delete(self, price_id: UUID) -> ReferencePriceRecord | None:
-        result = await self._session.execute(queries.delete_price(price_id))
-        return _optional(result.one_or_none())
+        row = (await self._session.scalars(queries.delete_price(price_id))).one_or_none()
+        return None if row is None else _to_record(row)
 
     async def find(
         self, asset_ids: Collection[UUID], dates: Collection[date]
     ) -> Sequence[ReferencePriceRecord]:
-        result = await self._session.execute(queries.select_prices(asset_ids, dates))
-        return [_record(row) for row in result]
+        rows = await self._session.scalars(queries.select_prices(asset_ids, dates))
+        return [_to_record(row) for row in rows]
 
     async def find_on_latest_date(
         self, asset_ids: Collection[UUID]
     ) -> Sequence[ReferencePriceRecord]:
-        result = await self._session.execute(queries.select_prices_on_latest_date(asset_ids))
-        return [_record(row) for row in result]
+        rows = await self._session.scalars(queries.select_prices_on_latest_date(asset_ids))
+        return [_to_record(row) for row in rows]
 
     async def find_in_range(
         self, asset_id: UUID, start_date: date, end_date: date
     ) -> Sequence[ReferencePriceRecord]:
-        result = await self._session.execute(
+        rows = await self._session.scalars(
             queries.select_prices_in_range(asset_id, start_date, end_date)
         )
-        return [_record(row) for row in result]
+        return [_to_record(row) for row in rows]
 
 
-def _optional(row: Row[Any] | None) -> ReferencePriceRecord | None:
-    return None if row is None else _record(row)
-
-
-def _record(row: Row[Any]) -> ReferencePriceRecord:
+def _to_record(row: ReferencePriceRow) -> ReferencePriceRecord:
     return ReferencePriceRecord(
         id=row.id,
         asset_id=row.asset_id,

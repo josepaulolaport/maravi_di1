@@ -15,14 +15,33 @@ from datetime import date, time
 import pytest
 
 from di1.modules.ledger.domain.listing import (
-    DEFAULT_PAGE_SIZE,
-    MAX_PAGE_SIZE,
     EntryCursor,
     EntrySearch,
     ListOrder,
+    PageRequest,
     validate_page_request,
 )
 from di1.shared.errors import DomainError, ErrorCode
+from di1.shared.paging import DEFAULT_LIMIT, MAX_LIMIT, PageParams
+
+
+def page_request(
+    *,
+    start_date: date,
+    end_date: date,
+    search: str | None,
+    order: ListOrder,
+    limit: int | None,
+    cursor: str | None,
+) -> PageRequest:
+    """The request the service builds, or the `DomainError` it raises."""
+    page = PageParams(DEFAULT_LIMIT if limit is None else limit, cursor)
+    errors = validate_page_request(start_date=start_date, end_date=end_date, page=page)
+    if errors:
+        raise DomainError(*errors)
+    return PageRequest.of(
+        start_date=start_date, end_date=end_date, search=search, order=order, page=page
+    )
 
 
 def test_the_cursor_round_trips_and_is_opaque() -> None:
@@ -35,9 +54,21 @@ def test_the_cursor_round_trips_and_is_opaque() -> None:
 
 
 @pytest.mark.parametrize("token", ["", "not-base64!", "MjAyNi0xMC0xNg", "eyJhIjogMX0"])
+def test_a_malformed_cursor_decodes_to_nothing(token: str) -> None:
+    assert EntryCursor.decode(token) is None
+
+
+@pytest.mark.parametrize("token", ["not-base64!", "MjAyNi0xMC0xNg", "eyJhIjogMX0"])
 def test_a_malformed_cursor_is_a_validation_error_on_cursor(token: str) -> None:
     with pytest.raises(DomainError) as error:
-        EntryCursor.decode(token)
+        page_request(
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 18),
+            search=None,
+            order=ListOrder.DESC,
+            limit=None,
+            cursor=token,
+        )
 
     assert error.value.code is ErrorCode.VALIDATION_ERROR
     assert error.value.errors[0].field == "cursor"
@@ -65,21 +96,15 @@ def _token(raw: str) -> str:
         "2026-10-16|10:00:00|4|extra",
     ],
 )
-def test_a_crafted_cursor_is_a_validation_error_not_a_server_error(raw: str) -> None:
-    with pytest.raises(DomainError) as error:
-        EntryCursor.decode(_token(raw))
-
-    assert error.value.code is ErrorCode.VALIDATION_ERROR
-    assert error.value.errors[0].field == "cursor"
+def test_a_crafted_cursor_is_refused_not_a_server_error(raw: str) -> None:
+    assert EntryCursor.decode(_token(raw)) is None
 
 
 def test_only_the_encoders_own_spelling_is_accepted() -> None:
     token = EntryCursor(date(2026, 10, 16), time(15, 0), 4).encode()
 
-    with pytest.raises(DomainError):
-        EntryCursor.decode(token + "==")  # padding the encoder never writes
-    with pytest.raises(DomainError):
-        EntryCursor.decode(token[:5] + "!" + token[5:])  # a character base64 would skip
+    assert EntryCursor.decode(token + "==") is None  # padding the encoder never writes
+    assert EntryCursor.decode(token[:5] + "!" + token[5:]) is None  # a character base64 skips
 
 
 def test_the_largest_seq_round_trips() -> None:
@@ -89,7 +114,7 @@ def test_the_largest_seq_round_trips() -> None:
 
 
 def test_an_empty_cursor_is_the_first_page() -> None:
-    request = validate_page_request(
+    request = page_request(
         start_date=date(2026, 10, 1),
         end_date=date(2026, 10, 18),
         search=None,
@@ -102,7 +127,7 @@ def test_an_empty_cursor_is_the_first_page() -> None:
 
 
 def test_the_page_request_defaults() -> None:
-    request = validate_page_request(
+    request = page_request(
         start_date=date(2026, 10, 1),
         end_date=date(2026, 10, 18),
         search=None,
@@ -111,14 +136,14 @@ def test_the_page_request_defaults() -> None:
         cursor=None,
     )
 
-    assert request.limit == DEFAULT_PAGE_SIZE == 50
+    assert request.limit == DEFAULT_LIMIT == 50
     assert request.search is None
     assert request.after is None
 
 
 def test_a_single_day_range_is_valid() -> None:
     day = date(2026, 10, 16)
-    request = validate_page_request(
+    request = page_request(
         start_date=day, end_date=day, search=None, order=ListOrder.ASC, limit=1, cursor=None
     )
     assert (request.start_date, request.end_date) == (day, day)
@@ -126,7 +151,7 @@ def test_a_single_day_range_is_valid() -> None:
 
 def test_start_after_end_is_an_invalid_range() -> None:
     with pytest.raises(DomainError) as error:
-        validate_page_request(
+        page_request(
             start_date=date(2026, 10, 18),
             end_date=date(2026, 10, 17),
             search=None,
@@ -139,10 +164,10 @@ def test_start_after_end_is_an_invalid_range() -> None:
     assert error.value.errors[0].field == "start_date"
 
 
-@pytest.mark.parametrize("limit", [0, -1, MAX_PAGE_SIZE + 1])
+@pytest.mark.parametrize("limit", [0, -1, MAX_LIMIT + 1])
 def test_the_page_size_is_between_1_and_200(limit: int) -> None:
     with pytest.raises(DomainError) as error:
-        validate_page_request(
+        page_request(
             start_date=date(2026, 10, 1),
             end_date=date(2026, 10, 18),
             search=None,
@@ -158,7 +183,7 @@ def test_the_page_size_is_between_1_and_200(limit: int) -> None:
 
 def test_the_cursor_is_decoded_into_the_request() -> None:
     cursor = EntryCursor(date(2026, 10, 16), time(15, 0), 4)
-    request = validate_page_request(
+    request = page_request(
         start_date=date(2026, 10, 1),
         end_date=date(2026, 10, 18),
         search="  ",
@@ -217,6 +242,30 @@ def test_a_code_search_selects_no_cash_entry() -> None:
 def test_an_empty_search_is_none() -> None:
     assert EntrySearch.parse(None) is None
     assert EntrySearch.parse("   ") is None
+
+
+def test_the_cursor_is_checked_once_the_range_and_size_are_valid() -> None:
+    errors = validate_page_request(
+        start_date=date(2026, 10, 18),
+        end_date=date(2026, 10, 17),
+        page=PageParams(limit=0, cursor="not-a-cursor"),
+    )
+
+    assert [(e.code, e.field) for e in errors] == [
+        (ErrorCode.INVALID_RANGE, "start_date"),
+        (ErrorCode.VALIDATION_ERROR, "limit"),
+    ]
+
+
+def test_an_unvalidated_bad_cursor_never_becomes_the_first_page() -> None:
+    with pytest.raises(ValueError, match="validate_page_request"):
+        PageRequest.of(
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 18),
+            search=None,
+            order=ListOrder.DESC,
+            page=PageParams(cursor="not-a-cursor"),
+        )
 
 
 def test_a_description_matches_ignoring_case_and_accents() -> None:

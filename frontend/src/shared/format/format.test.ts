@@ -6,7 +6,9 @@ import {
   displayedSign,
   formatDate,
   formatDateTime,
+  formatDayMonth,
   formatMoney,
+  formatPeriod,
   formatPu,
   formatQuantity,
   formatRate,
@@ -103,6 +105,11 @@ describe('date formatting', () => {
     expect(formatDate('2026-10-15')).toBe('15/10/2026');
     expect(formatDate(null)).toBe('—');
     expect(formatTime('14:10:00')).toBe('14:10');
+  });
+
+  it('§11 shows a short day and month, and an inclusive period with both dates', () => {
+    expect(formatDayMonth('2026-10-05')).toBe('05/10');
+    expect(formatPeriod('2026-10-14', '2026-10-16')).toBe('14/10/2026 a 16/10/2026');
   });
 
   it('OQ-14 takes today from São Paulo, not from UTC', () => {

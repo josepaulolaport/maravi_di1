@@ -37,10 +37,10 @@ from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import QueueSpec, Topology, declare_queue
 from di1.platform.messaging.worker import ConsumerRegistration, WorkerResources
 from di1.platform.observability.heartbeat import Heartbeat
-from di1.shared.clock import FixedClock
 from di1.workers import lifecycle
 from di1.workers import main as worker
 from di1.workers.main import JobFailedError, run_worker
+from tests.fakes.clock import FixedClock
 from tests.integration.platform.conftest import queue_spec
 from tests.integration.platform.support import (
     EFFECT,

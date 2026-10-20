@@ -1,5 +1,5 @@
 import type { IsoDate, ProcessingScope } from '@/api/contract';
-import { scopeToUrl } from '@/shared/processing/scope';
+import { SCOPE_URL } from '@/shared/processing/scope';
 
 export const paths = {
   controlCenter: '/central-de-controle',
@@ -29,7 +29,7 @@ export const controlCenterLinks = {
       tab: 'processamentos',
       inicio: range?.start,
       fim: range?.end,
-      escopo: range?.scope ? scopeToUrl(range.scope) : undefined,
+      escopo: range?.scope ? SCOPE_URL[range.scope] : undefined,
     }),
 };
 

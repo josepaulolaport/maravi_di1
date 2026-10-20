@@ -1,15 +1,13 @@
 import { http, HttpResponse } from 'msw';
 
 import type {
-  ErrorCode,
-  FieldError,
   LedgerEntry,
   ProcessingRequest,
   ProcessingScope,
-  Problem,
   ReferencePrice,
 } from '@/api/contract';
-import { API_BASE } from '@/api/http';
+
+import { fieldError, problem, url } from '../helpers';
 
 import * as fixtures from './fixtures';
 
@@ -18,30 +16,6 @@ import * as fixtures from './fixtures';
 // business rule (no search, ordering, pricing, statuses or processing): that is the backend's,
 // covered by its own suites, the §13 HTTP scenarios and `make e2e`. A test that needs another
 // answer, an error, or what the API returns after a write, says so with `server.use(...)`.
-
-/** Full URL of an API path. */
-export const url = (path: string) => `${API_BASE}${path}`;
-
-export const fieldError = (
-  code: ErrorCode,
-  message: string,
-  field: string | null = null,
-): FieldError => ({ code, message, field });
-
-/** An RFC 9457 problem+json response (OQ-15). */
-export function problem(status: number, errors: FieldError[]) {
-  const body: Problem = {
-    type: 'about:blank',
-    title: 'Erro',
-    status,
-    detail: errors[0]?.message ?? 'Erro',
-    errors,
-  };
-  return HttpResponse.json(body, {
-    status,
-    headers: { 'Content-Type': 'application/problem+json' },
-  });
-}
 
 const notFound = (what: string) =>
   problem(404, [fieldError('NOT_FOUND', `${what} não encontrado.`)]);
