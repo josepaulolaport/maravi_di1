@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
+from di1.platform.messaging import consumer
 from di1.platform.messaging.consumer import Job
 from di1.platform.messaging.envelope import Envelope
 from di1.platform.messaging.publisher import MessagePublisher
@@ -192,10 +193,16 @@ async def test_the_worker_beats_its_heartbeat_from_its_start_until_it_stops(
     release.set()
     stop.set()
     await asyncio.wait_for(running, timeout=10)
-    os.utime(path, (1000.0, 1000.0))
-    # A window in which nothing may happen: there is no event to wait for.
-    await asyncio.sleep(0.2)
-    assert path.stat().st_mtime == 1000.0  # stopped with the worker
+    # run_worker awaits its beat task before it returns: nothing beats the file any more.
+    assert _beating_tasks() == []
+
+
+def _beating_tasks() -> list[asyncio.Task[object]]:
+    return [
+        task
+        for task in asyncio.all_tasks()
+        if getattr(task.get_coro(), "__qualname__", "") == "beat_until_stopped"
+    ]
 
 
 async def _is_consumed(broker: AbstractRobustConnection, name: str) -> bool:
@@ -317,6 +324,10 @@ async def test_a_stop_before_the_ack_rolls_back_and_returns_the_message(
     await eventually(lambda: _has_ready(broker, spec.name, 1), every=0.05)
 
 
+async def _is_not_consumed(broker: AbstractRobustConnection, name: str) -> bool:
+    return not await _is_consumed(broker, name)
+
+
 async def _has_ready(broker: AbstractRobustConnection, name: str, count: int) -> bool:
     return await _ready_messages(broker, name) == count
 
@@ -349,8 +360,9 @@ async def test_a_dropped_broker_connection_does_not_cancel_the_run(
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
     assert await close_connections(management_url, worker.CONNECTION_NAME) >= 1
-    # A window in which nothing may happen: there is no event to wait for.
-    await asyncio.sleep(0.5)
+    # The connection drops (its consumer goes), then the robust connection restores it.
+    await eventually(lambda: _is_not_consumed(broker, spec.name), every=0.05)
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
     assert not handler.cancelled.is_set()
     handler.release.set()
 
@@ -367,10 +379,12 @@ async def test_a_message_arriving_during_a_run_is_acked_at_once_and_starts_nothi
     broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The second message is not left unacked behind the first run (RabbitMQ's consumer
     timeout) and starts nothing: its work stays waiting in the database, and the sweep after the
     first run takes it."""
+    caplog.set_level(logging.INFO, logger=consumer.__name__)
     spec = queue_spec(topology, "test.command")
     handler = _Run(hold_after_ack=True)
     sweeps: list[int] = []
@@ -397,8 +411,7 @@ async def test_a_message_arriving_during_a_run_is_acked_at_once_and_starts_nothi
 
     await publisher.publish(second)
 
-    # A window in which nothing may happen: there is no event to wait for.
-    await asyncio.sleep(0.3)
+    await eventually(lambda: "skipped while a job runs" in caplog.text, every=0.05)
     assert handler.claimed == [first]
     assert sweeps == []
     handler.release.set()
@@ -531,8 +544,9 @@ async def test_the_startup_hook_runs_once_before_the_first_delivery(
         )
     )
     await eventually(lambda: order == ["startup"], every=0.05)
-    # A window in which nothing may happen: there is no event to wait for.
-    await asyncio.sleep(0.3)
+    # The worker connects to the broker only after its startup: nothing consumes the queue yet.
+    assert not await _is_consumed(broker, spec.name)
+    assert await _ready_messages(broker, spec.name) == 1
     assert order == ["startup"]
 
     release.set()
@@ -569,12 +583,12 @@ async def test_a_failing_startup_hook_ends_the_worker_before_it_consumes(
     publisher: MessagePublisher,
 ) -> None:
     """The process then exits 1 (`di1.workers.lifecycle.run_process`) and Docker restarts it.
-    The hook takes a moment before failing, so a worker that consumed early would claim."""
+    The queued command stays unclaimed: the worker connects to the broker only after its
+    startup."""
     spec = await _queued_before_start(broker, broker_url, topology, publisher)
     handler = _Run()
 
     async def recover(resources: WorkerResources) -> None:
-        await asyncio.sleep(0.3)
         raise RuntimeError("recovery failed")
 
     with pytest.raises(RuntimeError, match="recovery failed"):
