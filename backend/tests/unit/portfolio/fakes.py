@@ -49,10 +49,9 @@ class InMemoryPortfolioRepository:
         self.days: dict[date, PublishedPortfolioDay] = {}
         self.positions: dict[date, tuple[PublishedPosition, ...]] = {}
         self.cash: dict[date, CashDay] = {}
-        self.snapshots = 0
 
     async def start_read_snapshot(self) -> None:
-        self.snapshots += 1
+        pass  # one snapshot per transaction: checked against PostgreSQL in the integration tests
 
     async def replace_positions_day(
         self,
@@ -83,12 +82,10 @@ class InMemoryPortfolioRepository:
 class FakeDateStatusReader:
     def __init__(self, statuses: Mapping[date, DateStatus] | None = None) -> None:
         self.statuses = dict(statuses or {})
-        self.reads = 0
 
     async def get_date_statuses(
         self, start_date: date, end_date: date
     ) -> Mapping[date, DateStatus]:
-        self.reads += 1
         return {d: s for d, s in self.statuses.items() if start_date <= d <= end_date}
 
 
@@ -125,14 +122,8 @@ class FakePriceReader:
         return {k: v for k, v in self.prices.items() if k[0] in asset_ids and k[1] in dates}
 
     async def latest(self, asset_ids: Collection[UUID]) -> Mapping[UUID, ReferencePriceRecord]:
-        latest: dict[UUID, ReferencePriceRecord] = {}
-        for (asset_id, _day), record in self.prices.items():
-            if asset_id not in asset_ids:
-                continue
-            current = latest.get(asset_id)
-            if current is None or record.reference_date > current.reference_date:
-                latest[asset_id] = record
-        return latest
+        # Part of the PriceReader protocol; Portfolio reads exact-date prices only (OQ-30).
+        raise AssertionError("Portfolio never reads the latest price")
 
 
 class FakeAssetReader:

@@ -1,13 +1,10 @@
-"""Portfolio's trade input: chronological order and immutability (spec §6.1; OQ-13)."""
+"""Portfolio's trade input: chronological order (spec §6.1; OQ-13). A zero quantity and a trade of
+another date are rejected in test_positions.py::test_an_impossible_input_is_rejected."""
 
 from __future__ import annotations
 
-import dataclasses
 from datetime import date
 
-import pytest
-
-from di1.modules.portfolio.domain.errors import PortfolioError
 from tests.unit.portfolio.factories import trade
 
 
@@ -24,16 +21,3 @@ def test_trades_order_by_date_then_time_then_seq() -> None:
     )
 
     assert ordered == [previous_day, late_seq_early_time, same_time_next_seq, early_seq_late_time]
-
-
-def test_a_trade_is_immutable() -> None:
-    executed = trade(1, "95000")
-
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        executed.signed_quantity = 2  # type: ignore[misc]
-
-
-def test_a_zero_quantity_trade_is_rejected() -> None:
-    # Schema CHECK trades_qty_nonzero (OQ-14).
-    with pytest.raises(PortfolioError):
-        trade(0, "95000")

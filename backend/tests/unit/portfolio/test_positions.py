@@ -1,19 +1,22 @@
-"""The positions chain: signed quantities, intraday order, expected assets (spec §7.2, §8.3).
+"""The positions chain: signed quantities, average entry PU and rate, intraday order, expected
+assets (spec §7.2, §8.3; §13 items 2, 3 and 7; OQ-3, OQ-10, OQ-13). This chain computes no cash.
 
-Spec §13 items 2 and 7; OQ-10 (expected assets), OQ-13 (order). This chain computes no cash.
+Expected averages are worked by hand from the §7.2 rules: each average is weighted by absolute
+quantity, and the average rate is weighted on its own.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 
+from di1.modules.portfolio.domain.average_cost import next_average
 from di1.modules.portfolio.domain.errors import PortfolioError
 from di1.modules.portfolio.domain.positions import (
     OpenPosition,
-    PositionDay,
     PositionState,
     calculate_positions_day,
 )
@@ -27,30 +30,126 @@ def _state(*positions: OpenPosition) -> PositionState:
     return PositionState(as_of=YESTERDAY, positions=positions)
 
 
-def _only_position(state: PositionState, *trades: Trade) -> PositionDay:
-    day = calculate_positions_day(state, trades, DAY)
-    assert len(day.positions) == 1
-    return day.positions[0]
+@pytest.mark.parametrize(
+    ("held", "trades", "previous_quantity", "quantity", "average_pu", "average_rate"),
+    [
+        pytest.param(
+            (), (trade(10, "95000", "0.105"),), 0, 10, "95000", "0.105", id="buy-from-flat"
+        ),
+        pytest.param(
+            (position(-20, "95500", "0.1"),), (), -20, -20, "95500", "0.1", id="untraded-carried"
+        ),
+        # PU: (10 × 95000 + 30 × 96000) / 40 = 95750; rate: (10 × 0.105 + 30 × 0.095) / 40 = 0.0975.
+        # 0.0975 is not the rate implied by PU 95750: the average rate is not derived from the PU.
+        pytest.param(
+            (position(10, "95000", "0.105"),),
+            (trade(30, "96000", "0.095"),),
+            10,
+            40,
+            "95750",
+            "0.0975",
+            id="increase-weights-pu-and-rate-separately",
+        ),
+        # (1 × 90909.0909090909 + 2 × 91000) / 3 = 90969.69696969696666…, stored at 10 places.
+        pytest.param(
+            (),
+            (
+                trade(1, "90909.0909090909", "0.1", at="09:00", seq=1),
+                trade(2, "91000", "0.1", at="09:30", seq=2),
+            ),
+            0,
+            3,
+            "90969.6969696970",
+            "0.1",
+            id="non-terminating-average-rounded-half-up-at-close",
+        ),
+        # PU: (10 × 96000 + 10 × 95000) / 20 = 95500; rate: (10 × 0.095 + 10 × 0.105) / 20 = 0.1.
+        pytest.param(
+            (),
+            (
+                trade(-10, "96000", "0.095", at="09:00", seq=1),
+                trade(-10, "95000", "0.105", at="11:00", seq=2),
+            ),
+            0,
+            -20,
+            "95500",
+            "0.1",
+            id="short-opened-and-increased",
+        ),
+        pytest.param(
+            (position(40, "95750", "0.0975"),),
+            (trade(-15, "97000", "0.08"),),
+            40,
+            25,
+            "95750",
+            "0.0975",
+            id="partial-close-keeps-the-average",
+        ),
+        pytest.param(
+            (position(-20, "95500", "0.1"),),
+            (trade(5, "94000", "0.12"),),
+            -20,
+            -15,
+            "95500",
+            "0.1",
+            id="partial-cover-keeps-the-average",
+        ),
+        # A flat position has no entry price; position_metrics stores NULL.
+        pytest.param(
+            (position(25, "95750", "0.0975"),),
+            (trade(-25, "97000", "0.08"),),
+            25,
+            0,
+            None,
+            None,
+            id="full-close-leaves-no-average",
+        ),
+        pytest.param(
+            (),
+            (trade(10, "95000", at="09:00", seq=1), trade(-10, "95100", at="15:00", seq=2)),
+            0,
+            0,
+            None,
+            None,
+            id="same-day-round-trip-leaves-a-zero-row",
+        ),
+        # Crossing zero opens the remainder at the trade's PU and rate; the row is never split.
+        pytest.param(
+            (position(10, "95000", "0.105"),),
+            (trade(-25, "96000", "0.095"),),
+            10,
+            -15,
+            "96000",
+            "0.095",
+            id="sell-crossing-zero",
+        ),
+        pytest.param(
+            (position(-10, "96000", "0.095"),),
+            (trade(25, "95500", "0.1"),),
+            -10,
+            15,
+            "95500",
+            "0.1",
+            id="buy-crossing-zero",
+        ),
+    ],
+)
+def test_the_closing_quantity_and_averages_follow_the_day_trades(
+    held: tuple[OpenPosition, ...],
+    trades: tuple[Trade, ...],
+    previous_quantity: int,
+    quantity: int,
+    average_pu: str | None,
+    average_rate: str | None,
+) -> None:
+    day = calculate_positions_day(_state(*held), trades, DAY)
 
-
-def test_a_buy_from_flat_opens_a_long_at_the_trade_pu_and_rate() -> None:
-    result = _only_position(PositionState.zero(YESTERDAY), trade(10, "95000", "0.105"))
-
+    (result,) = day.positions
     assert result.asset_id == DI1F27
-    assert result.previous_quantity == 0
-    assert result.quantity == 10
-    assert result.average_entry_pu == Decimal("95000")
-    assert result.average_entry_rate == Decimal("0.105")
-
-
-def test_an_untraded_position_is_carried_unchanged() -> None:
-    result = _only_position(_state(position(-20, "95500", "0.1")))
-
-    assert result.previous_quantity == -20
-    assert result.quantity == -20
-    assert result.average_entry_pu == Decimal("95500")
-    assert result.average_entry_rate == Decimal("0.1")
-    assert result.trades == ()
+    assert (result.previous_quantity, result.quantity) == (previous_quantity, quantity)
+    assert result.average_entry_pu == (None if average_pu is None else Decimal(average_pu))
+    assert result.average_entry_rate == (None if average_rate is None else Decimal(average_rate))
+    assert result.trades == trades  # applied whole, in order
 
 
 def test_same_day_trades_apply_in_time_then_seq_order_never_netted() -> None:
@@ -60,25 +159,14 @@ def test_same_day_trades_apply_in_time_then_seq_order_never_netted() -> None:
     first_buy = trade(10, "95000", "0.105", at="09:00", seq=3)
     sell = trade(-10, "96000", "0.095", at="09:00", seq=4)
 
-    result = _only_position(PositionState.zero(YESTERDAY), late_buy, sell, first_buy)
+    (result,) = calculate_positions_day(
+        PositionState.zero(YESTERDAY), [late_buy, sell, first_buy], DAY
+    ).positions
 
     assert result.quantity == 4
     assert result.average_entry_pu == Decimal("97000")
     assert result.average_entry_rate == Decimal("0.08")
     assert result.trades == (first_buy, sell, late_buy)
-
-
-def test_a_same_day_round_trip_leaves_a_zero_quantity_row() -> None:
-    result = _only_position(
-        PositionState.zero(YESTERDAY),
-        trade(10, "95000", at="09:00", seq=1),
-        trade(-10, "95100", at="15:00", seq=2),
-    )
-
-    assert result.previous_quantity == 0
-    assert result.quantity == 0
-    assert result.average_entry_pu is None
-    assert result.average_entry_rate is None
 
 
 def test_expected_assets_are_those_held_yesterday_or_traded_today() -> None:
@@ -102,39 +190,63 @@ def test_a_position_closed_today_keeps_its_row_today_and_leaves_tomorrow() -> No
     assert tomorrow.positions == ()
 
 
-def test_positions_are_listed_in_asset_id_order() -> None:
+def test_assets_are_listed_in_id_order_and_never_mix_averages() -> None:
     day = calculate_positions_day(
         PositionState.zero(YESTERDAY),
         [
             trade(1, "90000", asset_id=DI1F29, seq=1),
-            trade(1, "91000", asset_id=DI1F27, seq=2),
+            trade(1, "95000", asset_id=DI1F27, seq=2),
             trade(1, "92000", asset_id=DI1F28, seq=3),
         ],
         DAY,
     )
 
-    assert [p.asset_id for p in day.positions] == [DI1F27, DI1F28, DI1F29]
+    assert [(p.asset_id, p.average_entry_pu) for p in day.positions] == [
+        (DI1F27, Decimal("95000")),
+        (DI1F28, Decimal("92000")),
+        (DI1F29, Decimal("90000")),
+    ]
 
 
-def test_trades_of_different_assets_do_not_mix_averages() -> None:
-    day = calculate_positions_day(
-        PositionState.zero(YESTERDAY),
-        [trade(1, "90000", asset_id=DI1F28, seq=1), trade(1, "95000", asset_id=DI1F27, seq=2)],
-        DAY,
+def _flat_carried() -> object:
+    # The next day's state holds open positions only; flat assets are not expected (OQ-10).
+    return position(0, "95000", "0.1")
+
+
+def _same_asset_twice() -> object:
+    return _state(position(1, "95000", "0.1"), position(2, "95000", "0.1"))
+
+
+def _held_without_average() -> object:
+    # A held position always carries an average; a missing one is a broken state, not an opening.
+    return next_average(5, None, 1, Decimal("95000"))
+
+
+def _zero_quantity_trade() -> object:
+    # Schema CHECK trades_qty_nonzero (OQ-14).
+    return trade(0, "95000")
+
+
+def _misdated_trade() -> object:
+    # A chain day reads only its own date's trades (spec §7.2).
+    return calculate_positions_day(
+        PositionState.zero(YESTERDAY), [trade(1, "95000", on=YESTERDAY)], DAY
     )
 
-    assert [p.average_entry_pu for p in day.positions] == [Decimal("95000"), Decimal("90000")]
 
-
-def test_a_flat_position_is_never_carried() -> None:
-    # The next day's state holds open positions only; flat assets are not expected (OQ-10).
+@pytest.mark.parametrize(
+    "build",
+    [
+        pytest.param(_flat_carried, id="flat-position-carried"),
+        pytest.param(_same_asset_twice, id="same-asset-twice-in-a-state"),
+        pytest.param(_held_without_average, id="held-quantity-without-an-average"),
+        pytest.param(_zero_quantity_trade, id="zero-quantity-trade"),
+        pytest.param(_misdated_trade, id="trade-of-another-date"),
+    ],
+)
+def test_an_impossible_input_is_rejected(build: Callable[[], object]) -> None:
     with pytest.raises(PortfolioError):
-        position(0, "95000", "0.1")
-
-
-def test_a_state_holding_the_same_asset_twice_is_rejected() -> None:
-    with pytest.raises(PortfolioError):
-        _state(position(1, "95000", "0.1"), position(2, "95000", "0.1"))
+        build()
 
 
 @pytest.mark.parametrize("gap", [2, 0])

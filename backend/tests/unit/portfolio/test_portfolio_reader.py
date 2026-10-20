@@ -6,6 +6,8 @@ from datetime import timedelta
 from decimal import Decimal
 from uuid import UUID
 
+import pytest
+
 from di1.modules.pnl.public import CalculationCompleteness
 from di1.modules.portfolio.application.ports import (
     PublishedPortfolioDay,
@@ -13,6 +15,7 @@ from di1.modules.portfolio.application.ports import (
 )
 from di1.modules.portfolio.application.services.portfolio_reader import DefaultPortfolioReader
 from di1.modules.portfolio.domain.cash import CashBalance
+from di1.modules.portfolio.domain.errors import PortfolioError
 from di1.modules.portfolio.domain.positions import PositionState
 from di1.modules.portfolio.domain.valuation import ValuationStatus
 from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28, position
@@ -87,6 +90,17 @@ async def test_a_published_day_with_no_position_starts_empty() -> None:
     assert previous is not None
     assert previous.state == PositionState.zero(YESTERDAY)
     assert previous.cumulative_pnl is None  # the chain was already broken
+
+
+async def test_a_published_open_position_without_an_average_is_rejected() -> None:
+    # A held position always carries its average entry PU and rate (spec §7.2): rows that disagree
+    # are a technical fault, never a silent opening at an unknown price.
+    repository = InMemoryPortfolioRepository()
+    repository.days[YESTERDAY] = _portfolio_day("0")
+    repository.positions[YESTERDAY] = (_published(DI1F27, 10, None, None),)
+
+    with pytest.raises(PortfolioError, match="has no average"):
+        await DefaultPortfolioReader(repository).get_previous_positions(DAY)
 
 
 async def test_the_cash_starts_from_the_published_balance() -> None:
