@@ -6,7 +6,8 @@ the schema's CHECKs: rate > −1, PU > 0, quantity ≠ 0, amount ≠ 0, plus the
 INTEGER and NUMERIC(20,2)). All the errors are reported together, the maturity's included.
 
 The typed quote's rules are Pricing's one validation (code-review finding H3), which Ledger runs
-on its request fields; these tests run it through Ledger's own binding.
+on its request fields; these tests run it through Ledger's own binding. The validators return
+every problem; like the service, the helpers below raise them as one `DomainError`.
 """
 
 from __future__ import annotations
@@ -17,14 +18,9 @@ from uuid import UUID
 
 import pytest
 
-from di1.modules.ledger.application.services.ledger_service import validate_trade_quote
-from di1.modules.ledger.domain.entries import (
-    EntryDraft,
-    EntryType,
-    cash_description,
-    validate_cash_movement,
-)
-from di1.modules.ledger.domain.entries import validate_trade as validate_any_trade
+from di1.modules.ledger.application.services.ledger_service import validate_new_trade
+from di1.modules.ledger.domain import entries
+from di1.modules.ledger.domain.entries import EntryDraft, EntryType, cash_description
 from di1.shared.clock import SAO_PAULO
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
@@ -34,14 +30,18 @@ ASSET = UUID("6f1c2a10-0000-4000-8000-0000000000f8")
 DI1F28 = date(2028, 1, 3)
 
 
-def validate_trade(draft: EntryDraft, *, today: date, instrument: date | None = DI1F28) -> Decimal:
-    return validate_any_trade(
-        draft,
-        today=today,
-        known=instrument is not None,
-        maturity_date=instrument,
-        validate_quote=validate_trade_quote,
+def validate_trade(draft: EntryDraft, *, today: date, instrument: date | None = DI1F28) -> None:
+    errors = validate_new_trade(
+        draft, today=today, maturity_date=instrument, known=instrument is not None
     )
+    if errors:
+        raise DomainError(*errors)
+
+
+def validate_cash_movement(draft: EntryDraft, *, today: date) -> None:
+    errors = entries.validate_cash_movement(draft, today=today)
+    if errors:
+        raise DomainError(*errors)
 
 
 def _trade(**overrides: object) -> EntryDraft:
@@ -76,15 +76,12 @@ def _errors(error: pytest.ExceptionInfo[DomainError]) -> set[tuple[ErrorCode, st
 # --- trades -------------------------------------------------------------------------------------
 
 
-def test_a_rate_typed_trade_keeps_the_typed_rate() -> None:
-    typed = validate_trade(_trade(), today=TODAY, instrument=DI1F28)
-
-    assert typed == Decimal("0.10")
-    assert str(typed) == "0.10"  # as typed, trailing zero kept (OQ-3)
+def test_a_rate_typed_trade_is_accepted() -> None:
+    validate_trade(_trade(), today=TODAY, instrument=DI1F28)
 
 
-def test_a_pu_typed_sell_is_negative() -> None:
-    trade = validate_trade(
+def test_a_pu_typed_sell_is_accepted() -> None:
+    validate_trade(
         _trade(
             signed_quantity=-4,
             input_kind=InputKind.PU,
@@ -95,13 +92,11 @@ def test_a_pu_typed_sell_is_negative() -> None:
         instrument=DI1F28,
     )
 
-    assert str(trade) == "82057.00"
-
 
 def test_today_and_weekends_are_accepted() -> None:
     saturday = date(2026, 10, 17)
-    assert validate_trade(_trade(entry_date=TODAY), today=TODAY, instrument=DI1F28)
-    assert validate_trade(_trade(entry_date=saturday), today=TODAY, instrument=DI1F28)
+    validate_trade(_trade(entry_date=TODAY), today=TODAY, instrument=DI1F28)
+    validate_trade(_trade(entry_date=saturday), today=TODAY, instrument=DI1F28)
 
 
 def test_a_trade_after_today_is_rejected() -> None:
@@ -165,10 +160,9 @@ def test_rate_or_pu_is_typed_never_both() -> None:
 
 def test_a_typed_pu_with_more_than_10_places_is_rejected_not_rounded() -> None:
     typed = {"input_kind": InputKind.PU, "execution_rate": None}
-    ten = validate_trade(
+    validate_trade(
         _trade(**typed, execution_pu=Decimal("89006.4625467350")), today=TODAY, instrument=DI1F28
     )
-    assert ten == Decimal("89006.4625467350")
 
     with pytest.raises(DomainError) as error:
         validate_trade(
@@ -181,9 +175,7 @@ def test_a_typed_pu_with_more_than_10_places_is_rejected_not_rounded() -> None:
 
 
 def test_a_typed_rate_with_more_than_12_places_is_rejected_trailing_zeros_count() -> None:
-    assert validate_trade(
-        _trade(execution_rate=Decimal("0.100000000000")), today=TODAY, instrument=DI1F28
-    )
+    validate_trade(_trade(execution_rate=Decimal("0.100000000000")), today=TODAY, instrument=DI1F28)
     with pytest.raises(DomainError) as error:
         validate_trade(
             _trade(execution_rate=Decimal("0.1000000000000")), today=TODAY, instrument=DI1F28
@@ -206,7 +198,7 @@ def test_the_pu_must_be_positive(pu: str) -> None:
 
 
 def test_the_rate_must_be_greater_than_minus_one() -> None:
-    assert validate_trade(
+    validate_trade(
         _trade(execution_rate=Decimal("-0.999999999999")), today=TODAY, instrument=DI1F28
     )
     with pytest.raises(DomainError) as error:
@@ -269,7 +261,7 @@ MATURING = date(2026, 10, 16)
 
 
 def test_a_trade_on_the_maturity_date_with_a_typed_pu_is_accepted() -> None:
-    trade = validate_trade(
+    validate_trade(
         _trade(
             entry_date=date(2026, 10, 16),
             input_kind=InputKind.PU,
@@ -279,8 +271,6 @@ def test_a_trade_on_the_maturity_date_with_a_typed_pu_is_accepted() -> None:
         today=TODAY,
         instrument=MATURING,
     )
-
-    assert trade == Decimal("100000")
 
 
 def test_a_rate_typed_on_the_maturity_date_is_rejected() -> None:
@@ -342,18 +332,17 @@ def test_a_trade_after_the_maturity_date_is_rejected() -> None:
 
 def test_a_maturity_after_today_is_exempt_from_the_future_date_rule() -> None:
     assert DI1F28 > TODAY
-    assert validate_trade(_trade(entry_date=TODAY), today=TODAY, instrument=DI1F28)
+    validate_trade(_trade(entry_date=TODAY), today=TODAY, instrument=DI1F28)
 
 
 # --- cash movements -----------------------------------------------------------------------------
 
 
-def test_a_deposit_is_positive_and_a_withdrawal_negative() -> None:
-    deposit = validate_cash_movement(_cash(), today=TODAY)
-    withdrawal = validate_cash_movement(_cash(cash_amount=Decimal("-50000.00")), today=TODAY)
-
-    assert deposit == Decimal("1500000.00")
-    assert withdrawal == Decimal("-50000.00")
+def test_a_positive_deposit_and_a_negative_withdrawal_are_accepted() -> None:
+    # The signed amount is stored as given (test_ledger_service, test_ledger_persistence).
+    assert entries.validate_cash_movement(_cash(), today=TODAY) == ()
+    withdrawal = _cash(cash_amount=Decimal("-50000.00"))
+    assert entries.validate_cash_movement(withdrawal, today=TODAY) == ()
 
 
 @pytest.mark.parametrize("amount", [None, "0", "0.00", "-0"])
@@ -376,8 +365,8 @@ def test_an_amount_with_more_than_2_places_is_rejected() -> None:
 
 def test_the_amount_fits_numeric_20_2() -> None:
     largest = Decimal("999999999999999999.99")
-    assert validate_cash_movement(_cash(cash_amount=largest), today=TODAY) == largest
-    assert validate_cash_movement(_cash(cash_amount=-largest), today=TODAY) == -largest
+    validate_cash_movement(_cash(cash_amount=largest), today=TODAY)
+    validate_cash_movement(_cash(cash_amount=-largest), today=TODAY)
 
     with pytest.raises(DomainError) as error:
         validate_cash_movement(_cash(cash_amount=Decimal("1000000000000000000")), today=TODAY)
@@ -416,7 +405,7 @@ def test_trade_fields_on_a_cash_movement_are_rejected() -> None:
 def test_a_cash_movement_keeps_its_description_trimmed() -> None:
     draft = _cash(description="  Aporte inicial \n")
 
-    assert validate_cash_movement(draft, today=TODAY) == Decimal("1500000.00")
+    assert entries.validate_cash_movement(draft, today=TODAY) == ()
     assert cash_description(draft) == "Aporte inicial"
 
 
@@ -433,7 +422,7 @@ def test_an_absent_or_blank_description_is_none(description: str | None) -> None
 def test_a_description_of_200_characters_is_accepted() -> None:
     draft = _cash(description=f" {'á' * 200} ")
 
-    assert validate_cash_movement(draft, today=TODAY) == Decimal("1500000.00")
+    assert entries.validate_cash_movement(draft, today=TODAY) == ()
     assert cash_description(draft) == "á" * 200
 
 
@@ -476,7 +465,7 @@ def test_a_trade_takes_no_description(description: str) -> None:
 @pytest.mark.parametrize("description", [None, "", "   "])
 def test_a_blank_description_on_a_trade_is_no_description(description: str | None) -> None:
     # Trimmed first, as on a cash entry: blank is absent (OQ-51 item 1).
-    assert validate_trade(_trade(description=description), today=TODAY, instrument=DI1F28)
+    validate_trade(_trade(description=description), today=TODAY, instrument=DI1F28)
 
 
 def test_the_validators_refuse_a_draft_of_the_other_type() -> None:

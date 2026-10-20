@@ -15,9 +15,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from di1.modules.ledger.domain.entries import EntryType, LedgerEntry, entries_to_delete
+from di1.modules.ledger.domain.entries import EntryType, LedgerEntry, validate_deletion
 from di1.shared.clock import SAO_PAULO
-from di1.shared.errors import DomainError, ErrorCode
+from di1.shared.errors import ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 
 CREATED = datetime(2026, 10, 14, 14, 11, 2, tzinfo=SAO_PAULO)
@@ -109,28 +109,25 @@ def test_the_order_key_is_date_time_seq() -> None:
 
 def test_an_unknown_id_deletes_nothing() -> None:
     known = trade()
-    with pytest.raises(DomainError) as error:
-        entries_to_delete([known.id, uuid4()], {known.id})
-
-    assert error.value.code is ErrorCode.NOT_FOUND
-    assert error.value.errors[0].message == "Lançamento não encontrado."
+    assert validate_deletion([known.id, uuid4()], {known.id}) == (
+        ErrorDetail(ErrorCode.NOT_FOUND, "Lançamento não encontrado."),
+    )
 
 
 def test_an_empty_batch_is_rejected() -> None:
-    with pytest.raises(DomainError) as error:
-        entries_to_delete([], set())
+    (error,) = validate_deletion([], set())
 
-    assert error.value.code is ErrorCode.VALIDATION_ERROR
-    assert error.value.errors[0].field == "ids"
+    assert error.code is ErrorCode.VALIDATION_ERROR
+    assert error.field == "ids"
 
 
 def test_a_mixed_batch_deletes_every_requested_entry() -> None:
     deposit, sell = cash(date(2026, 10, 14)), trade(date(2026, 10, 16), quantity=-4)
 
-    assert entries_to_delete([sell.id, deposit.id], {deposit.id, sell.id}) == (sell.id, deposit.id)
+    assert validate_deletion([sell.id, deposit.id], {deposit.id, sell.id}) == ()
 
 
-def test_a_repeated_id_is_deleted_once() -> None:
+def test_a_repeated_id_is_valid() -> None:
     entry = trade()
 
-    assert entries_to_delete([entry.id, entry.id], {entry.id}) == (entry.id,)
+    assert validate_deletion([entry.id, entry.id], {entry.id}) == ()

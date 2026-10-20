@@ -1,6 +1,6 @@
 """The production `Clock`: real time in America/Sao_Paulo (OQ-14).
 
-Tests use `di1.shared.clock.FixedClock` instead.
+Tests use `tests.fakes.clock.FixedClock` instead.
 """
 
 from __future__ import annotations

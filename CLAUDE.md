@@ -109,7 +109,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
 - Docker Compose runs the API, PostgreSQL, RabbitMQ, the worker and the outbox relay; there is no dispatcher (OQ-46).
 
 **Modular monolith:** the modules are `asset`, `pricing`, `ledger`, `prices`, `portfolio`, `pnl` and `processing`; `platform` holds the shared technical infrastructure. The layout is in `docs/maravi_implementation_plan.md` §1:
-- `backend/src/di1/modules/<m>/{public.py, domain/, application/services/, application/interfaces/ when the module has several persistence ports (processing), infrastructure/, presentation/http/, presentation/messaging/}`
+- `backend/src/di1/modules/<m>/{public.py, domain/, application/ports.py (repository Protocols), application/services/, application/interfaces/ when the module has several persistence ports (processing, until it moves to ports.py), infrastructure/, presentation/http/, presentation/messaging/}`
 - `infrastructure/` holds persistence and any other outbound adapter. A module's RabbitMQ consumers and handlers live in `presentation/messaging/`; shared RabbitMQ infrastructure lives in `platform/messaging/`; business processing logic stays in `application/`.
 - `composition/`, `workers/`, `platform/`
 

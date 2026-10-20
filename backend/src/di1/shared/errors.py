@@ -78,6 +78,33 @@ class DomainError(Exception):
         return self.errors[0].code
 
 
+def invalid_range(field: str = "start_date") -> ErrorDetail:
+    """A date range whose start is after its end (OQ-11)."""
+    return ErrorDetail(
+        ErrorCode.INVALID_RANGE, "A data inicial deve ser anterior ou igual à data final.", field
+    )
+
+
+def future_date(field: str) -> ErrorDetail:
+    """A date after today in São Paulo (OQ-14)."""
+    return ErrorDetail(ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", field)
+
+
+def unknown_asset(field: str = "asset_id") -> ErrorDetail:
+    """A body or query field naming no contract: a validation error, never ``NOT_FOUND``."""
+    return ErrorDetail.validation("Selecione um contrato.", field)
+
+
+def invalid_cursor() -> ErrorDetail:
+    """A list cursor the API did not write (spec §12)."""
+    return ErrorDetail.validation("Cursor inválido.", "cursor")
+
+
+def limit_out_of_range(maximum: int) -> ErrorDetail:
+    """A page size outside [1, ``maximum``] (spec §12)."""
+    return ErrorDetail.validation(f"Use um limite entre 1 e {maximum}.", "limit")
+
+
 MAX_RANGE_DATES = 3660
 """The most dates, both ends included (about ten years), a processing request or a P&L series
 may span: a run of decades would hold the one worker for hours, and a series of decades builds
