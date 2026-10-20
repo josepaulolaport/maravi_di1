@@ -45,7 +45,10 @@ export function DateField({
   const [refused, setRefused] = useState<string | null>(null);
   const [sync, setSync] = useState({ value, own: value, key: 0 });
   if (sync.value !== value) {
-    setSync({ value, own: value, key: value === sync.own ? sync.key : sync.key + 1 });
+    const outside = value !== sync.own;
+    setSync({ value, own: value, key: outside ? sync.key + 1 : sync.key });
+    // Another date was chosen elsewhere: the refusal of the typed one no longer applies.
+    if (outside) setRefused(null);
   }
   const change = (next: IsoDate | null) => {
     setSync((current) => ({ ...current, own: next }));

@@ -31,6 +31,15 @@ function Harness({
         value={date}
         onChange={setDate}
       />
+      {/* A date set from outside, as a link or a retry prefill does. */}
+      <button
+        type="button"
+        onClick={() => {
+          setDate('2026-10-05');
+        }}
+      >
+        Preencher
+      </button>
     </form>
   );
 }
@@ -80,5 +89,20 @@ describe('DateField', () => {
 
     expect(input).toHaveValue('18/10/2026');
     expect(input).not.toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('OQ-14 a date set from outside replaces a refused one, and its message goes with it', async () => {
+    renderUi(<Harness maxDate="2026-10-18" onSubmit={() => undefined} />);
+    const user = userEvent.setup();
+    const input = screen.getByRole('textbox', { name: 'Data' });
+    await user.clear(input);
+    await user.type(input, '19/10/2026');
+    await user.tab();
+    expect(await screen.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Preencher' }));
+
+    expect(screen.getByRole('textbox', { name: 'Data' })).toHaveValue('05/10/2026');
+    expect(screen.queryByText('A data não pode ser posterior a hoje.')).not.toBeInTheDocument();
   });
 });
