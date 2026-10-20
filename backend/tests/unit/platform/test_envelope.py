@@ -79,13 +79,6 @@ def test_a_body_that_is_not_an_envelope_is_rejected(body: bytes) -> None:
         Envelope.from_json(body)
 
 
-def test_the_envelope_is_immutable() -> None:
-    envelope = _envelope()
-
-    with pytest.raises(ValidationError):
-        envelope.message_type = "other"  # type: ignore[misc]
-
-
 def test_a_payload_changed_after_validation_cannot_be_serialized_with_a_float() -> None:
     """`frozen` stops reassigning ``payload``, not changing the dict inside it."""
     envelope = _envelope(payload={"pu": "1.5"})

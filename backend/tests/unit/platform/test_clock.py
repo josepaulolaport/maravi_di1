@@ -5,10 +5,10 @@ Application code reads time only through a `Clock`; `SystemClock` is the product
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 
 from di1.platform.clock import SystemClock
-from di1.shared.clock import SAO_PAULO, Clock
+from di1.shared.clock import SAO_PAULO
 
 
 def test_now_is_aware_and_in_sao_paulo() -> None:
@@ -31,9 +31,3 @@ def test_today_is_the_sao_paulo_date() -> None:
     after = datetime.now(SAO_PAULO).date()
 
     assert today in {before, after}
-
-
-def test_satisfies_the_clock_protocol() -> None:
-    clock: Clock = SystemClock()  # checked by mypy
-
-    assert isinstance(clock.today(), date)

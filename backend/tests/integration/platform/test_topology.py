@@ -7,10 +7,8 @@ interfaces.md "Transaction boundaries" 7; plan §5 H.
 
 from __future__ import annotations
 
-import asyncio
-
 import aio_pika
-from aio_pika.abc import AbstractIncomingMessage, AbstractRobustConnection
+from aio_pika.abc import AbstractRobustConnection
 
 from di1.platform.messaging.topology import Topology, declare_exchange, declare_queue
 from tests.support.broker import queue_spec
@@ -56,14 +54,17 @@ async def test_a_queue_receives_only_its_message_types(
     for key in ("test.command", "other.command"):
         await exchange.publish(aio_pika.Message(body=key.encode()), routing_key=key)
 
-    received: list[bytes] = []
+    async def routed() -> bool:
+        """Each queue holds exactly one message (passive declares count them)."""
+        passive = await broker.channel()
+        try:
+            names = (work.name, queue_spec(topology, name="other").name)
+            queues = [await passive.declare_queue(name, passive=True) for name in names]
+            return [q.declaration_result.message_count for q in queues] == [1, 1]
+        finally:
+            await passive.close()
 
-    async def take(message: AbstractIncomingMessage) -> None:
-        received.append(message.body)
-        await message.ack()
-
-    await work.consume(take)
-    await eventually(lambda: bool(received), every=0.05)
-    # A window in which nothing may happen: there is no event to wait for.
-    await asyncio.sleep(0.2)
-    assert received == [b"test.command"]
+    await eventually(routed, every=0.05)
+    message = await work.get()
+    assert message.body == b"test.command"
+    await message.ack()
