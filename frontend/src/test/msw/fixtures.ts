@@ -145,6 +145,7 @@ export const cashEntries: CashLedgerEntry[] = [
     time: '09:00:00',
     seq: 1,
     cash_amount: '1500000.00',
+    description: 'Aporte inicial',
     created_at: '2026-10-14T09:00:00-03:00',
   },
   {
@@ -154,6 +155,7 @@ export const cashEntries: CashLedgerEntry[] = [
     time: '17:30:00',
     seq: 5,
     cash_amount: '-50000.00',
+    description: null,
     created_at: '2026-10-16T17:30:00-03:00',
   },
 ];

@@ -20,13 +20,18 @@ interface CashValues {
   date: IsoDate | null;
   time: string;
   amount: string;
+  description: string;
 }
 
 const FIELD_MAP: Record<string, keyof CashValues> = {
   date: 'date',
   time: 'time',
   cash_amount: 'amount',
+  description: 'description',
 };
+
+/** `ledger.entries.description VARCHAR(200)` (OQ-51). */
+const DESCRIPTION_MAX_LENGTH = 200;
 
 const LABELS = {
   DEPOSIT: { submit: 'Registrar aporte', done: 'Aporte registrado.' },
@@ -37,7 +42,8 @@ const LABELS = {
  * Aporte or retirada (§6.2): a date, a time and a positive amount; the side gives the sign, as
  * it does for a trade's quantity. The amount is sent exactly as typed, so the backend rejects
  * more than 2 places (OQ-3). Date and time are suggested as today and now in São Paulo, like a
- * trade (user, 2026-10-18: every entry has a time). No description (GAP-I-2).
+ * trade (user, 2026-10-18: every entry has a time). An optional description of at most 200
+ * characters is sent trimmed, and left out when blank (OQ-51).
  */
 export function CashMovementForm({
   type,
@@ -52,7 +58,7 @@ export function CashMovementForm({
   const [pageErrors, setPageErrors] = useState<string[]>([]);
 
   const form = useForm<CashValues>({
-    initialValues: { date: today, time: nowInSaoPaulo(), amount: '' },
+    initialValues: { date: today, time: nowInSaoPaulo(), amount: '', description: '' },
     validate: {
       date: (value) => (value ? null : 'Informe a data.'),
       time: (value) => (/^\d{2}:\d{2}(:\d{2})?$/.test(value) ? null : 'Informe a hora.'),
@@ -73,12 +79,14 @@ export function CashMovementForm({
     const date = values.date;
     if (!date || amount === null) return;
     setPageErrors([]);
+    const description = values.description.trim();
     createMovement.mutate(
       {
         type: 'CASH',
         date,
         time: toIsoTime(values.time),
         cash_amount: type === 'DEPOSIT' ? amount : `-${amount}`,
+        ...(description ? { description } : {}),
       },
       {
         onSuccess: () => {
@@ -119,6 +127,13 @@ export function CashMovementForm({
           inputMode="decimal"
           placeholder="1.500.000,00"
           {...form.getInputProps('amount')}
+        />
+        <TextInput
+          label="Descrição"
+          description={`Opcional. ${form.values.description.length}/${DESCRIPTION_MAX_LENGTH} caracteres.`}
+          maxLength={DESCRIPTION_MAX_LENGTH}
+          placeholder="Aporte inicial"
+          {...form.getInputProps('description')}
         />
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={onDone} disabled={createMovement.isPending}>
