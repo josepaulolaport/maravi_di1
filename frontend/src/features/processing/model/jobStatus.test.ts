@@ -61,14 +61,27 @@ describe('job status (§10.3, OQ-20)', () => {
     });
   });
 
-  it('OQ-50 item 6: a run that completed with a cancel on record reads by its end status only', () => {
-    // A cancel that arrived during the last date lets the run end COMPLETED (OQ-23 item 6).
-    expect(runBadge(withCancel('COMPLETED', '2026-10-18T13:05:00Z'))).toEqual({
-      label: 'Concluído',
-      color: 'teal',
-    });
-    expect(canCancel(withCancel('COMPLETED', '2026-10-18T13:05:00Z'))).toBe(false);
-  });
+  it.each<JobStatus>([
+    'QUEUED',
+    'DISPATCHED',
+    'CANCELLING',
+    'CANCELLED',
+    'COMPLETED',
+    'COMPLETED_WITH_ISSUES',
+    'FAILED',
+  ])(
+    'OQ-50 item 6: a %s run with a cancel on record reads by its status only, never Cancelando',
+    (status) => {
+      // A cancel asked during a date that then fails ends FAILED; one during the last date ends
+      // COMPLETED or COMPLETED_WITH_ISSUES (OQ-23 item 6). Only RUNNING turns into Cancelando.
+      const cancelled = withCancel(status, '2026-10-18T13:05:00Z');
+      const badge = runBadge(cancelled);
+
+      expect(badge).toEqual(runBadge(withCancel(status)));
+      if (status !== 'CANCELLING') expect(badge.label).not.toBe('Cancelando');
+      if (isFinal(status)) expect(canCancel(cancelled)).toBe(false);
+    },
+  );
 
   it('OQ-23 there are eight statuses: no SUPERSEDED (Obsoleto)', () => {
     expect(
