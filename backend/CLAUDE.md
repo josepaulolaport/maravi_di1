@@ -93,7 +93,7 @@ Create only the files and packages that are used. Initially only Processing has 
 
 ## Commands (from `backend/`)
 
-The full suite is `make test-backend` from the repository root (`scripts/test-backend.sh`): it starts throwaway `postgres:16` and `rabbitmq:4.1-management` containers on free ports (or uses `TEST_DATABASE_URL` / `TEST_RABBITMQ_URL`), sets `REQUIRE_DATABASE_TESTS=1` and `REQUIRE_BROKER_TESTS=1`, and so never skips a database or broker test (README, Setup). Bare `uv run pytest` is for quick local runs:
+The full suite is `make test-backend` from the repository root (`scripts/test-backend.sh`): it starts throwaway `postgres:16` and `rabbitmq:4.1-management` containers on free ports (or uses `TEST_DATABASE_URL` / `TEST_RABBITMQ_URL`), sets `REQUIRE_DATABASE_TESTS=1` and `REQUIRE_BROKER_TESTS=1`, and so never skips a database or broker test (docs/development.md, "Setup in 30 seconds"). Bare `uv run pytest` is for quick local runs:
 
 ```bash
 uv sync

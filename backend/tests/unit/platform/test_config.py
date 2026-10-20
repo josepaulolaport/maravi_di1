@@ -148,7 +148,8 @@ DOCUMENTED = {
     "RABBITMQ_PUBLISH_TIMEOUT_SECONDS",
     "OUTBOX_RELAY_BATCH_SIZE",
 }
-"""Defaults the README and compose.yaml also quote (the 5 s sweep, the 7-day retention, ...)."""
+"""Defaults docs/development.md and compose.yaml also quote (the 5 s sweep, the 7-day
+retention, ...)."""
 
 
 def _documented_defaults() -> dict[str, str]:
