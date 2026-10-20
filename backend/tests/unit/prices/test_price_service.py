@@ -27,22 +27,15 @@ from di1.modules.pricing.dependencies import build_pricing_service
 from di1.modules.pricing.public import PricingService
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
-from tests.fakes.clock import FixedClock
-from tests.unit.prices.fakes import (
-    FakeAssets,
-    FakeUnitOfWork,
-    PricingSpy,
-    RecordingRepository,
-    instrument,
-    record,
-)
+from tests.support.builders import DI1F28
+from tests.support.fakes import FakeAssetReader, FakeClock, FakeUnitOfWork, PricingSpy
+from tests.unit.prices.fakes import RecordingRepository, record
 
 TODAY = date(2026, 10, 19)
 DAY = date(2026, 10, 16)
 UNKNOWN_ASSET = ErrorDetail(ErrorCode.VALIDATION_ERROR, "Selecione um contrato.", "asset_id")
 
-ASSETS = FakeAssets()
-DI1F28 = ASSETS.add(instrument(maturity_date=date(2028, 1, 3)))
+ASSETS = FakeAssetReader(DI1F28)
 
 
 def _service(
@@ -54,7 +47,7 @@ def _service(
         uow,
         assets=ASSETS,
         pricing=pricing or build_pricing_service(ASSETS),
-        clock=FixedClock(TODAY),
+        clock=FakeClock(TODAY),
     )
 
 

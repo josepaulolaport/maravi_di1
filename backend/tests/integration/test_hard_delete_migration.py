@@ -9,9 +9,7 @@ from __future__ import annotations
 
 from alembic import command
 
-from tests.integration.alembic_support import alembic_config, database_url, execute, fetch
-
-__all__ = ["database_url"]
+from tests.support.db import alembic_config, execute, fetch
 
 ENTRIES = (
     "INSERT INTO ledger.entries (type, entry_date, entry_time, cash_amount, deleted_at,"

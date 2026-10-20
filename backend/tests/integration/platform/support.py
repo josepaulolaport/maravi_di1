@@ -7,12 +7,7 @@ own (`CREATE_EFFECTS`), so no business table is touched.
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
-import inspect
-import json
-import urllib.parse
-import urllib.request
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -137,49 +132,3 @@ async def consuming(queue: AbstractQueue, handler: MessageHandler) -> AsyncItera
         loop.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await loop
-
-
-async def eventually(condition: Callable[[], bool | Awaitable[bool]], within: float = 10.0) -> None:
-    """Poll state that lives in the broker or the database: there is no event to await."""
-    async with asyncio.timeout(within):
-        while True:
-            result = condition()
-            if await result if inspect.isawaitable(result) else result:
-                return
-            await asyncio.sleep(0.05)
-
-
-def _management(url: str, method: str, path: str) -> object:
-    parsed = urllib.parse.urlsplit(url)
-    credentials = f"{parsed.username}:{parsed.password}".encode()
-    request = urllib.request.Request(
-        f"{parsed.scheme}://{parsed.hostname}:{parsed.port}{path}",
-        method=method,
-        headers={"Authorization": f"Basic {base64.b64encode(credentials).decode()}"},
-    )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        body = response.read()
-    return json.loads(body) if body else None
-
-
-async def close_connections(url: str, connection_name: str) -> int:
-    def close() -> int:
-        connections = _management(url, "GET", "/api/connections")
-        names = [
-            entry["name"]
-            for entry in connections  # type: ignore[attr-defined]
-            if entry.get("user_provided_name") == connection_name
-        ]
-        for name in names:
-            _management(url, "DELETE", f"/api/connections/{urllib.parse.quote(name, safe='')}")
-        return len(names)
-
-    closed = 0
-
-    async def any_closed() -> bool:  # the management API lists new connections late
-        nonlocal closed
-        closed = await asyncio.to_thread(close)
-        return closed > 0
-
-    await eventually(any_closed, within=15)
-    return closed

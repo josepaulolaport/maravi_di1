@@ -11,11 +11,10 @@ refusal through on Pricing's field names, and refuses an unknown or non-DI1 inst
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -23,32 +22,10 @@ from di1.modules.asset.public import AssetReader, Instrument
 from di1.modules.pricing.dependencies import build_pricing_service
 from di1.modules.pricing.public import InputKind, Price, PricingService, Quote
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
-from tests.fakes.asset import CREATED_AT
+from tests.support.builders import CHALLENGE_DI1F28
+from tests.support.fakes import FakeAssetReader
 
-DI1F28 = Instrument(
-    id=uuid4(),
-    code="DI1F28",
-    product_id=uuid4(),
-    product_code="DI1",
-    instrument_type="FUTURE",
-    asset_class="INTEREST_RATE_FUTURE",
-    maturity_date=date(2028, 1, 1),
-    face_value=Decimal("100000"),
-    multiplier=Decimal("1"),
-    settlement_method="CASH",
-    created_at=CREATED_AT,
-)
 ONE_YEAR_BEFORE = date(2027, 1, 1)  # 365 calendar days to DI1F28's maturity
-
-
-class FakeAssetReader:
-    """`AssetReader` over a fixed set of instruments; unknown ids are absent."""
-
-    def __init__(self, *instruments: Instrument) -> None:
-        self._instruments = {instrument.id: instrument for instrument in instruments}
-
-    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
-        return {i: self._instruments[i] for i in instrument_ids if i in self._instruments}
 
 
 def service_for(*instruments: Instrument) -> PricingService:
@@ -66,7 +43,9 @@ RATE_10 = Quote(InputKind.RATE, Decimal("0.10"))
 
 async def test_the_challenge_example_prices_from_the_instrument() -> None:
     # DI1F28 at 10% a.a. on 01/01/2027: 100000 / 1.1 (desafio §5; spec §15 D4).
-    price = await service_for(DI1F28).calculate(DI1F28.id, ONE_YEAR_BEFORE, RATE_10)
+    price = await service_for(CHALLENGE_DI1F28).calculate(
+        CHALLENGE_DI1F28.id, ONE_YEAR_BEFORE, RATE_10
+    )
 
     assert price == Price(
         pu=Decimal("90909.0909090909"), rate=Decimal("0.10"), input_kind=InputKind.RATE
@@ -78,27 +57,27 @@ async def test_the_challenge_example_prices_from_the_instrument() -> None:
     [
         # 1000 / 1.1 = 909.090909090909…
         pytest.param(
-            replace(DI1F28, id=uuid4(), face_value=Decimal("1000")),
+            replace(CHALLENGE_DI1F28, id=uuid4(), face_value=Decimal("1000")),
             ONE_YEAR_BEFORE,
             "909.0909090909",
             id="face-value",
         ),
         # 01/01/2029 → 01/01/2031: 730 days, no 29/02, so 100000 / 1.1^2 = 82644.62809917355371…
         pytest.param(
-            replace(DI1F28, id=uuid4(), maturity_date=date(2031, 1, 1)),
+            replace(CHALLENGE_DI1F28, id=uuid4(), maturity_date=date(2031, 1, 1)),
             date(2029, 1, 1),
             "82644.6280991736",
             id="maturity-date",
         ),
         # OQ-2: stored on the product, never used by the formula.
         pytest.param(
-            replace(DI1F28, id=uuid4(), multiplier=Decimal("10")),
+            replace(CHALLENGE_DI1F28, id=uuid4(), multiplier=Decimal("10")),
             ONE_YEAR_BEFORE,
             "90909.0909090909",
             id="multiplier-not-applied",
         ),
         pytest.param(
-            replace(DI1F28, id=uuid4(), product_code="di1"),
+            replace(CHALLENGE_DI1F28, id=uuid4(), product_code="di1"),
             ONE_YEAR_BEFORE,
             "90909.0909090909",
             id="product-code-any-case",
@@ -115,8 +94,8 @@ async def test_the_terms_come_from_the_instrument(
 
 async def test_a_calculator_refusal_passes_through_on_pricing_fields() -> None:
     with pytest.raises(DomainError) as caught:
-        await service_for(DI1F28).calculate(
-            DI1F28.id, ONE_YEAR_BEFORE, Quote(InputKind.RATE, Decimal("0.1000000000001"))
+        await service_for(CHALLENGE_DI1F28).calculate(
+            CHALLENGE_DI1F28.id, ONE_YEAR_BEFORE, Quote(InputKind.RATE, Decimal("0.1000000000001"))
         )
 
     assert refusal(caught) == ErrorDetail(
@@ -126,7 +105,7 @@ async def test_a_calculator_refusal_passes_through_on_pricing_fields() -> None:
 
 async def test_an_unknown_instrument_is_not_found() -> None:
     with pytest.raises(DomainError) as caught:
-        await service_for(DI1F28).calculate(uuid4(), ONE_YEAR_BEFORE, RATE_10)
+        await service_for(CHALLENGE_DI1F28).calculate(uuid4(), ONE_YEAR_BEFORE, RATE_10)
 
     assert refusal(caught) == ErrorDetail(ErrorCode.NOT_FOUND, "Contrato não encontrado.")
 
@@ -142,7 +121,7 @@ NOT_PRICEABLE = ErrorDetail(
     "instrument",
     [
         replace(
-            DI1F28,
+            CHALLENGE_DI1F28,
             id=uuid4(),
             product_code="PETR",
             instrument_type="OPTION",
@@ -153,9 +132,9 @@ NOT_PRICEABLE = ErrorDetail(
             settlement_method=None,
         ),
         # Only DI1 has a calculator (spec §4.1: one product file, futures/di1.py).
-        replace(DI1F28, id=uuid4(), code="DAPK28", product_code="DAP"),
-        replace(DI1F28, id=uuid4(), maturity_date=None),
-        replace(DI1F28, id=uuid4(), face_value=None),
+        replace(CHALLENGE_DI1F28, id=uuid4(), code="DAPK28", product_code="DAP"),
+        replace(CHALLENGE_DI1F28, id=uuid4(), maturity_date=None),
+        replace(CHALLENGE_DI1F28, id=uuid4(), face_value=None),
     ],
     ids=["not-a-future", "another-product", "no-maturity", "no-face-value"],
 )

@@ -24,9 +24,9 @@ from tests.integration.acceptance.support import (
     derived_rows,
     expected_pu,
     price_body,
-    problem,
     sql,
 )
+from tests.support.http import problem_errors
 
 TODAY = date(2027, 1, 8)
 DAY = "2027-01-06"
@@ -149,8 +149,8 @@ def test_maturity_day_price_is_a_typed_pu_with_rate_zero(
 
     assert Decimal(on_maturity["pu"]) == Decimal("100000")
     assert Decimal(on_maturity["rate"]) == 0
-    assert problem(typed_rate, 422) == [("VALIDATION_ERROR", "rate")]
-    assert problem(after_maturity, 422) == [("CONTRACT_MATURED", "reference_date")]
+    assert problem_errors(typed_rate, 422) == [("VALIDATION_ERROR", "rate")]
+    assert problem_errors(after_maturity, 422) == [("CONTRACT_MATURED", "reference_date")]
 
 
 def test_a_price_write_saves_only_the_fact(

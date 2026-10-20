@@ -28,7 +28,7 @@ These tests need `TEST_DATABASE_URL`; CI sets it and runs them.
 Each queues a request through `POST /api/processing/requests`, lets the one worker drain the
 queue in-process with the real composition (`support.run_worker`: recover, then sweep, OQ-45,
 OQ-46), then reads `/api/portfolio/*` and `/api/processing/*` through `desk.Desk`. The API's
-clock ticks one second per call within the fixed "today" (`support.TickingClock`), so requests
+clock ticks one second per call within the fixed "today" (`tests.support.fakes.FakeClock` with a one-second step), so requests
 keep their FIFO order; each worker start has its own time, so processing times tell runs apart.
 Every scenario asserts the run's status and `processing.date_status` before its figures.
 

@@ -30,11 +30,9 @@ from di1.modules.asset.domain.model import AssetClass, FuturesTerms, InstrumentT
 from di1.modules.asset.infrastructure.persistence.repositories import SqlAssetRepository
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
-from tests.integration.asset.conftest import DI1_FUTURES, DI1_NAME, Di1Catalogue, Writer
-
-
-def _problems(error: pytest.ExceptionInfo[DomainError]) -> list[tuple[ErrorCode, str | None]]:
-    return [(detail.code, detail.field) for detail in error.value.errors]
+from tests.support.builders import DI1_NAME
+from tests.support.db import DI1_FUTURES, Di1Catalogue, Writer
+from tests.support.http import errors_of
 
 
 async def _count(session_factory: async_sessionmaker[AsyncSession], table: str) -> int:
@@ -189,7 +187,7 @@ async def test_a_refused_write_reports_every_problem_and_writes_nothing(
     with pytest.raises(DomainError) as error:
         await write(writer, di1)
 
-    assert _problems(error) == problems
+    assert errors_of(error) == problems
     assert await _count(session_factory, table) == before
 
 
@@ -199,7 +197,7 @@ async def test_an_unknown_product_is_a_validation_error_with_every_other_problem
     with pytest.raises(DomainError) as error:
         await writer.instrument(uuid4(), "  ", None)
 
-    assert _problems(error) == [(VALIDATION, "code"), (VALIDATION, "product_id")]
+    assert errors_of(error) == [(VALIDATION, "code"), (VALIDATION, "product_id")]
     assert error.value.errors[1].message == "Produto não encontrado."
     assert await _count(session_factory, "instruments") == 4
 
@@ -268,7 +266,7 @@ async def test_a_lost_race_is_a_validation_error_and_writes_nothing(
         with pytest.raises(DomainError) as error:
             await service.create_instrument(di1.di1_id, "DI1F27", date(2027, 1, 4))
 
-    assert _problems(error) == [(VALIDATION, "code")]
+    assert errors_of(error) == [(VALIDATION, "code")]
     assert await _count(session_factory, "instruments") == 4
 
 

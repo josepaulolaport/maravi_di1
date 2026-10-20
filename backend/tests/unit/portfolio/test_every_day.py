@@ -13,7 +13,7 @@ from di1.modules.portfolio.domain.cash import CashBalance, calculate_cash_day
 from di1.modules.portfolio.domain.errors import PortfolioError
 from di1.modules.portfolio.domain.positions import PositionState, calculate_positions_day
 from di1.shared.decimals import ZERO
-from tests.unit.portfolio.factories import DAY
+from tests.support.builders import DAY
 
 TWO_DAYS_BEFORE = DAY - timedelta(days=2)
 SKIPPED = f"the previous state must be of {DAY - timedelta(days=1)}, not {TWO_DAYS_BEFORE}"

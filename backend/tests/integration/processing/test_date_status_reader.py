@@ -15,11 +15,11 @@ from di1.modules.processing.dependencies import build_date_status_reader
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.clock import SAO_PAULO
-from tests.fakes.clock import FixedClock
 from tests.integration.processing.support import seed_statuses
+from tests.support.fakes import FakeClock
 
 PROCESSED_AT = datetime(2026, 10, 17, 18, 30, tzinfo=SAO_PAULO)
-CLOCK = FixedClock(PROCESSED_AT.date(), PROCESSED_AT)
+CLOCK = FakeClock(PROCESSED_AT.date(), PROCESSED_AT)
 
 
 async def test_oq31_reads_each_date_of_the_range_with_its_processing_times(

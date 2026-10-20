@@ -11,20 +11,10 @@ import psycopg
 import pytest
 from alembic import command
 
-from tests.integration.alembic_support import alembic_config, database_url, execute, fetch
+from tests.support.builders import DI1F27
+from tests.support.db import alembic_config, catalogue_sql, execute, fetch
 
-__all__ = ["database_url"]
-
-AN_INSTRUMENT = (
-    "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuro');"
-    "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
-    " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuro de juros');"
-    "INSERT INTO asset.products (id, asset_class_id, code, name)"
-    " VALUES ('00000000-0000-0000-0000-0000000000a1', 1, 'DI1', 'DI1');"
-    "INSERT INTO asset.instruments (id, product_id, code, maturity_date)"
-    " VALUES ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000a1',"
-    " 'DI1F28', '2028-01-03');"
-)
+AN_INSTRUMENT = catalogue_sql((DI1F27,))
 A_DEPOSIT = (
     "INSERT INTO ledger.entries (type, entry_date, entry_time, cash_amount{columns})"
     " VALUES ('CASH', '2026-10-01', '10:00', 1000{values})"
@@ -32,7 +22,7 @@ A_DEPOSIT = (
 A_TRADE = (
     "INSERT INTO ledger.entries (type, entry_date, entry_time, asset_id, signed_quantity,"
     " execution_pu, execution_rate, input_kind{columns}) VALUES ('TRADE', '2026-10-01', '10:00',"
-    " '00000000-0000-0000-0000-0000000000b1', 1, 90000, 0.1, 'PU'{values})"
+    f" '{DI1F27.id}', 1, 90000, 0.1, 'PU'{{values}})"
 )
 COLUMN = (
     "SELECT column_name FROM information_schema.columns WHERE table_schema = 'ledger'"

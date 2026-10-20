@@ -27,22 +27,16 @@ from di1.modules.pricing.public import Price, Quote
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 from di1.shared.paging import PageParams
-from tests.fakes.clock import FixedClock
-from tests.unit.ledger.fakes import (
-    DI1F28,
-    DI1F29,
-    FakeAssets,
-    FakeUnitOfWork,
-    InMemoryLedgerRepository,
-    PricingSpy,
-)
+from tests.support.builders import DI1F28, DI1F29
+from tests.support.fakes import FakeClock, FakeUnitOfWork, PricingSpy
+from tests.unit.ledger.fakes import InMemoryLedgerRepository, contracts
 
 TODAY = date(2026, 10, 18)
 
 
 class Harness:
     def __init__(self) -> None:
-        self.assets = FakeAssets()
+        self.assets = contracts()
         self.pricing = PricingSpy(self.assets)
         self.repository = InMemoryLedgerRepository()
 
@@ -51,7 +45,7 @@ class Harness:
         return LedgerService(
             self.repository,
             uow,
-            clock=FixedClock(TODAY),
+            clock=FakeClock(TODAY),
             assets=self.assets,
             pricing=self.pricing,
         )
@@ -226,7 +220,7 @@ async def test_a_pricing_error_names_the_request_field(
     service = LedgerService(
         harness.repository,
         uow,
-        clock=FixedClock(TODAY),
+        clock=FakeClock(TODAY),
         assets=harness.assets,
         pricing=RefusingPricing(pricing_error),
     )

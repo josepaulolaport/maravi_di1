@@ -24,23 +24,13 @@ import psycopg
 import pytest
 from alembic import command
 
-from tests.integration.alembic_support import alembic_config, database_url, execute, fetch
+from tests.support.builders import DI1F27
+from tests.support.db import alembic_config, catalogue_sql, execute, fetch
 
-__all__ = ["database_url"]
-
-INSTRUMENT = "00000000-0000-0000-0000-0000000000a1"
-PRODUCT = "00000000-0000-0000-0000-0000000000b1"
+INSTRUMENT = str(DI1F27.id)
 OLD_PRICE = "00000000-0000-0000-0000-0000000000c1"
 CURRENT_PRICE = "00000000-0000-0000-0000-0000000000c2"
-AN_INSTRUMENT = (
-    "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuro');"
-    "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
-    " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuro de juros');"
-    "INSERT INTO asset.products (id, asset_class_id, code, name)"
-    f" VALUES ('{PRODUCT}', 1, 'DI1', 'DI1');"
-    "INSERT INTO asset.instruments (id, product_id, code, maturity_date)"
-    f" VALUES ('{INSTRUMENT}', '{PRODUCT}', 'DI1F27', '2027-01-01');"
-)
+AN_INSTRUMENT = catalogue_sql((DI1F27,))
 
 
 def _a_0002_database(database_url: str) -> None:

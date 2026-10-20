@@ -1,94 +1,26 @@
-"""Test doubles for Ledger's collaborators: Asset, Pricing, the Unit of Work and persistence.
-
-Pricing is the real, pure service (`build_pricing_service`) over `FakeAssets`; `PricingSpy`
-only records what Ledger passes to it.
+"""Test doubles for Ledger's persistence, and Asset's reader over the contracts Ledger's tests
+trade. Pricing is the real, pure service through `tests.support.fakes.PricingSpy`, which only
+records what Ledger passes to it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
-from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from di1.modules.asset.public import Instrument
 from di1.modules.ledger.domain.entries import EntryType, LedgerEntry, NewCashMovement, NewTrade
 from di1.modules.ledger.domain.listing import PageRequest
-from di1.modules.pricing.dependencies import build_pricing_service
-from di1.modules.pricing.public import Price, Quote
 from di1.shared.clock import SAO_PAULO
-from tests.fakes.asset import CREATED_AT
-
-PRODUCT_ID = UUID("6f1c2a10-0000-4000-8000-000000000001")
-
-
-def di1_future(code: str, instrument_id: UUID, maturity: date) -> Instrument:
-    return Instrument(
-        id=instrument_id,
-        code=code,
-        product_id=PRODUCT_ID,
-        product_code="DI1",
-        instrument_type="FUTURE",
-        asset_class="INTEREST_RATE_FUTURE",
-        maturity_date=maturity,
-        face_value=Decimal("100000"),
-        multiplier=Decimal("1"),
-        settlement_method="CASH",
-        created_at=CREATED_AT,
-    )
+from tests.support.builders import DI1F27, DI1F28, DI1F29, DI1V26
+from tests.support.fakes import FakeAssetReader
 
 
-# The contracts of the frontend's test fixtures (frontend/src/test/msw/fixtures.ts; before #114,
-# frontend/src/api/mocks/fixtures.ts at 57b4df0).
-DI1F27 = di1_future("DI1F27", UUID("6f1c2a10-0000-4000-8000-0000000000f7"), date(2027, 1, 4))
-DI1F28 = di1_future("DI1F28", UUID("6f1c2a10-0000-4000-8000-0000000000f8"), date(2028, 1, 3))
-DI1F29 = di1_future("DI1F29", UUID("6f1c2a10-0000-4000-8000-0000000000f9"), date(2029, 1, 2))
-# Not in the fixtures: a contract that matured before today (OQ-1).
-DI1V26 = di1_future("DI1V26", UUID("6f1c2a10-0000-4000-8000-0000000000a1"), date(2026, 10, 1))
-
-
-@dataclass
-class FakeAssets:
-    """`AssetReader` over a fixed catalogue."""
-
-    instruments: dict[UUID, Instrument] = field(
-        default_factory=lambda: {i.id: i for i in (DI1F27, DI1F28, DI1F29, DI1V26)}
-    )
-
-    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
-        return {i: self.instruments[i] for i in instrument_ids if i in self.instruments}
-
-
-@dataclass
-class PricingSpy:
-    """The real `PricingService` over ``assets``, recording each call Ledger makes to it."""
-
-    assets: FakeAssets
-    calls: list[tuple[UUID, date, Quote]] = field(default_factory=list)
-
-    async def calculate(self, instrument_id: UUID, reference_date: date, quote: Quote) -> Price:
-        self.calls.append((instrument_id, reference_date, quote))
-        return await build_pricing_service(self.assets).calculate(
-            instrument_id, reference_date, quote
-        )
-
-
-class FakeUnitOfWork:
-    """Counts commits; has no session."""
-
-    def __init__(self) -> None:
-        self.commits = 0
-
-    @property
-    def session(self) -> AsyncSession:
-        raise AssertionError("the in-memory repository needs no session")
-
-    async def commit(self) -> None:
-        self.commits += 1
+def contracts() -> FakeAssetReader:
+    """Asset's reader over the catalogue contracts Ledger's tests trade."""
+    return FakeAssetReader(DI1F27, DI1F28, DI1F29, DI1V26)
 
 
 @dataclass

@@ -15,12 +15,14 @@ import psycopg
 import pytest
 from alembic import command
 
-from tests.integration.alembic_support import alembic_config, database_url, execute, fetch
-from tests.integration.databases import psycopg_url
-from tests.integration.test_no_reference_copy_migration import A_PUBLISHED_ROW, INSTRUMENT
+from tests.support.builders import DI1F27
+from tests.support.db import alembic_config, catalogue_sql, execute, fetch, psycopg_url
 
-__all__ = ["database_url"]
-
+INSTRUMENT = str(DI1F27.id)
+A_PUBLISHED_ROW = (
+    catalogue_sql((DI1F27,)) + "INSERT INTO portfolio.positions (asset_id, position_date, quantity)"
+    f" VALUES ('{INSTRUMENT}', '2026-10-01', 10);"
+)
 REQUEST = "00000000-0000-0000-0000-0000000000c1"
 PUBLISHED_AT = "2026-10-18 21:30:00+00"
 A_RUN = (

@@ -10,13 +10,12 @@ tests/unit/pricing/futures/.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from alembic import command
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,16 +26,7 @@ from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.shared.errors import DomainError, ErrorCode
-from tests.integration.alembic_support import alembic_config
-from tests.integration.asset.conftest import Di1Catalogue, Writer, seed_di1
-from tests.integration.databases import fresh_database_url
-
-
-@pytest.fixture
-def migrated_database_url() -> Iterator[str]:
-    for url in fresh_database_url():
-        command.upgrade(alembic_config(url), "head")
-        yield url
+from tests.support.db import Di1Catalogue, Writer, seed_di1
 
 
 @pytest.fixture

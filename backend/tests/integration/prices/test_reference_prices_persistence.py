@@ -26,7 +26,9 @@ from di1.modules.prices.infrastructure.persistence.repositories import (
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.input_kind import InputKind
-from tests.integration.prices.conftest import DI1F28, DI1F29, MATURED, ServiceOn
+from tests.integration.prices.support import ServiceOn
+from tests.support.builders import DI1F28, DI1F29, DI1V26
+from tests.support.waits import wait_for_a_lock_waiter
 
 DAY = date(2026, 10, 16)
 _COUNT_ID = text("SELECT count(*) FROM prices.reference_prices WHERE id = :id")
@@ -37,7 +39,7 @@ def _manual(
     *,
     source: PriceSource = PriceSource.MANUAL,
     day: date = DAY,
-    asset_id: UUID = DI1F28,
+    asset_id: UUID = DI1F28.id,
     rate: str | None = None,
 ) -> dict[str, object]:
     return {
@@ -95,22 +97,6 @@ async def _latest(
     return found.get(asset_id)
 
 
-async def _wait_for_a_lock_waiter(engine: AsyncEngine) -> None:
-    """Returns once another session of this database waits on a lock; fails after 5 seconds."""
-    async with asyncio.timeout(5):
-        while True:
-            async with engine.connect() as connection:
-                waiting = await connection.scalar(
-                    text(
-                        "SELECT count(*) FROM pg_stat_activity"
-                        " WHERE datname = current_database() AND wait_event_type = 'Lock'"
-                    )
-                )
-            if waiting:
-                return
-            await asyncio.sleep(0.01)
-
-
 # --- one row per (asset, date, source) ---------------------------------------------------------
 
 
@@ -122,7 +108,7 @@ async def test_a_typed_pu_is_stored_as_typed_with_the_dc365_rate_at_12_places(
     record = await _set(service, session_factory, _manual("89250.3147019396"))
 
     assert await _rows(engine) == [
-        (DI1F28, DAY, "MANUAL", "PU", "89250.3147019396", "0.098000000000")
+        (DI1F28.id, DAY, "MANUAL", "PU", "89250.3147019396", "0.098000000000")
     ]
     assert record.created_at == record.updated_at
     assert record.created_at.tzinfo is not None
@@ -156,7 +142,7 @@ async def test_concurrent_adds_of_one_key_both_succeed_and_leave_one_row(
     async def first() -> ReferencePriceRecord:
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
             record = await SqlReferencePriceRepository(uow.session).replace(
-                asset_id=DI1F28,
+                asset_id=DI1F28.id,
                 reference_date=DAY,
                 source=PriceSource.MANUAL,
                 input_kind=InputKind.PU,
@@ -164,7 +150,7 @@ async def test_concurrent_adds_of_one_key_both_succeed_and_leave_one_row(
                 rate=Decimal("0.1"),
             )
             first_written.set()
-            await _wait_for_a_lock_waiter(engine)  # the second write waits on this row's key
+            await wait_for_a_lock_waiter(engine)  # the second write waits on this row's key
             await uow.commit()
             return record
 
@@ -172,7 +158,7 @@ async def test_concurrent_adds_of_one_key_both_succeed_and_leave_one_row(
         await first_written.wait()
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
             record = await SqlReferencePriceRepository(uow.session).replace(
-                asset_id=DI1F28,
+                asset_id=DI1F28.id,
                 reference_date=DAY,
                 source=PriceSource.MANUAL,
                 input_kind=InputKind.PU,
@@ -185,7 +171,7 @@ async def test_concurrent_adds_of_one_key_both_succeed_and_leave_one_row(
     one, two = await asyncio.gather(first(), second())
 
     assert one.id != two.id
-    assert await _rows(engine) == [(DI1F28, DAY, "MANUAL", "PU", "89250.3147019396", "0.1")]
+    assert await _rows(engine) == [(DI1F28.id, DAY, "MANUAL", "PU", "89250.3147019396", "0.1")]
 
 
 async def test_many_concurrent_services_leave_one_row_per_source(
@@ -210,10 +196,10 @@ async def test_the_schema_refuses_a_second_row_of_one_key(engine: AsyncEngine) -
         " VALUES (:asset, :day, 'MANUAL', 'PU', 89000)"
     )
     async with engine.begin() as connection:
-        await connection.execute(insert, {"asset": DI1F28, "day": DAY})
+        await connection.execute(insert, {"asset": DI1F28.id, "day": DAY})
     with pytest.raises(Exception, match="reference_prices_one_per_source"):
         async with engine.begin() as connection:
-            await connection.execute(insert, {"asset": DI1F28, "day": DAY})
+            await connection.execute(insert, {"asset": DI1F28.id, "day": DAY})
 
 
 # --- PriceReader.get: the preferred price of exact dates ---------------------------------------
@@ -224,11 +210,11 @@ async def test_manual_wins_over_b3_and_b3_takes_over_after_its_removal(
 ) -> None:
     b3 = await _set(service, session_factory, _manual("89240.4279488087", source=PriceSource.B3))
     manual = await _set(service, session_factory, _manual("89250.3147019396"))
-    assert await _preferred(session_factory, DI1F28, DAY) == manual
+    assert await _preferred(session_factory, DI1F28.id, DAY) == manual
 
     await _remove(service, session_factory, manual.id)
 
-    assert await _preferred(session_factory, DI1F28, DAY) == b3
+    assert await _preferred(session_factory, DI1F28.id, DAY) == b3
 
 
 async def test_no_carry_forward_to_a_later_date_or_a_weekend(
@@ -237,7 +223,7 @@ async def test_no_carry_forward_to_a_later_date_or_a_weekend(
     await _set(service, session_factory, _manual("89250.3147019396"))
 
     for later in (date(2026, 10, 17), date(2026, 10, 18), date(2026, 10, 19)):
-        assert await _preferred(session_factory, DI1F28, later) is None
+        assert await _preferred(session_factory, DI1F28.id, later) is None
 
 
 async def test_batch_read_answers_every_pair_in_one_query(
@@ -252,7 +238,7 @@ async def test_batch_read_answers_every_pair_in_one_query(
     other = await _set(
         service,
         session_factory,
-        _manual(None, asset_id=DI1F29, day=date(2026, 10, 15), rate="0.1045"),
+        _manual(None, asset_id=DI1F29.id, day=date(2026, 10, 15), rate="0.1045"),
     )
     statements: list[str] = []
 
@@ -263,15 +249,15 @@ async def test_batch_read_answers_every_pair_in_one_query(
     try:
         async with session_factory() as session:
             found = await DefaultPriceReader(SqlReferencePriceRepository(session)).get(
-                [DI1F28, DI1F29], [date(2026, 10, 14), date(2026, 10, 15), DAY]
+                [DI1F28.id, DI1F29.id], [date(2026, 10, 14), date(2026, 10, 15), DAY]
             )
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", count)
 
     assert found == {
-        (DI1F28, DAY): b3,
-        (DI1F28, date(2026, 10, 15)): manual_15,
-        (DI1F29, date(2026, 10, 15)): other,
+        (DI1F28.id, DAY): b3,
+        (DI1F28.id, date(2026, 10, 15)): manual_15,
+        (DI1F29.id, date(2026, 10, 15)): other,
     }
     assert len([s for s in statements if "reference_prices" in s]) == 1
 
@@ -290,14 +276,14 @@ async def test_latest_date_then_manual_over_b3_in_one_statement(
     await _set(  # an older MANUAL of DI1F29, not its latest
         service,
         session_factory,
-        _manual("80100", asset_id=DI1F29, day=date(2026, 10, 9)),
+        _manual("80100", asset_id=DI1F29.id, day=date(2026, 10, 9)),
     )
     newer_b3 = await _set(
         service,
         session_factory,
         _manual(
             "80206.1333187932",
-            asset_id=DI1F29,
+            asset_id=DI1F29.id,
             day=date(2026, 10, 15),
             source=PriceSource.B3,
         ),
@@ -311,12 +297,12 @@ async def test_latest_date_then_manual_over_b3_in_one_statement(
     try:
         async with session_factory() as session:
             found = await DefaultPriceReader(SqlReferencePriceRepository(session)).latest(
-                [DI1F28, DI1F29, MATURED]
+                [DI1F28.id, DI1F29.id, DI1V26.id]
             )
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", count)
 
-    assert found == {DI1F28: manual_16, DI1F29: newer_b3}
+    assert found == {DI1F28.id: manual_16, DI1F29.id: newer_b3}
     assert len(statements) == 1
 
 
@@ -330,7 +316,7 @@ async def test_removing_the_latest_price_falls_back_to_the_previous_date(
 
     await _remove(service, session_factory, b3_16.id)
 
-    assert await _latest(session_factory, DI1F28) == manual_14
+    assert await _latest(session_factory, DI1F28.id) == manual_14
 
 
 async def test_removing_manual_on_the_latest_date_lets_b3_of_that_date_prevail(
@@ -338,8 +324,8 @@ async def test_removing_manual_on_the_latest_date_lets_b3_of_that_date_prevail(
 ) -> None:
     b3_16 = await _set(service, session_factory, _manual("89240.4279488087", source=PriceSource.B3))
     manual_16 = await _set(service, session_factory, _manual("89250.3147019396"))
-    assert await _latest(session_factory, DI1F28) == manual_16
+    assert await _latest(session_factory, DI1F28.id) == manual_16
 
     await _remove(service, session_factory, manual_16.id)
 
-    assert await _latest(session_factory, DI1F28) == b3_16
+    assert await _latest(session_factory, DI1F28.id) == b3_16

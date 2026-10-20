@@ -11,9 +11,7 @@ import psycopg
 import pytest
 from alembic import command
 
-from tests.integration.alembic_support import alembic_config, database_url, execute, fetch
-
-__all__ = ["database_url"]
+from tests.support.db import alembic_config, execute, fetch
 
 A_RUN = (
     "INSERT INTO processing.requests (id, scope, start_date, end_date, status, failed_date,"

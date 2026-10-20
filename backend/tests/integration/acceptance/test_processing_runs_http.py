@@ -23,7 +23,8 @@ from typing import Any
 import pytest
 
 from tests.integration.acceptance.desk import Desk
-from tests.integration.acceptance.support import acceptance_app, problem
+from tests.integration.acceptance.support import acceptance_app
+from tests.support.http import problem_errors
 
 TODAY = date(2027, 1, 8)
 MON, TUE, WED, THU = (date(2027, 1, d) for d in (4, 5, 6, 7))
@@ -141,7 +142,7 @@ def test_a_finished_request_cannot_be_cancelled(desk: Desk, di1f28: str) -> None
 
     response = desk.client.post(f"/api/processing/requests/{run['id']}/cancel")
 
-    assert problem(response, 409) == [("JOB_NOT_CANCELLABLE", None)]
+    assert problem_errors(response, 409) == [("JOB_NOT_CANCELLABLE", None)]
     assert desk.run(run["id"])["status"] == "COMPLETED"
 
 
@@ -151,7 +152,7 @@ def test_a_range_ending_after_today_is_refused(desk: Desk) -> None:
         json={"scope": "ALL", "start_date": "2027-01-08", "end_date": "2027-01-09"},
     )
 
-    assert problem(response, 422) == [("FUTURE_DATE", "end_date")]  # OQ-29
+    assert problem_errors(response, 422) == [("FUTURE_DATE", "end_date")]  # OQ-29
     assert desk.client.get("/api/processing/requests").json()["items"] == []
 
 

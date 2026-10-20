@@ -14,18 +14,16 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from di1.composition.errors import install_problem_handlers
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.presentation.http.router import create_router
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
-from tests.integration.ledger.conftest import ServiceOn
-from tests.unit.ledger.fakes import DI1F28, DI1F29
-
-PROBLEM_JSON = "application/problem+json"
+from tests.integration.ledger.support import ServiceOn
+from tests.support.builders import DI1F28, DI1F29
+from tests.support.http import app_client, assert_problem
 
 # The requests that record the fixtures' ledger, in the order of their seq.
 FIXTURE_REQUESTS: list[dict[str, Any]] = [
@@ -142,10 +140,7 @@ def client(
     def ledger_service(uow: UnitOfWork = Depends(unit_of_work)) -> LedgerService:  # noqa: B008
         return service(uow)
 
-    app = FastAPI()
-    install_problem_handlers(app)
-    app.include_router(create_router(get_service=ledger_service))
-    with TestClient(app) as test_client:
+    with app_client(create_router(get_service=ledger_service)) as test_client:
         yield test_client
 
 
@@ -160,15 +155,6 @@ def record_fixtures(client: TestClient) -> list[dict[str, Any]]:
 
 def without_server_fields(item: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in item.items() if k not in {"id", "created_at"}}
-
-
-def assert_problem(response: Any, status: int, *errors: tuple[str, str | None]) -> list[Any]:
-    assert response.status_code == status, response.text
-    assert response.headers["content-type"] == PROBLEM_JSON
-    body = response.json()
-    assert body["status"] == status
-    assert [(e["code"], e["field"]) for e in body["errors"]] == list(errors)
-    return list(body["errors"])
 
 
 # --- golden shapes ------------------------------------------------------------------------------

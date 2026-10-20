@@ -31,22 +31,63 @@ from di1.modules.prices.presentation.http.router import create_router
 from di1.modules.pricing.dependencies import build_pricing_service
 from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import UnitOfWork
-from tests.fakes.clock import FixedClock
-from tests.integration.databases import psycopg_url
-from tests.integration.prices.conftest import DI1F28, DI1F29, INSTRUMENTS, MATURED, PRODUCT, TODAY
+from tests.integration.prices.support import CONTRACTS, TODAY
+from tests.support.builders import DI1F28, DI1F29, DI1V26
+from tests.support.db import psycopg_url, seed_catalogue
+from tests.support.fakes import FakeClock
 
 # frontend/src/api/mocks/fixtures.ts `referencePrices`, DI1F28 and DI1F29.
 FIXTURES = [
-    (1, DI1F28, "2026-09-24", "B3", "88215.0712246655", "0.1032", "2026-09-24T18:00:00-03:00"),
-    (2, DI1F28, "2026-09-30", "MANUAL", "88509.2489449811", "0.1017", "2026-09-30T18:00:00-03:00"),
-    (3, DI1F28, "2026-10-05", "MANUAL", "88777.4109547747", "0.1002", "2026-10-05T18:00:00-03:00"),
-    (4, DI1F28, "2026-10-08", "B3", "88817.1246020680", "0.1005", "2026-10-08T18:00:00-03:00"),
-    (5, DI1F28, "2026-10-09", "MANUAL", "88910.3037976557", "0.0998", "2026-10-09T18:00:00-03:00"),
-    (6, DI1F28, "2026-10-14", "MANUAL", "89006.4625467350", "0.10", "2026-10-14T18:00:00-03:00"),
-    (7, DI1F28, "2026-10-15", "B3", "89128.4824345118", "0.0990", "2026-10-15T18:00:00-03:00"),
-    (8, DI1F28, "2026-10-16", "MANUAL", "89250.3147019396", "0.0980", "2026-10-17T10:00:00-03:00"),
-    (10, DI1F28, "2026-10-16", "B3", "89240.4279488087", "0.0981", "2026-10-16T19:00:00-03:00"),
-    (11, DI1F29, "2026-10-15", "MANUAL", "80206.1333187932", "0.1045", "2026-10-15T18:00:00-03:00"),
+    (1, DI1F28.id, "2026-09-24", "B3", "88215.0712246655", "0.1032", "2026-09-24T18:00:00-03:00"),
+    (
+        2,
+        DI1F28.id,
+        "2026-09-30",
+        "MANUAL",
+        "88509.2489449811",
+        "0.1017",
+        "2026-09-30T18:00:00-03:00",
+    ),
+    (
+        3,
+        DI1F28.id,
+        "2026-10-05",
+        "MANUAL",
+        "88777.4109547747",
+        "0.1002",
+        "2026-10-05T18:00:00-03:00",
+    ),
+    (4, DI1F28.id, "2026-10-08", "B3", "88817.1246020680", "0.1005", "2026-10-08T18:00:00-03:00"),
+    (
+        5,
+        DI1F28.id,
+        "2026-10-09",
+        "MANUAL",
+        "88910.3037976557",
+        "0.0998",
+        "2026-10-09T18:00:00-03:00",
+    ),
+    (6, DI1F28.id, "2026-10-14", "MANUAL", "89006.4625467350", "0.10", "2026-10-14T18:00:00-03:00"),
+    (7, DI1F28.id, "2026-10-15", "B3", "89128.4824345118", "0.0990", "2026-10-15T18:00:00-03:00"),
+    (
+        8,
+        DI1F28.id,
+        "2026-10-16",
+        "MANUAL",
+        "89250.3147019396",
+        "0.0980",
+        "2026-10-17T10:00:00-03:00",
+    ),
+    (10, DI1F28.id, "2026-10-16", "B3", "89240.4279488087", "0.0981", "2026-10-16T19:00:00-03:00"),
+    (
+        11,
+        DI1F29.id,
+        "2026-10-15",
+        "MANUAL",
+        "80206.1333187932",
+        "0.1045",
+        "2026-10-15T18:00:00-03:00",
+    ),
 ]
 REFERENCE_PRICE_KEYS = {
     "id",
@@ -103,7 +144,7 @@ def api(migrated_database_url: str) -> Iterator[Api]:
     def service(uow: UnitOfWork = uow_dependency) -> PriceService:
         assets = build_asset_reader(uow.session)
         return build_price_service(
-            uow, assets=assets, pricing=build_pricing_service(assets), clock=FixedClock(TODAY)
+            uow, assets=assets, pricing=build_pricing_service(assets), clock=FakeClock(TODAY)
         )
 
     app.include_router(create_router(get_service=service))
@@ -112,30 +153,8 @@ def api(migrated_database_url: str) -> Iterator[Api]:
 
 
 def _seed(url: str) -> None:
+    seed_catalogue(url, CONTRACTS)
     with psycopg.connect(psycopg_url(url)) as connection:
-        connection.execute(
-            "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuros')"
-        )
-        connection.execute(
-            "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
-            " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuros de juros')"
-        )
-        connection.execute(
-            "INSERT INTO asset.products (id, asset_class_id, code, name)"
-            " VALUES (%s, 1, 'DI1', 'DI1')",
-            (PRODUCT,),
-        )
-        connection.execute(
-            "INSERT INTO asset.futures (product_id, face_value, settlement_method)"
-            " VALUES (%s, 100000, 'CASH')",
-            (PRODUCT,),
-        )
-        for instrument_id, (code, maturity) in INSTRUMENTS.items():
-            connection.execute(
-                "INSERT INTO asset.instruments (id, product_id, code, maturity_date)"
-                " VALUES (%s, %s, %s, %s)",
-                (instrument_id, PRODUCT, code, maturity),
-            )
         for n, asset, day, source, pu, rate, created in FIXTURES:
             connection.execute(
                 "INSERT INTO prices.reference_prices (id, asset_id, reference_date, source,"
@@ -156,7 +175,7 @@ def _same(actual: dict[str, Any], expected: dict[str, Any]) -> None:
     )
 
 
-def _days(api: Api, start: str, end: str, asset_id: UUID = DI1F28) -> Any:
+def _days(api: Api, start: str, end: str, asset_id: UUID = DI1F28.id) -> Any:
     return api.client.get(
         "/reference-prices",
         params={"asset_id": str(asset_id), "start_date": start, "end_date": end},
@@ -233,7 +252,7 @@ def test_an_unknown_asset_and_an_inverted_range_are_422(api: Api) -> None:
 
 
 def test_missing_query_parameters_are_422(api: Api) -> None:
-    response = api.client.get("/reference-prices", params={"asset_id": str(DI1F28)})
+    response = api.client.get("/reference-prices", params={"asset_id": str(DI1F28.id)})
 
     assert response.status_code == 422
     assert {e["field"] for e in response.json()["errors"]} == {"start_date", "end_date"}
@@ -247,7 +266,7 @@ def test_missing_query_parameters_are_422(api: Api) -> None:
     [
         pytest.param(
             {
-                "asset_id": str(DI1F28),
+                "asset_id": str(DI1F28.id),
                 "reference_date": "2026-10-16",
                 "input_kind": "PU",
                 "pu": "89250.3147019396",
@@ -257,7 +276,7 @@ def test_missing_query_parameters_are_422(api: Api) -> None:
         ),
         pytest.param(
             {
-                "asset_id": str(DI1F29),
+                "asset_id": str(DI1F29.id),
                 "reference_date": "2026-10-15",
                 "input_kind": "RATE",
                 "rate": "0.1045",
@@ -266,9 +285,9 @@ def test_missing_query_parameters_are_422(api: Api) -> None:
             id="typed-rate",
         ),
         pytest.param(
-            # MATURED matures on 01/10/2026: on that date the PU is typed, the rate is 0 (OQ-1).
+            # DI1V26 matures on 01/10/2026: on that date the PU is typed, the rate is 0 (OQ-1).
             {
-                "asset_id": str(MATURED),
+                "asset_id": str(DI1V26.id),
                 "reference_date": "2026-10-01",
                 "input_kind": "PU",
                 "pu": "99987.5",
@@ -310,7 +329,7 @@ def test_a_typed_value_answers_201_with_a_manual_price_and_the_calculated_value(
             ],
         ),
         (
-            {"asset_id": str(MATURED), "input_kind": "PU", "pu": "100000"},
+            {"asset_id": str(DI1V26.id), "input_kind": "PU", "pu": "100000"},
             422,
             [
                 {
@@ -412,7 +431,7 @@ def test_refusals_are_problem_json_and_write_nothing(
     api: Api, body: dict[str, Any], status: int, errors: list[dict[str, Any]]
 ) -> None:
     before = api.rows()
-    payload = {"asset_id": str(DI1F28), "reference_date": "2026-10-16", **body}
+    payload = {"asset_id": str(DI1F28.id), "reference_date": "2026-10-16", **body}
 
     response = api.client.post("/reference-prices", json=payload)
 

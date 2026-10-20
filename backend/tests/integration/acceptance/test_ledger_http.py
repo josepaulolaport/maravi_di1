@@ -25,10 +25,10 @@ from tests.integration.acceptance.support import (
     derived_rows,
     expected_pu,
     expected_rate,
-    problem,
     sql,
     trade_body,
 )
+from tests.support.http import problem_errors
 
 TODAY = date(2027, 1, 8)
 WEEK = {"start_date": "2027-01-01", "end_date": "2027-01-08"}
@@ -141,7 +141,7 @@ def test_a_page_limit_outside_1_to_200_is_refused(
 ) -> None:
     response = client.get(path, params={**params, "limit": limit})
 
-    assert problem(response, 422) == [("VALIDATION_ERROR", "limit")]  # OQ-37
+    assert problem_errors(response, 422) == [("VALIDATION_ERROR", "limit")]  # OQ-37
 
 
 def test_mixed_batch_delete_is_hard_and_all_or_nothing(
@@ -154,7 +154,7 @@ def test_mixed_batch_delete_is_hard_and_all_or_nothing(
     unknown = "00000000-0000-0000-0000-000000000000"
 
     refused = client.post("/api/ledger/entries/deletions", json={"ids": [trade["id"], unknown]})
-    assert problem(refused, 404) == [("NOT_FOUND", None)]
+    assert problem_errors(refused, 404) == [("NOT_FOUND", None)]
     assert sorted(_listed(client)) == sorted([trade["id"], cash["id"], kept["id"]])
 
     deleted = client.post(
@@ -166,7 +166,7 @@ def test_mixed_batch_delete_is_hard_and_all_or_nothing(
     assert sql(database_url, "SELECT count(*) FROM ledger.entries") == [(1,)]
 
     again = client.post("/api/ledger/entries/deletions", json={"ids": [cash["id"]]})
-    assert problem(again, 404) == [("NOT_FOUND", None)]
+    assert problem_errors(again, 404) == [("NOT_FOUND", None)]
 
 
 def test_a_write_saves_only_the_fact(
@@ -196,7 +196,7 @@ def test_maturity_date_takes_a_typed_pu_and_stores_rate_zero(
 
     assert Decimal(on_maturity["execution_pu"]) == Decimal("100000")
     assert Decimal(on_maturity["execution_rate"]) == 0
-    assert problem(typed_rate, 422) == [("VALIDATION_ERROR", "execution_rate")]
+    assert problem_errors(typed_rate, 422) == [("VALIDATION_ERROR", "execution_rate")]
 
 
 def test_a_trade_after_maturity_is_refused(client: TestClient, contracts: dict[str, str]) -> None:
@@ -205,7 +205,7 @@ def test_a_trade_after_maturity_is_refused(client: TestClient, contracts: dict[s
         json=trade_body(contracts["DI1F27"], "2027-01-05", "10:00", 1, pu="100000"),
     )
 
-    assert problem(response, 422) == [("CONTRACT_MATURED", "date")]
+    assert problem_errors(response, 422) == [("CONTRACT_MATURED", "date")]
 
 
 def test_too_many_decimals_are_refused_never_rounded(
@@ -221,5 +221,5 @@ def test_too_many_decimals_are_refused_never_rounded(
         json=trade_body(contracts["DI1F28"], "2027-01-06", "10:00", 1, pu="90000.00000000001"),
     )
 
-    assert problem(rate, 422) == [("VALIDATION_ERROR", "execution_rate")]
-    assert problem(pu, 422) == [("VALIDATION_ERROR", "execution_pu")]
+    assert problem_errors(rate, 422) == [("VALIDATION_ERROR", "execution_rate")]
+    assert problem_errors(pu, 422) == [("VALIDATION_ERROR", "execution_pu")]

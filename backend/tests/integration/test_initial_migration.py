@@ -16,16 +16,17 @@ database, so it never touches a shared one.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import psycopg
 import pytest
 from alembic import command
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests.integration.alembic_support import alembic_config, database_url
-from tests.integration.databases import psycopg_url
+from tests.support.db import alembic_config, psycopg_url
 
-__all__ = ["database_url"]
+BACKEND = Path(__file__).resolve().parents[2]
 
 SCHEMAS = {"asset", "ledger", "prices", "portfolio", "processing", "platform"}
 TABLES = {

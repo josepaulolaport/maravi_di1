@@ -8,12 +8,10 @@ a database that never answers.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 from datetime import datetime
 from decimal import Decimal
 
 import pytest
-from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -93,24 +91,6 @@ async def test_a_worker_lock_wait_ends_with_an_operational_error(
             await holder.execute(text("SELECT pg_advisory_unlock(42)"))
     finally:
         await worker_engine.dispose()
-
-
-@pytest.fixture
-async def hanging_database_settings() -> AsyncIterator[Settings]:
-    """A TCP server that accepts connections and never answers: a database that hangs."""
-
-    async def hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        await reader.read()
-        writer.close()
-
-    server = await asyncio.start_server(hold, "127.0.0.1", 0)
-    port = server.sockets[0].getsockname()[1]
-    try:
-        yield Settings(
-            database_url=SecretStr(f"postgresql+psycopg://u:s3cret-pw@127.0.0.1:{port}/db")
-        )
-    finally:
-        server.close()
 
 
 async def test_the_startup_check_gives_up_on_a_database_that_never_answers(

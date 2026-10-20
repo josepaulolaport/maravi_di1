@@ -29,8 +29,9 @@ from di1.modules.prices.public import PriceSource
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
-from tests.integration.asset.conftest import Di1Catalogue, seed_di1
-from tests.integration.asset.latest_prices import FakePriceReader, price
+from tests.support.db import Di1Catalogue, seed_di1
+from tests.support.fakes import FakePriceReader, reference_price
+from tests.support.http import problem, problem_errors, problem_messages
 
 # fixtures.ts: instrumentTypes, products[0] and instruments (DI1F27…DI1F30).
 GOLDEN_INSTRUMENT_TYPES = {
@@ -111,7 +112,7 @@ def seeded(settings: Settings) -> Di1Catalogue:
 @pytest.fixture
 def latest_prices() -> FakePriceReader:
     """No instrument has a price unless a test gives it one."""
-    return FakePriceReader()
+    return FakePriceReader(dated_reads=False)
 
 
 @pytest.fixture
@@ -124,16 +125,6 @@ def client(
     )
     with TestClient(app) as client:
         yield client
-
-
-def _problem(response: Any) -> tuple[int, str, list[tuple[str, str, str | None]]]:
-    body = response.json()
-    assert body["type"] == "about:blank"
-    errors = [(e["code"], e["message"], e["field"]) for e in body["errors"]]
-    return response.status_code, response.headers["content-type"], errors
-
-
-PROBLEM = "application/problem+json"
 
 
 DAP = {
@@ -281,15 +272,13 @@ def test_products_are_filtered_by_the_type_query(
 def test_an_unknown_product_or_instrument_is_404(
     client: TestClient, resource: str, message: str
 ) -> None:
-    assert _problem(client.get(f"/{resource}/{uuid4()}")) == (
-        404,
-        PROBLEM,
-        [("NOT_FOUND", message, None)],
-    )
+    assert problem_messages(client.get(f"/{resource}/{uuid4()}"), 404) == [
+        ("NOT_FOUND", message, None)
+    ]
 
 
 def test_a_malformed_path_id_is_422(client: TestClient) -> None:
-    assert _problem(client.get("/instruments/not-a-uuid"))[0] == 422
+    problem(client.get("/instruments/not-a-uuid"), 422)
 
 
 Body = Callable[[Di1Catalogue], dict[str, Any]]
@@ -381,9 +370,8 @@ def test_a_refused_write_is_a_422_problem(
     body: Body,
     errors: list[tuple[str, str, str]],
 ) -> None:
-    status, content_type, actual = _problem(client.post(path, json=body(seeded)))
+    actual = problem_messages(client.post(path, json=body(seeded)), 422)
 
-    assert (status, content_type) == (422, PROBLEM)
     assert sorted(actual, key=lambda e: e[2] or "") == errors
 
 
@@ -394,9 +382,9 @@ def test_decimals_are_plain_decimal_strings(
     futures = dict(DAP["futures"]) | {"face_value": face_value}  # type: ignore[arg-type]
     body = DAP | {"asset_class_id": seeded.interest_rate_class_id, "futures": futures}
 
-    status, _, errors = _problem(client.post("/products", json=body))
+    errors = problem_errors(client.post("/products", json=body), 422)
 
-    assert (status, [e[2] for e in errors]) == (422, ["futures.face_value"])
+    assert [field for _, field in errors] == ["futures.face_value"]
 
 
 # ``Instrument.last_reference`` (OQ-48, reversing OQ-33 item 4): the latest preferred price, with
@@ -407,9 +395,9 @@ def test_each_listed_instrument_carries_its_latest_price(
     client: TestClient, seeded: Di1Catalogue, latest_prices: FakePriceReader
 ) -> None:
     f28, f29 = seeded.instrument_ids["DI1F28"], seeded.instrument_ids["DI1F29"]
-    latest_prices.by_asset[f28] = price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995")
-    latest_prices.by_asset[f29] = price(
-        f29, date(2026, 10, 15), "82057.00", None, source=PriceSource.B3
+    latest_prices.add(reference_price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995"))
+    latest_prices.add(
+        reference_price(f29, date(2026, 10, 15), "82057.00", None, source=PriceSource.B3)
     )
 
     items = client.get("/instruments").json()["items"]
@@ -437,7 +425,7 @@ def test_a_listing_reads_the_prices_once_for_its_instruments(
 ) -> None:
     client.get("/instruments", params={"search": "f2"})
 
-    assert latest_prices.calls == [
+    assert latest_prices.latest_calls == [
         frozenset(seeded.instrument_ids[c] for c in ("DI1F27", "DI1F28", "DI1F29"))
     ]
 
@@ -446,14 +434,14 @@ def test_an_empty_listing_reads_no_prices(
     client: TestClient, latest_prices: FakePriceReader
 ) -> None:
     assert client.get("/instruments", params={"search": "x"}).json() == {"items": []}
-    assert latest_prices.calls == []
+    assert latest_prices.latest_calls == []
 
 
 def test_one_instrument_carries_its_latest_price(
     client: TestClient, seeded: Di1Catalogue, latest_prices: FakePriceReader
 ) -> None:
     f28 = seeded.instrument_ids["DI1F28"]
-    latest_prices.by_asset[f28] = price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995")
+    latest_prices.add(reference_price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995"))
 
     body = client.get(f"/instruments/{f28}").json()
 
@@ -463,14 +451,14 @@ def test_one_instrument_carries_its_latest_price(
         "rate": "0.0995",
         "source": "MANUAL",
     }
-    assert latest_prices.calls == [frozenset({f28})]
+    assert latest_prices.latest_calls == [frozenset({f28})]
 
 
 def test_an_unknown_instrument_is_404_without_reading_prices(
     client: TestClient, latest_prices: FakePriceReader
 ) -> None:
     assert client.get(f"/instruments/{uuid4()}").status_code == 404
-    assert latest_prices.calls == []
+    assert latest_prices.latest_calls == []
 
 
 def test_a_new_instrument_has_no_latest_price(client: TestClient, seeded: Di1Catalogue) -> None:
@@ -483,7 +471,7 @@ def test_the_latest_price_crosses_in_plain_notation(
     client: TestClient, seeded: Di1Catalogue, latest_prices: FakePriceReader
 ) -> None:
     f30 = seeded.instrument_ids["DI1F30"]
-    latest_prices.by_asset[f30] = price(f30, date(2026, 10, 16), "7.5E+4", "1E-1")
+    latest_prices.add(reference_price(f30, date(2026, 10, 16), "7.5E+4", "1E-1"))
 
     reference = client.get(f"/instruments/{f30}").json()["last_reference"]
 

@@ -1,74 +1,43 @@
-"""Fixtures for Ledger's PostgreSQL tests: a fresh database migrated to head per test, the
-fixtures' DI1 contracts in ``asset.*`` (the foreign key target of a trade), and a service wired
-to the real repository and the real pricing service over a fake Asset reader."""
+"""Fixtures for Ledger's PostgreSQL tests: the test's database with the catalogue's DI1 contracts
+in ``asset.*`` (the foreign key target of a trade), and a service wired
+to the real repository and the real pricing over a fake Asset reader."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Iterator
-from pathlib import Path
+from collections.abc import AsyncIterator
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from pydantic import SecretStr
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.dependencies import build_ledger_service
 from di1.modules.pricing.dependencies import build_pricing_service
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
-from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import UnitOfWork
-from tests.fakes.clock import FixedClock
-from tests.integration.databases import fresh_database_url
-from tests.integration.ledger.support import TODAY, seed_contracts
-from tests.unit.ledger.fakes import FakeAssets
-
-BACKEND = Path(__file__).resolve().parents[3]
-
-
-@pytest.fixture
-def database_url() -> Iterator[str]:
-    yield from fresh_database_url()
-
-
-@pytest.fixture
-def migrated_database_url(database_url: str) -> str:
-    config = Config(str(BACKEND / "alembic.ini"))
-    config.set_main_option("script_location", str(BACKEND / "migrations"))
-    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    command.upgrade(config, "head")
-    return database_url
+from tests.integration.ledger.support import CONTRACTS, TODAY, ServiceOn
+from tests.support.db import seed_catalogue
+from tests.support.fakes import FakeAssetReader, FakeClock
 
 
 @pytest.fixture
 async def engine(migrated_database_url: str) -> AsyncIterator[AsyncEngine]:
+    seed_catalogue(migrated_database_url, CONTRACTS)
     engine = create_engine(Settings(database_url=SecretStr(migrated_database_url)))
     try:
-        async with engine.begin() as connection:
-            await seed_contracts(connection)
         yield engine
     finally:
         await engine.dispose()
 
 
 @pytest.fixture
-def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return create_session_factory(engine)
-
-
-ServiceOn = Callable[[UnitOfWork], LedgerService]
-"""Builds the service on a Unit of Work, as the composition does per request."""
-
-
-@pytest.fixture
 def service() -> ServiceOn:
-    assets = FakeAssets()
+    assets = FakeAssetReader(*CONTRACTS)
 
     def on(uow: UnitOfWork) -> LedgerService:
         return build_ledger_service(
-            uow, clock=FixedClock(TODAY), assets=assets, pricing=build_pricing_service(assets)
+            uow, clock=FakeClock(TODAY), assets=assets, pricing=build_pricing_service(assets)
         )
 
     return on
