@@ -39,6 +39,10 @@ def include_routers(app: FastAPI) -> None:
     )
     api.include_router(create_ledger_router(get_service=get_ledger_service))
     api.include_router(create_prices_router(get_service=get_price_service))
-    api.include_router(create_portfolio_router(get_portfolio_query_service))
-    api.include_router(create_processing_router(get_processing_service, get_unit_of_work))
+    api.include_router(create_portfolio_router(get_query_service=get_portfolio_query_service))
+    api.include_router(
+        create_processing_router(
+            get_service=get_processing_service, get_unit_of_work=get_unit_of_work
+        )
+    )
     app.include_router(api)
