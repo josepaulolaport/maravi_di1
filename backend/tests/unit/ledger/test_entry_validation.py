@@ -93,10 +93,12 @@ def test_a_pu_typed_sell_is_accepted() -> None:
     )
 
 
-def test_today_and_weekends_are_accepted() -> None:
-    saturday = date(2026, 10, 17)
-    validate_trade(_trade(entry_date=TODAY), today=TODAY, instrument=DI1F28)
-    validate_trade(_trade(entry_date=saturday), today=TODAY, instrument=DI1F28)
+def test_today_weekends_and_holidays_are_accepted() -> None:
+    # Any calendar date (OQ-7): there is no business calendar.
+    saturday, holiday = date(2026, 10, 17), date(2026, 10, 12)  # 12/10: Nossa Senhora Aparecida
+    for day in (TODAY, saturday, holiday):
+        validate_trade(_trade(entry_date=day), today=TODAY, instrument=DI1F28)
+        validate_cash_movement(_cash(entry_date=day), today=TODAY)
 
 
 def test_a_trade_after_today_is_rejected() -> None:
@@ -123,6 +125,7 @@ def test_the_quantity_is_a_nonzero_integer_within_the_column(quantity: int | Non
         validate_trade(_trade(signed_quantity=quantity), today=TODAY, instrument=DI1F28)
 
     assert _errors(error) == {(ErrorCode.VALIDATION_ERROR, "signed_quantity")}
+    assert error.value.errors[0].message == "A quantidade deve ser um inteiro diferente de zero."
 
 
 @pytest.mark.parametrize("quantity", [2**31 - 1, -(2**31)])

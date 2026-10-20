@@ -23,7 +23,7 @@ from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.presentation.http.router import create_router
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
 from tests.integration.ledger.conftest import ServiceOn
-from tests.unit.ledger.fakes import DI1F28, DI1F29, DI1V26
+from tests.unit.ledger.fakes import DI1F28, DI1F29
 
 PROBLEM_JSON = "application/problem+json"
 
@@ -236,18 +236,8 @@ def test_an_empty_cursor_is_the_first_page(client: TestClient) -> None:
     assert [item["seq"] for item in response.json()["items"]] == [5, 4]
 
 
-def test_a_crafted_cursor_is_refused_before_it_reaches_the_database(client: TestClient) -> None:
-    record_fixtures(client)
-    aware_time = base64.urlsafe_b64encode(b"2026-10-16|10:00:00+03:00|4").decode().rstrip("=")
-    huge_seq = base64.urlsafe_b64encode(b"2026-10-16|10:00:00|99999999999999999999").decode()
-
-    for cursor in (aware_time, huge_seq.rstrip("=")):
-        response = client.get("/ledger/entries", params={**RANGE, "cursor": cursor})
-
-        assert_problem(response, 422, ("VALIDATION_ERROR", "cursor"))
-
-
-def test_range_and_search_filter_on_the_server(client: TestClient) -> None:
+def test_range_and_search_reach_the_server(client: TestClient) -> None:
+    # The search itself is SQL (test_ledger_persistence); here only the query parameters.
     record_fixtures(client)
 
     def seqs(**params: str) -> list[int]:
@@ -257,9 +247,16 @@ def test_range_and_search_filter_on_the_server(client: TestClient) -> None:
 
     assert seqs(start_date="2026-10-15", end_date="2026-10-15") == [3]
     assert seqs(search="di1f28") == [4, 2]
-    assert seqs(search="Aporte") == [1]
-    assert seqs(search="retirada") == [5]
     assert seqs(search="INICIAL") == [1]  # the description (OQ-51)
+
+
+def test_a_search_with_a_nul_character_answers_an_empty_page(client: TestClient) -> None:
+    record_fixtures(client)
+
+    listed = client.get("/ledger/entries", params={**RANGE, "search": "a\u0000"})
+
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"] == []
 
 
 # --- cash description (OQ-51) -------------------------------------------------------------------
@@ -275,42 +272,9 @@ def test_a_cash_entry_without_a_description_answers_null(client: TestClient) -> 
         assert response.json()["description"] is None
 
 
-def test_a_description_of_more_than_200_characters_is_refused(client: TestClient) -> None:
-    response = client.post("/ledger/entries", json={**A_DEPOSIT, "description": "a" * 201})
-
-    [error] = assert_problem(response, 422, ("VALIDATION_ERROR", "description"))
-    assert error["message"] == "A descrição deve ter no máximo 200 caracteres."
-    assert client.get("/ledger/entries", params=RANGE).json()["items"] == []
-
-
-def test_a_trade_with_a_description_is_refused(client: TestClient) -> None:
-    body = {**FIXTURE_REQUESTS[1], "description": "Compra"}
-
-    response = client.post("/ledger/entries", json=body)
-
-    [error] = assert_problem(response, 422, ("VALIDATION_ERROR", "description"))
-    assert error["message"] == "Uma operação não tem descrição."
-
-
-def test_a_nul_character_is_refused_in_a_description_and_finds_nothing(
-    client: TestClient,
-) -> None:
-    response = client.post("/ledger/entries", json={**A_DEPOSIT, "description": "a\u0000b"})
-
-    [error] = assert_problem(response, 422, ("VALIDATION_ERROR", "description"))
-    assert error["message"] == "O texto não pode conter o caractere nulo."
-    listed = client.get("/ledger/entries", params={**RANGE, "search": "a\u0000"})
-    assert listed.status_code == 200, listed.text
-    assert listed.json()["items"] == []
-
-
-def test_a_description_must_be_a_string(client: TestClient) -> None:
-    response = client.post("/ledger/entries", json={**A_DEPOSIT, "description": 7})
-
-    assert_problem(response, 422, ("VALIDATION_ERROR", "description"))
-
-
 # --- deletion -----------------------------------------------------------------------------------
+# All or nothing, 404 for an unknown or deleted id and a repeated id are spec §13 item 16
+# (acceptance/test_ledger_http.py) and SQL (test_ledger_persistence.py).
 
 
 def test_a_batch_deletion_removes_the_entries_and_answers_204(client: TestClient) -> None:
@@ -326,207 +290,175 @@ def test_a_batch_deletion_removes_the_entries_and_answers_204(client: TestClient
     assert [item["seq"] for item in listed] == [3, 2, 1]
 
 
-def test_deleting_an_entry_twice_answers_404_the_second_time(client: TestClient) -> None:
-    created = record_fixtures(client)
-    body = {"ids": [created[4]["id"]]}
-
-    assert client.post("/ledger/entries/deletions", json=body).status_code == 204
-    assert_problem(client.post("/ledger/entries/deletions", json=body), 404, ("NOT_FOUND", None))
-
-
-def test_an_unknown_id_answers_404_and_deletes_nothing(client: TestClient) -> None:
-    created = record_fixtures(client)
-
-    response = client.post(
-        "/ledger/entries/deletions",
-        json={"ids": [created[0]["id"], "00000000-0000-4000-8000-000000000000"]},
-    )
-
-    errors = assert_problem(response, 404, ("NOT_FOUND", None))
-    assert errors[0]["message"] == "Lançamento não encontrado."
-    assert len(client.get("/ledger/entries", params=RANGE).json()["items"]) == 5
-
-
 def test_an_empty_deletion_is_a_validation_error(client: TestClient) -> None:
     response = client.post("/ledger/entries/deletions", json={"ids": []})
 
     assert_problem(response, 422, ("VALIDATION_ERROR", "ids"))
 
 
-def test_a_repeated_id_counts_once(client: TestClient) -> None:
-    # OQ-32 item 5: {ids: [X, X]} deletes X and succeeds, with no false 404.
-    created = record_fixtures(client)
-    entry_id = created[4]["id"]
-
-    response = client.post("/ledger/entries/deletions", json={"ids": [entry_id, entry_id]})
-
-    assert response.status_code == 204, response.text
-    listed = client.get("/ledger/entries", params=RANGE).json()["items"]
-    assert entry_id not in {item["id"] for item in listed}
-    assert len(listed) == 4
-
-
 # --- errors -------------------------------------------------------------------------------------
+# Each rule and its pt-BR message is tested once against the domain (tests/unit/ledger); here
+# only the status and the problem's (code, field), plus the messages the HTTP layer writes.
 
-
-def test_an_entry_after_today_is_refused_in_portuguese(client: TestClient) -> None:
-    response = client.post("/ledger/entries", json={**FIXTURE_REQUESTS[0], "date": "2026-10-19"})
-
-    errors = assert_problem(response, 422, ("FUTURE_DATE", "date"))
-    assert errors[0]["message"] == "A data não pode ser posterior a hoje."
-    assert response.json()["detail"] == "A data não pode ser posterior a hoje."
-
-
-def test_an_unknown_contract_is_a_validation_error_on_asset_id(client: TestClient) -> None:
-    body = {**FIXTURE_REQUESTS[1], "asset_id": "00000000-0000-4000-8000-000000000000"}
-
-    assert_problem(client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "asset_id"))
-
-
-def test_too_many_decimals_are_refused_never_rounded(client: TestClient) -> None:
-    body = {**FIXTURE_REQUESTS[1], "execution_rate": "0.1000000000001"}
-
-    errors = assert_problem(
-        client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "execution_rate")
-    )
-    assert errors[0]["message"] == "Use no máximo 12 casas decimais."
-
-
-def test_a_trade_after_maturity_is_contract_matured(client: TestClient) -> None:
-    body = {
-        **FIXTURE_REQUESTS[2],
-        "asset_id": str(DI1V26.id),
-        "date": "2026-10-02",
-        "execution_pu": "100000",
-    }
-
-    errors = assert_problem(
-        client.post("/ledger/entries", json=body), 422, ("CONTRACT_MATURED", "date")
-    )
-    assert errors[0]["message"] == "O contrato já venceu nesta data."
-
-
-def test_on_the_maturity_date_the_pu_is_typed_and_the_rate_stored_as_zero(
-    client: TestClient,
-) -> None:
-    closing = {
-        **FIXTURE_REQUESTS[2],
-        "asset_id": str(DI1V26.id),
-        "date": "2026-10-01",
-        "execution_pu": "100000.00",
-    }
-    by_rate = {**FIXTURE_REQUESTS[1], "asset_id": str(DI1V26.id), "date": "2026-10-01"}
-
-    response = client.post("/ledger/entries", json=closing)
-    refused = client.post("/ledger/entries", json=by_rate)
-
-    assert response.status_code == 201, response.text
-    assert response.json()["execution_pu"] == "100000.00"
-    assert response.json()["execution_rate"] == "0.000000000000"
-    errors = assert_problem(refused, 422, ("VALIDATION_ERROR", "execution_rate"))
-    assert errors[0]["message"] == "Na data de vencimento informe o PU."
-
-
-def test_a_json_number_for_a_decimal_is_refused(client: TestClient) -> None:
-    body = {**FIXTURE_REQUESTS[2], "execution_pu": 82057.0}
-
-    errors = assert_problem(
-        client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "execution_pu")
-    )
-    assert errors[0]["message"] == "Valor inválido."
-
-
-def test_non_ascii_digits_in_a_decimal_are_refused(client: TestClient) -> None:
-    # Arabic-Indic "123": Decimal() parses it to 123, yet only ASCII [0-9] is a typed decimal.
-    body = {**FIXTURE_REQUESTS[2], "execution_pu": "\u0661\u0662\u0663"}
-
-    assert_problem(
-        client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "execution_pu")
-    )
-
-
-@pytest.mark.parametrize("value", ["25:00", "9:00", "10:30:00.5", "", "\u0661\u0660:\u0663\u0660"])
-def test_a_malformed_time_is_refused(client: TestClient, value: str) -> None:
-    body = {**FIXTURE_REQUESTS[0], "time": value}
-
-    assert_problem(client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "time"))
-
-
-def test_the_time_is_required(client: TestClient) -> None:
-    body = {k: v for k, v in FIXTURE_REQUESTS[0].items() if k != "time"}
-
-    errors = assert_problem(
-        client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "time")
-    )
-    assert errors[0]["message"] == "Campo obrigatório."
-
-
-@pytest.mark.parametrize("quantity", [2**31, -(2**31) - 1])
-def test_a_quantity_outside_the_integer_column_is_refused(
-    client: TestClient, quantity: int
-) -> None:
-    # signed_quantity is INTEGER: out of its range is the domain's 422, never a database error.
-    body = {**FIXTURE_REQUESTS[2], "signed_quantity": quantity, "date": "2026-10-19"}
-
-    errors = assert_problem(
-        client.post("/ledger/entries", json=body),
-        422,
-        ("FUTURE_DATE", "date"),
-        ("VALIDATION_ERROR", "signed_quantity"),
-    )
-    assert errors[1]["message"] == "A quantidade deve ser um inteiro diferente de zero."
-
-
-@pytest.mark.parametrize("field", ["note", "deleted_at"])
-def test_an_unknown_body_field_is_refused(client: TestClient, field: str) -> None:
-    body = {**FIXTURE_REQUESTS[0], field: "x"}
-
-    assert_problem(client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", field))
-
-
-def test_a_cash_entry_with_trade_fields_is_refused(client: TestClient) -> None:
-    body = {**FIXTURE_REQUESTS[0], "signed_quantity": 1}
-
-    assert_problem(
-        client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "signed_quantity")
-    )
-
-
-def test_a_range_with_start_after_end_is_invalid(client: TestClient) -> None:
-    response = client.get(
-        "/ledger/entries", params={"start_date": "2026-10-18", "end_date": "2026-10-17"}
-    )
-
-    assert_problem(response, 422, ("INVALID_RANGE", "start_date"))
+_TRADE_BY_PU = FIXTURE_REQUESTS[2]
+_UNKNOWN_ID = "00000000-0000-4000-8000-000000000000"
+_NO_TIME = {k: v for k, v in FIXTURE_REQUESTS[0].items() if k != "time"}
 
 
 @pytest.mark.parametrize(
-    ("params", "field"),
+    ("body", "errors", "message"),
     [
-        ({"limit": "0"}, "limit"),
-        ({"limit": "201"}, "limit"),
-        ({"cursor": "nope"}, "cursor"),
-        ({"order": "sideways"}, "order"),
+        pytest.param(
+            {**FIXTURE_REQUESTS[0], "date": "2026-10-19"},
+            [("FUTURE_DATE", "date")],
+            None,
+            id="future-date",
+        ),
+        pytest.param(
+            {**FIXTURE_REQUESTS[1], "asset_id": _UNKNOWN_ID},
+            [("VALIDATION_ERROR", "asset_id")],  # a body field never answers 404
+            None,
+            id="unknown-contract",
+        ),
+        pytest.param(
+            {**_TRADE_BY_PU, "execution_pu": 82057.0},
+            [("VALIDATION_ERROR", "execution_pu")],
+            "Valor inválido.",
+            id="json-number-decimal",
+        ),
+        # Arabic-Indic "123": Decimal() parses it to 123, yet only ASCII [0-9] is a typed decimal.
+        pytest.param(
+            {**_TRADE_BY_PU, "execution_pu": "\u0661\u0662\u0663"},
+            [("VALIDATION_ERROR", "execution_pu")],
+            None,
+            id="non-ascii-digits",
+        ),
+        *(
+            pytest.param(
+                {**FIXTURE_REQUESTS[0], "time": value},
+                [("VALIDATION_ERROR", "time")],
+                None,
+                id=f"time-{name}",
+            )
+            for name, value in (
+                ("25h", "25:00"),
+                ("one-digit-hour", "9:00"),
+                ("fraction", "10:30:00.5"),
+                ("empty", ""),
+                ("non-ascii", "\u0661\u0660:\u0663\u0660"),
+            )
+        ),
+        pytest.param(_NO_TIME, [("VALIDATION_ERROR", "time")], "Campo obrigatório.", id="no-time"),
+        # signed_quantity is INTEGER: out of its range is the domain's 422, reported with the
+        # other errors, never a database error.
+        *(
+            pytest.param(
+                {**_TRADE_BY_PU, "signed_quantity": quantity, "date": "2026-10-19"},
+                [("FUTURE_DATE", "date"), ("VALIDATION_ERROR", "signed_quantity")],
+                None,
+                id=f"quantity-{name}",
+            )
+            for name, quantity in (("above-int", 2**31), ("below-int", -(2**31) - 1))
+        ),
+        *(
+            pytest.param(
+                {**FIXTURE_REQUESTS[0], field: "x"},
+                [("VALIDATION_ERROR", field)],
+                None,
+                id=f"unknown-field-{field}",
+            )
+            for field in ("note", "deleted_at")
+        ),
+        pytest.param(
+            {**FIXTURE_REQUESTS[0], "signed_quantity": 1},
+            [("VALIDATION_ERROR", "signed_quantity")],
+            None,
+            id="cash-with-trade-field",
+        ),
+        pytest.param(
+            {**A_DEPOSIT, "description": "a" * 201},
+            [("VALIDATION_ERROR", "description")],
+            None,
+            id="description-too-long",
+        ),
+        pytest.param(
+            {**FIXTURE_REQUESTS[1], "description": "Compra"},
+            [("VALIDATION_ERROR", "description")],
+            None,
+            id="trade-with-description",
+        ),
+        pytest.param(
+            {**A_DEPOSIT, "description": "a\u0000b"},
+            [("VALIDATION_ERROR", "description")],
+            None,
+            id="description-nul",
+        ),
+        pytest.param(
+            {**A_DEPOSIT, "description": 7},
+            [("VALIDATION_ERROR", "description")],
+            None,
+            id="description-not-a-string",
+        ),
     ],
 )
-def test_bad_list_parameters_are_validation_errors(
-    client: TestClient, params: dict[str, str], field: str
+def test_a_refused_entry_answers_a_problem(
+    client: TestClient,
+    body: dict[str, Any],
+    errors: list[tuple[str, str]],
+    message: str | None,
 ) -> None:
-    response = client.get("/ledger/entries", params={**RANGE, **params})
+    response = client.post("/ledger/entries", json=body)
 
-    assert_problem(response, 422, ("VALIDATION_ERROR", field))
-
-
-def test_the_range_is_required(client: TestClient) -> None:
-    response = client.get("/ledger/entries")
-
-    assert_problem(
-        response, 422, ("VALIDATION_ERROR", "start_date"), ("VALIDATION_ERROR", "end_date")
-    )
+    first = assert_problem(response, 422, *errors)[0]
+    if message is not None:
+        assert first["message"] == message
 
 
 def test_a_rejected_write_leaves_nothing(client: TestClient) -> None:
     response = client.post("/ledger/entries", json={**FIXTURE_REQUESTS[0], "date": "2026-10-19"})
 
-    assert_problem(response, 422, ("FUTURE_DATE", "date"))
+    [error] = assert_problem(response, 422, ("FUTURE_DATE", "date"))
+    # A single error's pt-BR message is also the problem's detail.
+    assert response.json()["detail"] == error["message"] == "A data não pode ser posterior a hoje."
     assert client.get("/ledger/entries", params=RANGE).json()["items"] == []
+
+
+def _cursor(raw: str) -> str:
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+@pytest.mark.parametrize(
+    ("params", "errors"),
+    [
+        pytest.param(
+            {"start_date": "2026-10-18", "end_date": "2026-10-17"},
+            [("INVALID_RANGE", "start_date")],
+            id="start-after-end",
+        ),
+        pytest.param(
+            {},
+            [("VALIDATION_ERROR", "start_date"), ("VALIDATION_ERROR", "end_date")],
+            id="no-range",
+        ),
+        pytest.param({**RANGE, "cursor": "nope"}, [("VALIDATION_ERROR", "cursor")], id="cursor"),
+        # Crafted cursors are refused before they reach the database, never a server error.
+        pytest.param(
+            {**RANGE, "cursor": _cursor("2026-10-16|10:00:00+03:00|4")},
+            [("VALIDATION_ERROR", "cursor")],
+            id="cursor-aware-time",
+        ),
+        pytest.param(
+            {**RANGE, "cursor": _cursor("2026-10-16|10:00:00|99999999999999999999")},
+            [("VALIDATION_ERROR", "cursor")],
+            id="cursor-beyond-bigint",
+        ),
+        pytest.param({**RANGE, "order": "sideways"}, [("VALIDATION_ERROR", "order")], id="order"),
+        # limit=0 and limit=201 are spec §13 item 22 (acceptance/test_ledger_http.py).
+    ],
+)
+def test_bad_list_parameters_answer_a_problem(
+    client: TestClient, params: dict[str, str], errors: list[tuple[str, str]]
+) -> None:
+    record_fixtures(client)
+
+    assert_problem(client.get("/ledger/entries", params=params), 422, *errors)

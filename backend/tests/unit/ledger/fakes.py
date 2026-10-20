@@ -1,8 +1,7 @@
 """Test doubles for Ledger's collaborators: Asset, Pricing, the Unit of Work and persistence.
 
-`FormulaPricing` implements ``pricing.public.PricingService`` with the spec's DC/365 formula
-until lane B's service is wired, so the golden values of the frontend fixtures hold. Like
-production code, these doubles reach other modules only through their ``public.py``.
+Pricing is the real, pure service (`build_pricing_service`) over `FakeAssets`; `PricingSpy`
+only records what Ledger passes to it.
 """
 
 from __future__ import annotations
@@ -18,13 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.asset.public import Instrument
 from di1.modules.ledger.domain.entries import EntryType, LedgerEntry, NewCashMovement, NewTrade
-from di1.modules.ledger.domain.listing import ListOrder, PageRequest
+from di1.modules.ledger.domain.listing import PageRequest
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.modules.pricing.public import Price, Quote
-from di1.shared.calendar import DAYS_PER_YEAR, calendar_days
 from di1.shared.clock import SAO_PAULO
-from di1.shared.decimals import financial_context, quantize_pu, quantize_rate
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
-from di1.shared.input_kind import InputKind
 from tests.fakes.asset import CREATED_AT
 
 PRODUCT_ID = UUID("6f1c2a10-0000-4000-8000-000000000001")
@@ -68,49 +64,17 @@ class FakeAssets:
 
 
 @dataclass
-class FormulaPricing:
-    """`PricingService` by the spec's DC/365 formula (spec §4.1, OQ-1, OQ-3), reading the contract
-    from ``assets`` as the real service does. It refuses like lane B's service: a `DomainError`
-    naming Pricing's own parameters (``reference_date``, ``pu``, ``rate``), which Ledger maps to
-    its request fields. Only the cases Ledger can reach after its own validation are modelled."""
+class PricingSpy:
+    """The real `PricingService` over ``assets``, recording each call Ledger makes to it."""
 
     assets: FakeAssets
     calls: list[tuple[UUID, date, Quote]] = field(default_factory=list)
 
     async def calculate(self, instrument_id: UUID, reference_date: date, quote: Quote) -> Price:
         self.calls.append((instrument_id, reference_date, quote))
-        contract = (await self.assets.get_instruments([instrument_id])).get(instrument_id)
-        if contract is None:
-            raise DomainError(ErrorDetail(ErrorCode.NOT_FOUND, "Contrato não encontrado."))
-        assert contract.maturity_date is not None and contract.face_value is not None
-        days = calendar_days(reference_date, contract.maturity_date)
-        if days < 0:
-            raise DomainError(
-                ErrorDetail(
-                    ErrorCode.CONTRACT_MATURED,
-                    "O contrato já venceu nesta data.",
-                    "reference_date",
-                )
-            )
-        face_value = contract.face_value
-        if quote.kind is InputKind.PU:
-            if days == 0:  # on the maturity date the PU is typed and the rate is 0 (OQ-1)
-                return Price(pu=quote.value, rate=quantize_rate(Decimal(0)), input_kind=quote.kind)
-            with financial_context():
-                rate = (face_value / quote.value) ** (DAYS_PER_YEAR / Decimal(days)) - 1
-            return Price(pu=quote.value, rate=quantize_rate(rate), input_kind=quote.kind)
-        if days == 0:
-            raise _refused("Na data de vencimento informe o PU.", "rate")
-        with financial_context():
-            pu = face_value / (1 + quote.value) ** (Decimal(days) / DAYS_PER_YEAR)
-        stored = quantize_pu(pu)
-        if stored <= 0:
-            raise _refused("A taxa resulta em um PU que arredonda para zero.", "rate")
-        return Price(pu=stored, rate=quote.value, input_kind=quote.kind)
-
-
-def _refused(message: str, field: str) -> DomainError:
-    return DomainError(ErrorDetail(ErrorCode.VALIDATION_ERROR, message, field))
+        return await build_pricing_service(self.assets).calculate(
+            instrument_id, reference_date, quote
+        )
 
 
 class FakeUnitOfWork:
@@ -135,6 +99,7 @@ class InMemoryLedgerRepository:
     rows: list[LedgerEntry] = field(default_factory=list)
     next_seq: int = 1
     now: datetime = datetime(2026, 10, 18, 12, 0, tzinfo=SAO_PAULO)
+    page_calls: list[tuple[PageRequest, set[UUID]]] = field(default_factory=list)
 
     async def add_trade(self, trade: NewTrade) -> LedgerEntry:
         return self._add(
@@ -177,30 +142,10 @@ class InMemoryLedgerRepository:
     async def page(
         self, request: PageRequest, *, matching_asset_ids: Collection[UUID]
     ) -> Sequence[LedgerEntry]:
-        descending = request.order is ListOrder.DESC
-        rows = sorted(
-            self._active(request.start_date, request.end_date),
-            key=lambda row: row.order_key,
-            reverse=descending,
-        )
-        if request.search is not None:
-            search = request.search
-
-            def matches(row: LedgerEntry) -> bool:
-                if row.type is EntryType.TRADE:
-                    return row.asset_id in set(matching_asset_ids)
-                assert row.cash_amount is not None
-                if search.matches_description(row.description):
-                    return True
-                if row.cash_amount > 0:
-                    return search.includes_deposits
-                return search.includes_withdrawals
-
-            rows = [row for row in rows if matches(row)]
-        if request.after is not None:
-            after = (request.after.entry_date, request.after.entry_time, request.after.seq)
-            rows = [r for r in rows if (r.order_key < after if descending else r.order_key > after)]
-        return rows[: request.limit + 1]
+        """The first ``limit + 1`` stored rows, as stored: ordering, search and keyset paging are
+        SQL, tested in tests/integration/ledger. Records what the service asked for."""
+        self.page_calls.append((request, set(matching_asset_ids)))
+        return self.rows[: request.limit + 1]
 
     def _active(self, start_date: date, end_date: date) -> list[LedgerEntry]:
         return [row for row in self.rows if start_date <= row.entry_date <= end_date]

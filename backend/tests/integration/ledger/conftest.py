@@ -1,6 +1,6 @@
 """Fixtures for Ledger's PostgreSQL tests: a fresh database migrated to head per test, the
 fixtures' DI1 contracts in ``asset.*`` (the foreign key target of a trade), and a service wired
-to the real repository with fake Asset/Pricing collaborators."""
+to the real repository and the real pricing service over a fake Asset reader."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.dependencies import build_ledger_service
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
@@ -22,7 +23,7 @@ from di1.platform.database.unit_of_work import UnitOfWork
 from tests.fakes.clock import FixedClock
 from tests.integration.databases import fresh_database_url
 from tests.integration.ledger.support import TODAY, seed_contracts
-from tests.unit.ledger.fakes import FakeAssets, FormulaPricing
+from tests.unit.ledger.fakes import FakeAssets
 
 BACKEND = Path(__file__).resolve().parents[3]
 
@@ -67,7 +68,7 @@ def service() -> ServiceOn:
 
     def on(uow: UnitOfWork) -> LedgerService:
         return build_ledger_service(
-            uow, clock=FixedClock(TODAY), assets=assets, pricing=FormulaPricing(assets)
+            uow, clock=FixedClock(TODAY), assets=assets, pricing=build_pricing_service(assets)
         )
 
     return on
