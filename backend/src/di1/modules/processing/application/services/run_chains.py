@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -26,23 +26,21 @@ from di1.modules.pnl.public import (
 from di1.modules.portfolio.public import (
     AssetValuationInput,
     CashBalance,
-    CashCalculator,
     PortfolioReader,
     PortfolioResultsWriter,
-    PositionsEngine,
     PositionState,
     Trade,
-    ValuationCalculator,
+    calculate_cash_day,
+    calculate_positions_day,
     is_past_maturity,
     reference_pu_on,
+    value_positions,
 )
 from di1.modules.prices.public import PriceReader
 from di1.modules.processing.application.interfaces.repositories import IssueRecord, IssueType
 from di1.platform.database.unit_of_work import UnitOfWork
-from di1.shared.decimals import financial_context
-
-ONE_DAY = timedelta(days=1)
-ZERO = Decimal("0")
+from di1.shared.calendar import ONE_DAY
+from di1.shared.decimals import ZERO, financial_context
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +117,7 @@ async def process_cash_day(
         previous = published
     trades = [trade_of(t) for t in await readers.ledger.get_trades(day, day)]
     deposits, withdrawals = cash_totals(await readers.ledger.get_cash_movements(day, day))
-    cash_day = CashCalculator().calculate_day(previous, trades, deposits, withdrawals, day)
+    cash_day = calculate_cash_day(previous, trades, deposits, withdrawals, day)
     await writer.write_cash_day(cash_day, uow=uow)
 
 
@@ -144,13 +142,15 @@ async def process_positions_day(
             raise ChainDataError(f"the positions of {previous_day} are processed but not published")
         state, previous_cumulative = published.state, published.cumulative_pnl
     trades = [trade_of(t) for t in await readers.ledger.get_trades(day, day)]
-    positions_day = PositionsEngine().calculate_day(state, trades, day)
+    positions_day = calculate_positions_day(state, trades, day)
 
     asset_ids = [p.asset_id for p in positions_day.positions]
     maturities = await _maturities(readers.assets, asset_ids)
     prices = await readers.prices.get(asset_ids, {previous_day, day}) if asset_ids else {}
 
     def reference_pu(asset_id: UUID, on: date) -> Decimal | None:
+        """The one resolution of the maturity rule (OQ-1): the exact-date price up to maturity,
+        0 after it, whatever price exists."""
         price = prices.get((asset_id, on))
         return reference_pu_on(on, maturities[asset_id], None if price is None else price.pu)
 
@@ -158,21 +158,14 @@ async def process_positions_day(
     asset_pnl: dict[UUID, AssetPnLResult] = {}
     issues: list[IssueRecord] = []
     for position in positions_day.positions:
-        asset_id, maturity = position.asset_id, maturities[position.asset_id]
-        current = None if is_past_maturity(day, maturity) else prices.get((asset_id, day))
-        valuation_inputs.append(
-            AssetValuationInput(
-                asset_id=asset_id,
-                quantity=position.quantity,
-                maturity_date=maturity,
-                reference_pu=None if current is None else current.pu,
-            )
-        )
+        asset_id = position.asset_id
+        current_pu = reference_pu(asset_id, day)
+        valuation_inputs.append(AssetValuationInput(asset_id, position.quantity, current_pu))
         result = calculate_asset_pnl(
             position.previous_quantity,
             [PnLTrade(t.signed_quantity, t.execution_pu) for t in position.trades],
             reference_pu(asset_id, previous_day),
-            reference_pu(asset_id, day),
+            current_pu,
         )
         asset_pnl[asset_id] = result
         needed = {
@@ -183,10 +176,10 @@ async def process_positions_day(
             IssueRecord(IssueType.MISSING_REFERENCE_PRICE, asset_id, day, required)
             for required in sorted(needed)
         )
-        if is_past_maturity(day, maturity) and position.quantity != 0:
+        if is_past_maturity(day, maturities[asset_id]) and position.quantity != 0:
             issues.append(IssueRecord(IssueType.EXPIRED_OPEN_POSITION, asset_id, day, None))
 
-    valuation = ValuationCalculator().calculate_day(day, valuation_inputs)
+    valuation = value_positions(day, valuation_inputs)
     pnl = aggregate_pnl(set(asset_ids), asset_pnl, previous_cumulative)
     await writer.write_positions_day(
         positions_day,

@@ -19,14 +19,8 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-import pytest
-
 from di1.modules.pnl.public import CalculationCompleteness
-from di1.modules.portfolio.public import (
-    AssetValuationInput,
-    ValuationCalculator,
-    ValuationStatus,
-)
+from di1.modules.portfolio.public import ValuationStatus
 from tests.acceptance.harness import DI1F27, MATURITIES, Facts, run, trade
 
 TUESDAY = date(2027, 1, 5)
@@ -47,11 +41,15 @@ def test_maturity_is_the_harness_contract_date() -> None:
     assert MATURITIES[DI1F27] == MATURITY
 
 
-def test_a_reference_price_after_maturity_is_rejected() -> None:
-    with pytest.raises(ValueError, match="no reference price is accepted after maturity"):
-        ValuationCalculator().calculate_day(
-            THURSDAY, [AssetValuationInput(DI1F27, 1, MATURITY, Decimal("1"))]
-        )
+def test_a_reference_price_dated_after_maturity_is_never_used() -> None:
+    # OQ-1: after maturity the reference PU is 0 by definition; a stray price is not read.
+    stray = Facts(trades=FACTS.trades, prices={**FACTS.prices, (DI1F27, THURSDAY): Decimal("1")})
+
+    thursday = run(stray, TUESDAY, THURSDAY)[THURSDAY]
+
+    assert thursday.valued(DI1F27).reference_pu == 0
+    assert thursday.valued(DI1F27).financial_total == 0
+    assert thursday.asset_pnl[DI1F27].position_pnl == Decimal("-100000")
 
 
 def test_close_on_the_maturity_date_and_leave_one_open() -> None:

@@ -8,7 +8,7 @@ from datetime import date, timedelta
 
 from di1.modules.portfolio.application.services.repository import PortfolioRepository
 from di1.modules.portfolio.domain.cash import CashBalance
-from di1.modules.portfolio.domain.errors import AccountingError
+from di1.modules.portfolio.domain.errors import PortfolioError
 from di1.modules.portfolio.domain.positions import OpenPosition, PositionState
 from di1.modules.portfolio.public import PreviousPositionsDay
 
@@ -31,7 +31,7 @@ class PortfolioReader:
             if p.quantity == 0:
                 continue  # closed on D−1: not expected on D unless it trades (OQ-10)
             if p.average_entry_pu is None or p.average_entry_rate is None:
-                raise AccountingError(
+                raise PortfolioError(
                     f"published position {p.asset_id} on {previous} has no average"
                 )
             carried.append(

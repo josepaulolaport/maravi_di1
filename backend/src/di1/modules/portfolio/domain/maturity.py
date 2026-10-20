@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-ZERO = Decimal("0")
+from di1.shared.decimals import ZERO
 
 
 def is_past_maturity(day: date, maturity: date | None) -> bool:

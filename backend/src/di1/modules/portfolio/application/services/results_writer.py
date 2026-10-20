@@ -76,11 +76,7 @@ class PortfolioResultsWriter:
             trades_pnl=pnl.trades_pnl,
             daily_pnl=pnl.daily_pnl,
             cumulative_pnl=pnl.cumulative_pnl,
-            valuation_status=(
-                CalculationCompleteness.MISSING
-                if valuation.status is ValuationStatus.MISSING
-                else CalculationCompleteness.COMPLETE
-            ),
+            valuation_status=CalculationCompleteness(valuation.status),
             pnl_status=pnl.status,
         )
         await self._repository_for(uow).replace_positions_day(portfolio_day, positions)

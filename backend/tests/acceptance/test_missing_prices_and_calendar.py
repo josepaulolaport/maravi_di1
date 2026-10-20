@@ -13,10 +13,10 @@ import pytest
 from di1.modules.pnl.public import CalculationCompleteness, MissingReferencePrice
 from di1.modules.portfolio.public import (
     CashBalance,
-    CashCalculator,
-    PositionsEngine,
     PositionState,
     ValuationStatus,
+    calculate_cash_day,
+    calculate_positions_day,
 )
 from tests.acceptance.harness import DI1F28, DI1F29, Facts, run, run_positions, trade
 
@@ -48,15 +48,13 @@ def test_every_calendar_day_is_processed_weekends_included() -> None:
 def test_a_day_cannot_be_skipped() -> None:
     # Each chain starts D from the close of D−1: neither accepts Friday's close for Sunday.
     thursday = date(2027, 1, 7)
-    positions = PositionsEngine().calculate_day(PositionState.zero(thursday), [], FRIDAY)
-    cash = CashCalculator().calculate_day(
-        CashBalance.zero(thursday), [], Decimal(0), Decimal(0), FRIDAY
-    )
+    positions = calculate_positions_day(PositionState.zero(thursday), [], FRIDAY)
+    cash = calculate_cash_day(CashBalance.zero(thursday), [], Decimal(0), Decimal(0), FRIDAY)
 
     with pytest.raises(ValueError, match="the previous state must be of 2027-01-09"):
-        PositionsEngine().calculate_day(positions.closing_state(), [], SUNDAY)
+        calculate_positions_day(positions.closing_state(), [], SUNDAY)
     with pytest.raises(ValueError, match="the previous state must be of 2027-01-09"):
-        CashCalculator().calculate_day(cash.closing_balance(), [], Decimal(0), Decimal(0), SUNDAY)
+        calculate_cash_day(cash.closing_balance(), [], Decimal(0), Decimal(0), SUNDAY)
 
 
 def test_no_price_on_saturday_leaves_dependent_figures_null() -> None:
