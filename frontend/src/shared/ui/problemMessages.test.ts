@@ -49,7 +49,7 @@ describe('splitProblem (forms, OQ-15)', () => {
     expect(result).toEqual({ fields: { entryDate: 'Informe a data.' }, page: [] });
   });
 
-  it('§12 keeps every message of a field, not only the first', () => {
+  it('OQ-15 shows the first message of a field on its input and the rest above the form', () => {
     const result = splitProblem(
       error([
         { field: 'pu', message: 'Informe um número válido.' },
@@ -60,10 +60,27 @@ describe('splitProblem (forms, OQ-15)', () => {
       { pu: 'pu' },
     );
 
-    expect(result.fields).toEqual({
-      pu: 'Informe um número válido. Use no máximo 10 casas decimais.',
-    });
-    expect(result.page).toEqual(['Fonte inválida.', 'Fonte desconhecida.']);
+    expect(result.fields).toEqual({ pu: 'Informe um número válido.' });
+    expect(result.page).toEqual([
+      'Use no máximo 10 casas decimais.',
+      'Fonte inválida.',
+      'Fonte desconhecida.',
+    ]);
+  });
+
+  it('OQ-15 leaves out only the first message of each field a form shows on its input', () => {
+    const result = splitProblem(
+      error([
+        { field: 'start_date', message: 'Primeira de start_date.' },
+        { field: 'start_date', message: 'Segunda de start_date.' },
+        { field: 'end_date', message: 'De end_date.' },
+        { field: null, message: 'Sem campo.' },
+      ]),
+      { start_date: 'start' },
+    );
+
+    expect(result.fields).toEqual({ start: 'Primeira de start_date.' });
+    expect(result.page).toEqual(['Segunda de start_date.', 'De end_date.', 'Sem campo.']);
   });
 
   it("§12 shows on the page, in the API's order, what no input displays, so none is lost", () => {
