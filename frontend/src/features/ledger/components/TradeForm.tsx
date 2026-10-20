@@ -1,8 +1,10 @@
-import { Button, Group, NumberInput, Select, Stack } from '@mantine/core';
+import { Group, NumberInput, Select, Stack } from '@mantine/core';
 import { TimeInput } from '@mantine/dates';
-import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { useMemo, useState } from 'react';
+
+import { useApiForm } from '@/shared/form/useApiForm';
+import { FormActions } from '@/shared/ui/FormActions';
 
 import { useAllInstruments, useAllProducts } from '@/shared/queries';
 import { MessageAlert } from '@/shared/ui/MessageAlert';
@@ -11,14 +13,13 @@ import type { CreateTradeEntryRequest, InputKind, IsoDate } from '@/api/contract
 import { formatDate } from '@/shared/format';
 
 import { useCreateEntry } from '../hooks/useLedger';
-import { splitProblem } from '@/shared/ui/problemMessages';
 import { PastDateInput } from '@/shared/ui/PastDateInput';
 
 import { nowInSaoPaulo, toIsoTime } from '../model/time';
 
 export type TradeSide = 'BUY' | 'SELL';
 
-interface TradeValues {
+interface TradeValues extends Record<string, unknown> {
   assetId: string | null;
   date: IsoDate | null;
   time: string;
@@ -28,7 +29,7 @@ interface TradeValues {
 }
 
 // API field → form field, for the problem+json errors (OQ-15).
-const FIELD_MAP: Record<string, keyof TradeValues> = {
+const FIELD_MAP = {
   asset_id: 'assetId',
   date: 'date',
   time: 'time',
@@ -36,7 +37,7 @@ const FIELD_MAP: Record<string, keyof TradeValues> = {
   execution_pu: 'price',
   execution_rate: 'price',
   input_kind: 'price',
-};
+} as const;
 
 const LABELS = {
   BUY: { submit: 'Registrar compra', done: 'Compra registrada.' },
@@ -95,39 +96,43 @@ export function TradeForm({
   onDone: () => void;
 }) {
   const createTrade = useCreateEntry();
-  const [pageErrors, setPageErrors] = useState<string[]>([]);
   const [assetClassId, setAssetClassId] = useState<string | null>(null);
   const contracts = useContractOptions(assetClassId);
 
-  const form = useForm<TradeValues>({
-    initialValues: {
-      assetId: null,
-      date: today,
-      time: nowInSaoPaulo(),
-      quantity: '',
-      inputKind: 'PU',
-      price: '',
-    },
-    validate: {
-      assetId: (value) => (value ? null : 'Selecione um contrato.'),
-      date: (value) => (value ? null : 'Informe a data.'),
-      time: (value) => (/^\d{2}:\d{2}(:\d{2})?$/.test(value) ? null : 'Informe a hora.'),
-      quantity: (value) =>
-        typeof value === 'number' && Number.isInteger(value) && value > 0
-          ? null
-          : 'Informe uma quantidade inteira maior que zero.',
-      price: (value, values) => {
-        if (!value.trim()) return values.inputKind === 'PU' ? 'Informe o PU.' : 'Informe a taxa.';
-        return typedPrice(values.inputKind, values.price) === null
-          ? 'Informe um número válido, como 1.234,56.'
-          : null;
+  const { form, pageErrors, onSubmit } = useApiForm<TradeValues>(
+    {
+      initialValues: {
+        assetId: null,
+        date: today,
+        time: nowInSaoPaulo(),
+        quantity: '',
+        inputKind: 'PU',
+        price: '',
+      },
+      validate: {
+        assetId: (value) => (value ? null : 'Selecione um contrato.'),
+        date: (value) => (value ? null : 'Informe a data.'),
+        time: (value) => (/^\d{2}:\d{2}(:\d{2})?$/.test(value) ? null : 'Informe a hora.'),
+        quantity: (value) =>
+          typeof value === 'number' && Number.isInteger(value) && value > 0
+            ? null
+            : 'Informe uma quantidade inteira maior que zero.',
+        price: (value, values) => {
+          if (!value.trim()) return values.inputKind === 'PU' ? 'Informe o PU.' : 'Informe a taxa.';
+          return typedPrice(values.inputKind, values.price) === null
+            ? 'Informe um número válido, como 1.234,56.'
+            : null;
+        },
       },
     },
-  });
+    FIELD_MAP,
+  );
 
-  const submit = form.onSubmit((values) => {
+  const submit = onSubmit((values) => {
     const price = typedPrice(values.inputKind, values.price);
-    if (!values.assetId || !values.date || typeof values.quantity !== 'number' || !price) return;
+    if (!values.assetId || !values.date || typeof values.quantity !== 'number' || !price) {
+      return undefined;
+    }
     const base = {
       type: 'TRADE' as const,
       asset_id: values.assetId,
@@ -139,20 +144,12 @@ export function TradeForm({
       values.inputKind === 'PU'
         ? { ...base, input_kind: 'PU', execution_pu: price }
         : { ...base, input_kind: 'RATE', execution_rate: price };
-    setPageErrors([]);
-    createTrade.mutate(body, {
-      onSuccess: () => {
-        notifications.show({
-          color: 'teal',
-          message: `${LABELS[side].done} Caixa e posições precisam ser processados a partir de ${formatDate(body.date)}: use o escopo Tudo.`,
-        });
-        onDone();
-      },
-      onError: (error) => {
-        const { fields, page } = splitProblem(error, FIELD_MAP);
-        form.setErrors(fields);
-        setPageErrors(page);
-      },
+    return createTrade.mutateAsync(body).then(() => {
+      notifications.show({
+        color: 'teal',
+        message: `${LABELS[side].done} Caixa e posições precisam ser processados a partir de ${formatDate(body.date)}: use o escopo Tudo.`,
+      });
+      onDone();
     });
   });
 
@@ -227,14 +224,11 @@ export function TradeForm({
           inputProps={form.getInputProps('price')}
           placeholder={{ PU: '89.006,46', RATE: '10,45' }}
         />
-        <Group justify="flex-end" gap="sm">
-          <Button variant="default" onClick={onDone} disabled={createTrade.isPending}>
-            Cancelar
-          </Button>
-          <Button type="submit" loading={createTrade.isPending}>
-            {LABELS[side].submit}
-          </Button>
-        </Group>
+        <FormActions
+          submitLabel={LABELS[side].submit}
+          onCancel={onDone}
+          pending={createTrade.isPending}
+        />
       </Stack>
     </form>
   );

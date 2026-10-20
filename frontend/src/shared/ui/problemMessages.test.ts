@@ -35,20 +35,6 @@ describe('problemMessages (OQ-15)', () => {
   it('OQ-15 falls back to the detail when the problem lists no errors', () => {
     expect(problemMessages(problem([]))).toEqual(['Detalhe']);
   });
-
-  it('OQ-15 leaves out only the first message of each field a form shows on its input', () => {
-    const error = problem([
-      { code: 'VALIDATION_ERROR', message: 'Primeira de start_date.', field: 'start_date' },
-      { code: 'FUTURE_DATE', message: 'Segunda de start_date.', field: 'start_date' },
-      { code: 'INVALID_RANGE', message: 'De end_date.', field: 'end_date' },
-      { code: 'VALIDATION_ERROR', message: 'Sem campo.', field: null },
-    ]);
-    expect(problemMessages(error, ['start_date'])).toEqual([
-      'Segunda de start_date.',
-      'De end_date.',
-      'Sem campo.',
-    ]);
-  });
 });
 
 describe('splitProblem (forms, OQ-15)', () => {

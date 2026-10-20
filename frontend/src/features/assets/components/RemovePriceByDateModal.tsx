@@ -1,9 +1,11 @@
-import { Button, Group, Modal, Stack, TextInput } from '@mantine/core';
+import { Stack, TextInput } from '@mantine/core';
 import { IconCalendar } from '@tabler/icons-react';
 import { useState } from 'react';
 
 import type { Instrument, IsoDate, ReferencePriceDay } from '@/api/contract';
 import { todayInSaoPaulo } from '@/shared/format';
+import { ActionModal } from '@/shared/ui/ActionModal';
+import { FormActions } from '@/shared/ui/FormActions';
 import { MessageAlert } from '@/shared/ui/MessageAlert';
 import { PastDateInput } from '@/shared/ui/PastDateInput';
 import { problemMessages } from '@/shared/ui/problemMessages';
@@ -57,13 +59,7 @@ function DatePicker({ instrument, onClose }: { instrument: Instrument; onClose: 
   const error = missing ? 'Informe a data.' : none ? NO_PRICE : undefined;
 
   return (
-    <Modal
-      opened
-      onClose={onClose}
-      title="Remover preço de referência"
-      centered
-      closeButtonProps={{ 'aria-label': 'Fechar' }}
-    >
+    <ActionModal opened onClose={onClose} title="Remover preço de referência" size="md">
       <Stack gap="md">
         <TextInput label="Contrato" value={instrument.code} readOnly />
         <PastDateInput
@@ -83,23 +79,18 @@ function DatePicker({ instrument, onClose }: { instrument: Instrument; onClose: 
         {lookup !== null && days.isError && !days.isFetching && (
           <MessageAlert messages={problemMessages(days.error)} />
         )}
-        <Group justify="flex-end" gap="sm">
-          <Button variant="default" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button
-            loading={lookup !== null && days.isFetching}
-            onClick={() => {
-              if (date === null) setMissing(true);
-              // The same date again: read it again (after a failure, or a write elsewhere).
-              else if (date === lookup) void days.refetch();
-              else setLookup(date);
-            }}
-          >
-            Continuar
-          </Button>
-        </Group>
+        <FormActions
+          submitLabel="Continuar"
+          onCancel={onClose}
+          pending={lookup !== null && days.isFetching}
+          onSubmit={() => {
+            if (date === null) setMissing(true);
+            // The same date again: read it again (after a failure, or a write elsewhere).
+            else if (date === lookup) void days.refetch();
+            else setLookup(date);
+          }}
+        />
       </Stack>
-    </Modal>
+    </ActionModal>
   );
 }

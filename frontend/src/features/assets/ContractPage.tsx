@@ -62,20 +62,16 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
     set({ inicio: next.start, fim: next.end }, { push: true });
   };
   // The modal's date: the URL's `?registrar=` while it is there, otherwise UI state.
-  const [modal, setModal] = useState<{ date: IsoDate | null; session: number }>({
-    date: null,
-    session: 0,
-  });
-  const modalDate = requested ?? modal.date;
+  const [modalDate, setModalDate] = useState<IsoDate | null>(null);
   const openModal = (date: IsoDate) => {
-    setModal((current) => ({ date, session: current.session + 1 }));
+    setModalDate(date);
   };
   // One URL update: drop `?registrar=` and, when the saved date is outside the period, move
   // the period to end on it, so the new observation is always in view. Without an explicit
   // period, `?registrar=` chose the window; it is kept in the URL, so closing the modal never
   // moves the calendar away from that date.
   const closeModal = (saved?: IsoDate) => {
-    setModal((current) => ({ date: null, session: current.session + 1 }));
+    setModalDate(null);
     const outside = saved !== undefined && (saved < start || saved > end);
     if (requested === null && !outside) return;
     const period = outside ? calendarWindow(saved, instrument.maturity_date) : { start, end };
@@ -131,12 +127,7 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
           />
         </>
       )}
-      <PriceModal
-        instrument={instrument}
-        date={modalDate}
-        session={modal.session}
-        onClose={closeModal}
-      />
+      <PriceModal instrument={instrument} date={requested ?? modalDate} onClose={closeModal} />
       <RemovePriceModal
         day={removing}
         onClose={() => {

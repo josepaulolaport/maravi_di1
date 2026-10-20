@@ -1,8 +1,9 @@
-import { Alert, Button, Modal, Group, Progress, SimpleGrid, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Progress, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 
 import type { ProcessingChain, ProcessingRequest } from '@/api/contract';
 import { addDays, formatDate, formatDateTime } from '@/shared/format';
+import { ActionModal } from '@/shared/ui/ActionModal';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { SCOPE_LABELS } from '@/shared/processing/scope';
 
@@ -74,14 +75,7 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
   const failure = job !== null && (job.status === 'FAILED' || chain !== null);
   const perChain = job ? chainNotices(job) : null;
   return (
-    <Modal
-      opened={job !== null}
-      onClose={onClose}
-      title="Detalhes do processamento"
-      centered
-      size="lg"
-      closeButtonProps={{ 'aria-label': 'Fechar' }}
-    >
+    <ActionModal opened={job !== null} onClose={onClose} title="Detalhes do processamento">
       {job && progress && (
         <Stack gap="md">
           <Group justify="space-between">
@@ -174,6 +168,6 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
           </Group>
         </Stack>
       )}
-    </Modal>
+    </ActionModal>
   );
 }

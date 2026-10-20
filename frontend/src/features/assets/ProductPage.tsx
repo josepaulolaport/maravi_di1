@@ -49,15 +49,13 @@ function ProductBody({ product }: { product: Product }) {
   const instruments = useInstruments(product.id, search);
   // Every contract of the product, whatever the search, for the price form's select.
   const allInstruments = useInstruments(product.id, '');
-  const [price, setPrice] = useState<{
-    instrument: Instrument | null;
-    date: IsoDate | null;
-    session: number;
-  }>({ instrument: null, date: null, session: 0 });
+  const [price, setPrice] = useState<{ instrument: Instrument | null; date: IsoDate | null }>({
+    instrument: null,
+    date: null,
+  });
   // The form opens on today, or on a matured contract's last day (OQ-1).
   const openPrice = (instrument: Instrument | null) => {
-    const date = lastDay(instrument, todayInSaoPaulo());
-    setPrice((current) => ({ instrument, date, session: current.session + 1 }));
+    setPrice({ instrument, date: lastDay(instrument, todayInSaoPaulo()) });
   };
   const [removing, setRemoving] = useState<Instrument | null>(null);
 
@@ -130,7 +128,6 @@ function ProductBody({ product }: { product: Product }) {
         contracts={allInstruments.data?.items ?? (price.instrument ? [price.instrument] : [])}
         contractsStatus={allInstruments.status}
         date={price.date}
-        session={price.session}
         onClose={() => {
           setPrice((current) => ({ ...current, date: null }));
         }}
