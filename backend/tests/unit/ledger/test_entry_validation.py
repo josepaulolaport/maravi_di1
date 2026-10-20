@@ -351,8 +351,8 @@ def test_a_deposit_is_positive_and_a_withdrawal_negative() -> None:
     deposit = validate_cash_movement(_cash(), today=TODAY)
     withdrawal = validate_cash_movement(_cash(cash_amount=Decimal("-50000.00")), today=TODAY)
 
-    assert deposit == Decimal("1500000.00")
-    assert withdrawal == Decimal("-50000.00")
+    assert deposit.amount == Decimal("1500000.00")
+    assert withdrawal.amount == Decimal("-50000.00")
 
 
 @pytest.mark.parametrize("amount", [None, "0", "0.00", "-0"])
@@ -375,8 +375,8 @@ def test_an_amount_with_more_than_2_places_is_rejected() -> None:
 
 def test_the_amount_fits_numeric_20_2() -> None:
     largest = Decimal("999999999999999999.99")
-    assert validate_cash_movement(_cash(cash_amount=largest), today=TODAY) == largest
-    assert validate_cash_movement(_cash(cash_amount=-largest), today=TODAY) == -largest
+    assert validate_cash_movement(_cash(cash_amount=largest), today=TODAY).amount == largest
+    assert validate_cash_movement(_cash(cash_amount=-largest), today=TODAY).amount == -largest
 
     with pytest.raises(DomainError) as error:
         validate_cash_movement(_cash(cash_amount=Decimal("1000000000000000000")), today=TODAY)
@@ -407,6 +407,60 @@ def test_trade_fields_on_a_cash_movement_are_rejected() -> None:
         (ErrorCode.VALIDATION_ERROR, field)
         for field in ("asset_id", "signed_quantity", "input_kind", "execution_pu", "execution_rate")
     }
+
+
+# --- cash description (OQ-51) -------------------------------------------------------------------
+
+
+def test_a_cash_movement_keeps_its_description_trimmed() -> None:
+    movement = validate_cash_movement(_cash(description="  Aporte inicial \n"), today=TODAY)
+
+    assert movement.description == "Aporte inicial"
+
+
+def test_a_description_is_stored_composed() -> None:
+    # The list's SQL search folds precomposed letters (OQ-51): "a" + U+0301 is stored as "á".
+    movement = validate_cash_movement(_cash(description="Aplicac\u0327a\u0303o"), today=TODAY)
+
+    assert movement.description == "Aplicação"
+
+
+@pytest.mark.parametrize("description", [None, "", "   ", "\t\n"])
+def test_an_absent_or_blank_description_is_none(description: str | None) -> None:
+    assert validate_cash_movement(_cash(description=description), today=TODAY).description is None
+
+
+def test_a_description_of_200_characters_is_accepted() -> None:
+    text = "á" * 200
+
+    assert validate_cash_movement(_cash(description=f" {text} "), today=TODAY).description == text
+
+
+def test_a_description_longer_than_200_characters_is_rejected_not_cut() -> None:
+    with pytest.raises(DomainError) as error:
+        validate_cash_movement(_cash(description="a" * 201), today=TODAY)
+
+    assert _errors(error) == {(ErrorCode.VALIDATION_ERROR, "description")}
+    assert error.value.errors[0].message == "A descrição deve ter no máximo 200 caracteres."
+
+
+def test_a_long_description_is_reported_with_the_other_input_errors() -> None:
+    with pytest.raises(DomainError) as error:
+        validate_cash_movement(_cash(cash_amount=None, description="a" * 201), today=TODAY)
+
+    assert _errors(error) == {
+        (ErrorCode.VALIDATION_ERROR, "cash_amount"),
+        (ErrorCode.VALIDATION_ERROR, "description"),
+    }
+
+
+@pytest.mark.parametrize("description", ["Compra", ""])
+def test_a_trade_takes_no_description(description: str) -> None:
+    with pytest.raises(DomainError) as error:
+        validate_trade(_trade(description=description), today=TODAY, instrument=DI1F28)
+
+    assert _errors(error) == {(ErrorCode.VALIDATION_ERROR, "description")}
+    assert error.value.errors[0].message == "Uma operação não tem descrição."
 
 
 def test_the_validators_refuse_a_draft_of_the_other_type() -> None:

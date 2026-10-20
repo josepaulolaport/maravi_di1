@@ -7,7 +7,7 @@ OQ-24, OQ-26 item 1).
   cursor is the first page; a cursor the API did not write is refused.
 - Search (frozen frontend contract, mock ``handlers/ledger.ts``): case- and accent-insensitive,
   by substring; a trade matches its contract code, a cash entry the label of its sign, "Aporte"
-  (positive) or "Retirada" (negative).
+  (positive) or "Retirada" (negative), or its description (OQ-51).
 """
 
 from __future__ import annotations
@@ -91,6 +91,10 @@ class EntrySearch:
 
     def matches_code(self, code: str) -> bool:
         return self.needle in _fold(code)
+
+    def matches_description(self, description: str | None) -> bool:
+        """The rule the SQL of the list applies to ``ledger.entries.description``."""
+        return description is not None and self.needle in _fold(description)
 
     @property
     def includes_deposits(self) -> bool:

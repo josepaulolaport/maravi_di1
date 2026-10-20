@@ -28,7 +28,13 @@ PROBLEM_JSON = "application/problem+json"
 
 # The requests that record the fixtures' ledger, in the order of their seq.
 FIXTURE_REQUESTS: list[dict[str, Any]] = [
-    {"type": "CASH", "date": "2026-10-14", "time": "09:00", "cash_amount": "1500000.00"},
+    {
+        "type": "CASH",
+        "date": "2026-10-14",
+        "time": "09:00",
+        "cash_amount": "1500000.00",
+        "description": " Aporte inicial ",
+    },
     {
         "type": "TRADE",
         "asset_id": str(DI1F28.id),
@@ -67,6 +73,7 @@ GOLDEN_DESC: list[dict[str, Any]] = [
         "time": "17:30:00",
         "seq": 5,
         "cash_amount": "-50000.00",
+        "description": None,
     },
     {
         "type": "TRADE",
@@ -116,6 +123,7 @@ GOLDEN_DESC: list[dict[str, Any]] = [
         "time": "09:00:00",
         "seq": 1,
         "cash_amount": "1500000.00",
+        "description": "Aporte inicial",
     },
 ]
 
@@ -186,7 +194,9 @@ def test_a_created_entry_is_answered_in_the_list_shape(client: TestClient) -> No
         "asset_code", "instrument_type_code", "signed_quantity", "execution_pu",
         "execution_rate", "input_kind",
     }  # fmt: skip
-    assert set(created[0]) == {"id", "type", "date", "time", "seq", "cash_amount", "created_at"}
+    assert set(created[0]) == {
+        "id", "type", "date", "time", "seq", "cash_amount", "created_at", "description",
+    }  # fmt: skip
     # An instant in UTC ("Z"), like every other module's timestamps (processing's _utc).
     assert all(c["created_at"].endswith("Z") for c in created)
 
@@ -247,6 +257,43 @@ def test_range_and_search_filter_on_the_server(client: TestClient) -> None:
     assert seqs(search="di1f28") == [4, 2]
     assert seqs(search="Aporte") == [1]
     assert seqs(search="retirada") == [5]
+    assert seqs(search="INICIAL") == [1]  # the description (OQ-51)
+
+
+# --- cash description (OQ-51) -------------------------------------------------------------------
+
+A_DEPOSIT = {"type": "CASH", "date": "2026-10-14", "time": "09:00", "cash_amount": "100.00"}
+
+
+def test_a_cash_entry_without_a_description_answers_null(client: TestClient) -> None:
+    for extra in ({}, {"description": None}, {"description": "   "}):
+        response = client.post("/ledger/entries", json={**A_DEPOSIT, **extra})
+
+        assert response.status_code == 201, response.text
+        assert response.json()["description"] is None
+
+
+def test_a_description_of_more_than_200_characters_is_refused(client: TestClient) -> None:
+    response = client.post("/ledger/entries", json={**A_DEPOSIT, "description": "a" * 201})
+
+    [error] = assert_problem(response, 422, ("VALIDATION_ERROR", "description"))
+    assert error["message"] == "A descrição deve ter no máximo 200 caracteres."
+    assert client.get("/ledger/entries", params=RANGE).json()["items"] == []
+
+
+def test_a_trade_with_a_description_is_refused(client: TestClient) -> None:
+    body = {**FIXTURE_REQUESTS[1], "description": "Compra"}
+
+    response = client.post("/ledger/entries", json=body)
+
+    [error] = assert_problem(response, 422, ("VALIDATION_ERROR", "description"))
+    assert error["message"] == "Uma operação não tem descrição."
+
+
+def test_a_description_must_be_a_string(client: TestClient) -> None:
+    response = client.post("/ledger/entries", json={**A_DEPOSIT, "description": 7})
+
+    assert_problem(response, 422, ("VALIDATION_ERROR", "description"))
 
 
 # --- deletion -----------------------------------------------------------------------------------

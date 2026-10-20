@@ -17,7 +17,7 @@ from sqlalchemy import (
     and_,
     delete,
     exists,
-    false,
+    func,
     insert,
     literal,
     or_,
@@ -31,6 +31,11 @@ from di1.modules.ledger.infrastructure.persistence.models import LedgerEntryRow
 
 entries = cast(Table, LedgerEntryRow.__table__)
 _ORDER_KEY = (entries.c.entry_date, entries.c.entry_time, entries.c.seq)
+
+_ACCENTED = "áàâãäåéèêëíìîïóòôõöúùûüçñýÿ"
+_PLAIN = "aaaaaaeeeeiiiiooooouuuucnyy"
+"""The fold of ``EntrySearch`` in SQL, for the letters of Portuguese and their Latin-1 kin: the
+schema does not install ``unaccent`` (as for Asset's search), and a description is short."""
 
 
 def insert_entry(values: dict[str, Any]) -> Insert:
@@ -121,4 +126,7 @@ def _matches(search: EntrySearch, matching_asset_ids: Collection[uuid.UUID]) -> 
         options.append(and_(is_cash, entries.c.cash_amount > 0))
     if search.includes_withdrawals:
         options.append(and_(is_cash, entries.c.cash_amount < 0))
-    return or_(*options) if options else false()
+    folded = func.translate(func.lower(entries.c.description), _ACCENTED, _PLAIN)
+    # A NULL description matches nothing; "%" and "_" in the search are literal (OQ-51).
+    options.append(and_(is_cash, folded.contains(search.needle, autoescape=True)))
+    return or_(*options)

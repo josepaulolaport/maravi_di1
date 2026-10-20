@@ -217,3 +217,12 @@ def test_a_code_search_selects_no_cash_entry() -> None:
 def test_an_empty_search_is_none() -> None:
     assert EntrySearch.parse(None) is None
     assert EntrySearch.parse("   ") is None
+
+
+def test_a_description_matches_ignoring_case_and_accents() -> None:
+    search = EntrySearch.parse("Aplicacao")
+
+    assert search is not None
+    assert search.matches_description("Aplicação inicial")
+    assert not search.matches_description("Resgate")
+    assert not search.matches_description(None)

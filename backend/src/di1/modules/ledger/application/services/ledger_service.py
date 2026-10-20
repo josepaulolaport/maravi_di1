@@ -75,8 +75,10 @@ class LedgerService:
         repository = self._repository_for(uow)
         today = self._clock.today()
         if draft.type is EntryType.CASH:
-            amount = validate_cash_movement(draft, today=today)
-            entry = await repository.add_cash_movement(draft, amount=amount)
+            movement = validate_cash_movement(draft, today=today)
+            entry = await repository.add_cash_movement(
+                draft, amount=movement.amount, description=movement.description
+            )
             await uow.commit()
             return LedgerEntryView(entry, asset_code=None, instrument_type_code=None)
 
