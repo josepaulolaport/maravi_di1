@@ -7,6 +7,7 @@ a green run can never hide that the migration was not applied.
 from __future__ import annotations
 
 import os
+import uuid
 
 import psycopg
 import pytest
@@ -35,8 +36,10 @@ def test_missing_server_fails_when_database_tests_are_required(
 def test_only_a_template_left_by_a_dead_session_is_dropped() -> None:
     # A killed run never reaches pytest_sessionfinish; the next session drops its template.
     admin_url = db._admin_url()
-    dead, live = "di1_template_999999999_deadbeef0000", f"di1_template_{os.getpid()}_live00000000"
-    legacy = "di1_template_0123456789ab"  # an older branch's naming, without a pid
+    suffix = uuid.uuid4().hex[:12]  # unique names: never clash with what the server holds
+    dead = f"di1_template_999999999_{suffix}"
+    live = f"di1_template_{os.getpid()}_{suffix}"
+    legacy = f"di1_template_{suffix}"  # an older branch's naming, without a pid
     for name in (dead, live, legacy):
         db._execute(admin_url, sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     try:
