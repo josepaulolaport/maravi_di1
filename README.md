@@ -93,6 +93,17 @@ request from PostgreSQL under a row lock, runs it, and repeats until none is lef
 - Rejected alternative: PostgreSQL LISTEN/NOTIFY or polling. It removes one service, but it drops
   the messaging part of the challenge and would rework tested code.
 
+**Decided, implemented in later PRs on `simplify` (OQ-50, 2026-10-19):** the user asked "Is it
+really necessary? I want to keep the queue" about the doorbell and chose option 1. Each request
+gets its own message, carrying its `request_id`, published through the outbox; the `request_id` is for tracing and logs only.
+The worker consumes one at a time and, on any message, takes the oldest `QUEUED` request by
+`(created_at, id)`, so FIFO is unchanged. A sweep in the worker, every few seconds, does the same
+while anything is `QUEUED`, so a lost message only delays a run. The inbox and its
+retention, the dead-letter queues, the delivery limit, the redelivery backoff and the after-ack job
+queue go. The same decision computes AUM at read time instead of storing it, derives "Processando"
+from the active run instead of writing it per date, and marks a Carteira row whose price changed
+after processing (the price of the date or of the day before). See [docs/open-questions.md](docs/open-questions.md) (OQ-50).
+
 ## Demo: the challenge example, end to end
 
 ```bash
@@ -202,6 +213,8 @@ rather than refactor before delivery (OQ-47); none changes a business result.
   and the frontend keeps the two status labels as a safe default.
 - **Inbox retention is unbatched (M9):** the retention `DELETE` of old `platform.inbox_messages`
   rows runs as one statement, and `processed_at` has no index; fine at doorbell volume.
+  Goes with the inbox itself under OQ-50 item 2; `inbox_messages`, `portfolio_metrics.aum` and
+  `date_status.*_previous` then stay in the schema unused, like the columns above.
 
 ## CI
 
