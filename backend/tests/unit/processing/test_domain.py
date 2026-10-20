@@ -1,11 +1,12 @@
 """Processing's domain types: a date's status per chain and a run's current date (OQ-21, OQ-23,
-OQ-31, OQ-36, OQ-40, OQ-50 item 4), and the run history's cursor (spec §12)."""
+OQ-31, OQ-36, OQ-40, OQ-50 item 4), the run history's cursor (spec §12), and the Pendências'
+deduplication (spec §10.3, §13 case 21; OQ-37)."""
 
 from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -15,6 +16,7 @@ from di1.modules.processing.domain.date_status import (
     DateStatus,
     with_active_run,
 )
+from di1.modules.processing.domain.issues import IssueRecord, IssueType, deduplicate
 from di1.modules.processing.domain.runs import (
     ProcessingErrorCode,
     ProcessingRequest,
@@ -151,3 +153,39 @@ def test_the_history_cursor_round_trips_and_refuses_anything_else() -> None:
         RequestCursor.decode(replace(cursor, created_at=T0.replace(tzinfo=None)).encode()) is None
     )
     assert RequestCursor.decode("%%%") is None
+
+
+def test_10_3_one_pendencia_per_obligation_with_its_earliest_affected_date() -> None:
+    """Spec §10.3, "deduplicar problemas repetidos para a mesma obrigação": a missing price is
+    one obligation per (asset, needed date); an expired open position, one per asset. Newest
+    affected date first."""
+    di1f29, di1f27 = UUID(int=29), UUID(int=27)
+
+    def issue(kind: IssueType, asset: UUID, affected: int, needed: int | None) -> IssueRecord:
+        return IssueRecord(
+            id=uuid4(),
+            issue_type=kind,
+            asset_id=asset,
+            affected_date=date(2026, 10, affected),
+            required_price_date=None if needed is None else date(2026, 10, needed),
+        )
+
+    missing = IssueType.MISSING_REFERENCE_PRICE
+    expired = IssueType.EXPIRED_OPEN_POSITION
+    first_valuation = issue(missing, di1f29, 16, 16)
+    next_day_pnl = issue(missing, di1f29, 17, 16)  # the same price, needed again on 17/10
+    other_day = issue(missing, di1f29, 17, 17)
+    first_expired = issue(expired, di1f27, 15, None)
+
+    kept = deduplicate(
+        [
+            issue(expired, di1f27, 17, None),
+            next_day_pnl,
+            other_day,
+            issue(expired, di1f27, 16, None),
+            first_valuation,
+            first_expired,
+        ]
+    )
+
+    assert kept == [other_day, first_valuation, first_expired]

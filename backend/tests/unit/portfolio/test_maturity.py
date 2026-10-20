@@ -1,10 +1,13 @@
 """The reference PU around maturity (spec §5, §7.4; OQ-1): the exact-date price up to and
-including the maturity date, 0 by definition after it, whatever price exists."""
+including the maturity date, 0 by definition after it, whatever price exists. An instrument
+without a maturity date never matures."""
 
 from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+
+import pytest
 
 from di1.modules.portfolio.public import is_past_maturity, reference_pu_on
 
@@ -12,22 +15,37 @@ MATURITY = date(2027, 1, 6)
 BEFORE, AFTER = date(2027, 1, 5), date(2027, 1, 7)
 
 
-def test_only_a_day_after_the_maturity_date_is_past_maturity() -> None:
-    assert not is_past_maturity(BEFORE, MATURITY)
-    assert not is_past_maturity(MATURITY, MATURITY)  # closing on the maturity date is allowed
-    assert is_past_maturity(AFTER, MATURITY)
+@pytest.mark.parametrize(
+    ("day", "maturity", "past"),
+    [
+        pytest.param(BEFORE, MATURITY, False, id="before"),
+        pytest.param(MATURITY, MATURITY, False, id="on-the-maturity-date-closing-is-allowed"),
+        pytest.param(AFTER, MATURITY, True, id="after"),
+        pytest.param(AFTER, None, False, id="no-maturity-date"),
+    ],
+)
+def test_only_a_day_after_the_maturity_date_is_past_maturity(
+    day: date, maturity: date | None, past: bool
+) -> None:
+    assert is_past_maturity(day, maturity) is past
 
 
-def test_up_to_maturity_the_reference_pu_is_the_exact_date_price() -> None:
-    assert reference_pu_on(BEFORE, MATURITY, Decimal("99985")) == Decimal("99985")
-    assert reference_pu_on(MATURITY, MATURITY, Decimal("100000")) == Decimal("100000")
+@pytest.mark.parametrize(
+    ("day", "maturity", "price", "reference"),
+    [
+        pytest.param(BEFORE, MATURITY, "99985", "99985", id="before-exact-date-price"),
+        pytest.param(MATURITY, MATURITY, "100000", "100000", id="on-maturity-exact-date-price"),
+        # No carry-forward and never zero (spec §5, §8.3).
+        pytest.param(MATURITY, MATURITY, None, None, id="on-maturity-missing-stays-missing"),
+        pytest.param(AFTER, MATURITY, None, "0", id="after-zero-without-a-price"),
+        pytest.param(AFTER, MATURITY, "100000", "0", id="after-zero-whatever-the-price"),
+        pytest.param(AFTER, None, "95000", "95000", id="no-maturity-date-exact-date-price"),
+        pytest.param(AFTER, None, None, None, id="no-maturity-date-missing-stays-missing"),
+    ],
+)
+def test_the_reference_pu_is_the_exact_date_price_until_maturity_then_zero(
+    day: date, maturity: date | None, price: str | None, reference: str | None
+) -> None:
+    result = reference_pu_on(day, maturity, None if price is None else Decimal(price))
 
-
-def test_up_to_maturity_a_missing_price_stays_missing() -> None:
-    # No carry-forward and never zero (spec §5, §8.3).
-    assert reference_pu_on(MATURITY, MATURITY, None) is None
-
-
-def test_after_maturity_the_reference_pu_is_zero_with_or_without_a_price() -> None:
-    assert reference_pu_on(AFTER, MATURITY, None) == 0
-    assert reference_pu_on(AFTER, MATURITY, Decimal("100000")) == 0
+    assert result == (None if reference is None else Decimal(reference))
