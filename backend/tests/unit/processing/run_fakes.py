@@ -15,13 +15,13 @@ from di1.modules.pnl.public import AssetPnLResult, PortfolioPnLResult
 from di1.modules.portfolio.public import (
     CashBalance,
     CashDay,
+    PortfolioResultsWriter,
     PortfolioValuation,
     PositionsDay,
     PreviousPositionsDay,
 )
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
-from di1.modules.processing.application.services.run_chains import DayReaders
-from di1.platform.database.unit_of_work import UnitOfWork
+from di1.modules.processing.application.ports import ChainPorts
 from di1.shared.input_kind import InputKind
 from tests.fakes.asset import CREATED_AT
 
@@ -206,12 +206,10 @@ class RecordingWriter:
         valuation: PortfolioValuation,
         asset_pnl: Mapping[UUID, AssetPnLResult],
         pnl: PortfolioPnLResult,
-        *,
-        uow: UnitOfWork,
     ) -> None:
         self.positions.append(PositionsWrite(day, valuation, asset_pnl, pnl))
 
-    async def write_cash_day(self, day: CashDay, *, uow: UnitOfWork) -> None:
+    async def write_cash_day(self, day: CashDay) -> None:
         self.cash.append(CashWrite(day))
 
 
@@ -224,10 +222,11 @@ class World:
     instruments: FakeInstruments = field(default_factory=FakeInstruments)
     portfolio: FakePortfolio = field(default_factory=FakePortfolio)
 
-    def readers(self, uow: UnitOfWork | None = None) -> DayReaders:
-        return DayReaders(
+    def ports(self, writer: PortfolioResultsWriter) -> ChainPorts:
+        return ChainPorts(
             ledger=self.ledger,
             prices=self.prices,
             assets=self.instruments,
             portfolio=self.portfolio,
+            writer=writer,
         )

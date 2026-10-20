@@ -12,17 +12,14 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from di1.modules.asset.public import Instrument
-from di1.modules.portfolio.application.services.repository import (
+from di1.modules.portfolio.application.ports import (
     PublishedPortfolioDay,
     PublishedPosition,
 )
 from di1.modules.portfolio.domain.cash import CashDay
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.modules.processing.public import DateStatus
-from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.input_kind import InputKind
 from tests.fakes.asset import CREATED_AT
 
@@ -83,26 +80,15 @@ class InMemoryPortfolioRepository:
         return self.positions.get(on, ())
 
 
-class FakeUnitOfWork:
-    """A Unit of Work the fakes ignore; the services only pass it through."""
-
-    @property
-    def session(self) -> AsyncSession:
-        raise AssertionError("the unit tests use no session")
-
-    async def commit(self) -> None:
-        raise AssertionError("the services under test never commit")
-
-
 class FakeDateStatusReader:
     def __init__(self, statuses: Mapping[date, DateStatus] | None = None) -> None:
         self.statuses = dict(statuses or {})
-        self.seen_uows: list[UnitOfWork] = []
+        self.reads = 0
 
     async def get_date_statuses(
-        self, start_date: date, end_date: date, *, uow: UnitOfWork
+        self, start_date: date, end_date: date
     ) -> Mapping[date, DateStatus]:
-        self.seen_uows.append(uow)
+        self.reads += 1
         return {d: s for d, s in self.statuses.items() if start_date <= d <= end_date}
 
 

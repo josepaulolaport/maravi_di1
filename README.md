@@ -245,8 +245,10 @@ rather than refactor before delivery (OQ-47); none changes a business result.
   unused, with no migration to drop them (OQ-45, OQ-46, OQ-47; [docs/schema.md](docs/schema.md)).
   No backend logic sets them or branches on them; the API still exposes `dispatched_at` as null,
   and the frontend keeps the two status labels only because the generated type lists them.
-- **Unused inbox table (OQ-50 item 2):** `platform.inbox_messages` stays in the schema, unused
-  since the worker needs no deduplication, with no migration (A9 excluded), like the columns above.
+- **Unused inbox table and columns (OQ-50 items 1, 2 and 4):** `platform.inbox_messages`,
+  `portfolio_metrics.aum` and `date_status.portfolio_previous`/`cash_previous` stay in the schema,
+  unused (no deduplication, AUM computed on read, no date stored `RUNNING`), with no migration
+  (A9 excluded), like the columns above.
 - **Orphaned broker objects on an existing RabbitMQ volume (OQ-50 item 2):** the old
   `processing.run_request` quorum queue, its `.dead-letter` queue and the `di1.dead-letter`
   exchange are no longer declared but stay on a volume created before this change. They are

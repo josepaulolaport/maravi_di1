@@ -4,7 +4,7 @@ instants, problem+json errors (spec §12, OQ-15, OQ-26 item 8)."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any
@@ -15,14 +15,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from di1.composition.errors import install_problem_handlers
-from di1.modules.processing.application.interfaces.repositories import (
-    IssueRecord,
-    IssueType,
-)
+from di1.modules.processing.domain.issues import IssueRecord, IssueType
 from di1.modules.processing.presentation.http.router import create_router
-from di1.modules.processing.public import ChainStatus, ProcessingScope, ProcessingStatus
-from di1.platform.database.unit_of_work import UnitOfWork
-from tests.unit.processing.fakes import FakeUnitOfWork, Harness, date_status
+from di1.modules.processing.public import Chain, ChainStatus, ProcessingStatus
+from tests.unit.processing.fakes import Harness, date_status
 
 # The keys of the fixtures' objects (fixtures.ts `job(...)`, `issues`; processing.ts), with
 # OQ-31 applied: an issue has no `chain`; OQ-40: a run carries `failed_date` and `failed_chain`.
@@ -72,12 +68,9 @@ def harness() -> Harness:
 
 @pytest.fixture
 def client(harness: Harness) -> Iterator[TestClient]:
-    async def unit_of_work() -> AsyncIterator[UnitOfWork]:
-        yield FakeUnitOfWork()
-
     app = FastAPI()
     install_problem_handlers(app)
-    app.include_router(create_router(lambda: harness.service, unit_of_work))
+    app.include_router(create_router(get_service=lambda: harness.service))
     with TestClient(app) as client:
         yield client
 
@@ -259,7 +252,7 @@ def test_oq40_a_run_exposes_its_first_failure(client: TestClient, harness: Harne
         run,
         status=ProcessingStatus.COMPLETED_WITH_ISSUES,
         failed_date=date(2026, 10, 15),
-        failed_chain=ProcessingScope.CASH,
+        failed_chain=Chain.CASH,
     )
 
     body = client.get(f"/processing/requests/{created['id']}").json()
@@ -285,7 +278,7 @@ def test_oq40_the_api_never_advertises_all_as_a_failed_chain(client: TestClient)
     """interfaces.md "Processing": ``failed_chain`` is CASH or POSITIONS, never ALL; the
     frontend generates its types from this schema."""
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
-    field = schemas["ProcessingRequestOut"]["properties"]["failed_chain"]
+    field = schemas["ProcessingRequestResponse"]["properties"]["failed_chain"]
     refs = [option.get("$ref") for option in field["anyOf"] if "$ref" in option]
     enums = [schemas[ref.rsplit("/", 1)[1]]["enum"] for ref in refs] or [
         option["enum"] for option in field["anyOf"] if "enum" in option

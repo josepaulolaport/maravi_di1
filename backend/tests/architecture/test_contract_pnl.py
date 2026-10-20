@@ -6,10 +6,10 @@ from decimal import Decimal
 from uuid import uuid4
 
 from di1.modules.pnl.public import (
-    AssetPnLCalculator,
     CalculationCompleteness,
     PnLTrade,
-    PortfolioPnLCalculator,
+    aggregate_pnl,
+    calculate_asset_pnl,
 )
 
 
@@ -19,13 +19,13 @@ def test_completeness_matches_the_pnl_status_check() -> None:
 
 def test_the_calculators_are_usable_through_the_contract() -> None:
     asset = uuid4()
-    result = AssetPnLCalculator().calculate(
+    result = calculate_asset_pnl(
         previous_position=10,
         day_trades=[PnLTrade(signed_quantity=-4, execution_pu=Decimal("90100"))],
         previous_reference_pu=Decimal("90000"),
         current_reference_pu=Decimal("90050"),
     )
-    portfolio = PortfolioPnLCalculator().aggregate(
+    portfolio = aggregate_pnl(
         expected_assets={asset}, asset_results={asset: result}, previous_cumulative=Decimal("0")
     )
 

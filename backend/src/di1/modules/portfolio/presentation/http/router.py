@@ -15,27 +15,24 @@ the app's handlers; a start after the end is the service's ``INVALID_RANGE``, an
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 
 from di1.modules.portfolio.presentation.http.schemas import (
-    PnlPointOut,
-    PnlSeriesOut,
-    PortfolioPositionsOut,
-    PortfolioSummaryOut,
+    PnlSeriesResponse,
+    PortfolioPositionsResponse,
+    PortfolioSummaryResponse,
 )
 from di1.modules.portfolio.public import PortfolioService
 
 
-def create_router(
-    get_query_service: Callable[..., AsyncIterator[PortfolioService]],
-) -> APIRouter:
-    """The Portfolio routes, each on the query service that ``get_query_service`` provides."""
+def create_router(*, get_service: Callable[..., PortfolioService]) -> APIRouter:
+    """The Portfolio routes, each on the query service that ``get_service`` provides."""
     # A plain default, not ``Annotated``: with postponed annotations FastAPI resolves an
     # annotation in the module's globals, where this closure's provider is not.
-    service_dependency = Depends(get_query_service)
+    service_dependency = Depends(get_service)
     date_query = Query(alias="date")  # ?date=YYYY-MM-DD; ``date`` would shadow the type
     router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
@@ -43,23 +40,22 @@ def create_router(
     async def get_summary(
         on: date = date_query,
         service: PortfolioService = service_dependency,
-    ) -> PortfolioSummaryOut:
-        return PortfolioSummaryOut.of(await service.get_summary(on))
+    ) -> PortfolioSummaryResponse:
+        return PortfolioSummaryResponse.of(await service.get_summary(on))
 
     @router.get("/positions")
     async def get_positions(
         on: date = date_query,
         service: PortfolioService = service_dependency,
-    ) -> PortfolioPositionsOut:
-        return PortfolioPositionsOut.of(await service.get_position_table(on))
+    ) -> PortfolioPositionsResponse:
+        return PortfolioPositionsResponse.of(await service.get_position_table(on))
 
     @router.get("/pnl")
     async def get_pnl(
         start_date: date,
         end_date: date,
         service: PortfolioService = service_dependency,
-    ) -> PnlSeriesOut:
-        points = await service.get_pnl_series(start_date, end_date)
-        return PnlSeriesOut(items=[PnlPointOut.of(p) for p in points])
+    ) -> PnlSeriesResponse:
+        return PnlSeriesResponse.of(await service.get_pnl_series(start_date, end_date))
 
     return router

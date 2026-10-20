@@ -10,8 +10,10 @@ from uuid import uuid4
 import pytest
 
 from di1.modules.processing.public import (
+    Chain,
     ChainStatus,
     DateStatus,
+    ProcessingErrorCode,
     ProcessingRequest,
     ProcessingScope,
     ProcessingStatus,
@@ -67,6 +69,21 @@ def test_processing_has_no_invalidator() -> None:
     assert not hasattr(processing_public, "FinancialResultInvalidator")
 
 
+def test_the_chain_names_a_date_status_column_and_never_all() -> None:
+    assert {chain.value for chain in Chain} == {"CASH", "POSITIONS"}
+    assert ProcessingScope.ALL.chains == (Chain.POSITIONS, Chain.CASH)
+
+
+def test_processing_error_codes_are_one_enum() -> None:
+    assert {code.value for code in ProcessingErrorCode} == {
+        "CASH_PREDECESSOR_MISSING",
+        "POSITIONS_PREDECESSOR_MISSING",
+        "PROCESSING_ERROR",
+        "SUPERSEDED",  # retired, still stored on old runs
+        "RECOVERY_EXHAUSTED",  # retired, still stored on old runs
+    }
+
+
 def test_chain_status_matches_the_schema_check() -> None:
     assert {status.value for status in ChainStatus} == {
         "PROCESSED",
@@ -97,4 +114,4 @@ def test_a_request_records_its_first_failure() -> None:
     assert fields[-2:] == ["failed_date", "failed_chain"]
     hints = typing.get_type_hints(ProcessingRequest)
     assert hints["failed_date"] == date | None
-    assert hints["failed_chain"] == ProcessingScope | None
+    assert hints["failed_chain"] == Chain | None  # CASH or POSITIONS, never ALL

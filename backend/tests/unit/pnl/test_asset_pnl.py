@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from di1.modules.pnl.domain.asset_pnl import AssetPnLCalculator
+from di1.modules.pnl.domain.asset_pnl import calculate_asset_pnl
 from di1.modules.pnl.domain.results import (
     AssetPnLResult,
     CalculationCompleteness,
@@ -28,7 +28,7 @@ def calculate(
     previous_reference_pu: str | None,
     current_reference_pu: str | None,
 ) -> AssetPnLResult:
-    return AssetPnLCalculator().calculate(
+    return calculate_asset_pnl(
         previous_position=int(previous_quantity),
         day_trades=[PnLTrade(signed_quantity=int(q), execution_pu=D(pu)) for q, pu in trades],
         previous_reference_pu=None if previous_reference_pu is None else D(previous_reference_pu),

@@ -12,11 +12,10 @@ from fastapi import APIRouter, FastAPI
 from di1.composition.dependencies import (
     get_asset_service,
     get_ledger_service,
-    get_portfolio_query_service,
+    get_portfolio_service,
     get_price_reader,
     get_price_service,
     get_processing_service,
-    get_unit_of_work,
 )
 from di1.modules.asset.presentation.http.router import create_router as create_asset_router
 from di1.modules.ledger.presentation.http.router import create_router as create_ledger_router
@@ -39,10 +38,6 @@ def include_routers(app: FastAPI) -> None:
     )
     api.include_router(create_ledger_router(get_service=get_ledger_service))
     api.include_router(create_prices_router(get_service=get_price_service))
-    api.include_router(create_portfolio_router(get_query_service=get_portfolio_query_service))
-    api.include_router(
-        create_processing_router(
-            get_service=get_processing_service, get_unit_of_work=get_unit_of_work
-        )
-    )
+    api.include_router(create_portfolio_router(get_service=get_portfolio_service))
+    api.include_router(create_processing_router(get_service=get_processing_service))
     app.include_router(api)
