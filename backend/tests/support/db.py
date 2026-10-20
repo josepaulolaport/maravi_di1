@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from argparse import Namespace
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -61,12 +62,26 @@ def psycopg_url(sqlalchemy_url: str) -> str:
     )
 
 
-def alembic_config(database_url: str) -> Config:
-    """The project's Alembic configuration, pointed at ``database_url``."""
+def alembic_config(database_url: str, *x_arguments: str) -> Config:
+    """The project's Alembic configuration, pointed at ``database_url``, with ``-x`` arguments."""
     config = Config(str(BACKEND / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND / "migrations"))
+    # configparser interpolates `%`; a percent-encoded password must survive.
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    config.cmd_opts = Namespace(x=list(x_arguments))
     return config
+
+
+def execute(database_url: str, statement: str) -> None:
+    """Run SQL on a test database, in one transaction."""
+    with psycopg.connect(psycopg_url(database_url)) as connection:
+        connection.execute(statement)
+
+
+def fetch(database_url: str, query: str) -> list[tuple[Any, ...]]:
+    """The rows of a query on a test database."""
+    with psycopg.connect(psycopg_url(database_url)) as connection:
+        return [tuple(row) for row in connection.execute(query)]
 
 
 def _admin_url() -> str:
@@ -156,41 +171,43 @@ def _connect(database: str | AsyncEngine) -> psycopg.Connection[tuple[Any, ...]]
     return psycopg.connect(psycopg_url(url), autocommit=True)
 
 
+CATALOGUE_ROOTS_SQL = (
+    "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuros');"
+    "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
+    " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuros de Taxa de Juros');"
+)
+"""The instrument type FUTURE (id 1) and the asset class INTEREST_RATE_FUTURE (id 1), which have
+no HTTP route (seeded data)."""
+
+
+def catalogue_sql(contracts: Sequence[Instrument] = CATALOGUE) -> str:
+    """SQL that seeds the catalogue roots, the DI1 product and ``contracts`` with their builder
+    ids: the foreign-key targets of trades, prices and published rows. The asset tables are the
+    same at every revision, so the migration tests seed with it too."""
+    values = ", ".join(
+        f"('{c.id}', '{PRODUCT_ID}', '{c.code}', '{c.maturity_date}')" for c in contracts
+    )
+    return (
+        CATALOGUE_ROOTS_SQL + "INSERT INTO asset.products (id, asset_class_id, code, name)"
+        f" VALUES ('{PRODUCT_ID}', 1, 'DI1', '{DI1_NAME}');"
+        "INSERT INTO asset.futures (product_id, face_value, settlement_method)"
+        f" VALUES ('{PRODUCT_ID}', 100000, 'CASH');"
+        + (f"INSERT INTO asset.instruments (id, product_id, code, maturity_date) VALUES {values};")
+    )
+
+
 def seed_catalogue_roots(database: str | AsyncEngine) -> None:
-    """The instrument type FUTURE (id 1) and the asset class INTEREST_RATE_FUTURE (id 1), which have
-    no HTTP route (seeded data)."""
+    """`CATALOGUE_ROOTS_SQL` on a test database."""
     with _connect(database) as connection:
-        connection.execute(
-            "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuros')"
-        )
-        connection.execute(
-            "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
-            " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuros de Taxa de Juros')"
-        )
+        connection.execute(CATALOGUE_ROOTS_SQL)
 
 
 def seed_catalogue(
     database: str | AsyncEngine, contracts: Sequence[Instrument] = CATALOGUE
 ) -> None:
-    """The catalogue roots, the DI1 product and ``contracts``, with their builder ids, in plain SQL:
-    the foreign-key targets of trades, prices and published rows."""
-    seed_catalogue_roots(database)
+    """`catalogue_sql` on a test database."""
     with _connect(database) as connection:
-        connection.execute(
-            "INSERT INTO asset.products (id, asset_class_id, code, name) VALUES (%s, 1, 'DI1', %s)",
-            (PRODUCT_ID, DI1_NAME),
-        )
-        connection.execute(
-            "INSERT INTO asset.futures (product_id, face_value, settlement_method)"
-            " VALUES (%s, 100000, 'CASH')",
-            (PRODUCT_ID,),
-        )
-        for contract in contracts:
-            connection.execute(
-                "INSERT INTO asset.instruments (id, product_id, code, maturity_date)"
-                " VALUES (%s, %s, %s, %s)",
-                (contract.id, PRODUCT_ID, contract.code, contract.maturity_date),
-            )
+        connection.execute(catalogue_sql(contracts))
 
 
 @dataclass(frozen=True, slots=True)

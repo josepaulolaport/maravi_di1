@@ -18,6 +18,12 @@ from tests.support.db import Di1Catalogue, Writer, seed_di1
 
 
 @pytest.fixture
+def database_url() -> Iterator[str]:
+    """An empty database, for the migration tests."""
+    yield from db.fresh_database_url()
+
+
+@pytest.fixture
 def migrated_database_url() -> Iterator[str]:
     yield from db.migrated_database_url()
 
