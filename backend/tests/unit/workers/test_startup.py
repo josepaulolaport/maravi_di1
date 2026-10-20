@@ -16,6 +16,15 @@ from di1.workers.main import run_worker
 from di1.workers.outbox_relay import run_outbox_relay
 
 PASSWORD = "s3cret-pw"
+
+
+@pytest.fixture(autouse=True)
+def no_broker_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Settings read the process environment: a ``RABBITMQ_URL`` set there must not hide the
+    missing-URL failures below."""
+    monkeypatch.delenv("RABBITMQ_URL", raising=False)
+
+
 DATABASE_URL = f"postgresql+psycopg://di1:{PASSWORD}@db:5432/di1"
 
 

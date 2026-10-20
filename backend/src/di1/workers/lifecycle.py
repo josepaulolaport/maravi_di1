@@ -63,7 +63,11 @@ async def _abandon[T](
         if pending:
             logger.warning("a step did not stop in %s s", CLOSE_TIMEOUT_SECONDS)
             return
-    if running.cancelled() or running.exception() is not None:
+    if running.cancelled():
+        return
+    if (error := running.exception()) is not None:
+        # The process is stopping, so the step's own failure on its cancellation is not raised.
+        logger.warning("a step failed while it was stopped", exc_info=error)
         return
     if discard is not None:
         await discard(running.result())
