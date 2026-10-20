@@ -1,11 +1,12 @@
 """Every calendar day is processed (spec §7.1): each chain starts D from the close of D−1.
 
-Neither chain accepts a state from two days back, so a skipped day cannot pass silently.
+Neither chain accepts a state from two days back (a skipped day) or from D itself (a repeated
+day), so neither can pass silently.
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 
@@ -15,15 +16,22 @@ from di1.modules.portfolio.domain.positions import PositionState, calculate_posi
 from di1.shared.decimals import ZERO
 from tests.support.builders import DAY
 
-TWO_DAYS_BEFORE = DAY - timedelta(days=2)
-SKIPPED = f"the previous state must be of {DAY - timedelta(days=1)}, not {TWO_DAYS_BEFORE}"
+WRONG_PREVIOUS = pytest.mark.parametrize(
+    "previous", [DAY - timedelta(days=2), DAY], ids=["skipped-day", "repeated-day"]
+)
 
 
-def test_the_positions_chain_refuses_to_skip_a_day() -> None:
-    with pytest.raises(PortfolioError, match=SKIPPED):
-        calculate_positions_day(PositionState.zero(TWO_DAYS_BEFORE), [], DAY)
+def _refusal(previous: date) -> str:
+    return f"the previous state must be of {DAY - timedelta(days=1)}, not {previous}"
 
 
-def test_the_cash_chain_refuses_to_skip_a_day() -> None:
-    with pytest.raises(PortfolioError, match=SKIPPED):
-        calculate_cash_day(CashBalance.zero(TWO_DAYS_BEFORE), [], ZERO, ZERO, DAY)
+@WRONG_PREVIOUS
+def test_the_positions_chain_starts_from_the_day_before(previous: date) -> None:
+    with pytest.raises(PortfolioError, match=_refusal(previous)):
+        calculate_positions_day(PositionState.zero(previous), [], DAY)
+
+
+@WRONG_PREVIOUS
+def test_the_cash_chain_starts_from_the_day_before(previous: date) -> None:
+    with pytest.raises(PortfolioError, match=_refusal(previous)):
+        calculate_cash_day(CashBalance.zero(previous), [], ZERO, ZERO, DAY)
