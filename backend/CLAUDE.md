@@ -20,6 +20,7 @@ backend/
       public.py
       dependencies.py                    # if needed
       domain/
+      application/ports.py               # the repository Protocols the services use
       application/services/
       application/interfaces/            # only when meaningful
       infrastructure/persistence/{models.py, repositories.py, queries/}

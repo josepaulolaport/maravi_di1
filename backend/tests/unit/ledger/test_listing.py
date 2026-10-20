@@ -242,3 +242,27 @@ def test_a_code_search_selects_no_cash_entry() -> None:
 def test_an_empty_search_is_none() -> None:
     assert EntrySearch.parse(None) is None
     assert EntrySearch.parse("   ") is None
+
+
+def test_the_cursor_is_checked_once_the_range_and_size_are_valid() -> None:
+    errors = validate_page_request(
+        start_date=date(2026, 10, 18),
+        end_date=date(2026, 10, 17),
+        page=PageParams(limit=0, cursor="not-a-cursor"),
+    )
+
+    assert [(e.code, e.field) for e in errors] == [
+        (ErrorCode.INVALID_RANGE, "start_date"),
+        (ErrorCode.VALIDATION_ERROR, "limit"),
+    ]
+
+
+def test_an_unvalidated_bad_cursor_never_becomes_the_first_page() -> None:
+    with pytest.raises(ValueError, match="validate_page_request"):
+        PageRequest.of(
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 18),
+            search=None,
+            order=ListOrder.DESC,
+            page=PageParams(cursor="not-a-cursor"),
+        )

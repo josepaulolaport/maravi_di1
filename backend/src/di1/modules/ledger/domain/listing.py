@@ -115,14 +115,17 @@ class PageRequest:
         page: PageParams,
     ) -> PageRequest:
         """The request `validate_page_request` accepted. An empty ``?cursor=`` is no cursor: the
-        first page."""
+        first page; any other cursor must decode, or the request was not validated."""
+        after = EntryCursor.decode(page.cursor) if page.cursor else None
+        if page.cursor and after is None:
+            raise ValueError("PageRequest.of needs a page request validate_page_request accepted")
         return cls(
             start_date=start_date,
             end_date=end_date,
             search=EntrySearch.parse(search),
             order=order,
             limit=page.limit,
-            after=EntryCursor.decode(page.cursor) if page.cursor else None,
+            after=after,
         )
 
 
@@ -135,12 +138,14 @@ class LedgerEntryPage:
 def validate_page_request(
     *, start_date: date, end_date: date, page: PageParams
 ) -> tuple[ErrorDetail, ...]:
-    """A range whose start is after its end, a page size outside [1, 200] or a cursor this API
-    did not write."""
+    """A range whose start is after its end and a page size outside [1, 200]; when both are
+    valid, a cursor this API did not write."""
     errors: list[ErrorDetail] = []
     if start_date > end_date:
         errors.append(invalid_range())
     errors.extend(page.errors())
-    if page.cursor and EntryCursor.decode(page.cursor) is None:
+    # The cursor is checked only once the range and the size are valid, as before the shared
+    # codec: one problem at a time for the list's own parameters.
+    if not errors and page.cursor and EntryCursor.decode(page.cursor) is None:
         errors.append(invalid_cursor())
     return tuple(errors)

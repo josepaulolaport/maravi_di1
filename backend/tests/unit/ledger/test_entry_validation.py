@@ -339,9 +339,11 @@ def test_a_maturity_after_today_is_exempt_from_the_future_date_rule() -> None:
 # --- cash movements -----------------------------------------------------------------------------
 
 
-def test_a_deposit_is_positive_and_a_withdrawal_negative() -> None:
-    validate_cash_movement(_cash(), today=TODAY)
-    validate_cash_movement(_cash(cash_amount=Decimal("-50000.00")), today=TODAY)
+def test_a_positive_deposit_and_a_negative_withdrawal_are_accepted() -> None:
+    # The signed amount is stored as given (test_ledger_service, test_ledger_persistence).
+    assert entries.validate_cash_movement(_cash(), today=TODAY) == ()
+    withdrawal = _cash(cash_amount=Decimal("-50000.00"))
+    assert entries.validate_cash_movement(withdrawal, today=TODAY) == ()
 
 
 @pytest.mark.parametrize("amount", [None, "0", "0.00", "-0"])
