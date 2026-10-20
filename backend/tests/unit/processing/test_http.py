@@ -113,12 +113,29 @@ def test_post_request_answers_201_with_the_queued_run(client: TestClient) -> Non
 @pytest.mark.parametrize(
     ("body", "field", "code"),
     [
-        ({**BODY, "scope": "EVERYTHING"}, "scope", "VALIDATION_ERROR"),
-        ({"start_date": "2026-10-14", "end_date": "2026-10-16"}, "scope", "VALIDATION_ERROR"),
-        ({**BODY, "start_date": "14/10/2026"}, "start_date", "VALIDATION_ERROR"),
-        ({**BODY, "start_date": "2026-10-17"}, "start_date", "INVALID_RANGE"),
-        ({**BODY, "end_date": "2026-10-20"}, "end_date", "FUTURE_DATE"),
-        ({**BODY, "start_date": "0001-01-01"}, "start_date", "INVALID_RANGE"),
+        pytest.param(
+            {**BODY, "scope": "EVERYTHING"}, "scope", "VALIDATION_ERROR", id="unknown scope"
+        ),
+        pytest.param(
+            {"start_date": "2026-10-14", "end_date": "2026-10-16"},
+            "scope",
+            "VALIDATION_ERROR",
+            id="no scope",
+        ),
+        pytest.param(
+            {**BODY, "start_date": "14/10/2026"},
+            "start_date",
+            "VALIDATION_ERROR",
+            id="not an ISO date",
+        ),
+        # One of the service's own refusals, to show it answers as a problem too; the range
+        # rules themselves are tested on the service (test_processing_service.py).
+        pytest.param(
+            {**BODY, "start_date": "2026-10-17"},
+            "start_date",
+            "INVALID_RANGE",
+            id="start after end",
+        ),
     ],
 )
 def test_post_request_refuses_a_malformed_range(
@@ -130,27 +147,39 @@ def test_post_request_refuses_a_malformed_range(
     assert harness.requests.rows == {}
 
 
-def test_get_requests_is_a_page_newest_first(client: TestClient) -> None:
-    ids = [client.post("/processing/requests", json=BODY).json()["id"] for _ in range(3)]
+def test_get_requests_answers_a_page_of_runs_and_a_cursor(client: TestClient) -> None:
+    """The shape only: the keyset order is tested on PostgreSQL (test_requests.py)."""
+    for _ in range(3):
+        client.post("/processing/requests", json=BODY)
 
-    first = client.get("/processing/requests", params={"limit": 2}).json()
-    second = client.get(
-        "/processing/requests", params={"limit": 2, "cursor": first["next_cursor"]}
-    ).json()
+    page = client.get("/processing/requests", params={"limit": 2}).json()
 
-    assert set(first) == {"items", "next_cursor"}
-    for item in first["items"]:
+    assert set(page) == {"items", "next_cursor"}
+    assert len(page["items"]) == 2
+    for item in page["items"]:
         _assert_request_shape(item)
-    assert [r["id"] for r in first["items"] + second["items"]] == ids[::-1]
-    assert second["next_cursor"] is None
+    assert isinstance(page["next_cursor"], str)
 
 
-def test_get_requests_refuses_a_bad_limit_or_cursor(client: TestClient) -> None:
-    bad_limit = _problem(client.get("/processing/requests", params={"limit": 500}), 422)
-    bad_cursor = _problem(client.get("/processing/requests", params={"cursor": "x"}), 422)
+@pytest.mark.parametrize(
+    ("path", "params", "field"),
+    [
+        pytest.param("/processing/requests", {"limit": 500}, "limit", id="limit over 200"),
+        pytest.param("/processing/requests", {"cursor": "x"}, "cursor", id="invalid cursor"),
+        pytest.param(
+            "/processing/preview",
+            {"start_date": "2026-10-14", "end_date": "2026-10-16"},
+            "scope",
+            id="preview without a scope",
+        ),
+    ],
+)
+def test_a_bad_query_is_a_422_problem(
+    client: TestClient, path: str, params: dict[str, Any], field: str
+) -> None:
+    errors = _problem(client.get(path, params=params), 422)
 
-    assert [(e["code"], e["field"]) for e in bad_limit] == [("VALIDATION_ERROR", "limit")]
-    assert [(e["code"], e["field"]) for e in bad_cursor] == [("VALIDATION_ERROR", "cursor")]
+    assert [(e["code"], e["field"]) for e in errors] == [("VALIDATION_ERROR", field)]
 
 
 def test_get_request_by_id_or_404(client: TestClient) -> None:
@@ -198,17 +227,6 @@ def test_get_preview_reports_both_chains(client: TestClient, harness: Harness) -
     assert set(response.json()) == PREVIEW_KEYS
 
 
-def test_get_preview_requires_the_scope(client: TestClient) -> None:
-    errors = _problem(
-        client.get(
-            "/processing/preview", params={"start_date": "2026-10-14", "end_date": "2026-10-16"}
-        ),
-        422,
-    )
-
-    assert [(e["code"], e["field"]) for e in errors] == [("VALIDATION_ERROR", "scope")]
-
-
 def test_get_issues_matches_the_fixture(client: TestClient, harness: Harness) -> None:
     # fixtures.ts `issues[0]`.
     asset_id = UUID("7e000000-0000-4000-8000-000000000029")
@@ -245,33 +263,42 @@ def test_get_issues_matches_the_fixture(client: TestClient, harness: Harness) ->
     assert set(response.json()["items"][0]) == ISSUE_KEYS
 
 
-def test_oq40_a_run_exposes_its_first_failure(client: TestClient, harness: Harness) -> None:
-    created = client.post("/processing/requests", json=BODY).json()
-    run = harness.requests.rows[UUID(created["id"])]
-    harness.requests.rows[run.id] = replace(
-        run,
-        status=ProcessingStatus.COMPLETED_WITH_ISSUES,
-        failed_date=date(2026, 10, 15),
-        failed_chain=Chain.CASH,
-    )
-
-    body = client.get(f"/processing/requests/{created['id']}").json()
-
-    assert (body["failed_date"], body["failed_chain"]) == ("2026-10-15", "CASH")
-
-
-def test_oq40_a_failure_of_no_chain_has_a_date_and_no_chain(
-    client: TestClient, harness: Harness
+@pytest.mark.parametrize(
+    ("status", "failed_date", "failed_chain", "expected"),
+    [
+        pytest.param(
+            ProcessingStatus.COMPLETED_WITH_ISSUES,
+            date(2026, 10, 15),
+            Chain.CASH,
+            ("2026-10-15", "CASH"),
+            id="a chain failed",
+        ),
+        pytest.param(
+            ProcessingStatus.FAILED,
+            date(2026, 10, 14),
+            None,
+            ("2026-10-14", None),
+            id="a failure of no chain has a date and no chain",
+        ),
+    ],
+)
+def test_oq40_a_run_exposes_its_first_failure(
+    client: TestClient,
+    harness: Harness,
+    status: ProcessingStatus,
+    failed_date: date,
+    failed_chain: Chain | None,
+    expected: tuple[str, str | None],
 ) -> None:
     created = client.post("/processing/requests", json=BODY).json()
     run = harness.requests.rows[UUID(created["id"])]
     harness.requests.rows[run.id] = replace(
-        run, status=ProcessingStatus.FAILED, failed_date=date(2026, 10, 14), failed_chain=None
+        run, status=status, failed_date=failed_date, failed_chain=failed_chain
     )
 
     body = client.get(f"/processing/requests/{created['id']}").json()
 
-    assert (body["failed_date"], body["failed_chain"]) == ("2026-10-14", None)
+    assert (body["failed_date"], body["failed_chain"]) == expected
 
 
 def test_oq40_the_api_never_advertises_all_as_a_failed_chain(client: TestClient) -> None:

@@ -260,6 +260,13 @@ class Worker:
             ).one()
             return dict(row._mapping)
 
+    async def all_runs(self) -> list[dict[str, Any]]:
+        async with self.engine.connect() as connection:
+            result = await connection.execute(
+                text("SELECT * FROM processing.requests ORDER BY created_at, id")
+            )
+            return [dict(row._mapping) for row in result]
+
     async def statuses(self) -> dict[date, tuple[str | None, str | None]]:
         """``{date: (portfolio, cash)}``."""
         async with self.engine.connect() as connection:

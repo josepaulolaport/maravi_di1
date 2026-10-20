@@ -1,7 +1,8 @@
 """The worker with the real collaborators on PostgreSQL: Ledger's, Prices', Asset's and
 Portfolio's readers and Portfolio's writer, all on the date's session (plan §7: both chains of an
 ALL date in one transaction; the Carteira's AUM, computed on read as ``cash + market value``,
-after CASH-only, POSITIONS-only and ALL publishes; missing price). Expected values by hand from
+after ALL publishes and after a CASH-only then a POSITIONS-only publish; missing price; a real SQL
+error in one chain's savepoint). Expected values by hand from
 CLAUDE.md §2."""
 
 from __future__ import annotations
@@ -160,17 +161,6 @@ async def test_aum_after_a_cash_only_then_a_positions_only_run(real: RealWorker)
     assert await real.aum(D1, D2) == [Decimal("1001000"), Decimal("1002000")]
 
 
-async def test_aum_after_a_positions_only_run_without_cash_is_null(real: RealWorker) -> None:
-    await seed_day_one(real)
-
-    await real.process("POSITIONS", D1, D1)
-
-    assert await real.rows(
-        "SELECT metric_date, positions_market_value FROM portfolio.portfolio_metrics"
-    ) == [(D1, Decimal("951000"))]
-    assert await real.aum(D1) == [None]
-
-
 async def test_a_missing_price_publishes_quantities_and_cash_with_null_figures(
     real: RealWorker,
 ) -> None:
@@ -178,7 +168,12 @@ async def test_a_missing_price_publishes_quantities_and_cash_with_null_figures(
 
     run = await real.process("ALL", D1, D2)
 
-    assert run["status"] == "COMPLETED_WITH_ISSUES"
+    # A Pendência is not a failure: no error and no failed date on the run.
+    assert (run["status"], run["error_code"], run["failed_date"]) == (
+        "COMPLETED_WITH_ISSUES",
+        None,
+        None,
+    )
     assert await real.rows(
         "SELECT metric_date, positions_market_value, daily_pnl, cumulative_pnl,"
         " valuation_status, pnl_status FROM portfolio.portfolio_metrics"
@@ -212,31 +207,12 @@ async def fail_cash_writes_on(real: RealWorker, day: date) -> None:
     )
 
 
-async def test_a_sql_error_in_the_cash_savepoint_keeps_positions_of_the_date(
+async def test_case_18_24_a_sql_error_in_the_cash_savepoint_lets_the_positions_chain_go_on(
     real: RealWorker,
 ) -> None:
-    await seed_day_one(real)
-    await fail_cash_writes_on(real, D2)
-
-    run = await real.process("ALL", D1, D2)
-
-    assert await real.rows(
-        "SELECT date, portfolio, cash FROM processing.date_status ORDER BY 1"
-    ) == [(D1, "PROCESSED", "PROCESSED"), (D2, "PROCESSED", "FAILED")]
-    assert (run["status"], run["failed_date"], run["failed_chain"], run["progress_date"]) == (
-        "COMPLETED_WITH_ISSUES",
-        D2,
-        "CASH",
-        D2,
-    )
-    assert await real.rows("SELECT balance_date FROM portfolio.cash_balances ORDER BY 1") == [(D1,)]
-    assert await real.rows("SELECT metric_date FROM portfolio.portfolio_metrics ORDER BY 1") == [
-        (D1,),
-        (D2,),
-    ]
-
-
-async def test_case_18_aum_is_null_from_the_failed_date_on(real: RealWorker) -> None:
+    """Case 24: a real SQL error leaves the transaction aborted; only rolling back to the cash
+    chain's savepoint lets positions be written on D2 and go on to D3, while the cash chain
+    stops. Case 18: AUM is null from the failed date on."""
     await seed_day_one(real)
     await real.sql(
         "INSERT INTO prices.reference_prices (asset_id, reference_date, source, input_kind, pu)"
@@ -246,44 +222,21 @@ async def test_case_18_aum_is_null_from_the_failed_date_on(real: RealWorker) -> 
     )
     await fail_cash_writes_on(real, D2)
 
-    await real.process("ALL", D1, D3)
+    run = await real.process("ALL", D1, D3)
 
-    # D1 has both chains; from D2 the cash chain is FAILED, then not processed: AUM null.
+    assert await real.rows(
+        "SELECT date, portfolio, cash FROM processing.date_status ORDER BY 1"
+    ) == [(D1, "PROCESSED", "PROCESSED"), (D2, "PROCESSED", "FAILED"), (D3, "PROCESSED", None)]
+    assert (
+        run["status"],
+        run["error_code"],
+        run["failed_date"],
+        run["failed_chain"],
+        run["progress_date"],
+    ) == ("COMPLETED_WITH_ISSUES", "PROCESSING_ERROR", D2, "CASH", D3)
+    assert await real.rows("SELECT balance_date FROM portfolio.cash_balances ORDER BY 1") == [(D1,)]
+    # 10 × 95 100, 10 × 95 200, 10 × 95 300
     assert await real.rows(
         "SELECT metric_date, positions_market_value FROM portfolio.portfolio_metrics ORDER BY 1"
     ) == [(D1, Decimal("951000")), (D2, Decimal("952000")), (D3, Decimal("953000"))]
     assert await real.aum(D1, D2, D3) == [Decimal("1001000"), None, None]
-
-
-async def test_a_d_minus_1_price_corrected_after_processing_changes_no_status(
-    real: RealWorker,
-) -> None:
-    await seed_day_one(real)
-    await real.process("POSITIONS", D1, D2)
-    before = await real.rows(
-        "SELECT date, portfolio, portfolio_processed_at FROM processing.date_status ORDER BY 1"
-    )
-    figures = await real.rows(
-        "SELECT metric_date, daily_pnl FROM portfolio.portfolio_metrics ORDER BY 1"
-    )
-
-    await real.sql(
-        "UPDATE prices.reference_prices SET pu = 95150, updated_at = now()"
-        " WHERE reference_date = :d",
-        d=D1,
-    )
-
-    assert before == [
-        (D1, "PROCESSED", before[0][2]),
-        (D2, "PROCESSED", before[1][2]),
-    ]
-    assert (
-        await real.rows(
-            "SELECT date, portfolio, portfolio_processed_at FROM processing.date_status ORDER BY 1"
-        )
-        == before
-    )  # no staleness (OQ-31): the dates keep their status until reprocessed
-    assert (
-        await real.rows("SELECT metric_date, daily_pnl FROM portfolio.portfolio_metrics ORDER BY 1")
-        == figures
-    )

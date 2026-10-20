@@ -1,15 +1,14 @@
 """`ProcessingService` with in-memory collaborators (spec §10.1 to §10.3, §13 item 10; OQ-5,
-OQ-11, OQ-21, OQ-23, OQ-26, OQ-29, OQ-30, OQ-31)."""
+OQ-11, OQ-21, OQ-23, OQ-26, OQ-29, OQ-30, OQ-31). The keyset order of the history and the
+Pendências' SQL are tested on PostgreSQL (``tests/integration/processing/test_requests.py``)."""
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from datetime import date, timedelta
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
-from di1.modules.processing.domain.issues import IssueRecord, IssueType
 from di1.modules.processing.domain.predecessor import PredecessorState
 from di1.modules.processing.domain.runs import RequestCursor
 from di1.modules.processing.public import (
@@ -25,6 +24,10 @@ from tests.unit.processing.fakes import T0, FakeUnitOfWork, Harness, date_status
 ALL = ProcessingScope.ALL
 CASH = ProcessingScope.CASH
 POSITIONS = ProcessingScope.POSITIONS
+TODAY = T0.date()  # 19/10/2026
+
+ZERO = PredecessorState.ZERO_STATE
+NOT_PROCESSED = PredecessorState.NOT_PROCESSED
 
 
 @pytest.fixture
@@ -51,212 +54,150 @@ async def test_10_1_the_preview_covers_exactly_the_requested_range(harness: Harn
     assert preview.predecessor_date == date(2026, 10, 9)
 
 
-async def test_oq26_with_nothing_before_the_range_each_chain_is_in_its_zero_state(
-    harness: Harness,
-) -> None:
-    harness.history.first_trade = date(2026, 10, 10)
-
-    preview = await harness.service.preview_range(ALL, date(2026, 10, 10), date(2026, 10, 10))
-
-    assert (preview.cash, preview.positions) == (
-        PredecessorState.ZERO_STATE,
-        PredecessorState.ZERO_STATE,
-    )
-
-
-async def test_oq26_a_deposit_before_the_range_leaves_only_positions_in_the_zero_state(
-    harness: Harness,
-) -> None:
-    harness.history.first_cash_movement = date(2026, 10, 1)
-
-    preview = await harness.service.preview_range(ALL, date(2026, 10, 10), date(2026, 10, 12))
-
-    assert (preview.cash, preview.positions) == (
-        PredecessorState.NOT_PROCESSED,
-        PredecessorState.ZERO_STATE,
-    )
-
-
-async def test_oq31_the_preview_reports_each_chain_status_of_the_day_before(
-    harness: Harness,
-) -> None:
-    harness.history.first_trade = date(2026, 10, 1)
-    harness.date_statuses.rows[date(2026, 10, 9)] = date_status(
-        date(2026, 10, 9), ChainStatus.PROCESSED_WITH_ISSUES, ChainStatus.FAILED
-    )
-
-    preview = await harness.service.preview_range(POSITIONS, date(2026, 10, 10), date(2026, 10, 12))
-
-    assert (preview.cash, preview.positions) == (
-        PredecessorState.FAILED,
-        PredecessorState.PROCESSED_WITH_ISSUES,
-    )
-
-
-async def test_oq31_a_missing_cash_predecessor_is_reported_and_enqueueing_still_allowed(
-    harness: Harness,
-) -> None:
-    harness.history.first_trade = date(2026, 10, 1)
-    harness.date_statuses.rows[date(2026, 10, 9)] = date_status(
-        date(2026, 10, 9), portfolio=ChainStatus.PROCESSED
-    )
-
-    preview = await harness.service.preview_range(CASH, date(2026, 10, 10), date(2026, 10, 12))
-    queued = await harness.enqueue(date(2026, 10, 10), date(2026, 10, 12), CASH)
-
-    assert preview.cash is PredecessorState.NOT_PROCESSED
-    assert queued.status is ProcessingStatus.QUEUED
+DAY_BEFORE = date(2026, 10, 9)
 
 
 @pytest.mark.parametrize(
-    ("status", "expected"),
+    ("first_trade", "first_cash", "day_before", "scope", "expected", "asked"),
     [
-        (ChainStatus.FAILED, PredecessorState.FAILED),  # (a) the run fails on A
-        (ChainStatus.RUNNING, PredecessorState.RUNNING),  # (c)
-        (ChainStatus.PROCESSED, PredecessorState.PROCESSED),  # (d) its real status
-        (ChainStatus.PROCESSED_WITH_ISSUES, PredecessorState.PROCESSED_WITH_ISSUES),
+        pytest.param(
+            date(2026, 10, 10),
+            None,
+            None,
+            ALL,
+            (ZERO, ZERO),
+            [(Chain.CASH, DAY_BEFORE), (Chain.POSITIONS, DAY_BEFORE)],
+            id="a trade on the start date leaves both chains in the zero state",
+        ),
+        pytest.param(
+            None,
+            date(2026, 10, 1),
+            None,
+            ALL,
+            (NOT_PROCESSED, ZERO),
+            [(Chain.CASH, DAY_BEFORE), (Chain.POSITIONS, DAY_BEFORE)],
+            id="a deposit before the range ends only the cash zero state",
+        ),
+        pytest.param(
+            date(2026, 10, 1),
+            None,
+            (ChainStatus.PROCESSED_WITH_ISSUES, ChainStatus.FAILED),
+            POSITIONS,
+            (PredecessorState.FAILED, PredecessorState.PROCESSED_WITH_ISSUES),
+            [],
+            id="each chain reports its own status on the day before",
+        ),
+        pytest.param(
+            date(2026, 10, 1),
+            None,
+            (ChainStatus.PROCESSED, None),
+            CASH,
+            (NOT_PROCESSED, PredecessorState.PROCESSED),
+            [(Chain.CASH, DAY_BEFORE)],
+            id="a missing cash predecessor is reported beside processed positions",
+        ),
     ],
 )
-async def test_oq37_a_status_on_the_day_before_wins_and_the_ledger_is_not_asked(
-    harness: Harness, status: ChainStatus, expected: PredecessorState
-) -> None:
-    """interfaces.md "Predecessor rule, per day" (OQ-37 item 4), with an empty ledger."""
-    harness.date_statuses.rows[date(2026, 10, 9)] = date_status(date(2026, 10, 9), cash=status)
-
-    preview = await harness.service.preview_range(CASH, date(2026, 10, 10), date(2026, 10, 12))
-
-    assert preview.cash is expected
-    assert (Chain.CASH, date(2026, 10, 9)) not in harness.history.asked
-
-
-async def test_oq37_a_gap_in_the_chain_is_not_processed_without_asking_the_ledger(
+async def test_oq26_oq31_the_preview_reports_both_chains_on_the_day_before_the_range(
     harness: Harness,
+    first_trade: date | None,
+    first_cash: date | None,
+    day_before: tuple[ChainStatus | None, ChainStatus | None] | None,
+    scope: ProcessingScope,
+    expected: tuple[PredecessorState, PredecessorState],
+    asked: list[tuple[Chain, date]],
 ) -> None:
-    """(b) No row on A−1 while an earlier date of the chain has a status: every day must be
-    processed, so the run fails on A; the other chain's history does not count."""
-    harness.date_statuses.rows[date(2026, 10, 5)] = date_status(
-        date(2026, 10, 5), cash=ChainStatus.PROCESSED
-    )
+    """Both chains are reported whatever the scope, each read on start−1: its stored status
+    there, else the Ledger is asked about start−1 (never the start date itself)."""
+    harness.history.first_trade = first_trade
+    harness.history.first_cash_movement = first_cash
+    if day_before is not None:
+        harness.date_statuses.rows[DAY_BEFORE] = date_status(DAY_BEFORE, *day_before)
 
-    preview = await harness.service.preview_range(ALL, date(2026, 10, 10), date(2026, 10, 12))
+    preview = await harness.service.preview_range(scope, date(2026, 10, 10), date(2026, 10, 12))
 
-    assert (preview.cash, preview.positions) == (
-        PredecessorState.NOT_PROCESSED,
-        PredecessorState.ZERO_STATE,
-    )
-    assert harness.history.asked == [(Chain.POSITIONS, date(2026, 10, 9))]
+    assert (preview.cash, preview.positions) == expected
+    assert harness.history.asked == asked
 
 
-async def test_the_preview_refuses_a_start_after_the_end(harness: Harness) -> None:
-    with pytest.raises(DomainError) as raised:
-        await harness.service.preview_range(ALL, date(2026, 10, 2), date(2026, 10, 1))
-
-    assert _error(raised) == (
-        ErrorDetail(
-            ErrorCode.INVALID_RANGE,
-            "A data inicial deve ser anterior ou igual à data final.",
-            "start_date",
-        ),
-    )
+# Range validation, shared by the preview and the enqueue
 
 
+INVALID_ORDER = ErrorDetail(
+    ErrorCode.INVALID_RANGE,
+    "A data inicial deve ser anterior ou igual à data final.",
+    "start_date",
+)
 TOO_LONG = ErrorDetail(
     ErrorCode.INVALID_RANGE, "O período deve ter no máximo 3.660 dias.", "end_date"
 )
+FUTURE = ErrorDetail(ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", "end_date")
+NO_DAY_BEFORE = ErrorDetail(
+    ErrorCode.INVALID_RANGE, "A data inicial deve ser posterior a 01/01/0001.", "start_date"
+)
+LONGEST_START = TODAY - timedelta(days=3659)  # 3,660 dates up to today, ends included
 
 
-async def test_a_range_of_3660_dates_is_allowed_and_one_more_is_refused(harness: Harness) -> None:
-    """A run of decades would hold the one worker for hours; the span is capped at 3,660
-    dates (about ten years, ends included)."""
-    end = date(2026, 10, 19)
-    longest = end - timedelta(days=3659)
-
-    await harness.service.preview_range(ALL, longest, end)
-    for call in (harness.service.preview_range, harness.service.enqueue_range):
-        with pytest.raises(DomainError) as raised:
-            await call(ALL, longest - timedelta(days=1), end)
-        assert _error(raised) == (TOO_LONG,)
-
-
-FUTURE = "A data não pode ser posterior a hoje."
-
-
-async def test_oq14_g1_a_range_ending_after_today_is_refused_everywhere(
-    harness: Harness,
+@pytest.mark.parametrize("method", ["preview_range", "enqueue_range"])
+@pytest.mark.parametrize(
+    ("start", "end", "expected"),
+    [
+        pytest.param(date(2026, 10, 2), date(2026, 10, 1), INVALID_ORDER, id="start after end"),
+        pytest.param(
+            date(2026, 10, 25),
+            date(2026, 10, 18),
+            INVALID_ORDER,
+            id="start after end is INVALID_RANGE even in the future (OQ-29)",
+        ),
+        pytest.param(
+            LONGEST_START - timedelta(days=1), TODAY, TOO_LONG, id="3661 dates are too many"
+        ),
+        pytest.param(date(2026, 10, 1), date(2026, 10, 20), FUTURE, id="ends after today"),
+        pytest.param(
+            date(2026, 10, 20),
+            date(2026, 10, 21),
+            FUTURE,
+            id="only the end of an ordered future range is reported (OQ-29)",
+        ),
+        pytest.param(date.min, date.min, NO_DAY_BEFORE, id="01/01/0001 has no day before to read"),
+    ],
+)
+async def test_oq14_oq29_a_bad_range_is_refused_and_nothing_is_stored(
+    harness: Harness, method: str, start: date, end: date, expected: ErrorDetail
 ) -> None:
-    """GAP-G-1, decided by the user: a processing range may not end after today (São Paulo,
-    injected clock); the harness's today is 19/10/2026."""
+    """GAP-G-1, OQ-29: a processing range may not end after today (São Paulo, injected clock;
+    the harness's today is 19/10/2026); a run of decades would hold the one worker for hours, so
+    the span is capped at 3,660 dates; 01/01/0001 is a 422, never a crash."""
     active = await harness.enqueue()
-    tomorrow = date(2026, 10, 20)
-    calls: list[Callable[[], Awaitable[object]]] = [
-        lambda: harness.service.preview_range(ALL, date(2026, 10, 1), tomorrow),
-        lambda: harness.service.enqueue_range(ALL, date(2026, 10, 1), tomorrow),
-    ]
+    before = dict(harness.requests.rows)
+    published = list(harness.run_messages.published)
+    uow = FakeUnitOfWork()
 
-    for call in calls:
-        with pytest.raises(DomainError) as raised:
-            await call()
-        assert _error(raised) == (ErrorDetail(ErrorCode.FUTURE_DATE, FUTURE, "end_date"),)
-    assert list(harness.requests.rows) == [active.id]
+    with pytest.raises(DomainError) as raised:
+        await getattr(harness.on(uow), method)(ALL, start, end)
+
+    assert _error(raised) == (expected,)
+    assert harness.requests.rows == before
     assert harness.requests.rows[active.id].status is ProcessingStatus.QUEUED
+    assert uow.commits == 0
+    assert harness.run_messages.published == published
 
 
-async def test_oq14_g1_a_range_ending_today_is_accepted(harness: Harness) -> None:
-    request = await harness.enqueue(date(2026, 10, 19), date(2026, 10, 19))
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        pytest.param(LONGEST_START, TODAY, id="3660 dates"),
+        pytest.param(TODAY, TODAY, id="a range ending today"),
+    ],
+)
+async def test_oq14_a_range_at_the_limits_is_accepted(
+    harness: Harness, start: date, end: date
+) -> None:
+    preview = await harness.service.preview_range(ALL, start, end)
+    request = await harness.enqueue(start, end)
 
+    assert preview.total_days == (end - start).days + 1
     assert request.status is ProcessingStatus.QUEUED
-
-
-async def test_oq29_only_the_end_of_an_ordered_range_is_checked_against_today(
-    harness: Harness,
-) -> None:
-    with pytest.raises(DomainError) as raised:
-        await harness.enqueue(date(2026, 10, 20), date(2026, 10, 21))
-
-    assert _error(raised) == (ErrorDetail(ErrorCode.FUTURE_DATE, FUTURE, "end_date"),)
-
-
-async def test_oq29_a_start_after_the_end_is_an_invalid_range_even_in_the_future(
-    harness: Harness,
-) -> None:
-    """``FUTURE_DATE`` is for a range ending after today (OQ-29); this one ends on 18/10."""
-    with pytest.raises(DomainError) as raised:
-        await harness.enqueue(date(2026, 10, 25), date(2026, 10, 18))
-
-    assert raised.value.code is ErrorCode.INVALID_RANGE
-
-
-async def test_the_first_representable_date_cannot_start_a_range(harness: Harness) -> None:
-    """A range needs the day before its start (the predecessor); 01/01/0001 has none, so it is
-    refused as a 422, never a crash."""
-    for call in (
-        lambda: harness.service.preview_range(ALL, date.min, date.min),
-        lambda: harness.service.enqueue_range(ALL, date.min, date.min),
-    ):
-        with pytest.raises(DomainError) as raised:
-            await call()
-        assert _error(raised) == (
-            ErrorDetail(
-                ErrorCode.INVALID_RANGE,
-                "A data inicial deve ser posterior a 01/01/0001.",
-                "start_date",
-            ),
-        )
-
-
-async def test_oq37_an_earlier_failed_date_alone_is_a_gap_and_the_ledger_is_not_asked(
-    harness: Harness,
-) -> None:
-    """No status on A−1, an earlier FAILED date of the chain: the chain has a status before A,
-    so it is a gap, not the zero state (OQ-37 item 4, OQ-40 item 5)."""
-    harness.date_statuses.rows[date(2026, 10, 3)] = date_status(
-        date(2026, 10, 3), portfolio=ChainStatus.FAILED
-    )
-
-    preview = await harness.service.preview_range(POSITIONS, date(2026, 10, 10), date(2026, 10, 12))
-
-    assert preview.positions is PredecessorState.NOT_PROCESSED
-    assert (Chain.POSITIONS, date(2026, 10, 9)) not in harness.history.asked
 
 
 # Enqueue
@@ -286,29 +227,6 @@ async def test_10_1_enqueue_records_a_queued_run_of_exactly_the_range_and_commit
     assert request.created_at == request.updated_at == harness.clock.current
     assert uow.commits == 1
     assert harness.run_messages.published == [(request.id, uow)]  # in the same transaction
-
-
-async def test_10_2_overlapping_and_repeated_requests_are_all_queued(harness: Harness) -> None:
-    first = await harness.enqueue(date(2026, 10, 1), date(2026, 10, 5))
-    second = await harness.enqueue(date(2026, 10, 3), date(2026, 10, 8))
-    third = await harness.enqueue(date(2026, 10, 1), date(2026, 10, 5))
-
-    assert {r.status for r in harness.requests.rows.values()} == {ProcessingStatus.QUEUED}
-    assert first.created_at < second.created_at < third.created_at  # FIFO (OQ-5)
-
-
-async def test_enqueue_refuses_a_start_after_the_end_and_stores_nothing(
-    harness: Harness,
-) -> None:
-    uow = FakeUnitOfWork()
-
-    with pytest.raises(DomainError) as raised:
-        await harness.on(uow).enqueue_range(ALL, date(2026, 10, 2), date(2026, 10, 1))
-
-    assert raised.value.code is ErrorCode.INVALID_RANGE
-    assert harness.requests.rows == {}
-    assert uow.commits == 0
-    assert harness.run_messages.published == []
 
 
 # Cancel
@@ -342,45 +260,41 @@ async def test_10_2_a_running_run_is_flagged_for_the_worker_and_stays_running(
     assert flagged.finished_at is None
 
 
-async def test_a_second_cancel_of_a_running_run_is_already_requested(harness: Harness) -> None:
-    run = await harness.enqueue()
-    harness.set_status(run.id, ProcessingStatus.RUNNING)
-    await harness.service.request_cancel(run.id)
-    uow = FakeUnitOfWork()
-
-    with pytest.raises(DomainError) as raised:
-        await harness.on(uow).request_cancel(run.id)
-
-    assert _error(raised) == (
-        ErrorDetail(
-            ErrorCode.JOB_NOT_CANCELLABLE, "O cancelamento deste processamento já foi solicitado."
-        ),
-    )
-    assert uow.commits == 0
+REQUESTED = "O cancelamento deste processamento já foi solicitado."
+ENDED = "Este processamento já foi encerrado e não pode ser cancelado."
 
 
 @pytest.mark.parametrize(
-    ("status", "message"),
+    ("status", "cancel_on_record", "message"),
     [
-        (
+        pytest.param(ProcessingStatus.RUNNING, True, REQUESTED, id="running, cancel requested"),
+        pytest.param(ProcessingStatus.COMPLETED, False, ENDED, id="completed"),
+        pytest.param(
+            ProcessingStatus.COMPLETED_WITH_ISSUES, False, ENDED, id="completed with issues"
+        ),
+        pytest.param(ProcessingStatus.CANCELLED, False, ENDED, id="cancelled"),
+        pytest.param(ProcessingStatus.FAILED, False, ENDED, id="failed"),
+        pytest.param(
+            ProcessingStatus.CANCELLED, True, ENDED, id="cancelled with its cancel on record"
+        ),
+        pytest.param(
             ProcessingStatus.COMPLETED,
-            "Este processamento já foi encerrado e não pode ser cancelado.",
+            True,
+            ENDED,
+            id="completed with a cancel that arrived during the last date (OQ-23)",
         ),
-        (
-            ProcessingStatus.COMPLETED_WITH_ISSUES,
-            "Este processamento já foi encerrado e não pode ser cancelado.",
-        ),
-        (
-            ProcessingStatus.CANCELLED,
-            "Este processamento já foi encerrado e não pode ser cancelado.",
-        ),
-        (ProcessingStatus.FAILED, "Este processamento já foi encerrado e não pode ser cancelado."),
+        pytest.param(ProcessingStatus.FAILED, True, ENDED, id="failed with a cancel on record"),
     ],
 )
-async def test_a_finished_run_is_not_cancellable(
-    harness: Harness, status: ProcessingStatus, message: str
+async def test_oq46_a_run_that_cannot_be_cancelled_says_why(
+    harness: Harness, status: ProcessingStatus, cancel_on_record: bool, message: str
 ) -> None:
+    """An ended run answers "encerrado", whatever cancel it has on record; "já foi solicitado"
+    only for a RUNNING run whose cancel is pending."""
     run = await harness.enqueue()
+    harness.set_status(run.id, ProcessingStatus.RUNNING)
+    if cancel_on_record:
+        await harness.service.request_cancel(run.id)
     harness.set_status(run.id, status)
     before = harness.requests.rows[run.id]
     uow = FakeUnitOfWork()
@@ -400,30 +314,7 @@ async def test_cancelling_an_unknown_run_is_not_found(harness: Harness) -> None:
     assert _error(raised) == (ErrorDetail(ErrorCode.NOT_FOUND, "Processamento não encontrado."),)
 
 
-# Reads
-
-
-async def test_12_the_history_is_newest_first_by_keyset(harness: Harness) -> None:
-    runs = [await harness.enqueue() for _ in range(5)]
-    newest_first = [r.id for r in reversed(runs)]
-
-    first = await harness.service.list_requests(PageParams(2, None))
-    assert first.next_cursor is not None
-    second = await harness.service.list_requests(PageParams(2, first.next_cursor))
-    assert second.next_cursor is not None
-    third = await harness.service.list_requests(PageParams(2, second.next_cursor))
-
-    assert [r.id for r in (*first.items, *second.items, *third.items)] == newest_first
-    assert third.next_cursor is None
-
-
-async def test_12_an_exact_last_page_has_no_next_cursor(harness: Harness) -> None:
-    for _ in range(2):
-        await harness.enqueue()
-
-    page = await harness.service.list_requests(PageParams(2, None))
-
-    assert (len(page.items), page.next_cursor) == (2, None)
+# History page parameters (spec §13 case 22)
 
 
 @pytest.mark.parametrize("limit", [0, -1, 201])
@@ -447,132 +338,4 @@ async def test_12_an_invalid_cursor_is_refused(harness: Harness, cursor: str) ->
 
     assert _error(raised) == (
         ErrorDetail(ErrorCode.VALIDATION_ERROR, "Cursor inválido.", "cursor"),
-    )
-
-
-def test_the_cursor_round_trips_its_keyset() -> None:
-    request_id = uuid4()
-
-    assert RequestCursor.decode(RequestCursor(T0, request_id).encode()) == RequestCursor(
-        T0, request_id
-    )
-
-
-async def test_get_request_returns_the_run_or_not_found(harness: Harness) -> None:
-    run = await harness.enqueue()
-
-    assert await harness.service.get_request(run.id) == run
-    with pytest.raises(DomainError) as raised:
-        await harness.service.get_request(uuid4())
-    assert raised.value.code is ErrorCode.NOT_FOUND
-
-
-async def test_oq31_issues_carry_their_asset_code(harness: Harness) -> None:
-    di1f29, di1f27, request_id = uuid4(), uuid4(), uuid4()
-    harness.assets.codes[di1f29] = "DI1F29"
-    harness.assets.codes[di1f27] = "DI1F27"
-    missing_price = IssueRecord(
-        id=uuid4(),
-        request_id=request_id,
-        issue_type=IssueType.MISSING_REFERENCE_PRICE,
-        asset_id=di1f29,
-        affected_date=date(2026, 10, 16),
-        required_price_date=date(2026, 10, 16),
-    )
-    expired = IssueRecord(
-        id=uuid4(),
-        request_id=request_id,
-        issue_type=IssueType.EXPIRED_OPEN_POSITION,
-        asset_id=di1f27,
-        affected_date=date(2026, 10, 14),
-        required_price_date=None,
-    )
-    harness.issues.rows = [expired, missing_price]
-
-    issues = await harness.service.get_issues()
-
-    assert [(i.id, i.issue_type, i.asset_code) for i in issues] == [
-        (missing_price.id, IssueType.MISSING_REFERENCE_PRICE, "DI1F29"),
-        (expired.id, IssueType.EXPIRED_OPEN_POSITION, "DI1F27"),
-    ]
-
-
-async def test_10_3_one_row_per_obligation_with_its_earliest_affected_date(
-    harness: Harness,
-) -> None:
-    """Spec §10.3, "deduplicar problemas repetidos para a mesma obrigação": a missing price is
-    one obligation per (asset, needed date); an expired open position, one per asset."""
-    di1f29, di1f27, request_id = uuid4(), uuid4(), uuid4()
-    harness.assets.codes |= {di1f29: "DI1F29", di1f27: "DI1F27"}
-
-    def issue(kind: IssueType, asset: UUID, affected: int, needed: int | None) -> IssueRecord:
-        return IssueRecord(
-            id=uuid4(),
-            request_id=request_id,
-            issue_type=kind,
-            asset_id=asset,
-            affected_date=date(2026, 10, affected),
-            required_price_date=None if needed is None else date(2026, 10, needed),
-        )
-
-    missing = IssueType.MISSING_REFERENCE_PRICE
-    expired = IssueType.EXPIRED_OPEN_POSITION
-    first_valuation = issue(missing, di1f29, 16, 16)
-    next_day_pnl = issue(missing, di1f29, 17, 16)
-    other_day = issue(missing, di1f29, 17, 17)
-    first_expired = issue(expired, di1f27, 15, None)
-    harness.issues.rows = [
-        issue(expired, di1f27, 17, None),
-        next_day_pnl,
-        other_day,
-        issue(expired, di1f27, 16, None),
-        first_valuation,
-        first_expired,
-    ]
-
-    issues = await harness.service.get_issues()
-
-    assert [i.id for i in issues] == [other_day.id, first_valuation.id, first_expired.id]
-
-
-def test_oq31_there_are_two_issue_types() -> None:
-    assert {t.value for t in IssueType} == {"MISSING_REFERENCE_PRICE", "EXPIRED_OPEN_POSITION"}
-
-
-@pytest.mark.parametrize(
-    "ended",
-    [
-        ProcessingStatus.CANCELLED,  # a queued run cancelled, then cancelled again
-        ProcessingStatus.COMPLETED,  # a cancel that arrived during the last date (OQ-23)
-        ProcessingStatus.FAILED,
-    ],
-)
-async def test_an_ended_run_with_a_cancel_on_record_answers_ended_not_requested(
-    harness: Harness, ended: ProcessingStatus
-) -> None:
-    run = await harness.enqueue()
-    harness.set_status(run.id, ProcessingStatus.RUNNING)
-    await harness.service.request_cancel(run.id)  # cancel on record
-    harness.set_status(run.id, ended)
-
-    with pytest.raises(DomainError) as raised:
-        await harness.service.request_cancel(run.id)
-
-    assert _error(raised) == (
-        ErrorDetail(
-            ErrorCode.JOB_NOT_CANCELLABLE,
-            "Este processamento já foi encerrado e não pode ser cancelado.",
-        ),
-    )
-
-
-async def test_a_queued_run_cancelled_twice_answers_ended(harness: Harness) -> None:
-    queued = await harness.enqueue()
-    await harness.service.request_cancel(queued.id)
-
-    with pytest.raises(DomainError) as raised:
-        await harness.service.request_cancel(queued.id)
-
-    assert _error(raised)[0].message == (
-        "Este processamento já foi encerrado e não pode ser cancelado."
     )

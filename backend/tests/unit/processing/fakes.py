@@ -92,9 +92,10 @@ class InMemoryRequests:
     async def list_newest_first(
         self, limit: int, after: tuple[datetime, UUID] | None
     ) -> Sequence[ProcessingRequest]:
-        ordered = sorted(self.rows.values(), key=lambda r: (r.created_at, r.id), reverse=True)
+        """The first page only: the keyset is SQL, tested on PostgreSQL (``test_requests.py``)."""
         if after is not None:
-            ordered = [r for r in ordered if (r.created_at, r.id) < after]
+            raise AssertionError("the keyset is tested on PostgreSQL, not on this fake")
+        ordered = sorted(self.rows.values(), key=lambda r: (r.created_at, r.id), reverse=True)
         return ordered[:limit]
 
 
