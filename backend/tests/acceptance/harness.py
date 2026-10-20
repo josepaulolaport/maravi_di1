@@ -45,15 +45,8 @@ from di1.modules.processing.application.services.run_chains import (
 )
 from di1.modules.processing.domain.issues import IssueRecord
 from di1.shared.decimals import financial_context
-from tests.unit.processing.run_fakes import (
-    FakeInstruments,
-    FakeLedger,
-    FakePrices,
-    cash_movement,
-)
-from tests.unit.processing.run_fakes import (
-    trade as ledger_trade,
-)
+from tests.support.builders import di1_contract, ledger_cash, ledger_trade
+from tests.support.fakes import FakeAssetReader, FakeLedger, FakePriceReader
 
 ONE_DAY = timedelta(days=1)
 ZERO = Decimal("0")
@@ -229,7 +222,7 @@ def _publish(
     ports = ChainPorts(
         ledger=_ledger(facts),
         prices=_prices(facts),
-        assets=FakeInstruments(maturities=dict(MATURITIES)),
+        assets=FakeAssetReader(*(di1_contract("DI1", i, m) for i, m in MATURITIES.items())),
         portfolio=published,
         writer=published,
     )
@@ -271,12 +264,12 @@ def _ledger(facts: Facts) -> FakeLedger:
     )
     for amounts, sign in ((facts.deposits, ""), (facts.withdrawals, "-")):
         for on, amount in amounts.items():
-            ledger.movements.append(cash_movement(on, f"{sign}{amount}", seq=len(ledger.movements)))
+            ledger.movements.append(ledger_cash(on, f"{sign}{amount}", seq=len(ledger.movements)))
     return ledger
 
 
-def _prices(facts: Facts) -> FakePrices:
-    prices = FakePrices()
+def _prices(facts: Facts) -> FakePriceReader:
+    prices = FakePriceReader()
     for (asset_id, on), pu in facts.prices.items():
         prices.set(asset_id, on, str(pu))
     return prices

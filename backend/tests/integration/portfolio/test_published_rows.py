@@ -34,9 +34,8 @@ from di1.modules.portfolio.domain.valuation import (
 from di1.modules.portfolio.infrastructure.persistence.repositories import SqlPortfolioRepository
 from di1.modules.portfolio.public import PortfolioService
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
-from tests.fakes.clock import FixedClock
-from tests.integration.asset.conftest import Di1Catalogue
-from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
+from tests.support.db import Di1Catalogue
+from tests.support.fakes import FakeClock, FakeDateStatusReader, FakePriceReader
 
 COMPLETE = CalculationCompleteness.COMPLETE
 MISSING = CalculationCompleteness.MISSING
@@ -394,7 +393,7 @@ def _service(uow: SqlAlchemyUnitOfWork) -> PortfolioService:
         assets=build_asset_reader(uow.session),
         prices=FakePriceReader(),
         date_statuses=FakeDateStatusReader(),
-        clock=FixedClock(D),
+        clock=FakeClock(D),
     )
 
 

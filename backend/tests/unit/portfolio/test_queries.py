@@ -26,15 +26,9 @@ from di1.modules.portfolio.public import PortfolioService
 from di1.modules.prices.public import PriceSource
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.shared.errors import DomainError, ErrorCode
-from tests.fakes.clock import FixedClock
-from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28, DI1F29
-from tests.unit.portfolio.fakes import (
-    FakeAssetReader,
-    FakeDateStatusReader,
-    FakePriceReader,
-    InMemoryPortfolioRepository,
-    stored_cash,
-)
+from tests.support.builders import DAY, DI1F27, DI1F28, DI1F29, di1_contract
+from tests.support.fakes import FakeAssetReader, FakeClock, FakeDateStatusReader, FakePriceReader
+from tests.unit.portfolio.fakes import InMemoryPortfolioRepository, stored_cash
 
 TODAY = DAY + timedelta(days=10)
 YESTERDAY = DAY - timedelta(days=1)
@@ -111,16 +105,16 @@ def queries(
     prices: FakePriceReader,
 ) -> PortfolioService:
     assets = FakeAssetReader(
-        (DI1F27, "DI1F27", YESTERDAY),  # matured yesterday
-        (DI1F28, "DI1F28", date(2028, 1, 3)),
-        (DI1F29, "DI1F29", date(2029, 1, 2)),
+        di1_contract("DI1F27", DI1F27.id, YESTERDAY),  # matured yesterday
+        DI1F28,
+        DI1F29,
     )
     return DefaultPortfolioService(
         repository,
         assets=assets,
         prices=prices,
         date_statuses=statuses,
-        clock=FixedClock(TODAY),
+        clock=FakeClock(TODAY),
     )
 
 
@@ -229,11 +223,11 @@ async def test_rows_carry_the_current_preferred_price_and_its_source(
     prices: FakePriceReader,
 ) -> None:
     repository.positions[DAY] = (
-        _position(DI1F29, -2, None),
-        _position(DI1F28, 10, "951000"),
+        _position(DI1F29.id, -2, None),
+        _position(DI1F28.id, 10, "951000"),
     )
-    prices.add(DI1F28, DAY, PriceSource.B3, "95100", "0.0990")
-    prices.add(DI1F28, YESTERDAY, PriceSource.MANUAL, "1", "0.5")  # another date
+    prices.set(DI1F28.id, DAY, "95100", PriceSource.B3, "0.0990")
+    prices.set(DI1F28.id, YESTERDAY, "1", PriceSource.MANUAL, "0.5")  # another date
     statuses.statuses[DAY] = _status(DAY, PROCESSED, None)
 
     table = await queries.get_position_table(DAY)
@@ -262,8 +256,8 @@ async def test_a_corrected_price_shows_next_to_the_figures_of_the_last_processin
 ) -> None:
     # OQ-30: the row shows the current preferred price; the stored financial_total stays that
     # of the last processing (10 × 95100) until the date is processed again.
-    repository.positions[DAY] = (_position(DI1F28, 10, "951000"),)
-    prices.add(DI1F28, DAY, PriceSource.MANUAL, "95300", "0.0970")
+    repository.positions[DAY] = (_position(DI1F28.id, 10, "951000"),)
+    prices.set(DI1F28.id, DAY, "95300", PriceSource.MANUAL, "0.0970")
 
     (row,) = (await queries.get_position_table(DAY)).items
 
@@ -276,7 +270,7 @@ async def test_after_maturity_the_reference_pu_is_zero_with_no_source(
     queries: PortfolioService, repository: InMemoryPortfolioRepository
 ) -> None:
     # OQ-1, OQ-30: the PU is 0 by definition after maturity.
-    repository.positions[DAY] = (_position(DI1F27, 3, "0"),)
+    repository.positions[DAY] = (_position(DI1F27.id, 3, "0"),)
 
     (row,) = (await queries.get_position_table(DAY)).items
 
@@ -303,29 +297,34 @@ D_MINUS_1_LATER = (-1, LATER)
 @pytest.mark.parametrize(
     ("asset", "registered", "held_before", "processed", "changed"),
     [
-        pytest.param(DI1F28, [(0, AFTER)], None, True, True, id="d-price-set-after-the-run"),
-        pytest.param(DI1F28, [D_PRICE_AT_RUN], None, True, False, id="d-price-set-at-the-run"),
+        pytest.param(DI1F28.id, [(0, AFTER)], None, True, True, id="d-price-set-after-the-run"),
+        pytest.param(DI1F28.id, [D_PRICE_AT_RUN], None, True, False, id="d-price-set-at-the-run"),
         pytest.param(
-            DI1F28, [(0, timedelta(minutes=-5))], None, True, False, id="d-price-set-before"
+            DI1F28.id, [(0, timedelta(minutes=-5))], None, True, False, id="d-price-set-before"
         ),
         # OQ-50 item 3: position P&L uses the D−1 price too while Q[D−1] ≠ 0 (OQ-4).
         pytest.param(
-            DI1F28, [D_PRICE_AT_RUN, D_MINUS_1_LATER], 10, True, True, id="d-1-price-set-after"
+            DI1F28.id, [D_PRICE_AT_RUN, D_MINUS_1_LATER], 10, True, True, id="d-1-price-set-after"
         ),
         # OQ-4: with Q[D−1] = 0 position P&L is exactly 0 and the D−1 price is never used.
         pytest.param(
-            DI1F28, [D_PRICE_AT_RUN, D_MINUS_1_LATER], None, True, False, id="d-1-first-buy-on-d"
+            DI1F28.id, [D_PRICE_AT_RUN, D_MINUS_1_LATER], None, True, False, id="d-1-first-buy-on-d"
         ),
         pytest.param(
-            DI1F28, [D_PRICE_AT_RUN, D_MINUS_1_LATER], 0, True, False, id="d-1-closed-on-d-1"
+            DI1F28.id, [D_PRICE_AT_RUN, D_MINUS_1_LATER], 0, True, False, id="d-1-closed-on-d-1"
         ),
         pytest.param(
-            DI1F28, [(1, NEXT_DAY), (-2, NEXT_DAY)], None, True, False, id="other-dates-set-later"
+            DI1F28.id,
+            [(1, NEXT_DAY), (-2, NEXT_DAY)],
+            None,
+            True,
+            False,
+            id="other-dates-set-later",
         ),
-        pytest.param(DI1F28, [], None, True, False, id="no-price"),
-        pytest.param(DI1F28, [(0, NEXT_DAY)], None, False, False, id="no-processing-time"),
+        pytest.param(DI1F28.id, [], None, True, False, id="no-price"),
+        pytest.param(DI1F28.id, [(0, NEXT_DAY)], None, False, False, id="no-processing-time"),
         # OQ-1: the PU is 0 by definition after maturity, whatever the price table holds.
-        pytest.param(DI1F27, [(0, NEXT_DAY)], None, True, False, id="after-maturity"),
+        pytest.param(DI1F27.id, [(0, NEXT_DAY)], None, True, False, id="after-maturity"),
     ],
 )
 async def test_a_row_is_marked_when_a_price_it_used_was_set_after_the_processing(
@@ -349,12 +348,12 @@ async def test_a_row_is_marked_when_a_price_it_used_was_set_after_the_processing
     for offset, set_at in registered:
         pu = "95300" if offset == 0 else "95000"
         on = DAY + timedelta(days=offset)
-        prices.add(asset, on, PriceSource.MANUAL, pu, "0.0970", created_at=POSITIONS_AT + set_at)
+        prices.set(asset, on, pu, PriceSource.MANUAL, "0.0970", created_at=POSITIONS_AT + set_at)
 
     (row,) = (await queries.get_position_table(DAY)).items
 
     assert row.reference_price_changed is changed
-    if asset == DI1F28 and any(offset == 0 for offset, _ in registered):
+    if asset == DI1F28.id and any(offset == 0 for offset, _ in registered):
         assert row.reference_pu == Decimal("95300")  # the row shows D's price, never D−1's
 
 

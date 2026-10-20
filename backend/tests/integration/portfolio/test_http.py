@@ -23,10 +23,9 @@ from di1.modules.portfolio.presentation.http.router import create_router
 from di1.modules.portfolio.public import PortfolioService
 from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import UnitOfWork
-from tests.fakes.clock import FixedClock
-from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
+from tests.support.fakes import FakeClock, FakeDateStatusReader, FakePriceReader
+from tests.support.http import problem
 
-PROBLEM_JSON = "application/problem+json"
 REQUEST_UOW = Depends(get_unit_of_work)
 
 
@@ -38,7 +37,7 @@ def client(settings: Settings) -> Iterator[TestClient]:
             assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=FakeDateStatusReader(),
-            clock=FixedClock(date(2026, 10, 16)),
+            clock=FakeClock(date(2026, 10, 16)),
         )
 
     app = create_app(settings)
@@ -77,11 +76,5 @@ def client(settings: Settings) -> Iterator[TestClient]:
 def test_an_invalid_read_is_a_422_problem(
     client: TestClient, path: str, expected: dict[str, str]
 ) -> None:
-    response = client.get(path)
-
-    assert response.status_code == 422, response.text
-    assert response.headers["content-type"] == PROBLEM_JSON
-    body = response.json()
-    assert body["status"] == 422
-    (error,) = body["errors"]
+    (error,) = problem(client.get(path), 422)["errors"]
     assert {key: error[key] for key in expected} == expected

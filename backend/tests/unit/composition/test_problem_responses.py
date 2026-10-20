@@ -10,8 +10,9 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from di1.composition.errors import PROBLEM_JSON, STATUS_BY_CODE, install_problem_handlers
+from di1.composition.errors import STATUS_BY_CODE, install_problem_handlers
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
+from tests.support.http import problem
 
 
 def _app() -> FastAPI:
@@ -78,11 +79,7 @@ def client() -> TestClient:
 
 
 def _problem(response: Any, status: int, title: str, detail: str) -> dict[str, Any]:
-    assert response.status_code == status
-    assert response.headers["content-type"] == PROBLEM_JSON
-    body: dict[str, Any] = response.json()
-    assert body["type"] == "about:blank"
-    assert body["status"] == status
+    body = problem(response, status)
     assert body["title"] == title
     assert body["detail"] == detail
     return body

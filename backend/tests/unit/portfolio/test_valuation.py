@@ -18,7 +18,7 @@ from di1.modules.portfolio.domain.valuation import (
     ValuationStatus,
     value_positions,
 )
-from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28
+from tests.support.builders import DAY, DI1F27, DI1F28
 
 COMPLETE = ValuationStatus.COMPLETE
 MISSING = ValuationStatus.MISSING
@@ -46,7 +46,7 @@ Valued = tuple[str | None, str | None, ValuationStatus]  # reference PU, total, 
         # Challenge §5 (spec §15 I3, D2): 1 DI1F28 at reference 10% → PU 90909.0909090909. One
         # contract is worth its PU: the multiplier is not applied (OQ-2).
         pytest.param(
-            [_asset(DI1F28, 1, "90909.0909090909")],
+            [_asset(DI1F28.id, 1, "90909.0909090909")],
             [("90909.0909090909", "90909.0909090909", COMPLETE)],
             "90909.0909090909",
             COMPLETE,
@@ -54,7 +54,7 @@ Valued = tuple[str | None, str | None, ValuationStatus]  # reference PU, total, 
         ),
         # Spec §8.2: the quantity is signed. −5 × 95000 = −475000.
         pytest.param(
-            [_asset(DI1F27, -5, "95000")],
+            [_asset(DI1F27.id, -5, "95000")],
             [("95000", "-475000", COMPLETE)],
             "-475000",
             COMPLETE,
@@ -62,7 +62,7 @@ Valued = tuple[str | None, str | None, ValuationStatus]  # reference PU, total, 
         ),
         # 2 × 95000 + (−1 × 91000) = 99000; listed in asset id order.
         pytest.param(
-            [_asset(DI1F28, -1, "91000"), _asset(DI1F27, 2, "95000")],
+            [_asset(DI1F28.id, -1, "91000"), _asset(DI1F27.id, 2, "95000")],
             [("95000", "190000", COMPLETE), ("91000", "-91000", COMPLETE)],
             "99000",
             COMPLETE,
@@ -70,7 +70,7 @@ Valued = tuple[str | None, str | None, ValuationStatus]  # reference PU, total, 
         ),
         # Spec §8.3: the total is not complete if any expected asset is missing; no partial sum.
         pytest.param(
-            [_asset(DI1F27, 2, "95000"), _asset(DI1F28, 1, None)],
+            [_asset(DI1F27.id, 2, "95000"), _asset(DI1F28.id, 1, None)],
             [("95000", "190000", COMPLETE), (None, None, MISSING)],
             None,
             MISSING,
@@ -78,14 +78,14 @@ Valued = tuple[str | None, str | None, ValuationStatus]  # reference PU, total, 
         ),
         # Spec §8.3: the market value of a zero position is zero even without a reference.
         pytest.param(
-            [_asset(DI1F27, 0, None)],
+            [_asset(DI1F27.id, 0, None)],
             [(None, "0", NOT_REQUIRED)],
             "0",
             COMPLETE,
             id="flat-without-a-price",
         ),
         pytest.param(
-            [_asset(DI1F27, 0, "95000")],
+            [_asset(DI1F27.id, 0, "95000")],
             [("95000", "0", NOT_REQUIRED)],
             "0",
             COMPLETE,
@@ -93,7 +93,7 @@ Valued = tuple[str | None, str | None, ValuationStatus]  # reference PU, total, 
         ),
         # OQ-1: after maturity the caller resolves the PU to 0; a short at 0 is not a negative zero.
         pytest.param(
-            [_asset(DI1F27, -4, "0")],
+            [_asset(DI1F27.id, -4, "0")],
             [("0", "0", COMPLETE)],
             "0",
             COMPLETE,
@@ -122,4 +122,4 @@ def test_the_market_value_sums_each_asset_quantity_times_its_reference_pu(
 
 def test_the_same_asset_twice_is_rejected() -> None:
     with pytest.raises(PortfolioError):
-        value_positions(DAY, [_asset(DI1F27, 1, "95000"), _asset(DI1F27, 2, "95000")])
+        value_positions(DAY, [_asset(DI1F27.id, 1, "95000"), _asset(DI1F27.id, 2, "95000")])

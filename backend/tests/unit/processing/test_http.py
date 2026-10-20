@@ -11,13 +11,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from di1.composition.errors import install_problem_handlers
 from di1.modules.processing.domain.issues import IssueRecord, IssueType
 from di1.modules.processing.presentation.http.router import create_router
 from di1.modules.processing.public import Chain, ChainStatus, ProcessingStatus
+from tests.support.builders import di1_contract
+from tests.support.http import app_client, problem
 from tests.unit.processing.fakes import Harness, date_status
 
 # The keys of the fixtures' objects (fixtures.ts `job(...)`, `issues`; processing.ts), with
@@ -57,7 +57,6 @@ ISSUE_KEYS = {
     "required_price_date",
     "request_id",
 }
-PROBLEM_KEYS = {"type", "title", "status", "detail", "errors"}
 BODY = {"start_date": "2026-10-14", "end_date": "2026-10-16", "scope": "ALL"}
 
 
@@ -68,10 +67,7 @@ def harness() -> Harness:
 
 @pytest.fixture
 def client(harness: Harness) -> Iterator[TestClient]:
-    app = FastAPI()
-    install_problem_handlers(app)
-    app.include_router(create_router(get_service=lambda: harness.service))
-    with TestClient(app) as client:
+    with app_client(create_router(get_service=lambda: harness.service)) as client:
         yield client
 
 
@@ -82,15 +78,6 @@ def _assert_request_shape(body: dict[str, Any]) -> None:
     date.fromisoformat(body["end_date"])
     assert datetime.fromisoformat(body["created_at"]).tzinfo is not None
     assert datetime.fromisoformat(body["updated_at"]).tzinfo is not None
-
-
-def _problem(response: Any, status: int) -> list[dict[str, Any]]:
-    assert response.status_code == status
-    assert response.headers["content-type"] == "application/problem+json"
-    body = response.json()
-    assert set(body) == PROBLEM_KEYS
-    errors: list[dict[str, Any]] = body["errors"]
-    return errors
 
 
 def test_post_request_answers_201_with_the_queued_run(client: TestClient) -> None:
@@ -141,7 +128,7 @@ def test_post_request_answers_201_with_the_queued_run(client: TestClient) -> Non
 def test_post_request_refuses_a_malformed_range(
     client: TestClient, harness: Harness, body: dict[str, str], field: str, code: str
 ) -> None:
-    errors = _problem(client.post("/processing/requests", json=body), 422)
+    errors = problem(client.post("/processing/requests", json=body), 422)["errors"]
 
     assert [(e["code"], e["field"]) for e in errors] == [(code, field)]
     assert harness.requests.rows == {}
@@ -177,7 +164,7 @@ def test_get_requests_answers_a_page_of_runs_and_a_cursor(client: TestClient) ->
 def test_a_bad_query_is_a_422_problem(
     client: TestClient, path: str, params: dict[str, Any], field: str
 ) -> None:
-    errors = _problem(client.get(path, params=params), 422)
+    errors = problem(client.get(path, params=params), 422)["errors"]
 
     assert [(e["code"], e["field"]) for e in errors] == [("VALIDATION_ERROR", field)]
 
@@ -189,7 +176,7 @@ def test_get_request_by_id_or_404(client: TestClient) -> None:
     missing = client.get(f"/processing/requests/{uuid4()}")
 
     assert (found.status_code, found.json()) == (200, created)
-    assert [e["code"] for e in _problem(missing, 404)] == ["NOT_FOUND"]
+    assert [e["code"] for e in problem(missing, 404)["errors"]] == ["NOT_FOUND"]
 
 
 def test_cancel_answers_200_then_409(client: TestClient) -> None:
@@ -201,7 +188,7 @@ def test_cancel_answers_200_then_409(client: TestClient) -> None:
     assert cancelled.status_code == 200
     _assert_request_shape(cancelled.json())
     assert cancelled.json()["status"] == "CANCELLED"
-    assert [e["code"] for e in _problem(again, 409)] == ["JOB_NOT_CANCELLABLE"]
+    assert [e["code"] for e in problem(again, 409)["errors"]] == ["JOB_NOT_CANCELLABLE"]
 
 
 def test_get_preview_reports_both_chains(client: TestClient, harness: Harness) -> None:
@@ -232,7 +219,7 @@ def test_get_issues_matches_the_fixture(client: TestClient, harness: Harness) ->
     asset_id = UUID("7e000000-0000-4000-8000-000000000029")
     request_id = UUID("7f3c9a02-0000-4000-8000-000000000002")
     issue_id = UUID("7d000000-0000-4000-8000-000000000001")
-    harness.assets.codes[asset_id] = "DI1F29"
+    harness.assets.add(di1_contract("DI1F29", asset_id, date(2029, 1, 2)))
     harness.issues.rows = [
         IssueRecord(
             id=issue_id,

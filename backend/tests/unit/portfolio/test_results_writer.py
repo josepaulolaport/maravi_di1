@@ -24,14 +24,14 @@ from di1.modules.portfolio.domain.valuation import (
     PortfolioValuation,
     ValuationStatus,
 )
-from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28
+from tests.support.builders import DAY, DI1F27, DI1F28
 from tests.unit.portfolio.fakes import InMemoryPortfolioRepository
 
 COMPLETE = CalculationCompleteness.COMPLETE
 MISSING = CalculationCompleteness.MISSING
 
 
-def _buy(asset_id: UUID = DI1F27) -> Trade:
+def _buy(asset_id: UUID = DI1F27.id) -> Trade:
     return Trade(asset_id, DAY, time(10), 1, 10, Decimal("95000"), Decimal("0.105"))
 
 
@@ -95,12 +95,15 @@ async def test_a_positions_day_maps_onto_the_published_rows(
     repository = InMemoryPortfolioRepository()
 
     await DefaultResultsWriter(repository).write_positions_day(
-        _positions(DI1F27), _valuation(DI1F27, market_value=market_value), _asset_pnl(DI1F27), PNL
+        _positions(DI1F27.id),
+        _valuation(DI1F27.id, market_value=market_value),
+        _asset_pnl(DI1F27.id),
+        PNL,
     )
 
     assert repository.positions[DAY] == (
         PublishedPosition(
-            asset_id=DI1F27,
+            asset_id=DI1F27.id,
             quantity=10,
             average_entry_pu=Decimal("95000"),
             average_entry_rate=Decimal("0.105"),
@@ -147,49 +150,49 @@ async def test_a_day_with_no_expected_asset_writes_only_the_portfolio_row() -> N
     [
         # The three inputs must cover the same assets.
         pytest.param(
-            _positions(DI1F27),
-            _valuation(DI1F27, DI1F28),
-            _asset_pnl(DI1F27),
+            _positions(DI1F27.id),
+            _valuation(DI1F27.id, DI1F28.id),
+            _asset_pnl(DI1F27.id),
             PNL,
             id="valued-asset-not-held",
         ),
         pytest.param(
-            _positions(DI1F27, DI1F28),
-            _valuation(DI1F27, DI1F28),
-            _asset_pnl(DI1F27),
+            _positions(DI1F27.id, DI1F28.id),
+            _valuation(DI1F27.id, DI1F28.id),
+            _asset_pnl(DI1F27.id),
             PNL,
             id="held-asset-without-pnl",
         ),
         pytest.param(
-            _positions(DI1F27),
-            _valuation(DI1F27),
-            _asset_pnl(DI1F27, DI1F28),
+            _positions(DI1F27.id),
+            _valuation(DI1F27.id),
+            _asset_pnl(DI1F27.id, DI1F28.id),
             PNL,
             id="pnl-for-an-asset-not-held",
         ),
         pytest.param(
-            _positions(DI1F27),
-            replace(_valuation(DI1F27), date=DAY.replace(day=5)),
-            _asset_pnl(DI1F27),
+            _positions(DI1F27.id),
+            replace(_valuation(DI1F27.id), date=DAY.replace(day=5)),
+            _asset_pnl(DI1F27.id),
             PNL,
             id="valuation-of-another-date",
         ),
         # Unavailable data is never stored as complete, nor a figure as missing (spec §8.3).
         pytest.param(
-            _positions(DI1F27),
-            replace(_valuation(DI1F27), positions_market_value=None),
-            _asset_pnl(DI1F27),
+            _positions(DI1F27.id),
+            replace(_valuation(DI1F27.id), positions_market_value=None),
+            _asset_pnl(DI1F27.id),
             PNL,
             id="null-market-value-marked-complete",
         ),
         pytest.param(
-            _positions(DI1F27),
+            _positions(DI1F27.id),
             replace(
-                _valuation(DI1F27),
+                _valuation(DI1F27.id),
                 positions_market_value=Decimal("0"),
                 status=ValuationStatus.MISSING,
             ),
-            _asset_pnl(DI1F27),
+            _asset_pnl(DI1F27.id),
             PNL,
             id="market-value-marked-missing",
         ),

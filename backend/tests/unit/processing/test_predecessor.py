@@ -11,7 +11,8 @@ import pytest
 from di1.modules.processing.application.services.predecessor import read_predecessor
 from di1.modules.processing.domain.date_status import Chain, ChainStatus
 from di1.modules.processing.domain.predecessor import PredecessorState
-from tests.unit.processing.fakes import FakeChainHistory, InMemoryDateStatuses, date_status
+from tests.support.fakes import FakeChainHistory
+from tests.unit.processing.fakes import InMemoryDateStatuses, date_status
 
 D0 = date(2026, 10, 5)
 

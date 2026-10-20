@@ -11,22 +11,12 @@ from decimal import Decimal
 
 from alembic import command
 
-from tests.integration.test_initial_migration import _alembic
-from tests.integration.test_migrations_match_schema import database_url, execute, fetch
+from tests.support.builders import DI1F27
+from tests.support.db import alembic_config, catalogue_sql, execute, fetch
 
-__all__ = ["database_url"]
-
-INSTRUMENT = "00000000-0000-0000-0000-0000000000a1"
-PRODUCT = "00000000-0000-0000-0000-0000000000b1"
+INSTRUMENT = str(DI1F27.id)
 A_PUBLISHED_ROW = (
-    "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuro');"
-    "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
-    " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuro de juros');"
-    "INSERT INTO asset.products (id, asset_class_id, code, name)"
-    f" VALUES ('{PRODUCT}', 1, 'DI1', 'DI1');"
-    "INSERT INTO asset.instruments (id, product_id, code, maturity_date)"
-    f" VALUES ('{INSTRUMENT}', '{PRODUCT}', 'DI1F27', '2027-01-01');"
-    "INSERT INTO portfolio.positions (asset_id, position_date, quantity)"
+    catalogue_sql((DI1F27,)) + "INSERT INTO portfolio.positions (asset_id, position_date, quantity)"
     f" VALUES ('{INSTRUMENT}', '2026-10-01', 10);"
 )
 COLUMNS = (
@@ -36,7 +26,7 @@ COLUMNS = (
 
 
 def test_upgrade_keeps_the_published_figures_without_the_price_copy(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0003")
+    command.upgrade(alembic_config(database_url), "0003")
     execute(
         database_url,
         A_PUBLISHED_ROW
@@ -46,7 +36,7 @@ def test_upgrade_keeps_the_published_figures_without_the_price_copy(database_url
         " 'COMPLETE')",
     )
 
-    command.upgrade(_alembic(database_url), "0004")
+    command.upgrade(alembic_config(database_url), "0004")
 
     assert fetch(database_url, COLUMNS) == []
     assert fetch(database_url, "SELECT financial_total FROM portfolio.position_metrics") == [
@@ -55,7 +45,7 @@ def test_upgrade_keeps_the_published_figures_without_the_price_copy(database_url
 
 
 def test_downgrade_brings_the_columns_back_empty(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0004")
+    command.upgrade(alembic_config(database_url), "0004")
     execute(
         database_url,
         A_PUBLISHED_ROW
@@ -64,7 +54,7 @@ def test_downgrade_brings_the_columns_back_empty(database_url: str) -> None:
         " 'COMPLETE', 'COMPLETE')",
     )
 
-    command.downgrade(_alembic(database_url), "0003")
+    command.downgrade(alembic_config(database_url), "0003")
 
     assert fetch(database_url, COLUMNS) == [("reference_pu",), ("reference_source",)]
     assert fetch(

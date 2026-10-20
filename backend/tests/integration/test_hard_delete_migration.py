@@ -9,10 +9,7 @@ from __future__ import annotations
 
 from alembic import command
 
-from tests.integration.test_initial_migration import _alembic
-from tests.integration.test_migrations_match_schema import database_url, execute, fetch
-
-__all__ = ["database_url"]
+from tests.support.db import alembic_config, execute, fetch
 
 ENTRIES = (
     "INSERT INTO ledger.entries (type, entry_date, entry_time, cash_amount, deleted_at,"
@@ -29,10 +26,10 @@ DELETION_COLUMNS = (
 
 
 def test_upgrade_deletes_the_soft_deleted_entries_and_their_columns(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0004")
+    command.upgrade(alembic_config(database_url), "0004")
     execute(database_url, ENTRIES)
 
-    command.upgrade(_alembic(database_url), "0005")
+    command.upgrade(alembic_config(database_url), "0005")
 
     assert fetch(database_url, DELETION_COLUMNS) == []
     assert fetch(
@@ -43,11 +40,11 @@ def test_upgrade_deletes_the_soft_deleted_entries_and_their_columns(database_url
 def test_downgrade_brings_the_columns_back_empty_without_the_deleted_entries(
     database_url: str,
 ) -> None:
-    command.upgrade(_alembic(database_url), "0004")
+    command.upgrade(alembic_config(database_url), "0004")
     execute(database_url, ENTRIES)
-    command.upgrade(_alembic(database_url), "0005")
+    command.upgrade(alembic_config(database_url), "0005")
 
-    command.downgrade(_alembic(database_url), "0004")
+    command.downgrade(alembic_config(database_url), "0004")
 
     assert fetch(database_url, DELETION_COLUMNS) == [("deleted_at",), ("deletion_batch_id",)]
     assert fetch(

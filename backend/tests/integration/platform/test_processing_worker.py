@@ -16,7 +16,7 @@ import os
 import re
 import signal
 import sys
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -40,18 +40,17 @@ from di1.platform.observability.heartbeat import Heartbeat
 from di1.workers import lifecycle
 from di1.workers import main as worker
 from di1.workers.main import JobFailedError, run_worker
-from tests.fakes.clock import FixedClock
-from tests.integration.platform.conftest import queue_spec
 from tests.integration.platform.support import (
     EFFECT,
     PUBLISH_TIMEOUT_SECONDS,
-    close_connections,
     effects,
-    eventually,
     make_envelope,
     with_broker,
     worker_parts,
 )
+from tests.support.broker import SilentServer, close_connections, queue_spec
+from tests.support.fakes import FakeClock
+from tests.support.waits import eventually
 
 
 @dataclass
@@ -140,7 +139,7 @@ async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
     spec = queue_spec(topology, "test.command")
     handler = _Run()
     given: list[WorkerResources] = []
-    clock = FixedClock(date(2026, 10, 19))
+    clock = FakeClock(date(2026, 10, 19))
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
@@ -152,11 +151,11 @@ async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
 
     await publisher.publish(envelope)
 
-    await eventually(lambda: handler.ran == [envelope])
+    await eventually(lambda: handler.ran == [envelope], every=0.05)
     stop.set()
     await asyncio.wait_for(running, timeout=10)
     assert await effects(engine) == [envelope.message_id]
@@ -189,14 +188,17 @@ async def test_the_worker_beats_its_heartbeat_from_its_start_until_it_stops(
             heartbeat=Heartbeat(path),
         )
     )
-    await eventually(path.exists)
+    await eventually(path.exists, every=0.05)
     os.utime(path, (1000.0, 1000.0))
-    await eventually(lambda: path.stat().st_mtime > 1000.0)  # still beating, mid-startup
+    await eventually(
+        lambda: path.stat().st_mtime > 1000.0, every=0.05
+    )  # still beating, mid-startup
 
     release.set()
     stop.set()
     await asyncio.wait_for(running, timeout=10)
     os.utime(path, (1000.0, 1000.0))
+    # A window in which nothing may happen: there is no event to wait for.
     await asyncio.sleep(0.2)
     assert path.stat().st_mtime == 1000.0  # stopped with the worker
 
@@ -239,7 +241,7 @@ async def test_a_stop_during_the_run_after_the_ack_cancels_it_and_the_message_st
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
     await publisher.publish(envelope)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
@@ -275,7 +277,7 @@ async def test_a_failure_after_the_ack_ends_the_worker_with_an_error(
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
 
     await publisher.publish(envelope)
 
@@ -308,7 +310,7 @@ async def test_a_stop_before_the_ack_rolls_back_and_returns_the_message(
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
     await publisher.publish(envelope)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
@@ -317,7 +319,7 @@ async def test_a_stop_before_the_ack_rolls_back_and_returns_the_message(
     await asyncio.wait_for(running, timeout=10)
     assert handler.cancelled.is_set()
     assert await effects(engine) == []
-    await eventually(lambda: _has_ready(broker, spec.name, 1))
+    await eventually(lambda: _has_ready(broker, spec.name, 1), every=0.05)
 
 
 async def _has_ready(broker: AbstractRobustConnection, name: str, count: int) -> bool:
@@ -347,16 +349,17 @@ async def test_a_dropped_broker_connection_does_not_cancel_the_run(
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
     await publisher.publish(envelope)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
     assert await close_connections(management_url, worker.CONNECTION_NAME) >= 1
+    # A window in which nothing may happen: there is no event to wait for.
     await asyncio.sleep(0.5)
     assert not handler.cancelled.is_set()
     handler.release.set()
 
-    await eventually(lambda: handler.ran == [envelope])
+    await eventually(lambda: handler.ran == [envelope], every=0.05)
     stop.set()
     await asyncio.wait_for(running, timeout=10)
     assert handler.claimed == [envelope]
@@ -393,17 +396,18 @@ async def test_a_message_arriving_during_a_run_is_acked_at_once_and_starts_nothi
         )
     )
     first, second = make_envelope(), make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
     await publisher.publish(first)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
     await publisher.publish(second)
 
+    # A window in which nothing may happen: there is no event to wait for.
     await asyncio.sleep(0.3)
     assert handler.claimed == [first]
     assert sweeps == []
     handler.release.set()
-    await eventually(lambda: sweeps == [1])  # the sweep right after the run
+    await eventually(lambda: sweeps == [1], every=0.05)  # the sweep right after the run
     stop.set()
     await asyncio.wait_for(running, timeout=10)
     assert handler.claimed == [first]
@@ -435,7 +439,7 @@ async def test_the_sweep_runs_on_every_interval_without_any_message(
         )
     )
 
-    await eventually(lambda: len(sweeps) >= 3)
+    await eventually(lambda: len(sweeps) >= 3, every=0.05)
     stop.set()
     await asyncio.wait_for(running, timeout=10)
 
@@ -467,26 +471,8 @@ async def test_a_failing_sweep_ends_the_worker_with_an_error(
     assert isinstance(raised.value.__cause__, RuntimeError)
 
 
-@pytest.fixture
-async def hanging_database_settings() -> AsyncIterator[Settings]:
-    """A TCP server that accepts connections and never answers: a database that hangs."""
-
-    async def hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        await reader.read()
-        writer.close()
-
-    server = await asyncio.start_server(hold, "127.0.0.1", 0)
-    port = server.sockets[0].getsockname()[1]
-    try:
-        yield Settings(
-            database_url=SecretStr(f"postgresql+psycopg://u:s3cret-pw@127.0.0.1:{port}/db")
-        )
-    finally:
-        server.close()
-
-
 async def test_a_stop_while_the_database_hangs_at_startup_ends_the_worker(
-    hanging_database_settings: Settings, broker_url: SecretStr
+    hanging_database_settings: Settings, broker_url: SecretStr, silent: SilentServer
 ) -> None:
     stop = asyncio.Event()
     running = asyncio.create_task(
@@ -496,8 +482,10 @@ async def test_a_stop_while_the_database_hangs_at_startup_ends_the_worker(
             stop=stop,
         )
     )
-    await asyncio.sleep(0.3)
-    assert not running.done()
+    await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
+    # A window in which nothing may happen: the connection keeps hanging.
+    done, _ = await asyncio.wait({running}, timeout=0.3)
+    assert not done
 
     stop.set()
 
@@ -523,29 +511,8 @@ async def test_an_unreachable_database_ends_the_worker_before_it_consumes(
         )
 
 
-async def _silent_server() -> AsyncIterator[str]:
-    """A TCP server that accepts connections and never answers: a broker that hangs."""
-
-    async def hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        await reader.read()
-        writer.close()
-
-    server = await asyncio.start_server(hold, "127.0.0.1", 0)
-    port = server.sockets[0].getsockname()[1]
-    try:
-        yield f"amqp://guest:s3cret-pw@127.0.0.1:{port}/"
-    finally:
-        server.close()
-
-
-@pytest.fixture
-async def hanging_broker_url() -> AsyncIterator[str]:
-    async for url in _silent_server():
-        yield url
-
-
 async def test_a_stop_while_connecting_to_the_broker_ends_the_worker(
-    settings: Settings, hanging_broker_url: str
+    settings: Settings, hanging_broker_url: str, silent: SilentServer
 ) -> None:
     stop = asyncio.Event()
     running = asyncio.create_task(
@@ -555,8 +522,10 @@ async def test_a_stop_while_connecting_to_the_broker_ends_the_worker(
             stop=stop,
         )
     )
-    await asyncio.sleep(0.3)
-    assert not running.done()
+    await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
+    # A window in which nothing may happen: the connection keeps hanging.
+    done, _ = await asyncio.wait({running}, timeout=0.3)
+    assert not done
 
     stop.set()
 
@@ -752,13 +721,14 @@ async def test_the_startup_hook_runs_once_before_the_first_delivery(
             topology=topology,
         )
     )
-    await eventually(lambda: order == ["startup"])
+    await eventually(lambda: order == ["startup"], every=0.05)
+    # A window in which nothing may happen: there is no event to wait for.
     await asyncio.sleep(0.3)
     assert order == ["startup"]
 
     release.set()
 
-    await eventually(lambda: handler.ran == [queued])
+    await eventually(lambda: handler.ran == [queued], every=0.05)
     stop.set()
     await asyncio.wait_for(running, timeout=10)
     assert order == ["startup", "claim"]

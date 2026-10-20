@@ -18,8 +18,8 @@ from tests.integration.acceptance.support import (
     acceptance_app,
     create_di1_product,
     create_instrument,
-    problem,
 )
+from tests.support.http import problem_errors
 
 TODAY = date(2027, 1, 1)
 
@@ -62,7 +62,7 @@ def test_an_unknown_product_is_a_field_error(client: TestClient) -> None:
         },
     )
 
-    assert problem(response, 422) == [("VALIDATION_ERROR", "product_id")]
+    assert problem_errors(response, 422) == [("VALIDATION_ERROR", "product_id")]
 
 
 def test_an_unknown_asset_class_is_a_field_error(client: TestClient) -> None:
@@ -70,4 +70,4 @@ def test_an_unknown_asset_class_is_a_field_error(client: TestClient) -> None:
         "/api/products", json={"asset_class_id": 999, "code": "DI1", "name": "Futuro DI1"}
     )
 
-    assert problem(response, 422) == [("VALIDATION_ERROR", "asset_class_id")]
+    assert problem_errors(response, 422) == [("VALIDATION_ERROR", "asset_class_id")]

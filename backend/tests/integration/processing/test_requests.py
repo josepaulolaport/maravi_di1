@@ -22,15 +22,15 @@ from di1.modules.processing.public import (
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.paging import PageParams
-from tests.fakes.clock import FixedClock
 from tests.integration.processing.support import (
     ServiceFactory,
     count,
     make_service,
     request_statuses,
-    seed_instrument,
 )
-from tests.unit.processing.fakes import T0, FakeAssets
+from tests.support.builders import DI1F27, DI1F29, T0
+from tests.support.db import seed_catalogue
+from tests.support.fakes import FakeAssetReader, FakeClock
 
 A, B = date(2026, 10, 1), date(2026, 10, 5)
 ALL = ProcessingScope.ALL
@@ -213,7 +213,7 @@ async def test_13_10_two_concurrent_cancels_have_one_winner(
 async def test_12_the_history_pages_by_keyset_even_with_equal_creation_times(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    same_instant = make_service(clock=FixedClock(T0.date(), T0))
+    same_instant = make_service(clock=FakeClock(T0.date(), T0))
     created = [await _enqueue(session_factory, same_instant) for _ in range(5)]
     later = await _enqueue(session_factory, make_service())
     expected = [later.id, *sorted((r.id for r in created), reverse=True)]
@@ -239,17 +239,9 @@ async def test_12_the_history_pages_by_keyset_even_with_equal_creation_times(
 async def test_10_3_issues_are_listed_newest_first_with_asset_codes(
     engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    di1f29 = await seed_instrument(engine, "DI1F29")
+    seed_catalogue(engine, (DI1F29, DI1F27))
     run = await _enqueue(session_factory, make_service())
     async with engine.begin() as connection:
-        di1f27 = await connection.scalar(
-            text(
-                "INSERT INTO asset.instruments (product_id, code, maturity_date)"
-                " SELECT product_id, 'DI1F27', DATE '2027-01-04' FROM asset.instruments"
-                " WHERE id = :a RETURNING id"
-            ),
-            {"a": di1f29},
-        )
         await connection.execute(
             text(
                 "INSERT INTO processing.issues"
@@ -257,9 +249,9 @@ async def test_10_3_issues_are_listed_newest_first_with_asset_codes(
                 " VALUES (:r, :f29, '2026-10-16', '2026-10-16', 'MISSING_REFERENCE_PRICE'),"
                 " (:r, :f27, '2026-10-14', NULL, 'EXPIRED_OPEN_POSITION')"
             ),
-            {"r": run.id, "f29": di1f29, "f27": di1f27},
+            {"r": run.id, "f29": DI1F29.id, "f27": DI1F27.id},
         )
-    service = make_service(assets=FakeAssets({di1f29: "DI1F29", di1f27: "DI1F27"}))
+    service = make_service(assets=FakeAssetReader(DI1F29, DI1F27))
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
         issues = await service.on(uow).get_issues()

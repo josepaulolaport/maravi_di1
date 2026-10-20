@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -14,6 +13,7 @@ import pytest
 
 from di1.platform.messaging.consumer import Job, JobLoop, MessageConsumer, MessageHandler
 from di1.platform.messaging.envelope import Envelope
+from tests.support.waits import eventually
 
 LONG = 3600.0
 """A sweep interval no test reaches: the sweep then runs only after a job."""
@@ -68,13 +68,6 @@ class Recorder:
         return handle
 
 
-async def wait_for(condition: Callable[[], bool]) -> None:
-    """Poll the recorder: the loop runs in a task of its own, with no event to await."""
-    async with asyncio.timeout(5):
-        while not condition():  # noqa: ASYNC110
-            await asyncio.sleep(0.005)
-
-
 async def serving(loop: JobLoop) -> asyncio.Task[None]:
     task = asyncio.create_task(loop.run())
     await asyncio.sleep(0)
@@ -94,7 +87,7 @@ async def test_the_message_is_acked_once_its_start_ran_and_the_job_then_a_sweep_
     message = FakeMessage(make_envelope().to_json(), events=recorder.events)
 
     await MessageConsumer(name="test", handler=recorder.handler(), jobs=loop).handle(message)
-    await wait_for(lambda: "sweep" in recorder.events)
+    await eventually(lambda: "sweep" in recorder.events)
 
     assert [e for e in recorder.events if e != "ack"] == ["start", "work", "sweep"]
     assert recorder.events.count("ack") == 1
@@ -110,7 +103,7 @@ async def test_a_message_whose_request_does_not_start_is_acked_and_the_sweep_run
     await MessageConsumer(name="test", handler=recorder.handler(start=False), jobs=loop).handle(
         message
     )
-    await wait_for(lambda: "sweep" in recorder.events)
+    await eventually(lambda: "sweep" in recorder.events)
 
     assert [e for e in recorder.events if e != "ack"] == ["start", "sweep"]
     assert recorder.events.count("ack") == 1
@@ -125,7 +118,7 @@ async def test_a_message_during_a_job_is_acked_at_once_and_skipped() -> None:
     task = await serving(loop)
     consumer = MessageConsumer(name="test", handler=recorder.handler(), jobs=loop)
     await consumer.handle(FakeMessage(make_envelope().to_json()))
-    await wait_for(lambda: recorder.events == ["start"])
+    await eventually(lambda: recorder.events == ["start"])
     second = FakeMessage(make_envelope().to_json())
 
     await consumer.handle(second)
@@ -134,7 +127,7 @@ async def test_a_message_during_a_job_is_acked_at_once_and_skipped() -> None:
     assert recorder.events == ["start"]  # the second message started nothing
     assert recorder.hold is not None
     recorder.hold.set()
-    await wait_for(lambda: recorder.events == ["start", "work", "sweep"])
+    await eventually(lambda: recorder.events == ["start", "work", "sweep"])
     await stop(task)
 
 
@@ -150,7 +143,7 @@ async def test_a_failing_start_is_logged_the_message_acked_and_the_sweep_runs(
     await MessageConsumer(name="test", handler=recorder.handler(fail=True), jobs=loop).handle(
         message
     )
-    await wait_for(lambda: recorder.events == ["start", "sweep"])
+    await eventually(lambda: recorder.events == ["start", "sweep"])
 
     assert message.acks == 1
     assert "the database is down" in caplog.text
@@ -177,7 +170,7 @@ async def test_the_sweep_runs_on_every_interval() -> None:
     loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=0.01)
     task = await serving(loop)
 
-    await wait_for(lambda: recorder.events.count("sweep") >= 3)
+    await eventually(lambda: recorder.events.count("sweep") >= 3)
 
     await stop(task)
 
@@ -213,10 +206,11 @@ async def test_a_cancelled_delivery_leaves_the_message_unacked_and_the_job_runs(
     """A stop or a closed channel cancels the delivery while its start is decided: the message
     is not acked (the broker delivers it again, and it is then skipped), and the start the loop
     began still commits and its job runs."""
-    release = asyncio.Event()
+    entered, release = asyncio.Event(), asyncio.Event()
     recorder = Recorder()
 
     async def handle(envelope: Envelope) -> Job | None:
+        entered.set()
         await release.wait()
         recorder.events.append("start")
 
@@ -231,13 +225,13 @@ async def test_a_cancelled_delivery_leaves_the_message_unacked_and_the_job_runs(
     delivery = asyncio.create_task(
         MessageConsumer(name="test", handler=handle, jobs=loop).handle(message)
     )
-    await asyncio.sleep(0.01)
+    await asyncio.wait_for(entered.wait(), timeout=5)  # the start is being decided
 
     delivery.cancel()
     with pytest.raises(asyncio.CancelledError):
         await delivery
     release.set()
 
-    await wait_for(lambda: recorder.events == ["start", "work", "sweep"])
+    await eventually(lambda: recorder.events == ["start", "work", "sweep"])
     assert message.acks == 0
     await stop(task)

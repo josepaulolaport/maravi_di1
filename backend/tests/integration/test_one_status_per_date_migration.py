@@ -24,28 +24,17 @@ import psycopg
 import pytest
 from alembic import command
 
-from tests.integration.test_initial_migration import _alembic
-from tests.integration.test_migrations_match_schema import database_url, execute, fetch
+from tests.support.builders import DI1F27
+from tests.support.db import alembic_config, catalogue_sql, execute, fetch
 
-__all__ = ["database_url"]
-
-INSTRUMENT = "00000000-0000-0000-0000-0000000000a1"
-PRODUCT = "00000000-0000-0000-0000-0000000000b1"
+INSTRUMENT = str(DI1F27.id)
 OLD_PRICE = "00000000-0000-0000-0000-0000000000c1"
 CURRENT_PRICE = "00000000-0000-0000-0000-0000000000c2"
-AN_INSTRUMENT = (
-    "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuro');"
-    "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
-    " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuro de juros');"
-    "INSERT INTO asset.products (id, asset_class_id, code, name)"
-    f" VALUES ('{PRODUCT}', 1, 'DI1', 'DI1');"
-    "INSERT INTO asset.instruments (id, product_id, code, maturity_date)"
-    f" VALUES ('{INSTRUMENT}', '{PRODUCT}', 'DI1F27', '2027-01-01');"
-)
+AN_INSTRUMENT = catalogue_sql((DI1F27,))
 
 
 def _a_0002_database(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0002")
+    command.upgrade(alembic_config(database_url), "0002")
     execute(
         database_url,
         AN_INSTRUMENT
@@ -101,7 +90,7 @@ def _a_0002_database(database_url: str) -> None:
 def test_upgrade_carries_existing_rows_over(database_url: str) -> None:
     _a_0002_database(database_url)
 
-    command.upgrade(_alembic(database_url), "0003")
+    command.upgrade(alembic_config(database_url), "0003")
 
     entries = fetch(
         database_url,
@@ -147,7 +136,7 @@ def test_upgrade_carries_existing_rows_over(database_url: str) -> None:
 
 def test_a_new_entry_follows_the_moved_ones(database_url: str) -> None:
     _a_0002_database(database_url)
-    command.upgrade(_alembic(database_url), "0003")
+    command.upgrade(alembic_config(database_url), "0003")
 
     execute(
         database_url,
@@ -174,18 +163,18 @@ BUSINESS_ROWS = {
 
 @pytest.mark.parametrize("rows", BUSINESS_ROWS.values(), ids=BUSINESS_ROWS.keys())
 def test_downgrade_refuses_a_database_with_business_data(database_url: str, rows: str) -> None:
-    command.upgrade(_alembic(database_url), "0003")
+    command.upgrade(alembic_config(database_url), "0003")
     execute(database_url, rows)
 
     with pytest.raises(RuntimeError, match="allow_data_loss"):
-        command.downgrade(_alembic(database_url), "0002")
+        command.downgrade(alembic_config(database_url), "0002")
 
 
 def test_a_forced_downgrade_carries_nothing_back(database_url: str) -> None:
     _a_0002_database(database_url)
-    command.upgrade(_alembic(database_url), "0003")
+    command.upgrade(alembic_config(database_url), "0003")
 
-    command.downgrade(_alembic(database_url, "allow_data_loss=true"), "0002")
+    command.downgrade(alembic_config(database_url, "allow_data_loss=true"), "0002")
 
     counts = fetch(
         database_url,
@@ -200,9 +189,9 @@ def test_a_forced_downgrade_carries_nothing_back(database_url: str) -> None:
 
 
 def test_an_empty_database_downgrades_without_force(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0003")
+    command.upgrade(alembic_config(database_url), "0003")
 
-    command.downgrade(_alembic(database_url), "0002")
+    command.downgrade(alembic_config(database_url), "0002")
 
     revision = fetch(database_url, "SELECT version_num FROM alembic_version")
     assert revision == [("0002",)]
@@ -247,7 +236,7 @@ REJECTED = {
 
 @pytest.mark.parametrize("statement", REJECTED.values(), ids=REJECTED.keys())
 def test_the_new_constraints_reject_malformed_rows(database_url: str, statement: str) -> None:
-    command.upgrade(_alembic(database_url), "0003")
+    command.upgrade(alembic_config(database_url), "0003")
     execute(database_url, AN_INSTRUMENT)
 
     with pytest.raises(psycopg.errors.IntegrityError):
@@ -256,7 +245,7 @@ def test_the_new_constraints_reject_malformed_rows(database_url: str, statement:
 
 @pytest.mark.parametrize("target", ["0003", "0002"])
 def test_neither_direction_runs_while_a_job_is_active(database_url: str, target: str) -> None:
-    command.upgrade(_alembic(database_url), "0002" if target == "0003" else "0003")
+    command.upgrade(alembic_config(database_url), "0002" if target == "0003" else "0003")
     dates = (
         "requested_start_date, requested_end_date" if target == "0003" else "start_date, end_date"
     )
@@ -268,7 +257,7 @@ def test_neither_direction_runs_while_a_job_is_active(database_url: str, target:
 
     migrate = command.upgrade if target == "0003" else command.downgrade
     with pytest.raises(RuntimeError, match="job is active"):
-        migrate(_alembic(database_url), target)
+        migrate(alembic_config(database_url), target)
 
 
 ISSUE_ON_THE_FIRST = (
@@ -287,7 +276,7 @@ ISSUE_ON_THE_FIRST = (
 def test_a_later_run_prunes_only_the_issues_of_its_own_chain(
     database_url: str, later_scope: str, kept: int
 ) -> None:
-    command.upgrade(_alembic(database_url), "0002")
+    command.upgrade(alembic_config(database_url), "0002")
     execute(
         database_url,
         AN_INSTRUMENT
@@ -297,7 +286,7 @@ def test_a_later_run_prunes_only_the_issues_of_its_own_chain(
         " '2026-10-06 10:00-03');",
     )
 
-    command.upgrade(_alembic(database_url), "0003")
+    command.upgrade(alembic_config(database_url), "0003")
 
     assert fetch(database_url, "SELECT count(*) FROM processing.issues") == [(kept,)]
 
@@ -306,7 +295,7 @@ def test_a_later_run_prunes_only_the_issues_of_its_own_chain(
 def test_allow_data_loss_does_not_bypass_the_active_job_check(
     database_url: str, target: str
 ) -> None:
-    command.upgrade(_alembic(database_url), "0002" if target == "0003" else "0003")
+    command.upgrade(alembic_config(database_url), "0002" if target == "0003" else "0003")
     dates = (
         "requested_start_date, requested_end_date" if target == "0003" else "start_date, end_date"
     )
@@ -318,4 +307,4 @@ def test_allow_data_loss_does_not_bypass_the_active_job_check(
 
     migrate = command.upgrade if target == "0003" else command.downgrade
     with pytest.raises(RuntimeError, match="job is active"):
-        migrate(_alembic(database_url, "allow_data_loss=true"), target)
+        migrate(alembic_config(database_url, "allow_data_loss=true"), target)

@@ -16,7 +16,7 @@ from di1.modules.portfolio.domain.cash import CashBalance, calculate_cash_day
 from di1.modules.portfolio.domain.errors import PortfolioError
 from di1.modules.portfolio.domain.trade import Trade
 from di1.shared.decimals import ZERO
-from tests.unit.portfolio.factories import DAY, trade
+from tests.support.builders import DAY, portfolio_trade
 
 YESTERDAY = DAY - timedelta(days=1)
 
@@ -27,7 +27,10 @@ YESTERDAY = DAY - timedelta(days=1)
         # −(10 × 95000) − (−10 × 94000) = −950000 + 940000 = −10000: a losing round trip.
         pytest.param(
             "0",
-            (trade(10, "95000", at="09:00", seq=1), trade(-10, "94000", at="10:00", seq=2)),
+            (
+                portfolio_trade(10, "95000", at="09:00", seq=1),
+                portfolio_trade(-10, "94000", at="10:00", seq=2),
+            ),
             "0",
             "0",
             "-10000",
@@ -47,7 +50,10 @@ YESTERDAY = DAY - timedelta(days=1)
         # 500000 − (3 × 95000) − (−1 × 96000) + 1000 − 2000 = 500000 − 189000 − 1000 = 310000.
         pytest.param(
             "500000",
-            (trade(3, "95000", at="09:00", seq=1), trade(-1, "96000", at="10:00", seq=2)),
+            (
+                portfolio_trade(3, "95000", at="09:00", seq=1),
+                portfolio_trade(-1, "96000", at="10:00", seq=2),
+            ),
             "1000",
             "2000",
             "-189000",
@@ -55,7 +61,9 @@ YESTERDAY = DAY - timedelta(days=1)
             id="trades-and-movements-in-one-day",
         ),
         # The schema's only bounds are its CHECKs (OQ-14); cash_balance has none.
-        pytest.param("0", (trade(1, "95000"),), "0", "0", "-95000", "-95000", id="may-go-negative"),
+        pytest.param(
+            "0", (portfolio_trade(1, "95000"),), "0", "0", "-95000", "-95000", id="may-go-negative"
+        ),
     ],
 )
 def test_cash_moves_by_the_trades_and_the_day_totals(

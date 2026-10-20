@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta
-from decimal import Decimal
+from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from di1.modules.asset.public import Instrument
 from di1.modules.processing.application.services.processing import ProcessingService
 from di1.modules.processing.domain.issues import IssueRecord
 from di1.modules.processing.public import (
@@ -21,38 +17,7 @@ from di1.modules.processing.public import (
     ProcessingScope,
     ProcessingStatus,
 )
-from di1.shared.clock import SAO_PAULO
-from tests.fakes.asset import CREATED_AT
-
-T0 = datetime(2026, 10, 19, 9, 0, tzinfo=SAO_PAULO)
-
-
-@dataclass
-class FakeUnitOfWork:
-    """Counts commits; the fakes never touch the session."""
-
-    commits: int = 0
-
-    @property
-    def session(self) -> AsyncSession:
-        raise AssertionError("the in-memory repositories never use the session")
-
-    async def commit(self) -> None:
-        self.commits += 1
-
-
-@dataclass
-class SteppingClock:
-    """Each ``now`` is one second after the previous one, so FIFO order is observable."""
-
-    current: datetime = T0
-
-    def today(self) -> date:
-        return self.current.date()
-
-    def now(self) -> datetime:
-        self.current += timedelta(seconds=1)
-        return self.current
+from tests.support.fakes import FakeAssetReader, FakeChainHistory, FakeUnitOfWork, stepping_clock
 
 
 @dataclass
@@ -131,45 +96,6 @@ class InMemoryIssues:
 
 
 @dataclass
-class FakeChainHistory:
-    """The first dated entry of each chain, or none."""
-
-    first_trade: date | None = None
-    first_cash_movement: date | None = None
-    asked: list[tuple[Chain, date]] = field(default_factory=list)
-
-    async def has_entries_on_or_before(self, chain: Chain, day: date) -> bool:
-        self.asked.append((chain, day))
-        firsts = [self.first_trade]
-        if chain is Chain.CASH:
-            firsts.append(self.first_cash_movement)
-        return any(first is not None and first <= day for first in firsts)
-
-
-@dataclass
-class FakeAssets:
-    codes: dict[UUID, str] = field(default_factory=dict)
-
-    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
-        return {i: self._descriptor(i) for i in instrument_ids if i in self.codes}
-
-    def _descriptor(self, instrument_id: UUID) -> Instrument:
-        return Instrument(
-            id=instrument_id,
-            code=self.codes[instrument_id],
-            product_id=UUID(int=1),
-            product_code="DI1",
-            instrument_type="FUTURE",
-            asset_class="INTEREST_RATE_FUTURE",
-            maturity_date=date(2029, 1, 2),
-            face_value=Decimal("100000"),
-            multiplier=Decimal("1"),
-            settlement_method="CASH",
-            created_at=CREATED_AT,
-        )
-
-
-@dataclass
 class FakeRunMessages:
     """Records the run messages published: ``(request_id, uow)``, ``uow`` the Unit of Work the
     service was built on."""
@@ -195,8 +121,8 @@ class Harness:
         self.date_statuses = InMemoryDateStatuses()
         self.issues = InMemoryIssues()
         self.history = FakeChainHistory()
-        self.assets = FakeAssets()
-        self.clock = SteppingClock()
+        self.assets = FakeAssetReader()
+        self.clock = stepping_clock()
         self.run_messages = FakeRunMessages()
 
     def on(self, uow: FakeUnitOfWork) -> ProcessingService:

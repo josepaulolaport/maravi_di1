@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from di1.modules.asset.public import AssetReader, Instrument
-from tests.fakes.asset import CREATED_AT
+from tests.support.builders import CREATED_AT
 
 
 def test_a_descriptor_carries_the_di1_specification() -> None:
