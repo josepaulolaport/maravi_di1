@@ -14,13 +14,28 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from di1.platform.config import Settings
 
 
-def create_engine(settings: Settings) -> AsyncEngine:
+def create_engine(settings: Settings, *, server_options: str | None = None) -> AsyncEngine:
+    """``server_options`` is libpq's ``options``, run-time parameters set on every connection
+    (``-c name=value ...``)."""
     return create_async_engine(
         settings.database_url.get_secret_value(),
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_max_overflow,
         pool_pre_ping=True,
         echo=settings.database_echo,
+        connect_args={} if server_options is None else {"options": server_options},
+    )
+
+
+def create_worker_engine(settings: Settings) -> AsyncEngine:
+    """The processing worker's engine: every connection has ``statement_timeout`` and
+    ``lock_timeout`` set, so a hung query or lock wait raises (an `OperationalError`, which the
+    processor treats as transient) instead of hanging the worker forever."""
+    statement_ms = round(settings.worker_statement_timeout_seconds * 1000)
+    lock_ms = round(settings.worker_lock_timeout_seconds * 1000)
+    return create_engine(
+        settings,
+        server_options=f"-c statement_timeout={statement_ms} -c lock_timeout={lock_ms}",
     )
 
 
