@@ -2,7 +2,7 @@
 #
 #   make install   backend dependencies (uv sync --frozen) and frontend dependencies (npm ci)
 #   make lint      uv lock --check, ruff check and ruff format --check (backend/, scripts/), mypy
-#                  (backend/ and every scripts/*.py), frontend eslint, tsc and prettier --check
+#                  (backend/, backend/scripts/ and scripts/), frontend eslint, tsc and prettier --check
 #   make test      Alembic head and migration smoke, then pytest with coverage against PostgreSQL 16
 #                  (a throwaway container unless TEST_DATABASE_URL is set), then the frontend tests
 #   make seed      catalogue (FUTURE, INTEREST_RATE_FUTURE, the DI1 product) into the running stack, again
@@ -36,7 +36,7 @@ lint-backend:
 	cd backend && uv lock --check
 	cd backend && uv run --frozen ruff check . ../scripts
 	cd backend && uv run --frozen ruff format --check . ../scripts
-	cd backend && uv run --frozen mypy src tests migrations ../scripts
+	cd backend && uv run --frozen mypy src tests migrations scripts ../scripts
 
 lint-frontend:
 	cd frontend && npm run lint && npm run typecheck && npm run format:check
