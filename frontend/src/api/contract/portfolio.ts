@@ -87,10 +87,10 @@ export interface PositionRow {
   reference_pu: Decimal | null;
   reference_rate: Decimal | null;
   /**
-   * The current preferred price of the date or of the day before was registered after the date's
-   * positions chain was processed, so the figures beside it come from another price: the date
-   * needs reprocessing (OQ-50 item 3). False with no processing time, or when neither price is
-   * read (both dates after maturity).
+   * The current preferred price of the date, or of the day before while the asset was held at
+   * its close (OQ-4), was registered after the date's positions chain was processed, so the
+   * figures beside it come from another price: the date needs reprocessing (OQ-50 item 3). False
+   * with no processing time, or when no such price is read (after maturity).
    */
   reference_price_changed: boolean;
   /** Market value, Q × reference PU (§8.2). */

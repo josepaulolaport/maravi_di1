@@ -106,6 +106,8 @@ class PortfolioService:
         before = on - timedelta(days=1)
         prices = await self._prices.get(asset_ids, [before, on]) if asset_ids else {}
         processed_at = None if status is None else status.portfolio_processed_at
+        # Q[D−1] per asset, from D−1's published rows (none: zero state or a first trade on D).
+        held_before = {q.asset_id: q.quantity for q in await self._repository.get_positions(before)}
         rows = []
         for p in published:
             instrument = instruments[p.asset_id]
@@ -116,9 +118,12 @@ class PortfolioService:
             source = None if price is None else price.source
             rate = None if price is None else price.rate
             # OQ-50 item 3: the stored figures come from the D and D−1 prices the run read; one
-            # registered after it (a re-saved price is a new row, OQ-25) means reprocess D.
+            # registered after it (a re-saved price is a new row, OQ-25) means reprocess D. The
+            # D−1 price counts only while Q[D−1] ≠ 0: otherwise position P&L is 0 (OQ-4).
             previous = (
-                None if is_past_maturity(before, maturity) else prices.get((p.asset_id, before))
+                None
+                if is_past_maturity(before, maturity) or held_before.get(p.asset_id, 0) == 0
+                else prices.get((p.asset_id, before))
             )
             changed = processed_at is not None and any(
                 used is not None and used.created_at > processed_at for used in (price, previous)
