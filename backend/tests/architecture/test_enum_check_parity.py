@@ -62,6 +62,13 @@ def test_the_enum_has_exactly_the_check_values(table: str, column: str, enum: ty
     assert _values(enum) == _check_values(table, column)
 
 
+def test_a_failed_chain_is_one_chain_never_all() -> None:
+    # OQ-40: a run's first failure belongs to the CASH or the POSITIONS chain.
+    assert _check_values("processing.requests", "failed_chain") == _values(ProcessingScope) - {
+        "ALL"
+    }
+
+
 def test_a_portfolio_total_is_valued_or_missing_never_not_required() -> None:
     # A flat asset needs no price (NOT_REQUIRED); the portfolio total is complete or missing.
     assert _check_values("portfolio.portfolio_metrics", "valuation_status") == _values(

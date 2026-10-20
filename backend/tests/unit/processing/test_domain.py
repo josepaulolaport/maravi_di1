@@ -131,6 +131,18 @@ def test_a_predecessor_error_code_names_its_chain() -> None:
     )
 
 
+def test_processing_error_codes_are_one_enum() -> None:
+    # Retired codes stay, since old runs still store them:
+    # SUPERSEDED (OQ-30) and RECOVERY_EXHAUSTED (OQ-45).
+    assert {code.value for code in ProcessingErrorCode} == {
+        "CASH_PREDECESSOR_MISSING",
+        "POSITIONS_PREDECESSOR_MISSING",
+        "PROCESSING_ERROR",
+        "SUPERSEDED",
+        "RECOVERY_EXHAUSTED",
+    }
+
+
 def test_the_history_cursor_round_trips_and_refuses_anything_else() -> None:
     cursor = RequestCursor(T0, uuid4())
 
