@@ -120,22 +120,24 @@ def test_the_other_value_is_never_typed_too(kind: InputKind, expected: ErrorDeta
 # --- typed precision (OQ-3) and bounds (OQ-14) ---------------------------------------------------
 
 
-def test_a_pu_with_more_than_10_places_is_rejected_not_rounded() -> None:
+@pytest.mark.parametrize("pu", ["89250.31470193960", "90909.09090909091"])
+def test_a_pu_with_more_than_10_places_is_rejected_not_rounded(pu: str) -> None:
     # Trailing zeros were typed, so they count.
-    assert check(InputKind.PU, pu=Decimal("89250.31470193960")) == (
+    assert check(InputKind.PU, pu=Decimal(pu)) == (
         None,
         (invalid("Use no máximo 10 casas decimais.", "pu"),),
     )
 
 
-def test_a_rate_with_more_than_12_places_is_rejected_not_rounded() -> None:
-    assert check(InputKind.RATE, rate=Decimal("0.1000000000000")) == (
+@pytest.mark.parametrize("rate", ["0.1000000000000", "0.1000000000001", "0.0000000000005"])
+def test_a_rate_with_more_than_12_places_is_rejected_not_rounded(rate: str) -> None:
+    assert check(InputKind.RATE, rate=Decimal(rate)) == (
         None,
         (invalid("Use no máximo 12 casas decimais.", "rate"),),
     )
 
 
-@pytest.mark.parametrize("pu", ["0", "0.0000000000", "-1"])
+@pytest.mark.parametrize("pu", ["0", "0.0000000000", "-1", "-90909.09"])
 def test_a_pu_must_be_positive(pu: str) -> None:
     assert check(InputKind.PU, pu=Decimal(pu)) == (
         None,
