@@ -69,7 +69,9 @@ Ponto de partida do dia a dia, com duas abas.
   - **Ações de cada execução:**
     - "Ver detalhes";
     - "Cancelar processamento": os dias já concluídos continuam publicados;
-    - "Solicitar novo processamento": refaz a partir do dia que falhou.
+    - "Solicitar novo processamento": refaz a partir do dia que falhou ou, numa execução
+      cancelada, do primeiro dia não alcançado. Numa execução "Tudo" em que só uma cadeia falhou,
+      também é possível refazer apenas essa cadeia (Caixa ou Posições).
 
 As execuções entram numa fila e rodam uma de cada vez, na ordem em que foram pedidas.
 
@@ -148,7 +150,7 @@ Quatro escolhas deliberadas, registradas na especificação (§15):
 - **D3:** a carteira não é reconstruída na consulta, e sim publicada pelo processamento
   solicitado. Antes dele, a data aparece como "Não processado".
 - **D4:** datas futuras são rejeitadas. Os testes rodam o exemplo de 01/01/2027 com relógio fixo,
-  e a demonstração usa a data de hoje.
+  e o `make e2e` executa o mesmo exemplo datado de hoje.
 
 ## Arquitetura
 
@@ -226,7 +228,8 @@ Testes de arquitetura garantem essas fronteiras:
 
 - um módulo só acessa outro pelo `public.py`;
 - as camadas dependem apenas para dentro, e o domínio não faz I/O;
-- SQL só existe na infraestrutura, e FastAPI só nos adaptadores HTTP.
+- SQL só existe na infraestrutura dos módulos, em `platform/` e na montagem da aplicação;
+- FastAPI só aparece nos adaptadores HTTP, nos provedores de dependência e em `composition/`.
 
 Valores monetários, PUs e taxas são `Decimal` em Python, `NUMERIC` no banco e strings no JSON.
 

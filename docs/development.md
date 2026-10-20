@@ -124,8 +124,7 @@ way, until none is left.
   service, but drops the messaging part of the challenge; the sweep is kept only as the safety
   net.
 
-**Decided (OQ-50, 2026-10-19); the queue part (item 2) is implemented, the rest lands in later
-PRs on `simplify`:** the user asked "Is it
+**Decided (OQ-50, 2026-10-19) and implemented:** the user asked "Is it
 really necessary? I want to keep the queue" about the doorbell and chose option 1. Each request
 gets its own message, carrying its `request_id`, published through the outbox; the `request_id` is for tracing and logs only.
 The worker consumes one at a time and, on any message, takes the oldest `QUEUED` request by
@@ -209,7 +208,7 @@ processing on request (§10).
 | D1 | §5 shows BRL as a row of the positions table (qty 109090.91, price 1) | Cash is the "Saldo em caixa" indicator, never a position row (§11.4) | Same numbers, different presentation |
 | D2 | §5 values DI1F28 at the trade's own price ("available reference prices") | A reference price comes only from the exact date; an execution price never becomes a reference price (§4.2, §5) | The user also enters a 10% reference price (PU 90.909,09) for the day; the numbers then match |
 | D3 | §5 and requirement 6: the query rebuilds the portfolio from the events up to the date | Rebuilding happens in a processing run the user requests; the GET only reads published results (§10, §11.4) | After a run for the date; before it the screen shows "Não processado" with a link to Processamentos |
-| D4 | The examples are dated 01/01/2027, a future date when written | Dates after today are rejected (§6.1) | Automated tests run the examples exactly as written with a fixed clock; the README demo uses today |
+| D4 | The examples are dated 01/01/2027, a future date when written | Dates after today are rejected (§6.1) | Automated tests run the examples exactly as written with a fixed clock; `make e2e` runs the same example dated today |
 
 ## Known gaps and next steps
 
