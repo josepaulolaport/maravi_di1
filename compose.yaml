@@ -1,7 +1,10 @@
 # Local stack (plan §0): PostgreSQL 16, RabbitMQ 4.1, the one-shot migration, catalogue seed and
 # demo data, the API, the outbox relay, the one processing worker and the web UI.
-# `docker compose up --build`; the UI answers on http://localhost:8080, the API on http://127.0.0.1:8000 (/health, /api/...), the RabbitMQ
-# management UI on http://127.0.0.1:15672.
+# `docker compose up --build`; by default the UI answers on http://localhost:8080, the API on
+# http://127.0.0.1:8000 (/health, /api/...), PostgreSQL on 127.0.0.1:5432 and the RabbitMQ
+# management UI on http://127.0.0.1:15672. The host ports come from .env (DI1_WEB_PORT,
+# DI1_API_PORT, DI1_DB_PORT, DI1_RABBITMQ_MANAGEMENT_PORT; user decision OQ-52), always bound to
+# 127.0.0.1; the containers keep their own ports, so the services' URLs never change.
 #
 # The credentials are local development defaults; override them with the DI1_* variables. Each
 # user and password sets the server's account and is also copied, as is, into DATABASE_URL or
@@ -45,6 +48,8 @@ services:
       POSTGRES_USER: ${DI1_DB_USER:-di1}
       POSTGRES_PASSWORD: ${DI1_DB_PASSWORD:-di1}
       POSTGRES_DB: ${DI1_DB_NAME:-di1}
+    ports:
+      - "127.0.0.1:${DI1_DB_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:

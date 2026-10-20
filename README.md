@@ -35,14 +35,19 @@ cp frontend/.env.example frontend/.env.local   # optional: API_PROXY_TARGET for 
 
 - `docker compose` reads the root `.env` by itself and interpolates the `DI1_*` variables
   (credentials, host ports, `DI1_DEMO`); its services set their own `DATABASE_URL`/`RABBITMQ_URL`.
+  The host ports are yours to choose (OQ-52): `DI1_WEB_PORT` (UI, default 8080), `DI1_API_PORT`
+  (API, 8000), `DI1_DB_PORT` (PostgreSQL, 5432) and `DI1_RABBITMQ_MANAGEMENT_PORT` (15672), all
+  bound to 127.0.0.1. A plain `docker compose up` picks them up; the containers keep their own
+  ports, so the services still reach each other the same way.
 - `uv run` with the working directory `backend/` (API, `alembic`, workers) reads `DATABASE_URL`, `RABBITMQ_URL`,
   `LOG_LEVEL` and the other settings from the root `.env`, then `backend/.env`
-  (`di1.platform.config`); `DI1_*` lines are ignored there. Compose does not publish PostgreSQL to
-  the host, so `DATABASE_URL` points at a server of your own.
+  (`di1.platform.config`); `DI1_*` lines are ignored there. `DATABASE_URL` may point at the Compose
+  PostgreSQL, `postgresql+psycopg://di1:di1@127.0.0.1:<DI1_DB_PORT>/di1`; Compose does not publish
+  AMQP, so `RABBITMQ_URL` points at a broker of your own.
 - `npm run dev` reads `API_PROXY_TARGET` from `frontend/.env` or `frontend/.env.local`.
 - Backend tests never read a `.env` (`backend/tests/conftest.py`; the worker processes they start
   run outside the checkout). `make e2e` runs Compose, so it uses the root `.env`'s credentials,
-  with its own ports and `DI1_DEMO=0`.
+  but picks its own free ports (whatever `.env` sets) and `DI1_DEMO=0`.
 
 ## Run the application
 
@@ -59,9 +64,11 @@ trade it.
 
 Then open http://localhost:8080: the `web` service serves the built UI (nginx) and forwards `/api/`
 and `/health` to the API, so the UI runs on the real backend. The API
-also answers directly on http://127.0.0.1:8000 (`/health`, `/api/...`), and the RabbitMQ
-management UI on http://127.0.0.1:15672 (user `di1`, password `di1`). Ports are set with
-`DI1_WEB_PORT`, `DI1_API_PORT` and `DI1_RABBITMQ_MANAGEMENT_PORT`.
+also answers directly on http://127.0.0.1:8000 (`/health`, `/api/...`), PostgreSQL on
+127.0.0.1:5432 (user, password and database `di1`), and the RabbitMQ management UI on
+http://127.0.0.1:15672 (user `di1`, password `di1`). Those are the defaults: set `DI1_WEB_PORT`,
+`DI1_API_PORT`, `DI1_DB_PORT` and `DI1_RABBITMQ_MANAGEMENT_PORT` in `.env` to publish them elsewhere
+(for example `DI1_DB_PORT=55432` when a local PostgreSQL already uses 5432).
 `docker compose down -v` removes the stack and its data.
 
 For frontend development, run the Vite dev server against the same stack (it needs the backend;
@@ -121,7 +128,8 @@ make e2e   # throwaway stack (project di1-e2e-<hash>, free ports, printed): run 
 
 Two runs at once (for example from two worktrees) need nothing extra: each checkout gets its own
 project (`di1-e2e-<hash of its path>`), image tags and free ports. To fix them instead, set
-`DI1_E2E_PROJECT`, `DI1_E2E_API_PORT`, `DI1_E2E_WEB_PORT` and `DI1_E2E_RABBITMQ_MANAGEMENT_PORT`.
+`DI1_E2E_PROJECT`, `DI1_E2E_API_PORT`, `DI1_E2E_WEB_PORT`, `DI1_E2E_DB_PORT` and
+`DI1_E2E_RABBITMQ_MANAGEMENT_PORT`.
 
 `scripts/e2e_smoke.py` runs the challenge example (§5 of the challenge) through the HTTP API,
 dated **today** rather than 01/01/2027 (deviation D4 below):
