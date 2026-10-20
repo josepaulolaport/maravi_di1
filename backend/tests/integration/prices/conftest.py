@@ -14,13 +14,9 @@ from di1.modules.prices.dependencies import build_price_service
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.unit_of_work import UnitOfWork
-from tests.integration.prices.support import TODAY, ServiceOn
-from tests.support.builders import DI1F28, DI1F29, DI1V26
+from tests.integration.prices.support import CONTRACTS, TODAY, ServiceOn
 from tests.support.db import seed_catalogue
 from tests.support.fakes import FakeAssetReader, FakeClock, FakePricing
-
-CONTRACTS = (DI1F28, DI1F29, DI1V26)
-"""The catalogue contracts these tests price and store."""
 
 
 @pytest.fixture

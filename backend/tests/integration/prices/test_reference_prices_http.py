@@ -22,8 +22,7 @@ from di1.modules.prices.dependencies import build_price_service
 from di1.modules.prices.presentation.http.router import create_router
 from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import UnitOfWork
-from tests.integration.prices.conftest import CONTRACTS
-from tests.integration.prices.support import TODAY
+from tests.integration.prices.support import CONTRACTS, TODAY
 from tests.support.builders import DI1F28, DI1F29, DI1V26
 from tests.support.db import psycopg_url, seed_catalogue
 from tests.support.fakes import (

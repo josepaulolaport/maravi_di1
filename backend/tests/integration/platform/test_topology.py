@@ -13,8 +13,7 @@ import aio_pika
 from aio_pika.abc import AbstractIncomingMessage, AbstractRobustConnection
 
 from di1.platform.messaging.topology import Topology, declare_exchange, declare_queue
-from tests.integration.platform.conftest import queue_spec
-from tests.integration.platform.support import eventually
+from tests.support.broker import eventually, queue_spec
 
 
 async def test_the_topology_is_a_durable_exchange_and_quorum_queue(

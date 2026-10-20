@@ -43,14 +43,8 @@ from di1.platform.messaging.worker import (
 from di1.platform.observability.heartbeat import Heartbeat
 from di1.workers import main as worker
 from di1.workers.main import JobFailedError, run_worker
-from tests.integration.platform.conftest import queue_spec
-from tests.integration.platform.support import (
-    EFFECT,
-    close_connections,
-    effects,
-    eventually,
-    make_envelope,
-)
+from tests.integration.platform.support import EFFECT, effects, make_envelope
+from tests.support.broker import close_connections, eventually, queue_spec
 from tests.support.fakes import FakeClock
 
 

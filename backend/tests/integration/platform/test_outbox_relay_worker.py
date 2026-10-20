@@ -34,8 +34,7 @@ from di1.platform.messaging.topology import Topology
 from di1.platform.observability.heartbeat import Heartbeat
 from di1.workers import outbox_relay
 from di1.workers.outbox_relay import run_outbox_relay
-from tests.integration.platform.conftest import queue_spec
-from tests.integration.platform.support import eventually
+from tests.support.broker import eventually, queue_spec
 
 
 async def test_the_relay_declares_the_queues_and_publishes_until_stopped(

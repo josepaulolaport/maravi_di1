@@ -19,15 +19,8 @@ from di1.platform.messaging.connection import connect
 from di1.platform.messaging.consumer import open_consumer_channel
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import Topology, declare_queue
-from tests.integration.platform.conftest import queue_spec
-from tests.integration.platform.support import (
-    RecordingHandler,
-    close_connections,
-    consuming,
-    effects,
-    eventually,
-    make_envelope,
-)
+from tests.integration.platform.support import RecordingHandler, consuming, effects, make_envelope
+from tests.support.broker import close_connections, eventually, queue_spec
 
 
 @pytest.fixture

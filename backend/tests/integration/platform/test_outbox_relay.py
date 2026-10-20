@@ -25,8 +25,7 @@ from di1.platform.messaging.outbox import OutboxRetention, add_outbox_message
 from di1.platform.messaging.outbox_relay import OutboxRelay
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import Topology, declare_queue
-from tests.integration.platform.conftest import queue_spec
-from tests.integration.platform.support import eventually
+from tests.support.broker import eventually, queue_spec
 
 
 class _CrashError(BaseException):
