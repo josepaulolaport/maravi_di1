@@ -139,7 +139,7 @@ def validate_trade(
         )
     if draft.cash_amount is not None:
         errors.append(ErrorDetail.validation("Uma operação não tem valor de caixa.", "cash_amount"))
-    if draft.description is not None:
+    if (draft.description or "").strip():  # blank is absent, as on a cash entry (OQ-51)
         errors.append(ErrorDetail.validation("Uma operação não tem descrição.", "description"))
     typed_value = None
     if draft.input_kind is None:

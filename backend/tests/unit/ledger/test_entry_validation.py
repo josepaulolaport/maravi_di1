@@ -464,13 +464,19 @@ def test_a_description_with_a_nul_character_is_rejected() -> None:
     assert error.value.errors[0].message == "O texto não pode conter o caractere nulo."
 
 
-@pytest.mark.parametrize("description", ["Compra", ""])
+@pytest.mark.parametrize("description", ["Compra", " Compra "])
 def test_a_trade_takes_no_description(description: str) -> None:
     with pytest.raises(DomainError) as error:
         validate_trade(_trade(description=description), today=TODAY, instrument=DI1F28)
 
     assert _errors(error) == {(ErrorCode.VALIDATION_ERROR, "description")}
     assert error.value.errors[0].message == "Uma operação não tem descrição."
+
+
+@pytest.mark.parametrize("description", [None, "", "   "])
+def test_a_blank_description_on_a_trade_is_no_description(description: str | None) -> None:
+    # Trimmed first, as on a cash entry: blank is absent (OQ-51 item 1).
+    assert validate_trade(_trade(description=description), today=TODAY, instrument=DI1F28)
 
 
 def test_the_validators_refuse_a_draft_of_the_other_type() -> None:
