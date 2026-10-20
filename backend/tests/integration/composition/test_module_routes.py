@@ -30,7 +30,7 @@ from pydantic import SecretStr
 
 from di1.main import create_app
 from di1.platform.config import Settings
-from di1.shared.clock import FixedClock
+from tests.fakes.clock import FixedClock
 from tests.integration.databases import fresh_database_url, psycopg_url
 
 BACKEND = Path(__file__).resolve().parents[3]

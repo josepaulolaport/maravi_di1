@@ -1,20 +1,23 @@
 """Prices' domain rules: what a typed reference price may be, and which observation is preferred
 (spec §5; OQ-1, OQ-3, OQ-14, OQ-25). The typed quote's rules are Pricing's one validation
-(code-review finding H3), run here on Pricing's field names, as the service does."""
+(code-review finding H3), run here on Pricing's field names, as the service does: the
+validators return every problem, and the helper below raises them as one `DomainError`."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 
+from di1.modules.prices.application.services.price_service import validate_new_price
 from di1.modules.prices.domain.reference_price import (
+    PriceSource,
+    ReferencePriceRecord,
     choose_preferred,
-    validate_reference_price,
 )
-from di1.modules.pricing.public import Quote, QuoteValidator
+from di1.modules.pricing.public import Quote
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 
@@ -31,15 +34,19 @@ def _validate(
     rate: Decimal | None = None,
     maturity_date: date | None = MATURITY,
 ) -> Quote:
-    return validate_reference_price(
+    errors = validate_new_price(
         today=TODAY,
         maturity_date=maturity_date,
         reference_date=reference_date,
         input_kind=input_kind,
         pu=pu,
         rate=rate,
-        validate_quote=QuoteValidator(),
     )
+    if errors:
+        raise DomainError(*errors)
+    typed = pu if input_kind is InputKind.PU else rate
+    assert typed is not None
+    return Quote(input_kind, typed)
 
 
 def _errors(excinfo: pytest.ExceptionInfo[DomainError]) -> tuple[ErrorDetail, ...]:
@@ -253,21 +260,33 @@ class TestRejectedValues:
         }
 
 
-@dataclass(frozen=True)
-class _Observation:
-    source: str
-    name: str
+def _observation(source: PriceSource) -> ReferencePriceRecord:
+    stamp = datetime(2026, 10, 16, 21, 0, tzinfo=UTC)
+    return ReferencePriceRecord(
+        id=uuid4(),
+        asset_id=ASSET,
+        reference_date=date(2026, 10, 16),
+        source=source,
+        input_kind=InputKind.PU,
+        pu=Decimal("89250.3147019396"),
+        rate=Decimal("0.098000000000"),
+        created_at=stamp,
+        updated_at=stamp,
+    )
+
+
+ASSET = uuid4()
 
 
 class TestPreferredObservation:
     def test_manual_wins_over_b3(self) -> None:
-        manual, b3 = _Observation("MANUAL", "m"), _Observation("B3", "b")
+        manual, b3 = _observation(PriceSource.MANUAL), _observation(PriceSource.B3)
 
         assert choose_preferred([b3, manual]) is manual
         assert choose_preferred([manual, b3]) is manual
 
     def test_b3_is_preferred_when_there_is_no_manual(self) -> None:
-        b3 = _Observation("B3", "b")
+        b3 = _observation(PriceSource.B3)
 
         assert choose_preferred([b3]) is b3
 

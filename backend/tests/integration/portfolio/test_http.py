@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 
 from di1.composition.dependencies import get_session_factory
 from di1.main import create_app
-from di1.modules.asset.dependencies import asset_reader
+from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
 from di1.modules.portfolio.dependencies import portfolio_query_service, results_writer
 from di1.modules.portfolio.domain.cash import CashDay
@@ -42,7 +42,7 @@ from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
-from di1.shared.clock import FixedClock
+from tests.fakes.clock import FixedClock
 from tests.integration.asset.conftest import Di1Catalogue, seed_di1
 from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
 
@@ -273,7 +273,7 @@ def client(
         async with SqlAlchemyUnitOfWork(get_session_factory(request)) as uow:
             yield portfolio_query_service(
                 uow,
-                assets=asset_reader(uow.session),
+                assets=build_asset_reader(uow.session),
                 prices=prices,
                 date_statuses=statuses,
                 clock=FixedClock(OCT_16),

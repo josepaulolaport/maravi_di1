@@ -17,10 +17,8 @@ from di1.modules.asset.infrastructure.persistence.models import (
     ProductRow,
 )
 
-CODE_INDEXES = frozenset(
-    {"instrument_types_code_uq", "asset_classes_code_uq", "products_code_uq", "instruments_code_uq"}
-)
-"""The unique indexes whose violation means "this code is taken"."""
+CODE_INDEXES = frozenset({"products_code_uq", "instruments_code_uq"})
+"""The unique indexes whose violation means "this code is taken", on the tables Asset writes."""
 
 
 def code_taken(column: InstrumentedAttribute[str], code: str) -> Select[bool]:

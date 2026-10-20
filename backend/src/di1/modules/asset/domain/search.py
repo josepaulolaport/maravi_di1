@@ -6,14 +6,9 @@ which the schema does not install.
 
 from __future__ import annotations
 
-import unicodedata
 from collections.abc import Iterable
 
-
-def fold(text: str) -> str:
-    """``text`` without accents, case-folded: "Depósitos" → "depositos"."""
-    decomposed = unicodedata.normalize("NFD", text)
-    return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
+from di1.shared.text import fold
 
 
 def matches(values: Iterable[str | None], search: str | None) -> bool:

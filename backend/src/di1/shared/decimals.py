@@ -43,6 +43,9 @@ PU_PLACES = 10
 RATE_PLACES = 12
 """Decimal places of a stored rate; the rate is a fraction, 0.135 = 13.5% a.a. (OQ-3)."""
 
+ZERO = Decimal(0)
+"""The unsigned zero every module starts its sums from."""
+
 
 def financial_context() -> AbstractContextManager[Context]:
     """``with financial_context(): ...`` runs the block in `DECIMAL_CONTEXT` and then restores
@@ -60,6 +63,12 @@ def fits_places(value: Decimal, places: int) -> bool:
     return exponent >= -places
 
 
+def unsigned(value: Decimal) -> Decimal:
+    """``value`` with the sign of a zero dropped (``-0.00`` → ``0.00``); any other value as is.
+    Arithmetic can yield a negative zero, which would reach the client as ``"-0"``."""
+    return value.copy_abs() if value.is_zero() else value
+
+
 def _quantize(value: Decimal, places: int) -> Decimal:
     if not value.is_finite():
         raise ValueError(f"cannot store a value that is not finite: {value}")
@@ -68,7 +77,7 @@ def _quantize(value: Decimal, places: int) -> Decimal:
     context = DECIMAL_CONTEXT.copy()
     context.prec = max(DECIMAL_CONTEXT.prec, value.adjusted() + places + 2)
     result = value.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP, context=context)
-    return result.copy_abs() if result.is_zero() else result
+    return unsigned(result)
 
 
 def quantize_pu(value: Decimal) -> Decimal:

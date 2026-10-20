@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from di1.modules.prices.application.services.price_service import PriceReader, PriceService
+from di1.modules.prices.application.services.price_service import DefaultPriceReader
 from di1.modules.prices.infrastructure.persistence.repositories import (
     SqlReferencePriceRepository,
 )
@@ -21,10 +21,11 @@ from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
-from tests.integration.prices.conftest import DI1F28, DI1F29, MATURED
+from tests.integration.prices.conftest import DI1F28, DI1F29, MATURED, ServiceOn
 from tests.unit.prices.fakes import CALCULATED_RATE
 
 DAY = date(2026, 10, 16)
+_COUNT_ID = text("SELECT count(*) FROM prices.reference_prices WHERE id = :id")
 
 
 def _manual(
@@ -57,26 +58,28 @@ async def _rows(engine: AsyncEngine) -> list[tuple[object, ...]]:
 
 
 async def _set(
-    service: PriceService,
+    service: ServiceOn,
     factory: async_sessionmaker[AsyncSession],
     request: dict[str, object],
 ) -> ReferencePriceRecord:
     async with SqlAlchemyUnitOfWork(factory) as uow:
-        return await service.set_reference_price(**request, uow=uow)  # type: ignore[arg-type]
+        return await service(uow).set_reference_price(**request)  # type: ignore[arg-type]
 
 
 async def _preferred(
     factory: async_sessionmaker[AsyncSession], asset_id: UUID, day: date
 ) -> ReferencePriceRecord | None:
     async with factory() as session:
-        found = await PriceReader(SqlReferencePriceRepository(session)).get([asset_id], [day])
+        found = await DefaultPriceReader(SqlReferencePriceRepository(session)).get(
+            [asset_id], [day]
+        )
         return found.get((asset_id, day))
 
 
 class TestOnePerSource:
     async def test_a_price_is_stored_exactly_as_typed_and_calculated(
         self,
-        service: PriceService,
+        service: ServiceOn,
         session_factory: async_sessionmaker[AsyncSession],
         engine: AsyncEngine,
     ) -> None:
@@ -90,7 +93,7 @@ class TestOnePerSource:
 
     async def test_adding_again_replaces_the_row_with_a_new_id(
         self,
-        service: PriceService,
+        service: ServiceOn,
         session_factory: async_sessionmaker[AsyncSession],
         engine: AsyncEngine,
     ) -> None:
@@ -102,7 +105,7 @@ class TestOnePerSource:
         assert second.created_at > first.created_at
         assert [row[4] for row in await _rows(engine)] == [Decimal("89250.3147019396")]
         async with session_factory() as session:
-            assert await SqlReferencePriceRepository(session).get(first.id) is None
+            assert await session.scalar(_COUNT_ID, {"id": first.id}) == 0
 
     async def test_concurrent_adds_of_one_key_both_succeed_and_leave_one_row(
         self, session_factory: async_sessionmaker[AsyncSession], engine: AsyncEngine
@@ -111,7 +114,7 @@ class TestOnePerSource:
 
         async def first() -> ReferencePriceRecord:
             async with SqlAlchemyUnitOfWork(session_factory) as uow:
-                record = await SqlReferencePriceRepository.of(uow).replace(
+                record = await SqlReferencePriceRepository(uow.session).replace(
                     asset_id=DI1F28,
                     reference_date=DAY,
                     source=PriceSource.MANUAL,
@@ -127,7 +130,7 @@ class TestOnePerSource:
         async def second() -> ReferencePriceRecord:
             await first_written.wait()
             async with SqlAlchemyUnitOfWork(session_factory) as uow:
-                record = await SqlReferencePriceRepository.of(uow).replace(
+                record = await SqlReferencePriceRepository(uow.session).replace(
                     asset_id=DI1F28,
                     reference_date=DAY,
                     source=PriceSource.MANUAL,
@@ -147,7 +150,7 @@ class TestOnePerSource:
 
     async def test_many_concurrent_services_leave_one_row_per_source(
         self,
-        service: PriceService,
+        service: ServiceOn,
         session_factory: async_sessionmaker[AsyncSession],
         engine: AsyncEngine,
     ) -> None:
@@ -178,7 +181,7 @@ class TestOnePerSource:
 
 class TestPreferred:
     async def test_manual_wins_over_b3_and_b3_takes_over_after_its_removal(
-        self, service: PriceService, session_factory: async_sessionmaker[AsyncSession]
+        self, service: ServiceOn, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         b3 = await _set(
             service, session_factory, _manual("89240.4279488087", source=PriceSource.B3)
@@ -187,12 +190,12 @@ class TestPreferred:
         assert await _preferred(session_factory, DI1F28, DAY) == manual
 
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
-            await service.remove_reference_price(manual.id, uow=uow)
+            await service(uow).remove_reference_price(manual.id)
 
         assert await _preferred(session_factory, DI1F28, DAY) == b3
 
     async def test_no_carry_forward_to_a_later_date_or_a_weekend(
-        self, service: PriceService, session_factory: async_sessionmaker[AsyncSession]
+        self, service: ServiceOn, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         await _set(service, session_factory, _manual("89250.3147019396"))
 
@@ -201,7 +204,7 @@ class TestPreferred:
 
     async def test_batch_read_answers_every_pair_in_one_query(
         self,
-        service: PriceService,
+        service: ServiceOn,
         session_factory: async_sessionmaker[AsyncSession],
         engine: AsyncEngine,
     ) -> None:
@@ -224,7 +227,7 @@ class TestPreferred:
         event.listen(engine.sync_engine, "before_cursor_execute", count)
         try:
             async with session_factory() as session:
-                found = await PriceReader(SqlReferencePriceRepository(session)).get(
+                found = await DefaultPriceReader(SqlReferencePriceRepository(session)).get(
                     [DI1F28, DI1F29], [date(2026, 10, 14), date(2026, 10, 15), DAY]
                 )
         finally:
@@ -244,7 +247,7 @@ class TestLatest:
 
     async def test_latest_date_then_manual_over_b3_in_one_statement(
         self,
-        service: PriceService,
+        service: ServiceOn,
         session_factory: async_sessionmaker[AsyncSession],
         engine: AsyncEngine,
     ) -> None:
@@ -274,7 +277,7 @@ class TestLatest:
         event.listen(engine.sync_engine, "before_cursor_execute", count)
         try:
             async with session_factory() as session:
-                found = await PriceReader(SqlReferencePriceRepository(session)).latest(
+                found = await DefaultPriceReader(SqlReferencePriceRepository(session)).latest(
                     [DI1F28, DI1F29, MATURED]
                 )
         finally:
@@ -284,7 +287,7 @@ class TestLatest:
         assert len(statements) == 1
 
     async def test_removing_the_latest_price_falls_back_to_the_previous_date(
-        self, service: PriceService, session_factory: async_sessionmaker[AsyncSession]
+        self, service: ServiceOn, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         manual_14 = await _set(
             service, session_factory, _manual("89006.4625467350", day=date(2026, 10, 14))
@@ -294,12 +297,12 @@ class TestLatest:
         )
 
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
-            await service.remove_reference_price(b3_16.id, uow=uow)
+            await service(uow).remove_reference_price(b3_16.id)
 
         assert await _latest(session_factory, DI1F28) == manual_14
 
     async def test_removing_manual_on_the_latest_date_lets_b3_of_that_date_prevail(
-        self, service: PriceService, session_factory: async_sessionmaker[AsyncSession]
+        self, service: ServiceOn, session_factory: async_sessionmaker[AsyncSession]
     ) -> None:
         b3_16 = await _set(
             service, session_factory, _manual("89240.4279488087", source=PriceSource.B3)
@@ -308,7 +311,7 @@ class TestLatest:
         assert await _latest(session_factory, DI1F28) == manual_16
 
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
-            await service.remove_reference_price(manual_16.id, uow=uow)
+            await service(uow).remove_reference_price(manual_16.id)
 
         assert await _latest(session_factory, DI1F28) == b3_16
 
@@ -323,7 +326,7 @@ class TestLatest:
         event.listen(engine.sync_engine, "before_cursor_execute", count)
         try:
             async with session_factory() as session:
-                found = await PriceReader(SqlReferencePriceRepository(session)).latest([])
+                found = await DefaultPriceReader(SqlReferencePriceRepository(session)).latest([])
         finally:
             event.remove(engine.sync_engine, "before_cursor_execute", count)
 
@@ -333,7 +336,7 @@ class TestLatest:
 class TestNoProcessingSideEffects:
     async def test_set_correct_and_remove_touch_no_processing_table(
         self,
-        service: PriceService,
+        service: ServiceOn,
         session_factory: async_sessionmaker[AsyncSession],
         engine: AsyncEngine,
     ) -> None:
@@ -344,7 +347,7 @@ class TestNoProcessingSideEffects:
         await _set(service, session_factory, _manual("89250.3147019396"))
         replaced = await _set(service, session_factory, _manual("89251"))
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
-            await service.remove_reference_price(replaced.id, uow=uow)
+            await service(uow).remove_reference_price(replaced.id)
 
         assert await _processing_tables(engine) == before
         assert before[1:] == (0, 0)
@@ -353,7 +356,7 @@ class TestNoProcessingSideEffects:
 class TestRefusedWrites:
     async def test_a_future_date_or_a_matured_contract_writes_nothing(
         self,
-        service: PriceService,
+        service: ServiceOn,
         session_factory: async_sessionmaker[AsyncSession],
         engine: AsyncEngine,
     ) -> None:
@@ -374,7 +377,7 @@ async def _latest(
     factory: async_sessionmaker[AsyncSession], asset_id: UUID
 ) -> ReferencePriceRecord | None:
     async with factory() as session:
-        found = await PriceReader(SqlReferencePriceRepository(session)).latest([asset_id])
+        found = await DefaultPriceReader(SqlReferencePriceRepository(session)).latest([asset_id])
     return found.get(asset_id)
 
 
