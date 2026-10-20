@@ -19,7 +19,7 @@ from di1.modules.portfolio.domain.average_cost import (
     closing_average_rate,
     next_average,
 )
-from di1.modules.portfolio.domain.errors import AccountingError, require_next_day
+from di1.modules.portfolio.domain.errors import PortfolioError, require_next_day
 from di1.modules.portfolio.domain.trade import Trade, day_trades
 
 
@@ -34,7 +34,7 @@ class OpenPosition:
 
     def __post_init__(self) -> None:
         if self.quantity == 0:
-            raise AccountingError("a carried position cannot be flat")
+            raise PortfolioError("a carried position cannot be flat")
 
 
 @dataclass(frozen=True)
@@ -85,7 +85,7 @@ class PositionsDay:
                 continue
             if p.average_entry_pu is None or p.average_entry_rate is None:
                 # Unreachable: every opening trade sets an average.
-                raise AccountingError(f"open position {p.asset_id} has no average entry price")
+                raise PortfolioError(f"open position {p.asset_id} has no average entry price")
             carried.append(
                 OpenPosition(
                     asset_id=p.asset_id,
@@ -97,33 +97,32 @@ class PositionsDay:
         return PositionState(as_of=self.date, positions=tuple(carried))
 
 
-class PositionsEngine:
-    """The positions chain, callable on its own (Processing may run positions without cash)."""
-
-    def calculate_day(
-        self, previous_state: PositionState, trades: Sequence[Trade], date: date
-    ) -> PositionsDay:
-        require_next_day(previous_state.as_of, date)
-        ordered = day_trades(trades, date)
-        running = {p.asset_id: _Running.of(p) for p in previous_state.positions}
-        applied: dict[UUID, list[Trade]] = {}
-        for t in ordered:
-            running.setdefault(t.asset_id, _Running(0, 0, None, None)).apply(t)
-            applied.setdefault(t.asset_id, []).append(t)
-        return PositionsDay(
-            date=date,
-            positions=tuple(
-                PositionDay(
-                    asset_id=asset_id,
-                    previous_quantity=r.previous_quantity,
-                    quantity=r.quantity,
-                    average_entry_pu=closing_average_pu(r.average_entry_pu),
-                    average_entry_rate=closing_average_rate(r.average_entry_rate),
-                    trades=tuple(applied.get(asset_id, ())),
-                )
-                for asset_id, r in sorted(running.items(), key=lambda item: item[0])
-            ),
-        )
+def calculate_positions_day(
+    previous_state: PositionState, trades: Sequence[Trade], date: date
+) -> PositionsDay:
+    """One day of the positions chain, callable on its own (Processing may run positions without
+    cash)."""
+    require_next_day(previous_state.as_of, date)
+    ordered = day_trades(trades, date)
+    running = {p.asset_id: _Running.of(p) for p in previous_state.positions}
+    applied: dict[UUID, list[Trade]] = {}
+    for t in ordered:
+        running.setdefault(t.asset_id, _Running(0, 0, None, None)).apply(t)
+        applied.setdefault(t.asset_id, []).append(t)
+    return PositionsDay(
+        date=date,
+        positions=tuple(
+            PositionDay(
+                asset_id=asset_id,
+                previous_quantity=r.previous_quantity,
+                quantity=r.quantity,
+                average_entry_pu=closing_average_pu(r.average_entry_pu),
+                average_entry_rate=closing_average_rate(r.average_entry_rate),
+                trades=tuple(applied.get(asset_id, ())),
+            )
+            for asset_id, r in sorted(running.items(), key=lambda item: item[0])
+        ),
+    )
 
 
 @dataclass
@@ -156,5 +155,5 @@ class _Running:
 def _sorted_unique(positions: tuple[OpenPosition, ...]) -> tuple[OpenPosition, ...]:
     asset_ids = [p.asset_id for p in positions]
     if len(set(asset_ids)) != len(asset_ids):
-        raise AccountingError("a state holds at most one position per asset")
+        raise PortfolioError("a state holds at most one position per asset")
     return tuple(sorted(positions, key=lambda p: p.asset_id))

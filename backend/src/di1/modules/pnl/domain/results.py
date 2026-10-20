@@ -1,7 +1,7 @@
 """P&L result values and completeness states (spec §8.3; schema ``pnl_status``).
 
-A figure that depends on a missing reference price is ``None``, never zero. Internal to the
-module until the integrator freezes the public DTOs (plan §3, W0.3b).
+A figure that depends on a missing reference price is ``None``, never zero. Re-exported by
+``pnl.public``.
 """
 
 from __future__ import annotations
@@ -58,8 +58,3 @@ class PortfolioPnLResult:
     daily_pnl: Decimal | None
     cumulative_pnl: Decimal | None
     status: CalculationCompleteness
-
-
-def unsigned_zero(value: Decimal) -> Decimal:
-    """A short times a zero move is ``-0`` in ``Decimal``; P&L never carries that sign."""
-    return value.copy_abs() if value.is_zero() else value

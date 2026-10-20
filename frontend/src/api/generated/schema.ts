@@ -308,6 +308,12 @@ export interface components {
             /** Name */
             name: string;
         };
+        /**
+         * CalculationCompleteness
+         * @description Mirrors the schema's ``pnl_status`` values.
+         * @enum {string}
+         */
+        CalculationCompleteness: "COMPLETE" | "MISSING";
         /** CashEntryResponse */
         CashEntryResponse: {
             /**
@@ -348,21 +354,27 @@ export interface components {
              */
             type: "CASH";
         };
-        /** CashSummaryOut */
-        CashSummaryOut: {
+        /** CashSummaryResponse */
+        CashSummaryResponse: {
             /** Balance */
             balance: string | null;
             /** Deposits */
             deposits: string | null;
             /** Published At */
             published_at: string | null;
-            /** Status */
-            status: string;
+            status: components["schemas"]["ShownChainStatus"];
             /** Trades Cash Flow */
             trades_cash_flow: string | null;
             /** Withdrawals */
             withdrawals: string | null;
         };
+        /**
+         * Chain
+         * @description One of the two daily chains (OQ-21): the one name used for a date's status column, a
+         *     run's ``failed_chain`` and a Pendência's chain. ``POSITIONS`` is the ``portfolio`` column.
+         * @enum {string}
+         */
+        Chain: "CASH" | "POSITIONS";
         /**
          * CreateInstrumentRequest
          * @description ``POST /instruments``. ``maturity_date`` is always sent; ``null`` is accepted here because
@@ -530,13 +542,13 @@ export interface components {
             /** Name */
             name: string;
         };
-        /** IssueList */
-        IssueList: {
+        /** IssueListResponse */
+        IssueListResponse: {
             /** Items */
-            items: components["schemas"]["IssueOut"][];
+            items: components["schemas"]["IssueResponse"][];
         };
-        /** IssueOut */
-        IssueOut: {
+        /** IssueResponse */
+        IssueResponse: {
             /**
              * Affected Date
              * Format: date
@@ -562,7 +574,7 @@ export interface components {
         };
         /**
          * IssueType
-         * @description The two Pendências of spec §10.3 (OQ-19, OQ-31).
+         * @description The two Pendências (OQ-31).
          * @enum {string}
          */
         IssueType: "MISSING_REFERENCE_PRICE" | "EXPIRED_OPEN_POSITION";
@@ -596,10 +608,10 @@ export interface components {
          */
         ListOrder: "asc" | "desc";
         /**
-         * PnlPointOut
+         * PnlPointResponse
          * @description One calendar date of the range, processed or not (OQ-41, OQ-49).
          */
-        PnlPointOut: {
+        PnlPointResponse: {
             /** Daily Pnl */
             daily_pnl: string | null;
             /**
@@ -609,45 +621,46 @@ export interface components {
             date: string;
             /** Range Cumulative Pnl */
             range_cumulative_pnl: string;
-            /** Status */
-            status: string;
+            status: components["schemas"]["ShownChainStatus"];
         };
-        /** PnlSeriesOut */
-        PnlSeriesOut: {
+        /** PnlSeriesResponse */
+        PnlSeriesResponse: {
             /** Items */
-            items: components["schemas"]["PnlPointOut"][];
+            items: components["schemas"]["PnlPointResponse"][];
         };
-        /** PortfolioPositionsOut */
-        PortfolioPositionsOut: {
+        /** PortfolioPositionsResponse */
+        PortfolioPositionsResponse: {
             /**
              * Date
              * Format: date
              */
             date: string;
             /** Items */
-            items: components["schemas"]["PositionRowOut"][];
+            items: components["schemas"]["PositionRowResponse"][];
             /** Published At */
             published_at: string | null;
-            /** Status */
-            status: string;
+            status: components["schemas"]["ShownChainStatus"];
         };
-        /** PortfolioSummaryOut */
-        PortfolioSummaryOut: {
+        /** PortfolioSummaryResponse */
+        PortfolioSummaryResponse: {
             /** Aum */
             aum: string | null;
-            cash: components["schemas"]["CashSummaryOut"];
+            cash: components["schemas"]["CashSummaryResponse"];
             /**
              * Date
              * Format: date
              */
             date: string;
-            positions: components["schemas"]["PositionsSummaryOut"];
+            positions: components["schemas"]["PositionsSummaryResponse"];
         };
-        /** PositionRowOut */
-        PositionRowOut: {
+        /** PositionRowResponse */
+        PositionRowResponse: {
             /** Asset Code */
             asset_code: string;
-            /** Asset Id */
+            /**
+             * Asset Id
+             * Format: uuid
+             */
             asset_id: string;
             /** Average Entry Pu */
             average_entry_pu: string | null;
@@ -659,8 +672,7 @@ export interface components {
             financial_total: string | null;
             /** Maturity Date */
             maturity_date: string | null;
-            /** Pnl Status */
-            pnl_status: string;
+            pnl_status: components["schemas"]["CalculationCompleteness"];
             /** Position Pnl */
             position_pnl: string | null;
             /** Quantity */
@@ -671,44 +683,39 @@ export interface components {
             reference_pu: string | null;
             /** Reference Rate */
             reference_rate: string | null;
-            /** Reference Source */
-            reference_source: string | null;
+            reference_source: components["schemas"]["PriceSource"] | null;
             /** Trades Pnl */
             trades_pnl: string | null;
-            /** Valuation Status */
-            valuation_status: string;
+            valuation_status: components["schemas"]["ValuationStatus"];
         };
-        /** PositionsSummaryOut */
-        PositionsSummaryOut: {
+        /** PositionsSummaryResponse */
+        PositionsSummaryResponse: {
             /** Cumulative Pnl */
             cumulative_pnl: string | null;
             /** Daily Pnl */
             daily_pnl: string | null;
             /** Market Value */
             market_value: string | null;
-            /** Pnl Status */
-            pnl_status: string | null;
+            pnl_status: components["schemas"]["CalculationCompleteness"] | null;
             /** Position Pnl */
             position_pnl: string | null;
             /** Published At */
             published_at: string | null;
-            /** Status */
-            status: string;
+            status: components["schemas"]["ShownChainStatus"];
             /** Trades Pnl */
             trades_pnl: string | null;
-            /** Valuation Status */
-            valuation_status: string | null;
+            valuation_status: components["schemas"]["CalculationCompleteness"] | null;
         };
-        /** PredecessorOut */
-        PredecessorOut: {
+        /** PredecessorResponse */
+        PredecessorResponse: {
             cash: components["schemas"]["PredecessorState"];
             positions: components["schemas"]["PredecessorState"];
         };
         /**
          * PredecessorState
-         * @description The day before a date, for one chain: its recorded status in ``date_status``, or, without
-         *     one, NOT_PROCESSED or ZERO_STATE (the chain has nothing on or before it). There is no
-         *     stale state (OQ-31).
+         * @description The day before, for one chain: its stored status in ``date_status`` or, without one,
+         *     NOT_PROCESSED or ZERO_STATE (the chain has nothing on or before it). There is no stale state
+         *     (OQ-31). RUNNING stays for the API's enum; since OQ-50 item 4 no date is stored RUNNING.
          * @enum {string}
          */
         PredecessorState: "PROCESSED" | "PROCESSED_WITH_ISSUES" | "RUNNING" | "FAILED" | "NOT_PROCESSED" | "ZERO_STATE";
@@ -719,19 +726,19 @@ export interface components {
          */
         PriceSource: "MANUAL" | "B3";
         /**
-         * ProcessingChain
-         * @description One of the two daily chains (OQ-21).
+         * ProcessingErrorCode
+         * @description A run's ``error_code`` (OQ-31, OQ-44); its pt-BR text is the run's ``error_message``.
          * @enum {string}
          */
-        ProcessingChain: "CASH" | "POSITIONS";
-        /** ProcessingPreviewOut */
-        ProcessingPreviewOut: {
+        ProcessingErrorCode: "CASH_PREDECESSOR_MISSING" | "POSITIONS_PREDECESSOR_MISSING" | "PROCESSING_ERROR" | "SUPERSEDED" | "RECOVERY_EXHAUSTED";
+        /** ProcessingPreviewResponse */
+        ProcessingPreviewResponse: {
             /**
              * End Date
              * Format: date
              */
             end_date: string;
-            predecessor: components["schemas"]["PredecessorOut"];
+            predecessor: components["schemas"]["PredecessorResponse"];
             /**
              * Predecessor Date
              * Format: date
@@ -747,10 +754,10 @@ export interface components {
             total_days: number;
         };
         /**
-         * ProcessingRangeBody
+         * ProcessingRangeRequest
          * @description ``POST /processing/requests``.
          */
-        ProcessingRangeBody: {
+        ProcessingRangeRequest: {
             /**
              * End Date
              * Format: date
@@ -763,8 +770,15 @@ export interface components {
              */
             start_date: string;
         };
-        /** ProcessingRequestOut */
-        ProcessingRequestOut: {
+        /** ProcessingRequestPageResponse */
+        ProcessingRequestPageResponse: {
+            /** Items */
+            items: components["schemas"]["ProcessingRequestResponse"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** ProcessingRequestResponse */
+        ProcessingRequestResponse: {
             /** Cancel Requested At */
             cancel_requested_at: string | null;
             /**
@@ -779,11 +793,10 @@ export interface components {
              * Format: date
              */
             end_date: string;
-            /** Error Code */
-            error_code: string | null;
+            error_code: components["schemas"]["ProcessingErrorCode"] | null;
             /** Error Message */
             error_message: string | null;
-            failed_chain: components["schemas"]["ProcessingChain"] | null;
+            failed_chain: components["schemas"]["Chain"] | null;
             /** Failed Date */
             failed_date: string | null;
             /** Finished At */
@@ -810,27 +823,19 @@ export interface components {
              */
             updated_at: string;
         };
-        /** ProcessingRequestPage */
-        ProcessingRequestPage: {
-            /** Items */
-            items: components["schemas"]["ProcessingRequestOut"][];
-            /** Next Cursor */
-            next_cursor: string | null;
-        };
         /**
          * ProcessingScope
-         * @description Which chain a request processes (OQ-21; schema ``requests.scope``). ALL publishes both
-         *     in one transaction.
+         * @description Which chains a run processes (OQ-21; schema ``requests.scope``). ALL writes both chains of
+         *     a date in one transaction, positions first.
          * @enum {string}
          */
         ProcessingScope: "CASH" | "POSITIONS" | "ALL";
         /**
          * ProcessingStatus
          * @description The eight run statuses (spec §10.3; schema ``requests_status_check``); there is no
-         *     SUPERSEDED since OQ-23. DISPATCHED and CANCELLING are never set since OQ-46: a request goes
-         *     QUEUED → RUNNING when the worker takes it, and a cancel of a RUNNING run only records
-         *     ``cancel_requested_at``. The two values stay only because the schema's CHECK and the API
-         *     enum keep them (user decision); no code reads or writes them, and no row holds them.
+         *     SUPERSEDED since OQ-23. A request goes QUEUED → RUNNING when the worker takes it, and a cancel
+         *     of a RUNNING run only records ``cancel_requested_at`` (OQ-46). DISPATCHED and CANCELLING stay
+         *     only because the schema's CHECK and the API enum keep them: nothing writes them.
          * @enum {string}
          */
         ProcessingStatus: "QUEUED" | "DISPATCHED" | "RUNNING" | "CANCELLING" | "COMPLETED" | "COMPLETED_WITH_ISSUES" | "CANCELLED" | "FAILED";
@@ -938,6 +943,12 @@ export interface components {
              */
             reference_date: string;
         };
+        /**
+         * ShownChainStatus
+         * @description A chain's status on a date as the API sends it: ``ChainStatus``, or NOT_PROCESSED.
+         * @enum {string}
+         */
+        ShownChainStatus: "NOT_PROCESSED" | "PROCESSED" | "PROCESSED_WITH_ISSUES" | "RUNNING" | "FAILED";
         /** TradeEntryResponse */
         TradeEntryResponse: {
             /** Asset Code */
@@ -1002,6 +1013,13 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * ValuationStatus
+         * @description Mirrors ``valuation_status`` in ``position_metrics`` and ``portfolio_metrics``. COMPLETE and
+         *     MISSING are PnL's ``CalculationCompleteness`` values, which a portfolio day stores.
+         * @enum {string}
+         */
+        ValuationStatus: "COMPLETE" | "MISSING" | "NOT_REQUIRED";
     };
     responses: never;
     parameters: never;
@@ -1245,7 +1263,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PnlSeriesOut"];
+                    "application/json": components["schemas"]["PnlSeriesResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1276,7 +1294,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PortfolioPositionsOut"];
+                    "application/json": components["schemas"]["PortfolioPositionsResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1307,7 +1325,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PortfolioSummaryOut"];
+                    "application/json": components["schemas"]["PortfolioSummaryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1336,7 +1354,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["IssueList"];
+                    "application/json": components["schemas"]["IssueListResponse"];
                 };
             };
         };
@@ -1360,7 +1378,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProcessingPreviewOut"];
+                    "application/json": components["schemas"]["ProcessingPreviewResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1392,7 +1410,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProcessingRequestPage"];
+                    "application/json": components["schemas"]["ProcessingRequestPageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1415,7 +1433,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProcessingRangeBody"];
+                "application/json": components["schemas"]["ProcessingRangeRequest"];
             };
         };
         responses: {
@@ -1425,7 +1443,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProcessingRequestOut"];
+                    "application/json": components["schemas"]["ProcessingRequestResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1456,7 +1474,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProcessingRequestOut"];
+                    "application/json": components["schemas"]["ProcessingRequestResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1487,7 +1505,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProcessingRequestOut"];
+                    "application/json": components["schemas"]["ProcessingRequestResponse"];
                 };
             };
             /** @description Validation Error */

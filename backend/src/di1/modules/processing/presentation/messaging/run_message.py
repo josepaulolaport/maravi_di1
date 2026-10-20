@@ -20,7 +20,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from di1.modules.processing.application.interfaces.run_messages import RUN_MESSAGE_TYPE
+from di1.modules.processing.application.ports import RUN_MESSAGE_TYPE
 from di1.platform.messaging.consumer import Job
 from di1.platform.messaging.envelope import Envelope
 

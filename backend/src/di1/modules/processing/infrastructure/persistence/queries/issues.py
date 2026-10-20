@@ -1,22 +1,27 @@
-"""SQL over ``processing.issues``."""
+"""SQL over ``processing.issues``: a date's Pendências are replaced whenever it is processed
+(OQ-26 item 5)."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from datetime import date
 from typing import Any
 
-from sqlalchemy import Select, select
+from sqlalchemy import Delete, Insert, Select, delete, insert, select
 
-from di1.modules.processing.infrastructure.persistence.models import IssueModel
+from di1.modules.processing.infrastructure.persistence.models import IssueRow
 
 
-def select_current() -> Select[*tuple[Any, ...]]:
-    """Every stored issue, newest affected date first; current because the run replaces a
-    date's issues when it publishes the date (OQ-26 item 5)."""
-    return select(
-        IssueModel.id,
-        IssueModel.request_id,
-        IssueModel.issue_type,
-        IssueModel.asset_id,
-        IssueModel.affected_date,
-        IssueModel.required_price_date,
-    ).order_by(IssueModel.affected_date.desc(), IssueModel.issue_type, IssueModel.id)
+def current() -> Select[IssueRow]:
+    """Every stored issue, newest affected date first."""
+    return select(IssueRow).order_by(
+        IssueRow.affected_date.desc(), IssueRow.issue_type, IssueRow.id
+    )
+
+
+def delete_of_date(day: date) -> Delete:
+    return delete(IssueRow).where(IssueRow.affected_date == day)
+
+
+def insert_issues(rows: Sequence[dict[str, Any]]) -> Insert:
+    return insert(IssueRow).values(list(rows))

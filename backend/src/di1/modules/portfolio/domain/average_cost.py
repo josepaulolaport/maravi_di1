@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from di1.modules.portfolio.domain.errors import AccountingError
+from di1.modules.portfolio.domain.errors import PortfolioError
 from di1.shared.decimals import financial_context, quantize_pu, quantize_rate
 
 
@@ -23,7 +23,7 @@ def next_average(
     if previous_quantity == 0:
         return price
     if average is None:
-        raise AccountingError("a held position must carry an average entry price")
+        raise PortfolioError("a held position must carry an average entry price")
     if (previous_quantity > 0) == (traded_quantity > 0):
         held, added = abs(previous_quantity), abs(traded_quantity)
         with financial_context():

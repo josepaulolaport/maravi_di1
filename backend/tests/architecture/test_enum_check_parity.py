@@ -18,7 +18,7 @@ from di1.modules.ledger.public import EntryType
 from di1.modules.pnl.public import CalculationCompleteness
 from di1.modules.portfolio.public import ValuationStatus
 from di1.modules.prices.public import PriceSource
-from di1.modules.processing.public import ChainStatus, ProcessingScope, ProcessingStatus
+from di1.modules.processing.public import Chain, ChainStatus, ProcessingScope, ProcessingStatus
 from di1.shared.input_kind import InputKind
 
 SCHEMA_SQL = Path(__file__).resolve().parents[3] / "docs" / "schema.sql"
@@ -49,6 +49,7 @@ def _values(enum: type[Enum]) -> set[str]:
         ("prices.reference_prices", "source", PriceSource),
         ("processing.requests", "scope", ProcessingScope),
         ("processing.requests", "status", ProcessingStatus),
+        ("processing.requests", "failed_chain", Chain),
         ("processing.date_status", "portfolio", ChainStatus),
         ("processing.date_status", "cash", ChainStatus),
         ("portfolio.position_metrics", "valuation_status", ValuationStatus),
@@ -59,13 +60,6 @@ def _values(enum: type[Enum]) -> set[str]:
 )
 def test_the_enum_has_exactly_the_check_values(table: str, column: str, enum: type[Enum]) -> None:
     assert _values(enum) == _check_values(table, column)
-
-
-def test_a_failed_chain_is_one_chain_never_all() -> None:
-    # OQ-40: a run's first failure belongs to the CASH or the POSITIONS chain.
-    assert _check_values("processing.requests", "failed_chain") == _values(ProcessingScope) - {
-        "ALL"
-    }
 
 
 def test_a_portfolio_total_is_valued_or_missing_never_not_required() -> None:

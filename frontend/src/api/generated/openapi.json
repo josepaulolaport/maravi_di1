@@ -24,6 +24,15 @@
         "title": "AssetClassResponse",
         "type": "object"
       },
+      "CalculationCompleteness": {
+        "description": "Mirrors the schema's ``pnl_status`` values.",
+        "enum": [
+          "COMPLETE",
+          "MISSING"
+        ],
+        "title": "CalculationCompleteness",
+        "type": "string"
+      },
       "CashEntryResponse": {
         "properties": {
           "cash_amount": {
@@ -86,7 +95,7 @@
         "title": "CashEntryResponse",
         "type": "object"
       },
-      "CashSummaryOut": {
+      "CashSummaryResponse": {
         "properties": {
           "balance": {
             "anyOf": [
@@ -123,8 +132,7 @@
             "title": "Published At"
           },
           "status": {
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/ShownChainStatus"
           },
           "trades_cash_flow": {
             "anyOf": [
@@ -157,8 +165,17 @@
           "withdrawals",
           "published_at"
         ],
-        "title": "CashSummaryOut",
+        "title": "CashSummaryResponse",
         "type": "object"
+      },
+      "Chain": {
+        "description": "One of the two daily chains (OQ-21): the one name used for a date's status column, a\nrun's ``failed_chain`` and a Pendência's chain. ``POSITIONS`` is the ``portfolio`` column.",
+        "enum": [
+          "CASH",
+          "POSITIONS"
+        ],
+        "title": "Chain",
+        "type": "string"
       },
       "CreateInstrumentRequest": {
         "additionalProperties": false,
@@ -604,11 +621,11 @@
         "title": "InstrumentTypeResponse",
         "type": "object"
       },
-      "IssueList": {
+      "IssueListResponse": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/IssueOut"
+              "$ref": "#/components/schemas/IssueResponse"
             },
             "title": "Items",
             "type": "array"
@@ -617,10 +634,10 @@
         "required": [
           "items"
         ],
-        "title": "IssueList",
+        "title": "IssueListResponse",
         "type": "object"
       },
-      "IssueOut": {
+      "IssueResponse": {
         "properties": {
           "affected_date": {
             "format": "date",
@@ -685,11 +702,11 @@
           "required_price_date",
           "request_id"
         ],
-        "title": "IssueOut",
+        "title": "IssueResponse",
         "type": "object"
       },
       "IssueType": {
-        "description": "The two Pendências of spec §10.3 (OQ-19, OQ-31).",
+        "description": "The two Pendências (OQ-31).",
         "enum": [
           "MISSING_REFERENCE_PRICE",
           "EXPIRED_OPEN_POSITION"
@@ -783,7 +800,7 @@
         "title": "ListOrder",
         "type": "string"
       },
-      "PnlPointOut": {
+      "PnlPointResponse": {
         "description": "One calendar date of the range, processed or not (OQ-41, OQ-49).",
         "properties": {
           "daily_pnl": {
@@ -807,8 +824,7 @@
             "type": "string"
           },
           "status": {
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/ShownChainStatus"
           }
         },
         "required": [
@@ -817,14 +833,14 @@
           "range_cumulative_pnl",
           "status"
         ],
-        "title": "PnlPointOut",
+        "title": "PnlPointResponse",
         "type": "object"
       },
-      "PnlSeriesOut": {
+      "PnlSeriesResponse": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/PnlPointOut"
+              "$ref": "#/components/schemas/PnlPointResponse"
             },
             "title": "Items",
             "type": "array"
@@ -833,10 +849,10 @@
         "required": [
           "items"
         ],
-        "title": "PnlSeriesOut",
+        "title": "PnlSeriesResponse",
         "type": "object"
       },
-      "PortfolioPositionsOut": {
+      "PortfolioPositionsResponse": {
         "properties": {
           "date": {
             "format": "date",
@@ -845,7 +861,7 @@
           },
           "items": {
             "items": {
-              "$ref": "#/components/schemas/PositionRowOut"
+              "$ref": "#/components/schemas/PositionRowResponse"
             },
             "title": "Items",
             "type": "array"
@@ -863,8 +879,7 @@
             "title": "Published At"
           },
           "status": {
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/ShownChainStatus"
           }
         },
         "required": [
@@ -873,10 +888,10 @@
           "published_at",
           "items"
         ],
-        "title": "PortfolioPositionsOut",
+        "title": "PortfolioPositionsResponse",
         "type": "object"
       },
-      "PortfolioSummaryOut": {
+      "PortfolioSummaryResponse": {
         "properties": {
           "aum": {
             "anyOf": [
@@ -890,7 +905,7 @@
             "title": "Aum"
           },
           "cash": {
-            "$ref": "#/components/schemas/CashSummaryOut"
+            "$ref": "#/components/schemas/CashSummaryResponse"
           },
           "date": {
             "format": "date",
@@ -898,7 +913,7 @@
             "type": "string"
           },
           "positions": {
-            "$ref": "#/components/schemas/PositionsSummaryOut"
+            "$ref": "#/components/schemas/PositionsSummaryResponse"
           }
         },
         "required": [
@@ -907,16 +922,17 @@
           "positions",
           "aum"
         ],
-        "title": "PortfolioSummaryOut",
+        "title": "PortfolioSummaryResponse",
         "type": "object"
       },
-      "PositionRowOut": {
+      "PositionRowResponse": {
         "properties": {
           "asset_code": {
             "title": "Asset Code",
             "type": "string"
           },
           "asset_id": {
+            "format": "uuid",
             "title": "Asset Id",
             "type": "string"
           },
@@ -977,8 +993,7 @@
             "title": "Maturity Date"
           },
           "pnl_status": {
-            "title": "Pnl Status",
-            "type": "string"
+            "$ref": "#/components/schemas/CalculationCompleteness"
           },
           "position_pnl": {
             "anyOf": [
@@ -1024,13 +1039,12 @@
           "reference_source": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/PriceSource"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Reference Source"
+            ]
           },
           "trades_pnl": {
             "anyOf": [
@@ -1044,8 +1058,7 @@
             "title": "Trades Pnl"
           },
           "valuation_status": {
-            "title": "Valuation Status",
-            "type": "string"
+            "$ref": "#/components/schemas/ValuationStatus"
           }
         },
         "required": [
@@ -1066,10 +1079,10 @@
           "valuation_status",
           "pnl_status"
         ],
-        "title": "PositionRowOut",
+        "title": "PositionRowResponse",
         "type": "object"
       },
-      "PositionsSummaryOut": {
+      "PositionsSummaryResponse": {
         "properties": {
           "cumulative_pnl": {
             "anyOf": [
@@ -1107,13 +1120,12 @@
           "pnl_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CalculationCompleteness"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Pnl Status"
+            ]
           },
           "position_pnl": {
             "anyOf": [
@@ -1139,8 +1151,7 @@
             "title": "Published At"
           },
           "status": {
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/ShownChainStatus"
           },
           "trades_pnl": {
             "anyOf": [
@@ -1156,13 +1167,12 @@
           "valuation_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CalculationCompleteness"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Valuation Status"
+            ]
           }
         },
         "required": [
@@ -1176,10 +1186,10 @@
           "cumulative_pnl",
           "pnl_status"
         ],
-        "title": "PositionsSummaryOut",
+        "title": "PositionsSummaryResponse",
         "type": "object"
       },
-      "PredecessorOut": {
+      "PredecessorResponse": {
         "properties": {
           "cash": {
             "$ref": "#/components/schemas/PredecessorState"
@@ -1192,11 +1202,11 @@
           "cash",
           "positions"
         ],
-        "title": "PredecessorOut",
+        "title": "PredecessorResponse",
         "type": "object"
       },
       "PredecessorState": {
-        "description": "The day before a date, for one chain: its recorded status in ``date_status``, or, without\none, NOT_PROCESSED or ZERO_STATE (the chain has nothing on or before it). There is no\nstale state (OQ-31).",
+        "description": "The day before, for one chain: its stored status in ``date_status`` or, without one,\nNOT_PROCESSED or ZERO_STATE (the chain has nothing on or before it). There is no stale state\n(OQ-31). RUNNING stays for the API's enum; since OQ-50 item 4 no date is stored RUNNING.",
         "enum": [
           "PROCESSED",
           "PROCESSED_WITH_ISSUES",
@@ -1217,16 +1227,19 @@
         "title": "PriceSource",
         "type": "string"
       },
-      "ProcessingChain": {
-        "description": "One of the two daily chains (OQ-21).",
+      "ProcessingErrorCode": {
+        "description": "A run's ``error_code`` (OQ-31, OQ-44); its pt-BR text is the run's ``error_message``.",
         "enum": [
-          "CASH",
-          "POSITIONS"
+          "CASH_PREDECESSOR_MISSING",
+          "POSITIONS_PREDECESSOR_MISSING",
+          "PROCESSING_ERROR",
+          "SUPERSEDED",
+          "RECOVERY_EXHAUSTED"
         ],
-        "title": "ProcessingChain",
+        "title": "ProcessingErrorCode",
         "type": "string"
       },
-      "ProcessingPreviewOut": {
+      "ProcessingPreviewResponse": {
         "properties": {
           "end_date": {
             "format": "date",
@@ -1234,7 +1247,7 @@
             "type": "string"
           },
           "predecessor": {
-            "$ref": "#/components/schemas/PredecessorOut"
+            "$ref": "#/components/schemas/PredecessorResponse"
           },
           "predecessor_date": {
             "format": "date",
@@ -1262,10 +1275,11 @@
           "predecessor_date",
           "predecessor"
         ],
-        "title": "ProcessingPreviewOut",
+        "title": "ProcessingPreviewResponse",
         "type": "object"
       },
-      "ProcessingRangeBody": {
+      "ProcessingRangeRequest": {
+        "additionalProperties": false,
         "description": "``POST /processing/requests``.",
         "properties": {
           "end_date": {
@@ -1287,10 +1301,38 @@
           "end_date",
           "scope"
         ],
-        "title": "ProcessingRangeBody",
+        "title": "ProcessingRangeRequest",
         "type": "object"
       },
-      "ProcessingRequestOut": {
+      "ProcessingRequestPageResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessingRequestResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ProcessingRequestPageResponse",
+        "type": "object"
+      },
+      "ProcessingRequestResponse": {
         "properties": {
           "cancel_requested_at": {
             "anyOf": [
@@ -1329,13 +1371,12 @@
           "error_code": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/ProcessingErrorCode"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Error Code"
+            ]
           },
           "error_message": {
             "anyOf": [
@@ -1351,7 +1392,7 @@
           "failed_chain": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ProcessingChain"
+                "$ref": "#/components/schemas/Chain"
               },
               {
                 "type": "null"
@@ -1446,39 +1487,11 @@
           "failed_date",
           "failed_chain"
         ],
-        "title": "ProcessingRequestOut",
-        "type": "object"
-      },
-      "ProcessingRequestPage": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ProcessingRequestOut"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
-          }
-        },
-        "required": [
-          "items",
-          "next_cursor"
-        ],
-        "title": "ProcessingRequestPage",
+        "title": "ProcessingRequestResponse",
         "type": "object"
       },
       "ProcessingScope": {
-        "description": "Which chain a request processes (OQ-21; schema ``requests.scope``). ALL publishes both\nin one transaction.",
+        "description": "Which chains a run processes (OQ-21; schema ``requests.scope``). ALL writes both chains of\na date in one transaction, positions first.",
         "enum": [
           "CASH",
           "POSITIONS",
@@ -1488,7 +1501,7 @@
         "type": "string"
       },
       "ProcessingStatus": {
-        "description": "The eight run statuses (spec §10.3; schema ``requests_status_check``); there is no\nSUPERSEDED since OQ-23. DISPATCHED and CANCELLING are never set since OQ-46: a request goes\nQUEUED → RUNNING when the worker takes it, and a cancel of a RUNNING run only records\n``cancel_requested_at``. The two values stay only because the schema's CHECK and the API\nenum keep them (user decision); no code reads or writes them, and no row holds them.",
+        "description": "The eight run statuses (spec §10.3; schema ``requests_status_check``); there is no\nSUPERSEDED since OQ-23. A request goes QUEUED → RUNNING when the worker takes it, and a cancel\nof a RUNNING run only records ``cancel_requested_at`` (OQ-46). DISPATCHED and CANCELLING stay\nonly because the schema's CHECK and the API enum keep them: nothing writes them.",
         "enum": [
           "QUEUED",
           "DISPATCHED",
@@ -1724,6 +1737,18 @@
         "title": "SetReferencePriceRequest",
         "type": "object"
       },
+      "ShownChainStatus": {
+        "description": "A chain's status on a date as the API sends it: ``ChainStatus``, or NOT_PROCESSED.",
+        "enum": [
+          "NOT_PROCESSED",
+          "PROCESSED",
+          "PROCESSED_WITH_ISSUES",
+          "RUNNING",
+          "FAILED"
+        ],
+        "title": "ShownChainStatus",
+        "type": "string"
+      },
       "TradeEntryResponse": {
         "properties": {
           "asset_code": {
@@ -1847,6 +1872,16 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      },
+      "ValuationStatus": {
+        "description": "Mirrors ``valuation_status`` in ``position_metrics`` and ``portfolio_metrics``. COMPLETE and\nMISSING are PnL's ``CalculationCompleteness`` values, which a portfolio day stores.",
+        "enum": [
+          "COMPLETE",
+          "MISSING",
+          "NOT_REQUIRED"
+        ],
+        "title": "ValuationStatus",
+        "type": "string"
       }
     }
   },
@@ -2247,7 +2282,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PnlSeriesOut"
+                  "$ref": "#/components/schemas/PnlSeriesResponse"
                 }
               }
             },
@@ -2290,7 +2325,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PortfolioPositionsOut"
+                  "$ref": "#/components/schemas/PortfolioPositionsResponse"
                 }
               }
             },
@@ -2333,7 +2368,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PortfolioSummaryOut"
+                  "$ref": "#/components/schemas/PortfolioSummaryResponse"
                 }
               }
             },
@@ -2364,7 +2399,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IssueList"
+                  "$ref": "#/components/schemas/IssueListResponse"
                 }
               }
             },
@@ -2415,7 +2450,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProcessingPreviewOut"
+                  "$ref": "#/components/schemas/ProcessingPreviewResponse"
                 }
               }
             },
@@ -2474,7 +2509,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProcessingRequestPage"
+                  "$ref": "#/components/schemas/ProcessingRequestPageResponse"
                 }
               }
             },
@@ -2502,7 +2537,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProcessingRangeBody"
+                "$ref": "#/components/schemas/ProcessingRangeRequest"
               }
             }
           },
@@ -2513,7 +2548,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProcessingRequestOut"
+                  "$ref": "#/components/schemas/ProcessingRequestResponse"
                 }
               }
             },
@@ -2556,7 +2591,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProcessingRequestOut"
+                  "$ref": "#/components/schemas/ProcessingRequestResponse"
                 }
               }
             },
@@ -2599,7 +2634,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProcessingRequestOut"
+                  "$ref": "#/components/schemas/ProcessingRequestResponse"
                 }
               }
             },

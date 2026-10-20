@@ -8,7 +8,7 @@ from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.pnl.public import CalculationCompleteness
-from di1.modules.portfolio.application.services.repository import (
+from di1.modules.portfolio.application.ports import (
     PublishedPortfolioDay,
     PublishedPosition,
 )

@@ -1,30 +1,34 @@
 """HTTP shapes of Processing: the frontend contract ``frontend/src/api/contract/processing.ts``
 (OQ-26 item 8), with OQ-30 and OQ-31 applied (no cancel-and-replace, processed statuses, no
-issue chain). Syntax only; the rules are in the
-service."""
+issue chain). Syntax only; the rules are in the service. Every instant is sent in UTC (``Z``)."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from datetime import date
+from typing import Self
 from uuid import UUID
 
 from pydantic import BaseModel
 
-from di1.modules.processing.application.interfaces.repositories import (
-    IssueType,
-    ProcessingChain,
-)
 from di1.modules.processing.application.services.processing import (
     IssueView,
     ProcessingPreview,
     RequestPage,
 )
+from di1.modules.processing.domain.issues import IssueType
 from di1.modules.processing.domain.predecessor import PredecessorState
-from di1.modules.processing.public import ProcessingRequest, ProcessingScope, ProcessingStatus
+from di1.modules.processing.public import (
+    Chain,
+    ProcessingErrorCode,
+    ProcessingRequest,
+    ProcessingScope,
+    ProcessingStatus,
+)
+from di1.platform.http import RequestBody, UtcDatetime
 
 
-class ProcessingRangeBody(BaseModel):
+class ProcessingRangeRequest(RequestBody):
     """``POST /processing/requests``."""
 
     start_date: date
@@ -32,35 +36,29 @@ class ProcessingRangeBody(BaseModel):
     scope: ProcessingScope
 
 
-def _utc(moment: datetime | None) -> datetime | None:
-    """One rendering for every run timestamp: the service stamps runs in São Paulo time and
-    PostgreSQL reads them back in UTC, so both are sent in UTC (``Z``)."""
-    return None if moment is None else moment.astimezone(UTC)
-
-
-class ProcessingRequestOut(BaseModel):
+class ProcessingRequestResponse(BaseModel):
     id: UUID
     scope: ProcessingScope
     start_date: date
     end_date: date
     status: ProcessingStatus
     progress_date: date | None
-    error_code: str | None
+    error_code: ProcessingErrorCode | None
     error_message: str | None
-    created_at: datetime
-    updated_at: datetime
-    dispatched_at: datetime | None
-    started_at: datetime | None
-    finished_at: datetime | None
-    cancel_requested_at: datetime | None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+    dispatched_at: UtcDatetime | None
+    started_at: UtcDatetime | None
+    finished_at: UtcDatetime | None
+    cancel_requested_at: UtcDatetime | None
     failed_date: date | None
     """The run's first failure (OQ-40); with ``failed_chain`` it prefills "Solicitar novo
     processamento"."""
-    failed_chain: ProcessingChain | None
+    failed_chain: Chain | None
     """CASH or POSITIONS; ``None`` with a ``failed_date`` when the failure belonged to no chain."""
 
     @classmethod
-    def of(cls, request: ProcessingRequest) -> ProcessingRequestOut:
+    def of(cls, request: ProcessingRequest) -> Self:
         return cls(
             id=request.id,
             scope=request.scope,
@@ -70,57 +68,55 @@ class ProcessingRequestOut(BaseModel):
             progress_date=request.progress_date,
             error_code=request.error_code,
             error_message=request.error_message,
-            created_at=request.created_at.astimezone(UTC),
-            updated_at=request.updated_at.astimezone(UTC),
-            dispatched_at=_utc(request.dispatched_at),
-            started_at=_utc(request.started_at),
-            finished_at=_utc(request.finished_at),
-            cancel_requested_at=_utc(request.cancel_requested_at),
+            created_at=request.created_at,
+            updated_at=request.updated_at,
+            dispatched_at=request.dispatched_at,
+            started_at=request.started_at,
+            finished_at=request.finished_at,
+            cancel_requested_at=request.cancel_requested_at,
             failed_date=request.failed_date,
-            failed_chain=None
-            if request.failed_chain is None
-            else ProcessingChain(request.failed_chain.value),
+            failed_chain=request.failed_chain,
         )
 
 
-class ProcessingRequestPage(BaseModel):
-    items: list[ProcessingRequestOut]
+class ProcessingRequestPageResponse(BaseModel):
+    items: list[ProcessingRequestResponse]
     next_cursor: str | None
 
     @classmethod
-    def of(cls, page: RequestPage) -> ProcessingRequestPage:
+    def of(cls, page: RequestPage) -> Self:
         return cls(
-            items=[ProcessingRequestOut.of(item) for item in page.items],
+            items=[ProcessingRequestResponse.of(item) for item in page.items],
             next_cursor=page.next_cursor,
         )
 
 
-class PredecessorOut(BaseModel):
+class PredecessorResponse(BaseModel):
     cash: PredecessorState
     positions: PredecessorState
 
 
-class ProcessingPreviewOut(BaseModel):
+class ProcessingPreviewResponse(BaseModel):
     start_date: date
     end_date: date
     total_days: int
     scope: ProcessingScope
     predecessor_date: date
-    predecessor: PredecessorOut
+    predecessor: PredecessorResponse
 
     @classmethod
-    def of(cls, preview: ProcessingPreview) -> ProcessingPreviewOut:
+    def of(cls, preview: ProcessingPreview) -> Self:
         return cls(
             start_date=preview.start_date,
             end_date=preview.end_date,
             total_days=preview.total_days,
             scope=preview.scope,
             predecessor_date=preview.predecessor_date,
-            predecessor=PredecessorOut(cash=preview.cash, positions=preview.positions),
+            predecessor=PredecessorResponse(cash=preview.cash, positions=preview.positions),
         )
 
 
-class IssueOut(BaseModel):
+class IssueResponse(BaseModel):
     id: UUID
     issue_type: IssueType
     asset_id: UUID | None
@@ -130,7 +126,7 @@ class IssueOut(BaseModel):
     request_id: UUID
 
     @classmethod
-    def of(cls, issue: IssueView) -> IssueOut:
+    def of(cls, issue: IssueView) -> Self:
         return cls(
             id=issue.id,
             issue_type=issue.issue_type,
@@ -142,9 +138,9 @@ class IssueOut(BaseModel):
         )
 
 
-class IssueList(BaseModel):
-    items: list[IssueOut]
+class IssueListResponse(BaseModel):
+    items: list[IssueResponse]
 
     @classmethod
-    def of(cls, issues: Sequence[IssueView]) -> IssueList:
-        return cls(items=[IssueOut.of(issue) for issue in issues])
+    def of(cls, issues: Sequence[IssueView]) -> Self:
+        return cls(items=[IssueResponse.of(issue) for issue in issues])

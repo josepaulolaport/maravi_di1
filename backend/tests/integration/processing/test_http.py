@@ -7,13 +7,14 @@ from collections.abc import AsyncIterator, Iterator
 from datetime import date
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from di1.composition.errors import install_problem_handlers
 from di1.modules.ledger.public import EntryType, LedgerEntry
-from di1.modules.processing.dependencies import make_processing_service
+from di1.modules.processing.application.services.processing import ProcessingService
+from di1.modules.processing.dependencies import build_processing_service
 from di1.modules.processing.presentation.http.router import create_router
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
 from tests.unit.processing.fakes import FakeAssets, SteppingClock
@@ -38,19 +39,20 @@ class _NoEntries:
 
 @pytest.fixture
 def client(session_factory: async_sessionmaker[AsyncSession]) -> Iterator[TestClient]:
-    service = make_processing_service(
-        assets=FakeAssets(),
-        ledger=_NoEntries(),
-        clock=SteppingClock(),
-    )
+    clock = SteppingClock()
 
     async def unit_of_work() -> AsyncIterator[UnitOfWork]:
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
             yield uow
 
+    UOW = Depends(unit_of_work)  # noqa: N806 (a dependency object, as the routers build them)
+
+    def service(uow: UnitOfWork = UOW) -> ProcessingService:
+        return build_processing_service(uow, assets=FakeAssets(), ledger=_NoEntries(), clock=clock)
+
     app = FastAPI()
     install_problem_handlers(app)
-    app.include_router(create_router(lambda: service, unit_of_work))
+    app.include_router(create_router(get_service=service))
     with TestClient(app) as client:
         yield client
 

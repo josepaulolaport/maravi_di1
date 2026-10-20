@@ -1,7 +1,6 @@
-"""What Portfolio's services need from persistence: the published tables, one date at a time.
-
-The repository maps rows to these records and holds no business rule (backend CLAUDE.md).
-"""
+"""What Portfolio's services need from persistence (implemented in ``infrastructure/``): the
+published tables, one date at a time, on one session. The repository maps rows to these records
+and holds no business rule."""
 
 from __future__ import annotations
 

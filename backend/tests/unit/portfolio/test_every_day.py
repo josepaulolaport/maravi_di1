@@ -9,9 +9,10 @@ from datetime import timedelta
 
 import pytest
 
-from di1.modules.portfolio.domain.cash import ZERO, CashBalance, CashCalculator
-from di1.modules.portfolio.domain.errors import AccountingError
-from di1.modules.portfolio.domain.positions import PositionsEngine, PositionState
+from di1.modules.portfolio.domain.cash import CashBalance, calculate_cash_day
+from di1.modules.portfolio.domain.errors import PortfolioError
+from di1.modules.portfolio.domain.positions import PositionState, calculate_positions_day
+from di1.shared.decimals import ZERO
 from tests.unit.portfolio.factories import DAY
 
 TWO_DAYS_BEFORE = DAY - timedelta(days=2)
@@ -19,10 +20,10 @@ SKIPPED = f"the previous state must be of {DAY - timedelta(days=1)}, not {TWO_DA
 
 
 def test_the_positions_chain_refuses_to_skip_a_day() -> None:
-    with pytest.raises(AccountingError, match=SKIPPED):
-        PositionsEngine().calculate_day(PositionState.zero(TWO_DAYS_BEFORE), [], DAY)
+    with pytest.raises(PortfolioError, match=SKIPPED):
+        calculate_positions_day(PositionState.zero(TWO_DAYS_BEFORE), [], DAY)
 
 
 def test_the_cash_chain_refuses_to_skip_a_day() -> None:
-    with pytest.raises(AccountingError, match=SKIPPED):
-        CashCalculator().calculate_day(CashBalance.zero(TWO_DAYS_BEFORE), [], ZERO, ZERO, DAY)
+    with pytest.raises(PortfolioError, match=SKIPPED):
+        calculate_cash_day(CashBalance.zero(TWO_DAYS_BEFORE), [], ZERO, ZERO, DAY)
