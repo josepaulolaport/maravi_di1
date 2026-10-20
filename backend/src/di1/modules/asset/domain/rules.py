@@ -1,6 +1,6 @@
 """Asset registration rules (spec §3; schema.sql ``asset.*``; schema.md "Application invariants").
 
-Each check returns the problems it found as `ErrorDetail`s (empty when valid), so a service can
+Each check returns the problems it found as `ErrorDetail`s (empty when valid), so the service can
 report every problem of a request at once. Lengths and formats are the schema's columns and CHECKs;
 the hierarchy rules are the ones the schema cannot express across tables.
 """
@@ -17,21 +17,12 @@ from di1.shared.errors import ErrorDetail
 FUTURE = "FUTURE"
 """The instrument type whose products carry an ``asset.futures`` specification."""
 
-INSTRUMENT_TYPE_CODE_LENGTH = 32
-ASSET_CLASS_CODE_LENGTH = 64
 PRODUCT_CODE_LENGTH = 32
 INSTRUMENT_CODE_LENGTH = 128
-INSTRUMENT_TYPE_NAME_LENGTH = 100
-ASSET_CLASS_NAME_LENGTH = 150
 PRODUCT_NAME_LENGTH = 200
 SETTLEMENT_METHOD_LENGTH = 32
-SMALLINT_MAX = 32767
-"""The largest instrument type or asset class id (``SMALLINT`` identities)."""
 
-_CATALOGUE_CODE = re.compile(r"[A-Z][A-Z0-9_]*")
 _PRODUCT_CODE = re.compile(r"[A-Za-z0-9_./-]+")
-
-Errors = tuple[ErrorDetail, ...]
 
 
 def has_nul(text: str) -> bool:
@@ -43,44 +34,36 @@ def _nul(field: str) -> ErrorDetail:
     return ErrorDetail.validation("O texto não pode conter o caractere nulo.", field)
 
 
-def normalize_instrument_code(typed: str) -> tuple[str, Errors]:
-    """The stored code: trimmed and upper-cased (OQ-33 item 1), with its problems."""
-    code = typed.strip().upper()
+def normalize_code(typed: str) -> str:
+    """A product or instrument code as stored: trimmed and upper-cased (OQ-33 item 1)."""
+    return typed.strip().upper()
+
+
+def validate_instrument_code(code: str) -> tuple[ErrorDetail, ...]:
+    """A normalized instrument code (`normalize_code`): present, without NUL, within its column."""
     if not code:
-        return code, (ErrorDetail.validation("Informe o código do contrato.", "code"),)
+        return (ErrorDetail.validation("Informe o código do contrato.", "code"),)
     if has_nul(code):
-        return code, (_nul("code"),)
+        return (_nul("code"),)
     if len(code) > INSTRUMENT_CODE_LENGTH:
         message = f"O código do contrato deve ter no máximo {INSTRUMENT_CODE_LENGTH} caracteres."
-        return code, (ErrorDetail.validation(message, "code"),)
-    return code, ()
-
-
-def validate_catalogue_code(code: str, *, max_length: int) -> Errors:
-    """An instrument type or asset class code: upper snake case (``FUTURE``)."""
-    if not _CATALOGUE_CODE.fullmatch(code) or len(code) > max_length:
-        message = (
-            "O código deve começar por uma letra maiúscula e conter apenas letras maiúsculas, "
-            f"dígitos e '_', com no máximo {max_length} caracteres."
-        )
         return (ErrorDetail.validation(message, "code"),)
     return ()
 
 
-def normalize_product_code(typed: str) -> tuple[str, Errors]:
-    """The stored product code (``DI1``): trimmed and upper-cased (OQ-33 item 1), then letters,
-    digits and ``_ . / -`` only, within its column."""
+def validate_product_code(typed: str) -> tuple[ErrorDetail, ...]:
+    """A product code as typed (``DI1``): letters, digits and ``_ . / -`` only, within its column
+    once normalized."""
     trimmed = typed.strip()
-    code = trimmed.upper()
     # The characters are checked before upper-casing: some non-ASCII letters upper-case into
     # ASCII ("ﬁ" → "FI"), which the schema's character set would otherwise let through.
-    if not _PRODUCT_CODE.fullmatch(trimmed) or len(code) > PRODUCT_CODE_LENGTH:
+    if not _PRODUCT_CODE.fullmatch(trimmed) or len(trimmed.upper()) > PRODUCT_CODE_LENGTH:
         message = (
             "O código do produto deve conter apenas letras, dígitos e '_ . / -', "
             f"com no máximo {PRODUCT_CODE_LENGTH} caracteres."
         )
-        return code, (ErrorDetail.validation(message, "code"),)
-    return code, ()
+        return (ErrorDetail.validation(message, "code"),)
+    return ()
 
 
 def _btrim_empty(text: str) -> bool:
@@ -88,7 +71,9 @@ def _btrim_empty(text: str) -> bool:
     return not text.strip(" ")
 
 
-def validate_name(name: str, *, max_length: int, non_blank: bool = False) -> Errors:
+def validate_name(
+    name: str, *, max_length: int, non_blank: bool = False
+) -> tuple[ErrorDetail, ...]:
     """A name within its column; ``non_blank`` where the schema has a ``btrim`` CHECK."""
     if non_blank and _btrim_empty(name):
         return (ErrorDetail.validation("Informe o nome.", "name"),)
@@ -101,7 +86,9 @@ def validate_name(name: str, *, max_length: int, non_blank: bool = False) -> Err
     return ()
 
 
-def validate_futures_for_type(instrument_type: str, futures: FuturesTerms | None) -> Errors:
+def validate_futures_for_type(
+    instrument_type: str, futures: FuturesTerms | None
+) -> tuple[ErrorDetail, ...]:
     """A FUTURE product has exactly one futures specification; no other product has one."""
     if instrument_type != FUTURE:
         if futures is not None:
@@ -139,7 +126,7 @@ def _positive(value: Decimal) -> bool:
     return value.is_finite() and value > 0
 
 
-def validate_maturity(instrument_type: str, maturity_date: date | None) -> Errors:
+def validate_maturity(instrument_type: str, maturity_date: date | None) -> tuple[ErrorDetail, ...]:
     """A futures contract has its own maturity (spec §3); other types do not require one."""
     if instrument_type == FUTURE and maturity_date is None:
         return (ErrorDetail.validation("Informe o vencimento.", "maturity_date"),)

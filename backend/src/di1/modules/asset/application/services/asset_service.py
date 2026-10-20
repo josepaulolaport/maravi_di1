@@ -3,29 +3,21 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Sequence
+from collections.abc import Sequence
 from datetime import date
 from uuid import UUID
 
-from di1.modules.asset.application.services.repository import (
-    AssetRepository,
-    DuplicateCodeError,
-)
-from di1.modules.asset.domain.model import (
-    FuturesTerms,
-    Instrument,
-    InstrumentType,
-    Product,
-)
+from di1.modules.asset.application.ports import AssetRepository
+from di1.modules.asset.domain.model import FuturesTerms, Instrument, InstrumentType, Product
 from di1.modules.asset.domain.rules import (
     PRODUCT_NAME_LENGTH,
-    SMALLINT_MAX,
     has_nul,
-    normalize_instrument_code,
-    normalize_product_code,
+    normalize_code,
     validate_futures_for_type,
+    validate_instrument_code,
     validate_maturity,
     validate_name,
+    validate_product_code,
 )
 from di1.modules.asset.domain.search import matches
 from di1.platform.database.unit_of_work import UnitOfWork
@@ -34,18 +26,12 @@ from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 logger = logging.getLogger(__name__)
 
 
-async def _insert[T](insert: Awaitable[T], duplicate: ErrorDetail) -> T:
-    """Run ``insert``; a code taken by a concurrent writer after the service's own check (the
-    unique index on ``upper(code)``) is the same ``duplicate`` error."""
-    try:
-        return await insert
-    except DuplicateCodeError:
-        raise DomainError(duplicate) from None
-
-
 class AssetService:
-    def __init__(self, repository: AssetRepository) -> None:
+    """The catalogue on one request's Unit of Work: each write commits it once."""
+
+    def __init__(self, repository: AssetRepository, uow: UnitOfWork) -> None:
         self._repository = repository
+        self._uow = uow
 
     # Reads (Ativos screen, spec §11.2)
 
@@ -82,24 +68,14 @@ class AssetService:
     # Writes
 
     async def create_product(
-        self,
-        asset_class_id: int,
-        code: str,
-        name: str,
-        futures: FuturesTerms | None,
-        *,
-        uow: UnitOfWork,
+        self, asset_class_id: int, code: str, name: str, futures: FuturesTerms | None
     ) -> Product:
-        code, code_errors = normalize_product_code(code)
         errors = [
-            *code_errors,
+            *validate_product_code(code),
             *validate_name(name, max_length=PRODUCT_NAME_LENGTH, non_blank=True),
         ]
-        classified = (
-            await self._repository.get_asset_class(asset_class_id)
-            if 1 <= asset_class_id <= SMALLINT_MAX
-            else None
-        )
+        code = normalize_code(code)
+        classified = await self._repository.get_asset_class(asset_class_id)
         if classified is None:
             errors.append(
                 ErrorDetail.validation("Classe de ativo não encontrada.", "asset_class_id")
@@ -112,19 +88,19 @@ class AssetService:
             errors.append(duplicate)
         if errors:
             raise DomainError(*errors)
-        product_id = await _insert(
-            self._repository.add_product(asset_class_id, code, name, futures),
-            duplicate,
-        )
+        product_id = await self._repository.add_product(asset_class_id, code, name, futures)
+        if product_id is None:
+            raise DomainError(duplicate)
         product = await self.get_product(product_id)
-        await uow.commit()
+        await self._uow.commit()
         logger.info("product %s created", product.code)
         return product
 
     async def create_instrument(
-        self, product_id: UUID, code: str, maturity_date: date | None, *, uow: UnitOfWork
+        self, product_id: UUID, code: str, maturity_date: date | None
     ) -> Instrument:
-        code, code_errors = normalize_instrument_code(code)
+        code = normalize_code(code)
+        code_errors = validate_instrument_code(code)
         errors = list(code_errors)
         product = await self._repository.get_product(product_id)
         if product is None:
@@ -136,11 +112,10 @@ class AssetService:
             errors.append(duplicate)
         if errors:
             raise DomainError(*errors)
-        instrument_id = await _insert(
-            self._repository.add_instrument(product_id, code, maturity_date),
-            duplicate,
-        )
+        instrument_id = await self._repository.add_instrument(product_id, code, maturity_date)
+        if instrument_id is None:
+            raise DomainError(duplicate)
         instrument = await self.get_instrument(instrument_id)
-        await uow.commit()
+        await self._uow.commit()
         logger.info("instrument %s created", instrument.code)
         return instrument

@@ -13,7 +13,7 @@ from uuid import UUID
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from di1.modules.asset.dependencies import asset_reader
+from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
 from di1.modules.portfolio.dependencies import (
     portfolio_query_service,
@@ -485,7 +485,7 @@ async def test_a_read_keeps_one_snapshot_while_a_date_is_published(
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
         queries = portfolio_query_service(
             uow,
-            assets=asset_reader(uow.session),
+            assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=FakeDateStatusReader(),
             clock=FixedClock(D),
@@ -499,7 +499,7 @@ async def test_a_read_keeps_one_snapshot_while_a_date_is_published(
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
         after = await portfolio_query_service(
             uow,
-            assets=asset_reader(uow.session),
+            assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=FakeDateStatusReader(),
             clock=FixedClock(D),
@@ -575,7 +575,7 @@ async def test_case_27_the_range_sum_skips_unprocessed_and_failed_days(
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
         points = await portfolio_query_service(
             uow,
-            assets=asset_reader(uow.session),
+            assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=statuses,
             clock=FixedClock(days[3]),

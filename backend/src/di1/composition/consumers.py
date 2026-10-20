@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Sequence
 
-from di1.modules.asset.dependencies import asset_reader
+from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.ledger.dependencies import ledger_reader
 from di1.modules.portfolio.dependencies import portfolio_reader, results_writer
 from di1.modules.prices.dependencies import price_reader
@@ -44,7 +44,7 @@ def _processor(resources: WorkerResources) -> PortfolioRangeProcessor:
         clock=resources.clock,
         ledger_reader=ledger_reader,
         price_reader=price_reader,
-        asset_reader=asset_reader,
+        asset_reader=build_asset_reader,
         portfolio_reader=portfolio_reader,
         writer=results_writer(),
     )

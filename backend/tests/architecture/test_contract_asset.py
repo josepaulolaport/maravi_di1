@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from di1.modules.asset.public import AssetReader, Instrument
+from tests.fakes.asset import CREATED_AT
 
 
 def test_a_descriptor_carries_the_di1_specification() -> None:
@@ -27,6 +28,7 @@ def test_a_descriptor_carries_the_di1_specification() -> None:
         face_value=Decimal("100000"),
         multiplier=Decimal("1"),
         settlement_method="FINANCIAL",
+        created_at=CREATED_AT,
     )
 
     with pytest.raises(dataclasses.FrozenInstanceError):

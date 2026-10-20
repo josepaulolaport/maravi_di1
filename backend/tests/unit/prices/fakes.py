@@ -15,6 +15,7 @@ from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.modules.pricing.public import Price, Quote
 from di1.shared.clock import SAO_PAULO
 from di1.shared.input_kind import InputKind
+from tests.fakes.asset import CREATED_AT
 
 CALCULATED_PU = Decimal("89006.4625467350")
 CALCULATED_RATE = Decimal("0.100000000000")
@@ -33,6 +34,7 @@ def instrument(maturity_date: date | None = date(2028, 1, 3)) -> Instrument:
         face_value=Decimal("100000"),
         multiplier=Decimal("1"),
         settlement_method="CASH",
+        created_at=CREATED_AT,
     )
 
 

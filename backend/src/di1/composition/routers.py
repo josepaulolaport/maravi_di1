@@ -34,7 +34,9 @@ API_PREFIX = "/api"
 def include_routers(app: FastAPI) -> None:
     """Include the module routers; ``main.create_app`` calls this once."""
     api = APIRouter(prefix=API_PREFIX)
-    api.include_router(create_asset_router(get_asset_service, get_unit_of_work, get_price_reader))
+    api.include_router(
+        create_asset_router(get_service=get_asset_service, get_price_reader=get_price_reader)
+    )
     api.include_router(
         create_ledger_router(get_service=get_ledger_service, get_unit_of_work=get_unit_of_work)
     )

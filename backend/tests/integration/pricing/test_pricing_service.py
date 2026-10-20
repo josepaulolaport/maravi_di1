@@ -18,7 +18,7 @@ from alembic.config import Config
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from di1.modules.asset.dependencies import asset_reader
+from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.pricing.dependencies import build_pricing_service
 from di1.modules.pricing.public import InputKind, Price, PricingService, Quote
 from di1.platform.config import Settings
@@ -54,7 +54,7 @@ async def catalogue_and_session(
 
 
 def service_on(session: AsyncSession) -> PricingService:
-    return build_pricing_service(asset_reader(session))
+    return build_pricing_service(build_asset_reader(session))
 
 
 async def test_a_di1_contract_is_priced_from_the_catalogue(

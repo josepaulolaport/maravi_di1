@@ -23,7 +23,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from di1.modules.asset.application.services.asset_service import AssetService
-from di1.modules.asset.application.services.repository import DuplicateCodeError
 from di1.modules.asset.domain.model import AssetClass, FuturesTerms, InstrumentType
 from di1.modules.asset.infrastructure.persistence.repositories import SqlAssetRepository
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
@@ -74,11 +73,11 @@ class TestHierarchy:
 
         assert [(t.code, t.asset_classes) for t in types] == [("OPTION", ())]
 
-    @pytest.mark.parametrize("asset_class_id", [999, 0, -1, 32768, 10**12])
+    @pytest.mark.parametrize("asset_class_id", [999, 0, -1])
     async def test_a_product_needs_an_existing_class(
         self, writer: Writer, asset_class_id: int
     ) -> None:
-        # Out of the SMALLINT range is simply not an existing class, never a database error.
+        # Out of the SMALLINT range is refused by the HTTP schema (test_http.py).
         with pytest.raises(DomainError) as error:
             await writer.product(asset_class_id, "DI1", DI1_NAME, DI1_FUTURES)
 
@@ -174,8 +173,7 @@ class TestDuplicateCodes:
         # The service checks first; the unique index on upper(code) catches the race after it.
         repository = SqlAssetRepository(reader_session)
 
-        with pytest.raises(DuplicateCodeError):
-            await repository.add_instrument(di1.di1_id, "di1f27", date(2027, 1, 4))
+        assert await repository.add_instrument(di1.di1_id, "di1f27", date(2027, 1, 4)) is None
 
     async def test_a_lost_race_is_a_validation_error_and_writes_nothing(
         self, di1: Di1Catalogue, session_factory: async_sessionmaker[AsyncSession]
@@ -185,9 +183,9 @@ class TestDuplicateCodes:
                 return False  # the other writer commits between the check and the insert
 
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
-            service = AssetService(RacingRepository(uow.session))
+            service = AssetService(RacingRepository(uow.session), uow)
             with pytest.raises(DomainError) as error:
-                await service.create_instrument(di1.di1_id, "DI1F27", date(2027, 1, 4), uow=uow)
+                await service.create_instrument(di1.di1_id, "DI1F27", date(2027, 1, 4))
 
         assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "code")]
         assert await _count(session_factory, "instruments") == 4

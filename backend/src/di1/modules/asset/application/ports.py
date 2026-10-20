@@ -1,9 +1,9 @@
-"""What the Asset services need from persistence. The repository maps rows to these read models
-and holds no business rule; the services validate before they write."""
+"""What the Asset service needs from persistence. The repository maps rows to the domain read
+models and holds no business rule; the service validates before it writes."""
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Sequence
 from datetime import date
 from typing import Protocol
 from uuid import UUID
@@ -15,11 +15,6 @@ from di1.modules.asset.domain.model import (
     InstrumentType,
     Product,
 )
-
-
-class DuplicateCodeError(Exception):
-    """A code is already taken, case-insensitively; raised when a concurrent insert won the race
-    after the service's own check."""
 
 
 class AssetRepository(Protocol):
@@ -39,12 +34,15 @@ class AssetRepository(Protocol):
 
     async def add_product(
         self, asset_class_id: int, code: str, name: str, futures: FuturesTerms | None
-    ) -> UUID:
-        """The product and, when given, its ``asset.futures`` row. Raises `DuplicateCodeError`."""
+    ) -> UUID | None:
+        """The product and, when given, its ``asset.futures`` row; ``None`` when the code was
+        taken by a concurrent writer after the service's own check (the unique index)."""
         ...
 
-    async def add_instrument(self, product_id: UUID, code: str, maturity_date: date | None) -> UUID:
-        """Raises `DuplicateCodeError` when the code is taken."""
+    async def add_instrument(
+        self, product_id: UUID, code: str, maturity_date: date | None
+    ) -> UUID | None:
+        """``None`` when the code is taken, as for ``add_product``."""
         ...
 
     async def list_products(self, instrument_type_code: str | None) -> Sequence[Product]:
@@ -58,7 +56,3 @@ class AssetRepository(Protocol):
         ...
 
     async def get_instrument(self, instrument_id: UUID) -> Instrument | None: ...
-
-    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
-        """The instruments that exist among ``instrument_ids``."""
-        ...

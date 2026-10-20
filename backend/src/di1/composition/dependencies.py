@@ -16,7 +16,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from di1.modules.asset.application.services.asset_service import AssetService
-from di1.modules.asset.dependencies import asset_reader, asset_service
+from di1.modules.asset.dependencies import build_asset_reader, build_asset_service
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.dependencies import create_ledger_service, ledger_reader
 from di1.modules.portfolio.dependencies import portfolio_query_service
@@ -54,23 +54,23 @@ AppClock = Annotated[Clock, Depends(get_clock)]
 
 
 def get_asset_service(uow: RequestUnitOfWork) -> AssetService:
-    return asset_service(uow)
+    return build_asset_service(uow)
 
 
 def get_ledger_service(uow: RequestUnitOfWork, clock: AppClock) -> LedgerService:
     """Ledger over Asset's reader and Pricing, both on the request's session."""
-    assets = asset_reader(uow.session)
+    assets = build_asset_reader(uow.session)
     return create_ledger_service(clock=clock, assets=assets, pricing=build_pricing_service(assets))
 
 
-def get_price_reader(uow: UnitOfWork) -> PriceReader:
+def get_price_reader(uow: RequestUnitOfWork) -> PriceReader:
     """Prices on ``uow``'s session, including ``latest`` for Asset HTTP ``last_reference``
     (OQ-48)."""
     return price_reader(uow.session)
 
 
 def get_price_service(uow: RequestUnitOfWork, clock: AppClock) -> PriceService:
-    assets = asset_reader(uow.session)
+    assets = build_asset_reader(uow.session)
     return price_service(uow, assets=assets, pricing=build_pricing_service(assets), clock=clock)
 
 
@@ -82,7 +82,7 @@ async def get_portfolio_query_service(
     Building the readers runs no statement."""
     yield portfolio_query_service(
         uow,
-        assets=asset_reader(uow.session),
+        assets=build_asset_reader(uow.session),
         prices=price_reader(uow.session),
         date_statuses=make_date_status_reader(),
         clock=clock,
@@ -93,5 +93,5 @@ def get_processing_service(uow: RequestUnitOfWork, clock: AppClock) -> Processin
     """Processing over Asset's and Ledger's readers on the request's session; the service holds
     no state, so building it per request costs only the objects."""
     return make_processing_service(
-        assets=asset_reader(uow.session), ledger=ledger_reader(uow.session), clock=clock
+        assets=build_asset_reader(uow.session), ledger=ledger_reader(uow.session), clock=clock
     )

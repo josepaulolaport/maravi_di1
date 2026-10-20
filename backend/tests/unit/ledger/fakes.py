@@ -25,6 +25,7 @@ from di1.shared.clock import SAO_PAULO
 from di1.shared.decimals import financial_context, quantize_pu, quantize_rate
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
+from tests.fakes.asset import CREATED_AT
 
 PRODUCT_ID = UUID("6f1c2a10-0000-4000-8000-000000000001")
 
@@ -41,6 +42,7 @@ def di1_future(code: str, instrument_id: UUID, maturity: date) -> Instrument:
         face_value=Decimal("100000"),
         multiplier=Decimal("1"),
         settlement_method="CASH",
+        created_at=CREATED_AT,
     )
 
 

@@ -24,6 +24,7 @@ from di1.modules.prices.infrastructure.persistence.repositories import (
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
+from tests.fakes.asset import CREATED_AT
 from tests.fakes.clock import FixedClock
 from tests.integration.databases import fresh_database_url
 from tests.unit.prices.fakes import FakeAssets, FakePricing
@@ -87,6 +88,7 @@ def assets() -> FakeAssets:
                 face_value=Decimal("100000"),
                 multiplier=Decimal("1"),
                 settlement_method="CASH",
+                created_at=CREATED_AT,
             )
         )
     return fake

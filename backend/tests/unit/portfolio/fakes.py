@@ -25,6 +25,7 @@ from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.modules.processing.public import DateStatus
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.input_kind import InputKind
+from tests.fakes.asset import CREATED_AT
 
 ZERO = Decimal("0")
 
@@ -167,6 +168,7 @@ class FakeAssetReader:
                 face_value=Decimal("100000"),
                 multiplier=Decimal("1"),
                 settlement_method="CASH",
+                created_at=CREATED_AT,
             )
             for asset_id, code, maturity in instruments
         }
