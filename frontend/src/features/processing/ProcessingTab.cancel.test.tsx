@@ -2,20 +2,18 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
 import { job, processingRequests } from '@/test/msw/fixtures';
-import { url } from '@/test/msw/handlers';
+import { url, fieldError, problem } from '@/test/helpers';
 import { server } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
 import {
   PAGE,
-  problemResponse,
   answerCancel,
   serveWith,
   RUNNING,
-  jobRow,
   findJobRow,
   openMenu,
-} from './processingTab.support';
+} from '@/test/screens/processing';
 
 describe('Processamentos: cancel (§10.2)', () => {
   it('§10.2 cancels a queued job at once, after confirmation', async () => {
@@ -28,7 +26,7 @@ describe('Processamentos: cancel (§10.2)', () => {
         finished_at: '2026-10-18T10:05:00-03:00',
       }),
     );
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
     await user.click(menu.getByRole('menuitem', { name: 'Cancelar processamento' }));
@@ -57,7 +55,7 @@ describe('Processamentos: cancel (§10.2)', () => {
   it('§10.2 goes back without cancelling', async () => {
     const jobs = serveWith(job());
     const cancels = answerCancel(jobs, job({ status: 'CANCELLED' }));
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
     await user.click(menu.getByRole('menuitem', { name: 'Cancelar processamento' }));
@@ -68,7 +66,8 @@ describe('Processamentos: cancel (§10.2)', () => {
       expect(screen.queryByRole('dialog', { name: 'Cancelar processamento?' })).toBeNull();
     });
     expect(cancels.count).toBe(0);
-    expect(jobRow('17/10/2026 a 18/10/2026', 'Na fila')).toBeTruthy();
+    // Waited for: the history is hidden from the accessibility tree until the dialog is gone.
+    expect(await findJobRow('17/10/2026 a 18/10/2026', 'Na fila')).toBeTruthy();
   });
 
   it('§10.2 OQ-23 OQ-46 cancels a running job cooperatively: Cancelando, then Cancelado', async () => {
@@ -78,7 +77,7 @@ describe('Processamentos: cancel (§10.2)', () => {
     const jobs = serveWith(running);
     // The API keeps the run RUNNING with cancel_requested_at set (OQ-46).
     answerCancel(jobs, { ...running, cancel_requested_at: '2026-10-18T10:05:00-03:00' });
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));
     await user.click(menu.getByRole('menuitem', { name: 'Cancelar processamento' }));
@@ -103,7 +102,7 @@ describe('Processamentos: cancel (§10.2)', () => {
       }),
       ...processingRequests,
     ];
-    await findJobRow('17/10/2026 a 18/10/2026', 'Cancelado', 3_000);
+    await findJobRow('17/10/2026 a 18/10/2026', 'Cancelado');
   }, 10_000);
 
   it('OQ-46 shows the API message when a cancel was already asked', async () => {
@@ -111,14 +110,15 @@ describe('Processamentos: cancel (§10.2)', () => {
     // Cancelled elsewhere in the meantime: the API refuses a second cancel.
     server.use(
       http.post(url('/processing/requests/:id/cancel'), () =>
-        problemResponse(
-          409,
-          'JOB_NOT_CANCELLABLE',
-          'O cancelamento deste processamento já foi solicitado.',
-        ),
+        problem(409, [
+          fieldError(
+            'JOB_NOT_CANCELLABLE',
+            'O cancelamento deste processamento já foi solicitado.',
+          ),
+        ]),
       ),
     );
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));
     await user.click(menu.getByRole('menuitem', { name: 'Cancelar processamento' }));
@@ -151,7 +151,7 @@ describe('Processamentos: cancel (§10.2)', () => {
         ),
       ),
     );
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
     await user.click(menu.getByRole('menuitem', { name: 'Cancelar processamento' }));

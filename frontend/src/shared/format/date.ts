@@ -12,6 +12,12 @@ export function formatDate(value: IsoDate | null | undefined): string {
   return `${day ?? ''}/${month ?? ''}/${year ?? ''}`;
 }
 
+/** 2026-10-15 → 15/10, for chart axes and short labels. */
+export function formatDayMonth(value: IsoDate): string {
+  const [, month, day] = value.split('-');
+  return `${day ?? ''}/${month ?? ''}`;
+}
+
 const dateTimeParts = new Intl.DateTimeFormat('pt-BR', {
   timeZone: 'America/Sao_Paulo',
   day: '2-digit',

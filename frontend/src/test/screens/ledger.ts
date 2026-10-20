@@ -3,9 +3,9 @@ import { http, HttpResponse } from 'msw';
 
 import type { LedgerEntry, PortfolioSummary } from '@/api/contract';
 import { ledgerEntries, summaries } from '@/test/msw/fixtures';
-import { url } from '@/test/msw/handlers';
+import { url, type User } from '@/test/helpers';
 import { server } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
 // Expected figures are the fixtures' values (src/test/msw/fixtures.ts), formatted in pt-BR. Intl puts a no-break space after "R$"; Testing Library's default normalizer turns
 // it into a plain space, so expectations use a plain space.
@@ -13,7 +13,7 @@ import { renderApp } from '@/test/render';
 export const FULL_RANGE = '/lancamentos?inicio=2026-10-14&fim=2026-10-16';
 
 export async function openLedger(route = FULL_RANGE) {
-  const result = renderApp(route);
+  const result = renderRoute(route);
   await screen.findByText(/lançamentos? encontrados?$/);
   return result;
 }
@@ -31,12 +31,6 @@ export function rowNamed(name: string) {
   const row = checkbox.closest('tr');
   if (!row) throw new Error(`no row for ${name}`);
   return within(row);
-}
-
-export function cellTexts(row: HTMLElement) {
-  return within(row)
-    .getAllByRole('cell')
-    .map((cell) => cell.textContent.replaceAll('\u00a0', ' '));
 }
 
 /**
@@ -119,10 +113,7 @@ const ENTRY_GROUP = {
 } as const;
 
 /** "Novo lançamento" → the modal, set to the given kind of entry (Operação or Caixa first). */
-export async function openNew(
-  user: ReturnType<typeof renderApp>['user'],
-  item: keyof typeof ENTRY_GROUP,
-) {
+export async function openNew(user: User, item: keyof typeof ENTRY_GROUP) {
   await user.click(screen.getByRole('button', { name: 'Novo lançamento' }));
   const modal = within(await screen.findByRole('dialog', { name: 'Novo lançamento' }));
   await user.click(modal.getByRole('radio', { name: ENTRY_GROUP[item] }));
@@ -130,18 +121,14 @@ export async function openNew(
   return modal;
 }
 
-export async function typeDate(
-  user: ReturnType<typeof renderApp>['user'],
-  input: HTMLElement,
-  text: string,
-) {
+export async function typeDate(user: User, input: HTMLElement, text: string) {
   await user.clear(input);
   await user.type(input, text);
   await user.tab();
 }
 
 export async function chooseContract(
-  user: ReturnType<typeof renderApp>['user'],
+  user: User,
   modal: BoundFunctions<typeof queries>,
   code: string,
 ) {

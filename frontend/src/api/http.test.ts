@@ -47,7 +47,7 @@ describe('http client', () => {
     expect(received).toEqual({ ids: ['a'] });
   });
 
-  it('§12 OQ-15 turns problem+json into an ApiError with field and page messages', async () => {
+  it('§12 OQ-15 turns problem+json into an ApiError carrying the problem', async () => {
     server.use(
       mock.post(url, () =>
         HttpResponse.json(
@@ -74,11 +74,11 @@ describe('http client', () => {
 
     expect(error.status).toBe(422);
     expect(error.problem.errors?.[0]?.code).toBe('FUTURE_DATE');
-    expect(error.fieldErrors()).toEqual({ trade_date: 'A data não pode ser posterior a hoje.' });
-    expect(error.pageErrors()).toEqual(['Revise os dados.']);
+    expect(error.problem.errors?.map((e) => e.field)).toEqual(['trade_date', null]);
+    expect(error.message).toBe('A data não pode ser posterior a hoje.');
   });
 
-  it('uses the problem detail as the page message when there is no errors list', async () => {
+  it('uses the problem detail as the message when there is no errors list', async () => {
     server.use(
       mock.get(url, () =>
         HttpResponse.json(
@@ -90,7 +90,7 @@ describe('http client', () => {
 
     const error = await captureError(http.get(path));
 
-    expect(error.pageErrors()).toEqual(['Já encerrado.']);
+    expect(error.message).toBe('Já encerrado.');
   });
 
   it('gives a pt-BR problem when the error body is not problem+json', async () => {

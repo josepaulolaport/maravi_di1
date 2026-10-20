@@ -76,6 +76,18 @@ The dev server proxies `/api` and `/health` to the API; when the API runs on ano
 the `npm run dev` command.
 MSW is used only in the frontend's component tests, as static fixtures.
 
+The frontend's API types are generated from the backend's OpenAPI (user, 2026-10-19: "yes").
+After a change to an HTTP schema, regenerate and commit both files in
+`frontend/src/api/generated/`; no server is needed:
+
+```bash
+cd frontend && npm run gen:api   # backend/scripts/dump_openapi.py, then openapi-typescript
+```
+
+`backend/tests/architecture/test_openapi_snapshot.py` fails when `openapi.json` no longer matches
+the app, and `frontend/src/api/generated/schema.test.ts` when `schema.ts` no longer matches
+`openapi.json`.
+
 ### Processing: why RabbitMQ
 
 Processing runs only when the user requests it, in one worker process (OQ-45, OQ-46).
@@ -212,7 +224,7 @@ rather than refactor before delivery (OQ-47); none changes a business result.
   `lease_expires_at`, `attempt_count`, `dispatched_at` and `calculation_state` stay in the schema,
   unused, with no migration to drop them (OQ-45, OQ-46, OQ-47; [docs/schema.md](docs/schema.md)).
   No backend logic sets them or branches on them; the API still exposes `dispatched_at` as null,
-  and the frontend keeps the two status labels as a safe default.
+  and the frontend keeps the two status labels only because the generated type lists them.
 - **Inbox retention is unbatched (M9):** the retention `DELETE` of old `platform.inbox_messages`
   rows runs as one statement, and `processed_at` has no index; fine at doorbell volume.
   Goes with the inbox itself under OQ-50 item 2; `inbox_messages`, `portfolio_metrics.aum` and

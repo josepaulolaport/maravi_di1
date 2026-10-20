@@ -9,15 +9,17 @@ import type { Instrument, IsoDate, Product } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { textParam, useQueryParams } from '@/shared/url/useQueryParams';
 
 import { ContractsTable } from './components/ContractsTable';
-import { countLabel, todayInSaoPaulo } from '@/shared/format';
+import { countLabel } from '@/shared/format';
+import { useToday } from '@/shared/hooks/useToday';
 import { NewContractModal } from './components/NewContractModal';
-import { lastDay } from './components/calendarData';
+import { lastDay } from './model/calendarData';
 import { PageHeader } from './components/PageHeader';
 import { PriceModal } from './components/PriceModal';
 import { RemovePriceByDateModal } from './components/RemovePriceByDateModal';
-import { useInstruments, useProduct, useSearchParam } from './hooks/useAssets';
+import { useInstruments, useProduct } from './hooks/useAssets';
 
 /**
  * A product (spec §11.2, design 2:165): its contracts, each with its latest reference
@@ -39,20 +41,23 @@ export function ProductPage() {
 }
 
 function ProductBody({ product }: { product: Product }) {
-  const [search, setSearch] = useSearchParam();
+  const today = useToday();
+  const { values, set } = useQueryParams({ busca: textParam });
+  const search = values.busca;
+  const setSearch = (busca: string) => {
+    set({ busca });
+  };
   const [modalOpen, setModalOpen] = useState(false);
   const instruments = useInstruments(product.id, search);
   // Every contract of the product, whatever the search, for the price form's select.
   const allInstruments = useInstruments(product.id, '');
-  const [price, setPrice] = useState<{
-    instrument: Instrument | null;
-    date: IsoDate | null;
-    session: number;
-  }>({ instrument: null, date: null, session: 0 });
+  const [price, setPrice] = useState<{ instrument: Instrument | null; date: IsoDate | null }>({
+    instrument: null,
+    date: null,
+  });
   // The form opens on today, or on a matured contract's last day (OQ-1).
   const openPrice = (instrument: Instrument | null) => {
-    const date = lastDay(instrument, todayInSaoPaulo());
-    setPrice((current) => ({ instrument, date, session: current.session + 1 }));
+    setPrice({ instrument, date: lastDay(instrument?.maturity_date, today) });
   };
   const [removing, setRemoving] = useState<Instrument | null>(null);
 
@@ -125,7 +130,6 @@ function ProductBody({ product }: { product: Product }) {
         contracts={allInstruments.data?.items ?? (price.instrument ? [price.instrument] : [])}
         contractsStatus={allInstruments.status}
         date={price.date}
-        session={price.session}
         onClose={() => {
           setPrice((current) => ({ ...current, date: null }));
         }}

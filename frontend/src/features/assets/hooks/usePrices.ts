@@ -1,28 +1,26 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import type { IsoDate, SetReferencePriceRequest } from '@/api/contract';
 import { pricesApi } from '@/api/endpoints';
-import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
+import { queryKeys } from '@/api/queryKeys';
 
-// Reference prices (spec §5) read and written from the contract page. Keys live under the
-// prices API area, so any price write elsewhere (Pendências "Definir preço") refreshes them.
-const priceKeys = {
-  all: queryRoots.prices,
-  days: (assetId: string, start: IsoDate, end: IsoDate) =>
-    [...priceKeys.all, 'reference-prices', assetId, start, end] as const,
-};
+// Reference prices (spec §5), read and written from Ativos. A write refreshes every view: the
+// prices behind the positions, the pendências and the contracts' latest reference change too.
 
+/** The prices of a contract's days in [start, end]; nothing is read while `days` is null. */
 export function useReferencePriceDays(
-  assetId: string,
-  start: IsoDate,
-  end: IsoDate,
-  enabled = true,
+  days: { assetId: string; start: IsoDate; end: IsoDate } | null,
 ) {
   return useQuery({
-    enabled,
-    queryKey: priceKeys.days(assetId, start, end),
-    queryFn: () =>
-      pricesApi.listReferencePrices({ asset_id: assetId, start_date: start, end_date: end }),
+    queryKey: queryKeys.prices.days(days),
+    queryFn: days
+      ? () =>
+          pricesApi.listReferencePrices({
+            asset_id: days.assetId,
+            start_date: days.start,
+            end_date: days.end,
+          })
+      : skipToken,
   });
 }
 
@@ -35,7 +33,7 @@ export function useSetReferencePrice() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: SetReferencePriceRequest) => pricesApi.setReferencePrice(body),
-    onSuccess: () => invalidateAfterWrite(queryClient),
+    onSuccess: () => queryClient.invalidateQueries(),
   });
 }
 
@@ -50,6 +48,6 @@ export function useRemoveReferencePrices() {
     mutationFn: async (priceIds: string[]) => {
       for (const priceId of priceIds) await pricesApi.removeReferencePrice(priceId);
     },
-    onSettled: () => invalidateAfterWrite(queryClient),
+    onSettled: () => queryClient.invalidateQueries(),
   });
 }

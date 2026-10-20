@@ -3,9 +3,9 @@ import { act, waitFor } from '@testing-library/react';
 import type { ProcessingRequest } from '@/api/contract';
 import { job, processingRequests } from '@/test/msw/fixtures';
 import { countReads, serveJobs } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
-import { PAGE, serveWith, findJobRow } from './processingTab.support';
+import { PAGE, serveWith, findJobRow } from '@/test/screens/processing';
 
 describe('Processamentos: polling (§11.1, §12)', () => {
   beforeEach(() => {
@@ -17,8 +17,10 @@ describe('Processamentos: polling (§11.1, §12)', () => {
 
   it('§12 does not poll when no job is active', async () => {
     const jobs = serveJobs([...processingRequests]);
-    renderApp(PAGE);
+    renderRoute(PAGE);
     await findJobRow('01/10/2026 a 05/10/2026', 'Falhou');
+    // Opening the page reads the history once more (refetch on mount); only later reads poll.
+    await act(() => vi.advanceTimersByTimeAsync(500));
     const before = jobs.polls;
 
     await act(() => vi.advanceTimersByTimeAsync(10_000));
@@ -29,7 +31,7 @@ describe('Processamentos: polling (§11.1, §12)', () => {
   it('§12 polls every 2 s while a job is active, and stops once it has finished', async () => {
     const jobs = serveWith(job());
     const issueReads = countReads('/processing/issues');
-    renderApp(PAGE);
+    renderRoute(PAGE);
     await findJobRow('17/10/2026 a 18/10/2026', 'Na fila');
     const before = jobs.polls;
 
@@ -80,7 +82,7 @@ describe('Processamentos: a job that finished between two reads (§10.4)', () =>
   it('§10.4 refreshes the results when a new job is first seen already finished', async () => {
     const jobs = serveWith(job());
     const issueReads = countReads('/processing/issues');
-    renderApp(PAGE);
+    renderRoute(PAGE);
     await findJobRow('17/10/2026 a 18/10/2026', 'Na fila');
     await waitFor(() => {
       expect(issueReads.count).toBeGreaterThan(0);
@@ -119,7 +121,7 @@ describe('Processamentos: UTC timestamps (OQ-46, #93)', () => {
   it('§10.4 compares creation times as instants: an older job in UTC is not news', async () => {
     const jobs = serveWith(job({ created_at: '2026-10-18T22:00:00-03:00' })); // 19/10 01:00 UTC
     const issueReads = countReads('/processing/issues');
-    renderApp(PAGE);
+    renderRoute(PAGE);
     await findJobRow('17/10/2026 a 18/10/2026', 'Na fila');
     await waitFor(() => {
       expect(issueReads.count).toBeGreaterThan(0);

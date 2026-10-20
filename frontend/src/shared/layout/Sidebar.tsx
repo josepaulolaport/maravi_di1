@@ -1,4 +1,4 @@
-import { ActionIcon, AppShell, Box, Group, Stack, Tooltip } from '@mantine/core';
+import { ActionIcon, AppShell, Group, Stack, Tooltip } from '@mantine/core';
 import { IconLayoutSidebarLeftCollapse, type Icon } from '@tabler/icons-react';
 import { NavLink } from 'react-router';
 
@@ -21,21 +21,12 @@ export function Sidebar({ navItems, collapsed, onToggle }: SidebarProps) {
 
   return (
     <AppShell.Navbar className={classes.navbar} aria-label="Navegação principal">
+      {/* No brand (user, 2026-10-19): the header holds only the collapse button. */}
       <Group
         className={`${classes.header} ${collapsed ? classes.headerCollapsed : ''}`}
-        justify={collapsed ? 'center' : 'space-between'}
+        justify={collapsed ? 'center' : 'flex-end'}
         wrap="nowrap"
       >
-        {collapsed ? (
-          <Box className={classes.brand} role="img" aria-label="Maravi Backoffice">
-            M
-          </Box>
-        ) : (
-          <Box>
-            <div className={classes.brand}>MARAVI</div>
-            <div className={classes.brandSub}>BACKOFFICE</div>
-          </Box>
-        )}
         <ActionIcon
           variant="subtle"
           className={classes.toggle}

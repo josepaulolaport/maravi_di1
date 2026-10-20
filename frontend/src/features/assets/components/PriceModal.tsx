@@ -1,17 +1,27 @@
-import { Alert, Button, Group, Modal, Select, Stack, Text, TextInput } from '@mantine/core';
+import { Alert, Select, Stack, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconCalendar, IconInfoCircle } from '@tabler/icons-react';
-import { useForm } from '@mantine/form';
+import { IconInfoCircle } from '@tabler/icons-react';
+import type { UseMutationResult } from '@tanstack/react-query';
 
+import { typedPrice } from '@/shared/format';
+import { useApiForm } from '@/shared/form/useApiForm';
+import { useLastValue } from '@/shared/hooks/useLastValue';
+import { useToday } from '@/shared/hooks/useToday';
+import { ActionModal } from '@/shared/ui/ActionModal';
+import { FormActions } from '@/shared/ui/FormActions';
 import { MessageAlert } from '@/shared/ui/MessageAlert';
-import type { InputKind, Instrument, IsoDate } from '@/api/contract';
-import { todayInSaoPaulo } from '@/shared/format';
-import { PriceInput, typedPrice } from '@/shared/ui/PriceInput';
+import type {
+  InputKind,
+  Instrument,
+  IsoDate,
+  ReferencePrice,
+  SetReferencePriceRequest,
+} from '@/api/contract';
+import { PriceInput } from '@/shared/ui/PriceInput';
 
 import { useSetReferencePrice } from '../hooks/usePrices';
-import { lastDay } from './calendarData';
-import { splitProblem } from '@/shared/ui/problemMessages';
-import { PastDateInput } from '@/shared/ui/PastDateInput';
+import { lastDay } from '../model/calendarData';
+import { DateField } from '@/shared/ui/DateField';
 
 interface PriceModalProps {
   /** The contract the price is for; `null` with `contracts` lets the user pick it. */
@@ -25,8 +35,6 @@ interface PriceModalProps {
   contractsStatus?: 'pending' | 'error' | 'success';
   /** The date the modal opens on; `null` closes it. */
   date: IsoDate | null;
-  /** Bumped on every opening, so each one starts with a clean form. */
-  session: number;
   /** `saved` is the date of the price just recorded, when the modal closes after a save. */
   onClose: (saved?: IsoDate) => void;
 }
@@ -41,42 +49,32 @@ export function PriceModal({
   contracts,
   contractsStatus = 'success',
   date,
-  session,
   onClose,
 }: PriceModalProps) {
   const save = useSetReferencePrice();
-  // While a save runs the modal stays open, so its confirmation is never lost.
+  const shownDate = useLastValue(date);
   const close = (saved?: IsoDate) => {
-    if (save.isPending) return;
     save.reset();
     onClose(saved);
   };
   return (
-    <Modal
+    <ActionModal
       opened={date !== null}
-      onClose={() => {
-        close();
-      }}
+      onClose={close}
       title="Registrar preço de referência"
-      centered
-      size="lg"
-      closeOnClickOutside={!save.isPending}
-      closeOnEscape={!save.isPending}
-      withCloseButton={!save.isPending}
-      closeButtonProps={{ 'aria-label': 'Fechar' }}
+      pending={save.isPending}
     >
-      {date !== null && (
+      {shownDate !== null && (
         <PriceForm
-          key={session}
           instrument={instrument}
           contracts={contracts}
           contractsStatus={contractsStatus}
-          initialDate={date}
+          initialDate={shownDate}
           save={save}
           onDone={close}
         />
       )}
-    </Modal>
+    </ActionModal>
   );
 }
 
@@ -85,11 +83,11 @@ interface PriceFormProps {
   contracts: Instrument[] | undefined;
   contractsStatus: 'pending' | 'error' | 'success';
   initialDate: IsoDate;
-  save: ReturnType<typeof useSetReferencePrice>;
+  save: UseMutationResult<ReferencePrice, Error, SetReferencePriceRequest>;
   onDone: (saved?: IsoDate) => void;
 }
 
-interface PriceValues {
+interface PriceValues extends Record<string, unknown> {
   assetId: string | null;
   date: IsoDate | null;
   kind: InputKind;
@@ -97,10 +95,15 @@ interface PriceValues {
 }
 
 // API field → form field, for the problem+json errors (OQ-15); the value input owns pu, rate
-// and input_kind, so every one of their messages is shown on it.
-const FIELD_MAP = { reference_date: 'date', pu: 'price', rate: 'price', input_kind: 'price' };
-// With a contract select, its errors go on it.
-const FIELD_MAP_WITH_CONTRACT = { ...FIELD_MAP, asset_id: 'assetId' };
+// and input_kind, so every one of their messages is shown on it. The contract select, when
+// there is one, shows asset_id's; otherwise they go above the form.
+const FIELD_MAP = {
+  reference_date: 'date',
+  pu: 'price',
+  rate: 'price',
+  input_kind: 'price',
+} as const;
+const FIELD_MAP_WITH_CONTRACT = { ...FIELD_MAP, asset_id: 'assetId' } as const;
 
 function PriceForm({
   instrument,
@@ -110,47 +113,41 @@ function PriceForm({
   save,
   onDone,
 }: PriceFormProps) {
-  const fieldMap = contracts ? FIELD_MAP_WITH_CONTRACT : FIELD_MAP;
-  const form = useForm<PriceValues>({
-    initialValues: { assetId: instrument?.id ?? null, date: initialDate, kind: 'PU', price: '' },
-    validate: {
-      assetId: (value) => (value ? null : 'Selecione o contrato.'),
-      date: (value) => (value ? null : 'Informe a data.'),
-      price: (value, values) => {
-        if (!value.trim()) return values.kind === 'PU' ? 'Informe o PU.' : 'Informe a taxa.';
-        return typedPrice(values.kind, value) === null ? 'Informe um número válido.' : null;
+  const { form, pageErrors, clearPageErrors, onSubmit } = useApiForm<PriceValues>(
+    {
+      initialValues: { assetId: instrument?.id ?? null, date: initialDate, kind: 'PU', price: '' },
+      validate: {
+        assetId: (value) => (value ? null : 'Selecione o contrato.'),
+        date: (value) => (value ? null : 'Informe a data.'),
+        price: (value, values) => {
+          if (!value.trim()) return values.kind === 'PU' ? 'Informe o PU.' : 'Informe a taxa.';
+          return typedPrice(values.kind, value) === null ? 'Informe um número válido.' : null;
+        },
       },
     },
-  });
+    contracts ? FIELD_MAP_WITH_CONTRACT : FIELD_MAP,
+  );
 
   const chosen = contracts?.find((c) => c.id === form.values.assetId) ?? instrument;
   // Nothing after today (OQ-14), nor after the contract's maturity (OQ-1).
-  const today = todayInSaoPaulo();
-  const maxDate = lastDay(chosen, today);
+  const today = useToday();
+  const maxDate = lastDay(chosen?.maturity_date, today);
 
-  const submit = form.onSubmit((values) => {
+  const submit = onSubmit((values) => {
     const value = typedPrice(values.kind, values.price);
-    if (!values.assetId || !values.date || value === null) return;
+    if (!values.assetId || !values.date || value === null) return undefined;
     const base = { asset_id: values.assetId, reference_date: values.date };
-    save.mutate(
-      values.kind === 'PU'
-        ? { ...base, input_kind: 'PU', pu: value }
-        : { ...base, input_kind: 'RATE', rate: value },
-      {
-        onSuccess: (price) => {
-          notifications.show({ color: 'teal', message: 'Preço de referência registrado.' });
-          save.reset();
-          onDone(price.reference_date);
-        },
-        // On the form, so editing a field clears its message (Mantine clears on change).
-        onError: (error) => {
-          form.setErrors(splitProblem(error, fieldMap).fields);
-        },
-      },
-    );
+    return save
+      .mutateAsync(
+        values.kind === 'PU'
+          ? { ...base, input_kind: 'PU', pu: value }
+          : { ...base, input_kind: 'RATE', rate: value },
+      )
+      .then((price) => {
+        notifications.show({ color: 'teal', message: 'Preço de referência registrado.' });
+        onDone(price.reference_date);
+      });
   });
-
-  const { page } = splitProblem(save.error, fieldMap);
 
   return (
     <form onSubmit={submit} noValidate>
@@ -173,10 +170,11 @@ function PriceForm({
             onChange={(assetId: string | null) => {
               // Another contract: the previous one's errors no longer apply.
               form.clearErrors();
+              clearPageErrors();
               save.reset();
               form.setFieldValue('assetId', assetId);
               const next = contracts.find((c) => c.id === assetId) ?? null;
-              const limit = lastDay(next, today);
+              const limit = lastDay(next?.maturity_date, today);
               if (form.values.date !== null && form.values.date > limit) {
                 form.setFieldValue('date', null);
                 form.setFieldError('date', 'O contrato já venceu nesta data.');
@@ -186,14 +184,10 @@ function PriceForm({
         ) : (
           <TextInput label="Contrato" value={instrument?.code ?? ''} readOnly />
         )}
-        <PastDateInput
-          today={today}
+        <DateField
           label="Data de referência"
-          placeholder="DD/MM/AAAA"
-          valueFormat="DD/MM/YYYY"
           maxDate={maxDate}
           limitMessage="O contrato já venceu nesta data."
-          leftSection={<IconCalendar size={16} stroke={1.5} />}
           {...form.getInputProps('date')}
         />
         <PriceInput
@@ -210,21 +204,14 @@ function PriceForm({
             O registro não inicia um recálculo. Solicite um processamento para atualizar a carteira.
           </Text>
         </Alert>
-        <MessageAlert messages={page} />
-        <Group justify="flex-end" gap="sm">
-          <Button
-            variant="default"
-            onClick={() => {
-              onDone();
-            }}
-            disabled={save.isPending}
-          >
-            Cancelar
-          </Button>
-          <Button type="submit" loading={save.isPending}>
-            Salvar
-          </Button>
-        </Group>
+        <MessageAlert messages={pageErrors} />
+        <FormActions
+          submitLabel="Salvar"
+          onCancel={() => {
+            onDone();
+          }}
+          pending={save.isPending}
+        />
       </Stack>
     </form>
   );

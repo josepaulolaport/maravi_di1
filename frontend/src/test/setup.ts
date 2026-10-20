@@ -5,9 +5,9 @@ import { cleanup, configure } from '@testing-library/react';
 import { TEST_TODAY } from './msw/fixtures';
 import { server } from './msw/server';
 
-// The first test of a file also loads its lazy route, which can pass the default 1 s under a
-// busy machine; 8 s (below the 20 s test timeout in vite.config.ts) keeps `findBy*`/`waitFor`
-// honest without masking real hangs.
+// A busy machine can pass the default 1 s for a `findBy*`/`waitFor` (renderApp also loads a lazy
+// route); 8 s (below the 20 s test timeout in vite.config.ts) keeps them honest without masking
+// real hangs.
 configure({ asyncUtilTimeout: 8_000 });
 
 // jsdom lacks these browser APIs; Mantine needs them (Mantine testing guide).

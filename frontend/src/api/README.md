@@ -1,8 +1,9 @@
 # API layer
 
-The shapes in `contract/` are the adopted HTTP contract (OQ-26 item 8), frozen at 57b4df0 (Lead Backend, 2026-10-19); `docs/interfaces.md` records them. The proposals below are kept as the history of each decision.
+The HTTP contract is the backend's OpenAPI schema (user, 2026-10-19: "yes"). The proposals below are kept as the history of each decision; `docs/interfaces.md` records them.
 
-- `contract/`: response and request types. snake_case names follow `docs/schema.sql`; decimals are strings; `null` means unavailable.
+- `generated/`: `openapi.json` (dumped from the app by `backend/scripts/dump_openapi.py`, `/api` paths only) and `schema.ts` (openapi-typescript). Both are committed and made by `npm run gen:api`; never edit them. A backend test and `generated/schema.test.ts` fail when either is out of date.
+- `contract/`: the types the app imports, named as the app uses them. Each is a generated schema; where the backend types a status as `string`, `Narrow` gives its values, and the compiler checks the narrowed type still fits the generated one. Requests whose PU-or-rate choice the schema flattens are unions checked with `Fits`. Only the problem+json errors (not in the OpenAPI schema) and the string aliases (`Decimal`, `IsoDate`…) are written by hand. snake_case names follow `docs/schema.sql`; decimals are strings; `null` means unavailable.
 - `http.ts`: the only HTTP client. JSON in and out; RFC 9457 problem+json errors become `ApiError` (OQ-15).
 - `endpoints.ts`: one typed function per endpoint. Feature hooks call these.
 
