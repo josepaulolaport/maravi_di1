@@ -11,8 +11,7 @@ import psycopg
 import pytest
 from alembic import command
 
-from tests.integration.test_initial_migration import _alembic
-from tests.integration.test_migrations_match_schema import database_url, execute, fetch
+from tests.integration.alembic_support import alembic_config, database_url, execute, fetch
 
 __all__ = ["database_url"]
 
@@ -27,7 +26,7 @@ COLUMNS = (
 
 
 def test_a_run_records_its_first_failure(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0006")
+    command.upgrade(alembic_config(database_url), "0006")
     execute(
         database_url,
         A_RUN + " (gen_random_uuid(), 'ALL', '2026-10-01', '2026-10-10', 'COMPLETED_WITH_ISSUES',"
@@ -52,15 +51,15 @@ def test_a_run_records_its_first_failure(database_url: str) -> None:
     ids=["chain-without-date", "unknown-chain", "date-outside-run"],
 )
 def test_an_inconsistent_failure_is_refused(database_url: str, values: str) -> None:
-    command.upgrade(_alembic(database_url), "0006")
+    command.upgrade(alembic_config(database_url), "0006")
 
     with pytest.raises(psycopg.errors.CheckViolation):
         execute(database_url, A_RUN + " " + values)
 
 
 def test_downgrade_drops_the_columns(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0006")
+    command.upgrade(alembic_config(database_url), "0006")
 
-    command.downgrade(_alembic(database_url), "0005")
+    command.downgrade(alembic_config(database_url), "0005")
 
     assert fetch(database_url, COLUMNS) == []

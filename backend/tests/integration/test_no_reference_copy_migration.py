@@ -11,8 +11,7 @@ from decimal import Decimal
 
 from alembic import command
 
-from tests.integration.test_initial_migration import _alembic
-from tests.integration.test_migrations_match_schema import database_url, execute, fetch
+from tests.integration.alembic_support import alembic_config, database_url, execute, fetch
 
 __all__ = ["database_url"]
 
@@ -36,7 +35,7 @@ COLUMNS = (
 
 
 def test_upgrade_keeps_the_published_figures_without_the_price_copy(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0003")
+    command.upgrade(alembic_config(database_url), "0003")
     execute(
         database_url,
         A_PUBLISHED_ROW
@@ -46,7 +45,7 @@ def test_upgrade_keeps_the_published_figures_without_the_price_copy(database_url
         " 'COMPLETE')",
     )
 
-    command.upgrade(_alembic(database_url), "0004")
+    command.upgrade(alembic_config(database_url), "0004")
 
     assert fetch(database_url, COLUMNS) == []
     assert fetch(database_url, "SELECT financial_total FROM portfolio.position_metrics") == [
@@ -55,7 +54,7 @@ def test_upgrade_keeps_the_published_figures_without_the_price_copy(database_url
 
 
 def test_downgrade_brings_the_columns_back_empty(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0004")
+    command.upgrade(alembic_config(database_url), "0004")
     execute(
         database_url,
         A_PUBLISHED_ROW
@@ -64,7 +63,7 @@ def test_downgrade_brings_the_columns_back_empty(database_url: str) -> None:
         " 'COMPLETE', 'COMPLETE')",
     )
 
-    command.downgrade(_alembic(database_url), "0003")
+    command.downgrade(alembic_config(database_url), "0003")
 
     assert fetch(database_url, COLUMNS) == [("reference_pu",), ("reference_source",)]
     assert fetch(

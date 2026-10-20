@@ -20,8 +20,7 @@ import psycopg
 import pytest
 from alembic import command
 
-from tests.integration.test_initial_migration import _alembic
-from tests.integration.test_migrations_match_schema import database_url, execute, fetch
+from tests.integration.alembic_support import alembic_config, database_url, execute, fetch
 
 __all__ = ["database_url"]
 
@@ -44,7 +43,7 @@ AN_INSTRUMENT = (
 
 
 def test_upgrade_carries_existing_rows_over(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0001")
+    command.upgrade(alembic_config(database_url), "0001")
     execute(
         database_url,
         "INSERT INTO processing.requests (requested_start_date, requested_end_date,"
@@ -61,7 +60,7 @@ def test_upgrade_carries_existing_rows_over(database_url: str) -> None:
         " SELECT id, '2026-10-01', 0, 'COMPLETE', 'COMPLETE' FROM processing.requests;",
     )
 
-    command.upgrade(_alembic(database_url), "0002")
+    command.upgrade(alembic_config(database_url), "0002")
 
     requests = fetch(
         database_url,
@@ -86,7 +85,7 @@ def test_upgrade_carries_existing_rows_over(database_url: str) -> None:
 
 
 def test_upgrade_of_a_clean_database_leaves_no_marker(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0002")
+    command.upgrade(alembic_config(database_url), "0002")
 
     state = fetch(
         database_url,
@@ -97,7 +96,7 @@ def test_upgrade_of_a_clean_database_leaves_no_marker(database_url: str) -> None
 
 
 def test_downgrade_folds_revisions_and_markers_back(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0002")
+    command.upgrade(alembic_config(database_url), "0002")
     execute(
         database_url,
         A_REQUEST + f"UPDATE processing.requests SET trades_revision_at_start = 3,"
@@ -110,7 +109,7 @@ def test_downgrade_folds_revisions_and_markers_back(database_url: str) -> None:
         " FROM (VALUES ('CASH'), ('POSITIONS')) AS chains (chain);",
     )
 
-    command.downgrade(_alembic(database_url, "allow_data_loss=true"), "0001")
+    command.downgrade(alembic_config(database_url, "allow_data_loss=true"), "0001")
 
     state = fetch(
         database_url,
@@ -147,12 +146,12 @@ LOSSY = {
 
 @pytest.mark.parametrize("rows", LOSSY.values(), ids=LOSSY.keys())
 def test_downgrade_refuses_to_lose_rows(database_url: str, rows: str) -> None:
-    command.upgrade(_alembic(database_url), "0002")
+    command.upgrade(alembic_config(database_url), "0002")
     execute(database_url, rows)
 
     with pytest.raises(RuntimeError, match="allow_data_loss"):
-        command.downgrade(_alembic(database_url), "0001")
-    command.downgrade(_alembic(database_url, "allow_data_loss=true"), "0001")
+        command.downgrade(alembic_config(database_url), "0001")
+    command.downgrade(alembic_config(database_url, "allow_data_loss=true"), "0001")
 
     tables = fetch(
         database_url,
@@ -162,7 +161,7 @@ def test_downgrade_refuses_to_lose_rows(database_url: str, rows: str) -> None:
 
 
 def test_an_all_job_records_one_stale_predecessor_per_chain(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0002")
+    command.upgrade(alembic_config(database_url), "0002")
     execute(
         database_url,
         A_REQUEST + "INSERT INTO processing.issues (request_id, affected_date, issue_type, chain)"
@@ -198,7 +197,7 @@ CHECKS = {
 
 @pytest.mark.parametrize("statement", CHECKS.values(), ids=CHECKS.keys())
 def test_the_new_constraints_reject_invalid_rows(database_url: str, statement: str) -> None:
-    command.upgrade(_alembic(database_url), "0002")
+    command.upgrade(alembic_config(database_url), "0002")
 
     with pytest.raises(psycopg.errors.IntegrityError):
         execute(database_url, statement)
@@ -206,7 +205,7 @@ def test_the_new_constraints_reject_invalid_rows(database_url: str, statement: s
 
 @pytest.mark.parametrize("target", ["0002", "0001"])
 def test_neither_direction_runs_while_a_job_is_active(database_url: str, target: str) -> None:
-    command.upgrade(_alembic(database_url), "0001" if target == "0002" else "0002")
+    command.upgrade(alembic_config(database_url), "0001" if target == "0002" else "0002")
     scope = "" if target == "0002" else "scope, "
     value = "" if target == "0002" else "'ALL', "
     execute(
@@ -217,4 +216,4 @@ def test_neither_direction_runs_while_a_job_is_active(database_url: str, target:
 
     migrate = command.upgrade if target == "0002" else command.downgrade
     with pytest.raises(RuntimeError, match="job is active"):
-        migrate(_alembic(database_url), target)
+        migrate(alembic_config(database_url), target)

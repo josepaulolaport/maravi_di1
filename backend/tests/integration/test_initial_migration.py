@@ -16,20 +16,16 @@ database, so it never touches a shared one.
 
 from __future__ import annotations
 
-from argparse import Namespace
-from collections.abc import Iterator
-from pathlib import Path
-
 import psycopg
 import pytest
 from alembic import command
-from alembic.config import Config
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests.integration.databases import fresh_database_url, psycopg_url
+from tests.integration.alembic_support import alembic_config, database_url
+from tests.integration.databases import psycopg_url
 
-BACKEND = Path(__file__).resolve().parents[2]
+__all__ = ["database_url"]
 
 SCHEMAS = {"asset", "ledger", "prices", "portfolio", "processing", "platform"}
 TABLES = {
@@ -42,23 +38,9 @@ TABLES = {
 }  # fmt: skip
 
 
-@pytest.fixture
-def database_url() -> Iterator[str]:
-    yield from fresh_database_url()
-
-
-def _alembic(database_url: str, *x_arguments: str) -> Config:
-    config = Config(str(BACKEND / "alembic.ini"))
-    config.set_main_option("script_location", str(BACKEND / "migrations"))
-    # configparser interpolates `%`; a percent-encoded password must survive.
-    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    config.cmd_opts = Namespace(x=list(x_arguments))
-    return config
-
-
 def test_database_url_with_percent_encoding_survives_the_config() -> None:
     url = "postgresql+psycopg://user:p%40ss%25w@localhost:5432/db"
-    assert _alembic(url).get_main_option("sqlalchemy.url") == url
+    assert alembic_config(url).get_main_option("sqlalchemy.url") == url
 
 
 def _schemas_and_tables(database_url: str) -> tuple[set[str], set[str], int | None]:
@@ -89,14 +71,14 @@ def _schemas_and_tables(database_url: str) -> tuple[set[str], set[str], int | No
 
 
 def test_upgrade_creates_the_documented_schema(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "head")
+    command.upgrade(alembic_config(database_url), "head")
 
     state = _schemas_and_tables(database_url)
     assert state == (SCHEMAS, TABLES, 1)
 
 
 def test_downgrade_removes_everything_and_upgrade_works_again(database_url: str) -> None:
-    config = _alembic(database_url)
+    config = alembic_config(database_url)
     command.upgrade(config, "head")
 
     command.downgrade(config, "base")
@@ -117,26 +99,26 @@ def _insert_cash_movement(database_url: str) -> None:
 
 
 def test_downgrade_refuses_to_drop_business_data(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "head")
+    command.upgrade(alembic_config(database_url), "head")
     _insert_cash_movement(database_url)
 
     with pytest.raises(RuntimeError, match="allow_data_loss"):
-        command.downgrade(_alembic(database_url), "base")
+        command.downgrade(alembic_config(database_url), "base")
     state = _schemas_and_tables(database_url)
     assert state == (SCHEMAS, TABLES, 1)
 
 
 def test_downgrade_drops_business_data_only_when_explicitly_allowed(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "head")
+    command.upgrade(alembic_config(database_url), "head")
     _insert_cash_movement(database_url)
 
-    command.downgrade(_alembic(database_url, "allow_data_loss=true"), "base")
+    command.downgrade(alembic_config(database_url, "allow_data_loss=true"), "base")
     state = _schemas_and_tables(database_url)
     assert state == (set(), set(), None)
 
 
 async def test_async_caller_migrates_through_its_own_connection(database_url: str) -> None:
-    config = _alembic(database_url)
+    config = alembic_config(database_url)
 
     def upgrade(connection: Connection) -> None:
         config.attributes["connection"] = connection

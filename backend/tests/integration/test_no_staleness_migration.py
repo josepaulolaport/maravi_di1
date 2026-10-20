@@ -15,9 +15,8 @@ import psycopg
 import pytest
 from alembic import command
 
+from tests.integration.alembic_support import alembic_config, database_url, execute, fetch
 from tests.integration.databases import psycopg_url
-from tests.integration.test_initial_migration import _alembic
-from tests.integration.test_migrations_match_schema import database_url, execute, fetch
 from tests.integration.test_no_reference_copy_migration import A_PUBLISHED_ROW, INSTRUMENT
 
 __all__ = ["database_url"]
@@ -59,10 +58,10 @@ READ_STATUSES = (
 
 
 def test_upgrade_renames_the_statuses_and_keeps_each_processing_time(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0003")
+    command.upgrade(alembic_config(database_url), "0003")
     execute(database_url, A_PUBLISHED_ROW + A_RUN + PUBLISHED_DAYS + STATUSES + ISSUES)
 
-    command.upgrade(_alembic(database_url), "0004")
+    command.upgrade(alembic_config(database_url), "0004")
 
     assert fetch(database_url, READ_STATUSES) == [
         (date(2026, 10, 1), "PROCESSED", "PROCESSED", None, True, True),
@@ -82,7 +81,7 @@ def test_upgrade_renames_the_statuses_and_keeps_each_processing_time(database_ur
 
 
 def test_a_stale_status_is_refused_after_the_upgrade(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0004")
+    command.upgrade(alembic_config(database_url), "0004")
 
     with pytest.raises(psycopg.errors.CheckViolation):
         execute(
@@ -92,14 +91,14 @@ def test_a_stale_status_is_refused_after_the_upgrade(database_url: str) -> None:
 
 
 def test_downgrade_gives_the_old_names_back(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0004")
+    command.upgrade(alembic_config(database_url), "0004")
     execute(
         database_url,
         "INSERT INTO processing.date_status (date, portfolio, cash, cash_previous) VALUES"
         " ('2026-10-01', 'PROCESSED', 'RUNNING', 'PROCESSED_WITH_ISSUES')",
     )
 
-    command.downgrade(_alembic(database_url), "0003")
+    command.downgrade(alembic_config(database_url), "0003")
 
     assert fetch(
         database_url, "SELECT portfolio, cash, cash_previous FROM processing.date_status"
