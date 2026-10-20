@@ -347,6 +347,29 @@ describe('Processamentos: request safety (§10.2, OQ-15)', () => {
     expect(screen.getByRole('dialog', { name: 'Solicitar processamento' })).toBeInTheDocument();
     expect(screen.getByText('5 processamentos encontrados')).toBeInTheDocument();
   });
+
+  it('OQ-15 shows every API message of a field on that field, joined, as the other forms do', async () => {
+    server.use(
+      http.post(url('/processing/requests'), () =>
+        problem(422, [
+          fieldError('VALIDATION_ERROR', 'Informe a data inicial.', 'start_date'),
+          fieldError('FUTURE_DATE', 'A data não pode ser posterior a hoje.', 'start_date'),
+        ]),
+      ),
+    );
+    const { user } = renderRoute(`${PAGE}&inicio=2026-10-14&fim=2026-10-16`);
+
+    const dialog = await openConfirmation(user);
+    await user.click(dialog.getByRole('button', { name: 'Confirmar processamento' }));
+
+    const start = dialog.getByRole('textbox', { name: 'Data inicial' });
+    await waitFor(() => {
+      expect(start).toHaveAccessibleDescription(
+        'Informe a data inicial. A data não pode ser posterior a hoje.',
+      );
+    });
+    expect(dialog.queryByRole('alert')).not.toBeInTheDocument();
+  });
 });
 
 describe('Processamentos: preview failure (OQ-15)', () => {
