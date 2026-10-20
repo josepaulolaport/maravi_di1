@@ -137,7 +137,9 @@ pricing rule applies). The dates are relative to the **first** `up`: data writte
 X − 14 to X (São Paulo). Every later `up` finds the demo's last price and adds nothing ("already
 loaded"); a run that stopped part-way makes the `demo` service exit 1 ("incomplete") instead.
 `docker compose down -v` and `up` load a fresh copy dated from that day. `DI1_DEMO=0`
-turns it off (`make e2e` does, to keep its ledger empty).
+turns it off (`make e2e` does, to keep its ledger empty). The UI does not wait for the demo: if the
+demo fails, the app still starts and works without its data; `docker compose ps -a demo` shows its
+exit status and `docker compose logs demo` says why.
 
 - Three contracts: the January DI1 of each of the next three years (DI1F27, DI1F28 and DI1F29 when
   loaded in 2026, maturing 04/01/2027, 03/01/2028 and 02/01/2029).
@@ -199,8 +201,6 @@ rather than refactor before delivery (OQ-47); none changes a business result.
   predecessor rule is in its `domain/`.
 - **Wiring differs per module (M10):** routers and dependency providers are not built the same way
   in every module.
-- **Three decimal-string types (M11):** the HTTP schemas of asset, ledger and prices each define
-  their own decimal-string type instead of sharing one.
 - **Two `FuturesTerms` classes (M12):** one in asset's domain, one in pricing's.
 - **Timestamp types (M13):** timestamps are not typed the same way across modules.
 - **A migrated database per test (M14):** integration tests migrate a fresh database each, which
@@ -216,6 +216,9 @@ rather than refactor before delivery (OQ-47); none changes a business result.
   rows runs as one statement, and `processed_at` has no index; fine at doorbell volume.
   Goes with the inbox itself under OQ-50 item 2; `inbox_messages`, `portfolio_metrics.aum` and
   `date_status.*_previous` then stay in the schema unused, like the columns above.
+- **Outbox retention is unbatched:** the retention `DELETE` of `platform.outbox_messages` rows
+  published more than `OUTBOX_RETENTION_DAYS` ago runs as one statement, and `published_at` has
+  no index; fine at one row per processing request.
 
 ## CI
 
