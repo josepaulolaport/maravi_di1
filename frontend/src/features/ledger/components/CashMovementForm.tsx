@@ -33,6 +33,12 @@ const FIELD_MAP: Record<string, keyof CashValues> = {
 /** `ledger.entries.description VARCHAR(200)` (OQ-51). */
 const DESCRIPTION_MAX_LENGTH = 200;
 
+/**
+ * Characters as the backend counts them: code points of the trimmed text (OQ-51). The input's
+ * `maxLength` counts UTF-16 units of the raw text, a stricter guard, never a looser one.
+ */
+const descriptionLength = (value: string) => Array.from(value.trim()).length;
+
 const LABELS = {
   DEPOSIT: { submit: 'Registrar aporte', done: 'Aporte registrado.' },
   WITHDRAWAL: { submit: 'Registrar retirada', done: 'Retirada registrada.' },
@@ -130,7 +136,7 @@ export function CashMovementForm({
         />
         <TextInput
           label="Descrição"
-          description={`Opcional. ${form.values.description.length}/${DESCRIPTION_MAX_LENGTH} caracteres.`}
+          description={`Opcional. ${String(descriptionLength(form.values.description))}/${String(DESCRIPTION_MAX_LENGTH)} caracteres.`}
           maxLength={DESCRIPTION_MAX_LENGTH}
           placeholder="Aporte inicial"
           {...form.getInputProps('description')}

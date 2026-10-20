@@ -395,7 +395,8 @@ describe('Lançamentos (§11.3)', () => {
       });
       await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
       await user.type(description, '  Aporte inicial ');
-      expect(modal.getByText('Opcional. 17/200 caracteres.')).toBeInTheDocument();
+      // Counted as the backend does: the trimmed text, by characters (OQ-51).
+      expect(modal.getByText('Opcional. 14/200 caracteres.')).toBeInTheDocument();
       await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
 
       await waitFor(() => {

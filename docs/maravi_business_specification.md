@@ -113,7 +113,7 @@ Uma compra/venda inclui contrato, direção, quantidade, data/hora efetiva e PU 
 ### 6.2 Movimentações de caixa
 
 - Dois tipos: **aporte** e **retirada**, cada qual com valor positivo informado e data e hora efetivas (hora obrigatória, OQ-24). O valor é armazenado com sinal: positivo para aporte, negativo para retirada, nunca zero.
-- **Descrição opcional** (enunciado §4.2; OQ-51): texto livre de até 200 caracteres, gravado sem espaços nas pontas; vazia ou em branco vira nula. Só movimentações de caixa têm descrição: uma operação com descrição é rejeitada (422). Como o resto do lançamento, não é editada.
+- **Descrição opcional** (enunciado §4.2; OQ-51): texto livre de até 200 caracteres, gravado sem espaços nas pontas e na forma Unicode composta (NFC); vazia ou em branco vira nula; o caractere nulo é rejeitado (422). Só movimentações de caixa têm descrição: uma operação com descrição é rejeitada (422). Como o resto do lançamento, não é editada.
 - Também não podem ser editadas; a exclusão é definitiva, como para todo lançamento (§6, OQ-32).
 - Incluir ou excluir uma movimentação apenas grava o fato; não marca nenhuma data (OQ-31).
 - Aportes/retiradas modificam **saldo de caixa** e AUM, **não** P&L.
