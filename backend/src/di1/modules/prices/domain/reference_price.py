@@ -3,8 +3,8 @@
 - A price is typed as a PU **or** a rate; the other value is calculated by Pricing.
 - Any calendar date up to today (São Paulo, given by the caller).
 - The typed quote, its decimals and bounds, and the maturity rules (OQ-1, OQ-3, OQ-14) are
-  Pricing's one quote validation, which the caller passes in as a `QuoteRule`
-  (``pricing.public.QuoteValidator``): domain code imports no other module.
+  Pricing's one quote validation, which the service runs next to the date rule
+  (``pricing.public.validate_quote``): domain code imports no other module.
 - MANUAL is preferred over B3 for the same asset and date; only the exact date counts.
 """
 
@@ -12,43 +12,17 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import date
-from decimal import Decimal
 from typing import Final, Protocol
 
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
-from di1.shared.input_kind import InputKind
-from di1.shared.quotes import Quote, QuoteRule
+from di1.shared.errors import ErrorDetail, future_date
 
 SOURCE_PRIORITY: Final = ("MANUAL", "B3")
 """The preferred source first (spec §5). Values of `prices.public.PriceSource`."""
 
 
-def validate_reference_price(
-    *,
-    today: date,
-    maturity_date: date | None,
-    reference_date: date,
-    input_kind: InputKind,
-    pu: Decimal | None,
-    rate: Decimal | None,
-    validate_quote: QuoteRule,
-) -> Quote:
-    """The typed quote of a reference price, or `DomainError` with every problem found."""
-    errors: list[ErrorDetail] = []
-    if reference_date > today:
-        errors.append(
-            ErrorDetail(
-                ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", "reference_date"
-            )
-        )
-    value, quote_errors = validate_quote(
-        input_kind, pu=pu, rate=rate, reference_date=reference_date, maturity_date=maturity_date
-    )
-    errors.extend(quote_errors)
-    if errors:
-        raise DomainError(*errors)
-    assert value is not None  # the quote rule reported a missing value
-    return Quote(input_kind, value)
+def validate_reference_date(reference_date: date, *, today: date) -> tuple[ErrorDetail, ...]:
+    """A reference price is dated up to today in São Paulo (OQ-14); the maturity is Pricing's."""
+    return (future_date("reference_date"),) if reference_date > today else ()
 
 
 class SourcedObservation(Protocol):

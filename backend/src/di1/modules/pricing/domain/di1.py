@@ -6,8 +6,8 @@
 - Exactly one input is typed, the rate or the PU; the other is calculated.
 - Calendar days include weekends and holidays; there is no holiday calendar (OQ-7).
 - The rate is an annual fraction: 0.10 = 10% a.a.
-- `QuoteValidator` is the one validation of a typed quote, which Ledger and Prices call through
-  `pricing.public` with their own field names before pricing; the calculator runs it too.
+- `validate_quote` is the one validation of a typed quote, which Ledger and Prices call through
+  `pricing.public` with their own field names before pricing; `price` runs it too.
 - Precision (OQ-3): the 34-digit, half-up context of `di1.shared.decimals`. A calculated PU is
   returned as stored (10 places), a calculated rate as stored (12 places). A typed value with more
   places is rejected, never rounded, and is returned as typed.
@@ -26,22 +26,19 @@ from datetime import date
 from decimal import Decimal, Overflow
 from typing import NoReturn
 
-from di1.modules.pricing.domain.model import (
-    FuturesTerms,
-    InputKind,
-    Price,
-    Quote,
-)
+from di1.modules.pricing.domain.model import DI1Terms, Price, Quote
 from di1.shared.calendar import DAYS_PER_YEAR, calendar_days
 from di1.shared.decimals import (
     PU_PLACES,
     RATE_PLACES,
+    ZERO,
     financial_context,
     fits_places,
     quantize_pu,
     quantize_rate,
 )
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
+from di1.shared.input_kind import InputKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,109 +56,94 @@ class QuoteFields:
         if field is None:
             return None
         return {
-            _PRICING_FIELDS.reference_date: self.reference_date,
-            _PRICING_FIELDS.pu: self.pu,
-            _PRICING_FIELDS.rate: self.rate,
+            PRICING_FIELDS.reference_date: self.reference_date,
+            PRICING_FIELDS.pu: self.pu,
+            PRICING_FIELDS.rate: self.rate,
         }.get(field, field)
 
 
-_PRICING_FIELDS = QuoteFields()
+PRICING_FIELDS = QuoteFields()
 
 
-@dataclass(frozen=True, slots=True)
-class QuoteValidator:
-    """The one validation of a DI1 quote typed as a PU or a rate (spec §4.1; OQ-1, OQ-3, OQ-14).
+def validate_quote(
+    kind: InputKind,
+    *,
+    pu: Decimal | None,
+    rate: Decimal | None,
+    reference_date: date,
+    maturity_date: date | None,
+    fields: QuoteFields = PRICING_FIELDS,
+) -> tuple[ErrorDetail, ...]:
+    """Every problem of a DI1 quote typed as a PU or a rate (spec §4.1; OQ-1, OQ-3, OQ-14), on
+    ``fields``; empty when the typed value (``pu`` or ``rate``, as ``kind`` says) is valid.
 
     Ledger and Prices call it before pricing, so their requests report every problem at once, and
-    the calculator runs it again on its own input: one rule, one set of messages.
+    `price` runs it again on its own input: one rule, one set of messages. ``maturity_date`` is
+    ``None`` when the caller knows no contract; then only the typed values are checked.
     """
-
-    fields: QuoteFields = _PRICING_FIELDS
-
-    def __call__(
-        self,
-        kind: InputKind,
-        *,
-        pu: Decimal | None,
-        rate: Decimal | None,
-        reference_date: date,
-        maturity_date: date | None,
-    ) -> tuple[Decimal | None, tuple[ErrorDetail, ...]]:
-        """The typed value, or ``None``, and every problem found. ``maturity_date`` is ``None``
-        when the caller knows no contract; then only the typed values are checked."""
-        errors: list[ErrorDetail] = []
-        if maturity_date is not None and reference_date > maturity_date:
-            errors.append(
-                ErrorDetail(
-                    ErrorCode.CONTRACT_MATURED,
-                    "O contrato já venceu nesta data.",
-                    self.fields.reference_date,
-                )
+    errors: list[ErrorDetail] = []
+    if maturity_date is not None and reference_date > maturity_date:
+        errors.append(
+            ErrorDetail(
+                ErrorCode.CONTRACT_MATURED,
+                "O contrato já venceu nesta data.",
+                fields.reference_date,
             )
-        elif kind is InputKind.RATE and reference_date == maturity_date:
-            # No rate is typed on the maturity date: one message says so. A missing or invalid
-            # rate, or "informe apenas a taxa" for a PU sent too, would contradict it.
-            return None, (
-                ErrorDetail.validation("Na data de vencimento informe o PU.", self.fields.rate),
-            )
-        if kind is InputKind.PU:
-            typed, other = pu, rate
-            typed_field, other_field = self.fields.pu, self.fields.rate
-            missing, only, places = "Informe o PU.", "Informe apenas o PU, sem a taxa.", PU_PLACES
-        else:
-            typed, other = rate, pu
-            typed_field, other_field = self.fields.rate, self.fields.pu
-            missing, only, places = (
-                "Informe a taxa.",
-                "Informe apenas a taxa, sem o PU.",
-                RATE_PLACES,
-            )
-        if other is not None:
-            errors.append(ErrorDetail.validation(only, other_field))
-        if typed is None:
-            errors.append(ErrorDetail.validation(missing, typed_field))
-        elif not typed.is_finite():
-            errors.append(ErrorDetail.validation("Informe um número válido.", typed_field))
-        elif not fits_places(typed, places):
-            errors.append(
-                ErrorDetail.validation(f"Use no máximo {places} casas decimais.", typed_field)
-            )
-        elif kind is InputKind.PU and typed <= 0:
-            errors.append(ErrorDetail.validation("O PU deve ser maior que zero.", typed_field))
-        elif kind is InputKind.RATE and typed <= -1:
-            errors.append(ErrorDetail.validation("A taxa deve ser maior que −100%.", typed_field))
-        return (None if errors else typed), tuple(errors)
-
-
-_validate_quote = QuoteValidator()
-
-
-class DI1Calculator:
-    """Stateless; one instance can be shared."""
-
-    def calculate(self, terms: FuturesTerms, reference_date: date, quote: Quote) -> Price:
-        typed_pu = quote.kind is InputKind.PU
-        _, errors = _validate_quote(
-            quote.kind,
-            pu=quote.value if typed_pu else None,
-            rate=None if typed_pu else quote.value,
-            reference_date=reference_date,
-            maturity_date=terms.maturity_date,
         )
-        if errors:
-            raise DomainError(*errors)
-        days = calendar_days(reference_date, terms.maturity_date)
-        if typed_pu:
-            pu = quote.value
-            rate = (
-                quantize_rate(Decimal(0))
-                if days == 0
-                else _rate_from_pu(pu, days, terms.face_value)
-            )
-        else:
-            rate = quote.value
-            pu = _pu_from_rate(rate, days, terms.face_value)
-        return Price(pu=pu, rate=rate, input_kind=quote.kind)
+    elif kind is InputKind.RATE and reference_date == maturity_date:
+        # No rate is typed on the maturity date: one message says so. A missing or invalid
+        # rate, or "informe apenas a taxa" for a PU sent too, would contradict it.
+        return (ErrorDetail.validation("Na data de vencimento informe o PU.", fields.rate),)
+    if kind is InputKind.PU:
+        typed, other = pu, rate
+        typed_field, other_field = fields.pu, fields.rate
+        missing, only, places = "Informe o PU.", "Informe apenas o PU, sem a taxa.", PU_PLACES
+    else:
+        typed, other = rate, pu
+        typed_field, other_field = fields.rate, fields.pu
+        missing, only, places = (
+            "Informe a taxa.",
+            "Informe apenas a taxa, sem o PU.",
+            RATE_PLACES,
+        )
+    if other is not None:
+        errors.append(ErrorDetail.validation(only, other_field))
+    if typed is None:
+        errors.append(ErrorDetail.validation(missing, typed_field))
+    elif not typed.is_finite():
+        errors.append(ErrorDetail.validation("Informe um número válido.", typed_field))
+    elif not fits_places(typed, places):
+        errors.append(
+            ErrorDetail.validation(f"Use no máximo {places} casas decimais.", typed_field)
+        )
+    elif kind is InputKind.PU and typed <= 0:
+        errors.append(ErrorDetail.validation("O PU deve ser maior que zero.", typed_field))
+    elif kind is InputKind.RATE and typed <= -1:
+        errors.append(ErrorDetail.validation("A taxa deve ser maior que −100%.", typed_field))
+    return tuple(errors)
+
+
+def price(terms: DI1Terms, reference_date: date, quote: Quote) -> Price:
+    """The complete pair for ``quote`` on ``reference_date``; `DomainError` when the quote is
+    invalid (`validate_quote`) or its other value cannot be stored."""
+    typed_pu = quote.kind is InputKind.PU
+    errors = validate_quote(
+        quote.kind,
+        pu=quote.value if typed_pu else None,
+        rate=None if typed_pu else quote.value,
+        reference_date=reference_date,
+        maturity_date=terms.maturity_date,
+    )
+    if errors:
+        raise DomainError(*errors)
+    days = calendar_days(reference_date, terms.maturity_date)
+    if typed_pu:
+        pu = quote.value
+        rate = quantize_rate(ZERO) if days == 0 else _rate_from_pu(pu, days, terms.face_value)
+    else:
+        rate = quote.value
+        pu = _pu_from_rate(rate, days, terms.face_value)
+    return Price(pu=pu, rate=rate, input_kind=quote.kind)
 
 
 def _refuse(message: str, field: str) -> NoReturn:

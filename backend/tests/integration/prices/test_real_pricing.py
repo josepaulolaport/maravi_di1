@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from di1.modules.asset.dependencies import asset_reader
 from di1.modules.prices.dependencies import price_service
 from di1.modules.prices.public import ReferencePriceRecord
-from di1.modules.pricing.dependencies import pricing_service
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.decimals import to_plain
 from di1.shared.input_kind import InputKind
@@ -31,7 +31,7 @@ async def _set(factory: async_sessionmaker[AsyncSession], **price: object) -> Re
     async with SqlAlchemyUnitOfWork(factory) as uow:
         assets = asset_reader(uow.session)
         service = price_service(
-            uow, assets=assets, pricing=pricing_service(assets), clock=FixedClock(TODAY)
+            uow, assets=assets, pricing=build_pricing_service(assets), clock=FixedClock(TODAY)
         )
         return await service.set_reference_price(**price, uow=uow)  # type: ignore[arg-type]
 

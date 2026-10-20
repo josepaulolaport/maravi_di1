@@ -24,7 +24,7 @@ from di1.modules.portfolio.public import PortfolioService
 from di1.modules.prices.application.services.price_service import PriceService
 from di1.modules.prices.dependencies import price_reader, price_service
 from di1.modules.prices.public import PriceReader
-from di1.modules.pricing.dependencies import pricing_service
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.modules.processing.application.services.processing import ProcessingService
 from di1.modules.processing.dependencies import make_date_status_reader, make_processing_service
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
@@ -60,7 +60,7 @@ def get_asset_service(uow: RequestUnitOfWork) -> AssetService:
 def get_ledger_service(uow: RequestUnitOfWork, clock: AppClock) -> LedgerService:
     """Ledger over Asset's reader and Pricing, both on the request's session."""
     assets = asset_reader(uow.session)
-    return create_ledger_service(clock=clock, assets=assets, pricing=pricing_service(assets))
+    return create_ledger_service(clock=clock, assets=assets, pricing=build_pricing_service(assets))
 
 
 def get_price_reader(uow: UnitOfWork) -> PriceReader:
@@ -71,7 +71,7 @@ def get_price_reader(uow: UnitOfWork) -> PriceReader:
 
 def get_price_service(uow: RequestUnitOfWork, clock: AppClock) -> PriceService:
     assets = asset_reader(uow.session)
-    return price_service(uow, assets=assets, pricing=pricing_service(assets), clock=clock)
+    return price_service(uow, assets=assets, pricing=build_pricing_service(assets), clock=clock)
 
 
 async def get_portfolio_query_service(

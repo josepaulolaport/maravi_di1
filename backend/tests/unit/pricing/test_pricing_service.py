@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from di1.modules.asset.public import AssetReader, Instrument
-from di1.modules.pricing.dependencies import pricing_service
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.modules.pricing.public import InputKind, Price, PricingService, Quote
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 
@@ -49,7 +49,7 @@ class FakeAssetReader:
 
 def service_for(*instruments: Instrument) -> PricingService:
     reader: AssetReader = FakeAssetReader(*instruments)
-    return pricing_service(reader)
+    return build_pricing_service(reader)
 
 
 def refusal(caught: pytest.ExceptionInfo[DomainError]) -> ErrorDetail:

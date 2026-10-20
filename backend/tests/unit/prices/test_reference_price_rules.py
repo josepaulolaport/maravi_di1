@@ -1,6 +1,7 @@
 """Prices' domain rules: what a typed reference price may be, and which observation is preferred
 (spec §5; OQ-1, OQ-3, OQ-14, OQ-25). The typed quote's rules are Pricing's one validation
-(code-review finding H3), run here on Pricing's field names, as the service does."""
+(code-review finding H3), run here on Pricing's field names, as the service does: the
+validators return every problem, and the helper below raises them as one `DomainError`."""
 
 from __future__ import annotations
 
@@ -10,11 +11,9 @@ from decimal import Decimal
 
 import pytest
 
-from di1.modules.prices.domain.reference_price import (
-    choose_preferred,
-    validate_reference_price,
-)
-from di1.modules.pricing.public import Quote, QuoteValidator
+from di1.modules.prices.application.services.price_service import validate_new_price
+from di1.modules.prices.domain.reference_price import choose_preferred
+from di1.modules.pricing.public import Quote
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 
@@ -31,15 +30,19 @@ def _validate(
     rate: Decimal | None = None,
     maturity_date: date | None = MATURITY,
 ) -> Quote:
-    return validate_reference_price(
+    errors = validate_new_price(
         today=TODAY,
         maturity_date=maturity_date,
         reference_date=reference_date,
         input_kind=input_kind,
         pu=pu,
         rate=rate,
-        validate_quote=QuoteValidator(),
     )
+    if errors:
+        raise DomainError(*errors)
+    typed = pu if input_kind is InputKind.PU else rate
+    assert typed is not None
+    return Quote(input_kind, typed)
 
 
 def _errors(excinfo: pytest.ExceptionInfo[DomainError]) -> tuple[ErrorDetail, ...]:

@@ -15,9 +15,9 @@ from di1.modules.prices.application.services.repository import (
     ReferencePriceRepository,
     RepositoryFactory,
 )
-from di1.modules.prices.domain.reference_price import choose_preferred, validate_reference_price
+from di1.modules.prices.domain.reference_price import choose_preferred, validate_reference_date
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
-from di1.modules.pricing.public import PricingService, Quote, QuoteValidator
+from di1.modules.pricing.public import PricingService, Quote, validate_quote
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
@@ -25,11 +25,24 @@ from di1.shared.input_kind import InputKind
 
 logger = logging.getLogger(__name__)
 
-_validate_quote = QuoteValidator()
-"""Pricing's one quote validation; the price request's fields already use Pricing's names."""
-
 _UNKNOWN_ASSET = ErrorDetail.validation("Selecione um contrato.", "asset_id")
 _PRICE_NOT_FOUND = ErrorDetail(ErrorCode.NOT_FOUND, "Preço de referência não encontrado.")
+
+
+def validate_new_price(
+    *,
+    today: date,
+    maturity_date: date | None,
+    reference_date: date,
+    input_kind: InputKind,
+    pu: Decimal | None,
+    rate: Decimal | None,
+) -> tuple[ErrorDetail, ...]:
+    """Every problem of a typed reference price: its date, then Pricing's one quote validation,
+    whose field names the price request already uses."""
+    return validate_reference_date(reference_date, today=today) + validate_quote(
+        input_kind, pu=pu, rate=rate, reference_date=reference_date, maturity_date=maturity_date
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,24 +156,22 @@ class PriceService:
         """The validated price pair. An unknown asset is reported together with every other
         problem of the request, as the frontend contract does."""
         instrument = (await self._assets.get_instruments([asset_id])).get(asset_id)
-        try:
-            quote = validate_reference_price(
-                today=self._clock.today(),
-                maturity_date=None if instrument is None else instrument.maturity_date,
-                reference_date=reference_date,
-                input_kind=input_kind,
-                pu=pu,
-                rate=rate,
-                validate_quote=_validate_quote,
-            )
-        except DomainError as error:
-            if instrument is None:
-                raise DomainError(_UNKNOWN_ASSET, *error.errors) from None
-            raise
+        errors = validate_new_price(
+            today=self._clock.today(),
+            maturity_date=None if instrument is None else instrument.maturity_date,
+            reference_date=reference_date,
+            input_kind=input_kind,
+            pu=pu,
+            rate=rate,
+        )
         if instrument is None:
-            raise DomainError(_UNKNOWN_ASSET)
+            errors = (_UNKNOWN_ASSET, *errors)
+        if errors:
+            raise DomainError(*errors)
+        typed = pu if input_kind is InputKind.PU else rate
+        assert instrument is not None and typed is not None
         price = await self._pricing.calculate(
-            instrument.id, reference_date, Quote(quote.kind, quote.value)
+            instrument.id, reference_date, Quote(input_kind, typed)
         )
         return price.pu, price.rate
 

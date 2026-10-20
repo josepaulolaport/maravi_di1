@@ -6,9 +6,11 @@
 - Both have a date and a required time (São Paulo) and one ``seq`` shared by both types; their
   order is ``(entry_date, entry_time, seq)`` (OQ-13, OQ-24).
 - Nothing is dated after today (OQ-14). The typed PU or rate, its decimals, its bounds and the
-  maturity rules (OQ-1, OQ-3, OQ-14) are Pricing's one quote validation, which the caller passes
-  in as a `QuoteRule` (``pricing.public.QuoteValidator``): domain code imports no other module.
+  maturity rules (OQ-1, OQ-3, OQ-14) are Pricing's one quote validation, which the service runs
+  next to these rules (``pricing.public.validate_quote``): domain code imports no other module.
   The other value bounds are only the schema's CHECKs and column ranges (OQ-14).
+- Each validator returns every problem it finds, empty when the draft is valid; the service
+  raises them together.
 - A trade's cash effect is not stored: −signed_quantity × execution_pu, computed on read (§7.3).
 - Entries are never edited. A batch delete removes entries of either type for good, all or
   nothing (OQ-24; user decision 2026-10-19: no soft delete).
@@ -29,7 +31,6 @@ from uuid import UUID
 from di1.shared.decimals import financial_context, fits_places
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
-from di1.shared.quotes import QuoteRule
 
 CASH_PLACES = 2
 """Decimal places of a cash amount: ``cash_amount NUMERIC(20,2)`` (OQ-3, OQ-24)."""
@@ -103,16 +104,9 @@ class LedgerEntry:
             return _ZERO - self.signed_quantity * self.execution_pu
 
 
-def validate_trade(
-    draft: EntryDraft,
-    *,
-    today: date,
-    known: bool,
-    maturity_date: date | None,
-    validate_quote: QuoteRule,
-) -> Decimal:
-    """The typed quote of a valid TRADE draft, or `DomainError` with every problem found.
-    ``known`` is whether ``draft.asset_id`` names a contract."""
+def validate_trade(draft: EntryDraft, *, today: date, known: bool) -> tuple[ErrorDetail, ...]:
+    """Every problem of a TRADE draft but its typed quote, which is Pricing's rule. ``known`` is
+    whether ``draft.asset_id`` names a contract."""
     if draft.type is not EntryType.TRADE:
         raise ValueError(f"validate_trade expects a TRADE draft, got {draft.type}")
     errors = _date_errors(draft.entry_date, today) + _time_errors(draft.entry_time)
@@ -130,27 +124,13 @@ def validate_trade(
         )
     if draft.cash_amount is not None:
         errors.append(ErrorDetail.validation("Uma operação não tem valor de caixa.", "cash_amount"))
-    typed_value = None
     if draft.input_kind is None:
         errors.append(ErrorDetail.validation("Informe o PU ou a taxa.", "input_kind"))
-    else:
-        typed_value, quote_errors = validate_quote(
-            draft.input_kind,
-            pu=draft.execution_pu,
-            rate=draft.execution_rate,
-            reference_date=draft.entry_date,
-            maturity_date=maturity_date if known else None,
-        )
-        errors.extend(quote_errors)
-    if errors:
-        raise DomainError(*errors)
-
-    assert typed_value is not None
-    return typed_value
+    return tuple(errors)
 
 
-def validate_cash_movement(draft: EntryDraft, *, today: date) -> Decimal:
-    """The aporte or retirada a draft describes. Raises `DomainError` with every input error."""
+def validate_cash_movement(draft: EntryDraft, *, today: date) -> tuple[ErrorDetail, ...]:
+    """Every problem of a CASH draft: an aporte (positive) or a retirada (negative)."""
     if draft.type is not EntryType.CASH:
         raise ValueError(f"validate_cash_movement expects a CASH draft, got {draft.type}")
     errors = _date_errors(draft.entry_date, today) + _time_errors(draft.entry_time)
@@ -173,10 +153,7 @@ def validate_cash_movement(draft: EntryDraft, *, today: date) -> Decimal:
         errors.append(ErrorDetail.validation("O valor deve ser diferente de zero.", "cash_amount"))
     elif abs(amount) >= _CASH_LIMIT:
         errors.append(ErrorDetail.validation("O valor excede o limite permitido.", "cash_amount"))
-    if errors:
-        raise DomainError(*errors)
-    assert amount is not None
-    return amount
+    return tuple(errors)
 
 
 def entries_to_delete(

@@ -24,7 +24,7 @@ from di1.modules.ledger.domain.entries import (
     validate_trade,
 )
 from di1.modules.ledger.domain.listing import EntryCursor, ListOrder, validate_page_request
-from di1.modules.pricing.public import PricingService, Quote, QuoteFields, QuoteValidator
+from di1.modules.pricing.public import PricingService, Quote, QuoteFields, validate_quote
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
@@ -35,8 +35,24 @@ logger = logging.getLogger(__name__)
 TRADE_QUOTE_FIELDS = QuoteFields(reference_date="date", pu="execution_pu", rate="execution_rate")
 """The request fields the client keys a trade's quote errors on (frontend ``ledger.ts``)."""
 
-validate_trade_quote = QuoteValidator(TRADE_QUOTE_FIELDS)
-"""Pricing's one quote validation, reported on the trade request's fields (OQ-34)."""
+
+def validate_new_trade(
+    draft: EntryDraft, *, today: date, maturity_date: date | None, known: bool
+) -> tuple[ErrorDetail, ...]:
+    """Every problem of a TRADE draft: Ledger's rules, then Pricing's one quote validation on the
+    trade request's fields (OQ-34). ``known`` is whether ``draft.asset_id`` names a contract,
+    whose maturity is ``maturity_date``."""
+    errors = validate_trade(draft, today=today, known=known)
+    if draft.input_kind is None:
+        return errors
+    return errors + validate_quote(
+        draft.input_kind,
+        pu=draft.execution_pu,
+        rate=draft.execution_rate,
+        reference_date=draft.entry_date,
+        maturity_date=maturity_date if known else None,
+        fields=TRADE_QUOTE_FIELDS,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,20 +91,28 @@ class LedgerService:
         repository = self._repository_for(uow)
         today = self._clock.today()
         if draft.type is EntryType.CASH:
-            amount = validate_cash_movement(draft, today=today)
-            entry = await repository.add_cash_movement(draft, amount=amount)
+            errors = validate_cash_movement(draft, today=today)
+            if errors:
+                raise DomainError(*errors)
+            assert draft.cash_amount is not None
+            entry = await repository.add_cash_movement(draft, amount=draft.cash_amount)
             await uow.commit()
             return LedgerEntryView(entry, asset_code=None, instrument_type_code=None)
 
         instrument = await self._instrument(draft.asset_id)
-        typed_value = validate_trade(
+        errors = validate_new_trade(
             draft,
             today=today,
-            known=instrument is not None,
             maturity_date=None if instrument is None else instrument.maturity_date,
-            validate_quote=validate_trade_quote,
+            known=instrument is not None,
         )
+        if errors:
+            raise DomainError(*errors)
         assert draft.asset_id is not None and draft.input_kind is not None
+        typed_value = (
+            draft.execution_pu if draft.input_kind is InputKind.PU else draft.execution_rate
+        )
+        assert typed_value is not None
         try:
             price = await self._pricing.calculate(
                 draft.asset_id, draft.entry_date, Quote(draft.input_kind, typed_value)
