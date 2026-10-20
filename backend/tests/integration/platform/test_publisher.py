@@ -13,8 +13,8 @@ from datetime import UTC, datetime
 import aio_pika
 import pytest
 from aio_pika.abc import AbstractRobustConnection
+from pydantic import SecretStr
 
-from di1.platform.config import BrokerSettings
 from di1.platform.messaging.envelope import Envelope
 from di1.platform.messaging.publisher import (
     BrokerUnavailableError,
@@ -23,6 +23,7 @@ from di1.platform.messaging.publisher import (
 )
 from di1.platform.messaging.topology import Topology, declare_queue
 from tests.integration.platform.conftest import queue_spec
+from tests.integration.platform.support import PUBLISH_TIMEOUT_SECONDS
 
 
 def _envelope(message_type: str = "test.command") -> Envelope:
@@ -36,11 +37,13 @@ def _envelope(message_type: str = "test.command") -> Envelope:
 
 
 async def test_a_published_message_is_persistent_and_carries_the_envelope(
-    broker: AbstractRobustConnection, broker_settings: BrokerSettings, topology: Topology
+    broker: AbstractRobustConnection, broker_url: SecretStr, topology: Topology
 ) -> None:
     channel = await broker.channel()
     queue = await declare_queue(channel, topology, queue_spec(topology, "test.command"))
-    publisher = await MessagePublisher.create(broker, topology, settings=broker_settings)
+    publisher = await MessagePublisher.create(
+        broker, topology, confirm_timeout_seconds=PUBLISH_TIMEOUT_SECONDS
+    )
     envelope = _envelope()
 
     await publisher.publish(envelope)
@@ -58,10 +61,12 @@ async def test_a_published_message_is_persistent_and_carries_the_envelope(
 
 
 async def test_a_message_no_queue_accepts_is_a_failed_publish(
-    broker: AbstractRobustConnection, broker_settings: BrokerSettings, topology: Topology
+    broker: AbstractRobustConnection, broker_url: SecretStr, topology: Topology
 ) -> None:
     """An unroutable message would be dropped silently; the relay must keep it and retry."""
-    publisher = await MessagePublisher.create(broker, topology, settings=broker_settings)
+    publisher = await MessagePublisher.create(
+        broker, topology, confirm_timeout_seconds=PUBLISH_TIMEOUT_SECONDS
+    )
 
     with pytest.raises(PublishFailedError, match="NO_ROUTE") as raised:
         await publisher.publish(_envelope("nobody.listens"))
@@ -69,9 +74,11 @@ async def test_a_message_no_queue_accepts_is_a_failed_publish(
 
 
 async def test_a_closed_channel_is_an_unavailable_broker(
-    broker: AbstractRobustConnection, broker_settings: BrokerSettings, topology: Topology
+    broker: AbstractRobustConnection, broker_url: SecretStr, topology: Topology
 ) -> None:
-    publisher = await MessagePublisher.create(broker, topology, settings=broker_settings)
+    publisher = await MessagePublisher.create(
+        broker, topology, confirm_timeout_seconds=PUBLISH_TIMEOUT_SECONDS
+    )
     await publisher.close()
 
     with pytest.raises(BrokerUnavailableError):  # every later message would fail the same way
