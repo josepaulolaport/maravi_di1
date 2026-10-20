@@ -22,7 +22,6 @@ backend/
       domain/
       application/ports.py               # the repository Protocols the services use
       application/services/
-      application/interfaces/            # only when meaningful
       infrastructure/persistence/{models.py, repositories.py, queries/}
       infrastructure/<adapter>/          # other outbound adapters, when needed
       presentation/http/{router.py, schemas.py}
