@@ -8,6 +8,7 @@ import { formatPeriod } from '@/shared/format';
 import { formatProgress, shortId } from '../model/format';
 import { useCancel } from '../hooks/useProcessing';
 import { runBadge, progressOf } from '../model/jobStatus';
+import { useLastValue } from '@/shared/hooks/useLastValue';
 import { Field } from '@/shared/ui/Field';
 
 interface CancelDialogProps {
@@ -23,6 +24,8 @@ interface CancelDialogProps {
  */
 export function CancelDialog({ job, onClose }: CancelDialogProps) {
   const cancel = useCancel();
+  // Still shown while the dialog closes.
+  const shown = useLastValue(job);
   const close = () => {
     cancel.reset();
     onClose();
@@ -37,18 +40,18 @@ export function CancelDialog({ job, onClose }: CancelDialogProps) {
       loading={cancel.isPending}
       error={cancel.error}
     >
-      {job && (
+      {shown && (
         <Stack gap="sm">
-          <Field label="Processamento">{shortId(job.id)}</Field>
-          <Field label="Período">{formatPeriod(job.start_date, job.end_date)}</Field>
+          <Field label="Processamento">{shortId(shown.id)}</Field>
+          <Field label="Período">{formatPeriod(shown.start_date, shown.end_date)}</Field>
           <Field label="Progresso">
-            {formatProgress(progressOf(job).done, progressOf(job).total)}
+            {formatProgress(progressOf(shown).done, progressOf(shown).total)}
           </Field>
           <Field label="Status atual">
-            <StatusBadge {...runBadge(job)} />
+            <StatusBadge {...runBadge(shown)} />
           </Field>
           <Text size="sm">
-            {job.status === 'QUEUED'
+            {shown.status === 'QUEUED'
               ? 'O processamento ainda não começou e será cancelado imediatamente. Nenhuma data será processada.'
               : 'O processamento será interrompido ao fim da data em andamento. As datas já processadas continuam publicadas; as seguintes não serão processadas.'}
           </Text>

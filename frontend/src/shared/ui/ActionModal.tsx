@@ -1,5 +1,5 @@
 import { type MantineSize, Modal } from '@mantine/core';
-import { type ReactNode, useState } from 'react';
+import { Fragment, type ReactNode, useState } from 'react';
 
 interface ActionModalProps {
   opened: boolean;
@@ -24,8 +24,15 @@ export function ActionModal({
   size = 'lg',
   children,
 }: ActionModalProps) {
-  const [mounted, setMounted] = useState(opened);
-  if (opened && !mounted) setMounted(true);
+  // Each opening mounts a new content (`key`); closing keeps it until the animation ends.
+  const [session, setSession] = useState({ opened, mounted: opened, key: 0 });
+  if (opened !== session.opened) {
+    setSession({
+      opened,
+      mounted: opened || session.mounted,
+      key: opened ? session.key + 1 : session.key,
+    });
+  }
   return (
     <Modal
       opened={opened}
@@ -40,10 +47,10 @@ export function ActionModal({
       withCloseButton={!pending}
       closeButtonProps={{ 'aria-label': 'Fechar' }}
       onExitTransitionEnd={() => {
-        setMounted(false);
+        setSession((current) => (current.opened ? current : { ...current, mounted: false }));
       }}
     >
-      {mounted && children}
+      {session.mounted && <Fragment key={session.key}>{children}</Fragment>}
     </Modal>
   );
 }

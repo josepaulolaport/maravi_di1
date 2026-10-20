@@ -12,10 +12,14 @@ export const queryKeys = {
   assets: {
     all: ['assets'] as const,
     instrumentTypes: () => key('assets', 'instrument-types', {}),
+    /** Every product, of every type (the trade form's class filter). */
+    allProducts: () => key('assets', 'all-products', {}),
     products: (params: { instrumentType: string | null; search: string }) =>
       key('assets', 'products', params),
     product: (id: string) => key('assets', 'product', { id }),
-    instruments: (params: { productId: string | null; search: string }) =>
+    /** Every instrument, of every product (the trade form's contract picker). */
+    allInstruments: () => key('assets', 'all-instruments', {}),
+    instruments: (params: { productId: string; search: string }) =>
       key('assets', 'instruments', params),
     instrument: (id: string) => key('assets', 'instrument', { id }),
   },

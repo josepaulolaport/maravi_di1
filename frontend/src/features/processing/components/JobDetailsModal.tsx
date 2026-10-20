@@ -3,6 +3,7 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 
 import type { ProcessingChain, ProcessingRequest } from '@/api/contract';
 import { addDays, formatDate, formatDateTime } from '@/shared/format';
+import { useLastValue } from '@/shared/hooks/useLastValue';
 import { ActionModal } from '@/shared/ui/ActionModal';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { SCOPE_LABELS } from '@/shared/processing/scope';
@@ -69,7 +70,14 @@ interface JobDetailsModalProps extends Omit<JobActions, 'onDetails'> {
  * A run's details (§11.1, OQ-23): its range, times, days, progress, what it left published
  * and, if any, its error and the date it failed on.
  */
-export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobDetailsModalProps) {
+export function JobDetailsModal({
+  job: current,
+  onClose,
+  onCancel,
+  onRequestAgain,
+}: JobDetailsModalProps) {
+  // Still shown while the modal closes.
+  const job = useLastValue(current);
   const progress = job ? progressOf(job) : null;
   const chain = job ? failedChainOf(job) : null;
   // Falhou, or a Tudo run that kept a chain's failure when it ended Concluído com pendências or
@@ -77,7 +85,7 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
   const failure = job !== null && (job.status === 'FAILED' || chain !== null);
   const perChain = job ? chainNotices(job) : null;
   return (
-    <ActionModal opened={job !== null} onClose={onClose} title="Detalhes do processamento">
+    <ActionModal opened={current !== null} onClose={onClose} title="Detalhes do processamento">
       {job && progress && (
         <Stack gap="md">
           <Group justify="space-between">

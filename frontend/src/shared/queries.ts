@@ -47,7 +47,7 @@ export function useInstrumentTypes() {
 /** Every product; each carries its asset class (the trade form's class filter). */
 export function useAllProducts() {
   return useQuery({
-    queryKey: queryKeys.assets.products({ instrumentType: null, search: '' }),
+    queryKey: queryKeys.assets.allProducts(),
     queryFn: () => assetsApi.listProducts({}),
   });
 }
@@ -55,7 +55,7 @@ export function useAllProducts() {
 /** Every instrument (the trade form's contract picker). */
 export function useAllInstruments() {
   return useQuery({
-    queryKey: queryKeys.assets.instruments({ productId: null, search: '' }),
+    queryKey: queryKeys.assets.allInstruments(),
     queryFn: () => assetsApi.listInstruments({}),
   });
 }

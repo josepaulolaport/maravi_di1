@@ -3,6 +3,7 @@ import { notifications } from '@mantine/notifications';
 import { useEffect, useRef, useState } from 'react';
 
 import { ApiError } from '@/api/http';
+import { useLastValue } from '@/shared/hooks/useLastValue';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { countLabel } from '@/shared/format';
 import { problemMessages } from '@/shared/ui/problemMessages';
@@ -35,6 +36,8 @@ export function DeleteDialog({
 }) {
   // One request for one entry or many, of either type (`POST /ledger/entries/deletions`).
   const mutation = useDeleteEntries();
+  // Still shown while the dialog closes.
+  const shown = useLastValue(target);
 
   const close = () => {
     mutation.reset();
@@ -102,23 +105,23 @@ export function DeleteDialog({
     onRetarget({ mode: 'many', entries: left });
   };
 
-  const many = target?.mode === 'many' ? target.entries : [];
+  const many = shown?.mode === 'many' ? shown.entries : [];
 
   return (
     <ConfirmModal
       opened={target !== null}
       onClose={close}
       onConfirm={confirm}
-      title={target?.mode === 'many' ? 'Excluir lançamentos' : 'Excluir lançamento'}
+      title={shown?.mode === 'many' ? 'Excluir lançamentos' : 'Excluir lançamento'}
       confirmLabel="Excluir"
       loading={mutation.isPending || refreshing}
       error={mutation.error}
     >
       <Stack gap="xs">
-        {target?.mode === 'one' && (
-          <Text inherit>O lançamento {entryLabel(target.entry)} será excluído.</Text>
+        {shown?.mode === 'one' && (
+          <Text inherit>O lançamento {entryLabel(shown.entry)} será excluído.</Text>
         )}
-        {target?.mode === 'many' && (
+        {shown?.mode === 'many' && (
           <>
             <Text inherit>
               {many.length === 1

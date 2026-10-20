@@ -9,6 +9,7 @@ import type {
   ProcessingScope,
 } from '@/api/contract';
 import { useApiForm } from '@/shared/form/useApiForm';
+import { useLastValue } from '@/shared/hooks/useLastValue';
 import { ActionModal } from '@/shared/ui/ActionModal';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { FormActions } from '@/shared/ui/FormActions';
@@ -58,6 +59,7 @@ export function ProcessingRequestModal({
   queuedMessage,
 }: ProcessingRequestModalProps) {
   const enqueue = useEnqueue();
+  const shown = useLastValue(draft);
   const close = () => {
     enqueue.reset();
     onClose();
@@ -69,9 +71,9 @@ export function ProcessingRequestModal({
       title="Solicitar processamento"
       pending={enqueue.isPending}
     >
-      {draft && (
+      {shown && (
         <RequestForm
-          draft={draft}
+          draft={shown}
           enqueue={enqueue}
           onClose={close}
           today={today}

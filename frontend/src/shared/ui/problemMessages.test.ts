@@ -88,4 +88,8 @@ describe('splitProblem (forms, OQ-15)', () => {
     ]);
     expect(splitProblem(null, {})).toEqual({ fields: {}, page: [] });
   });
+  it('OQ-15 maps only the fields the form owns, never an inherited name', () => {
+    const result = splitProblem(error([{ field: 'constructor', message: 'Campo estranho.' }]), {});
+    expect(result).toEqual({ fields: {}, page: ['Campo estranho.'] });
+  });
 });

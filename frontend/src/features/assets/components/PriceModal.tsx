@@ -5,6 +5,7 @@ import type { UseMutationResult } from '@tanstack/react-query';
 
 import { typedPrice } from '@/shared/format';
 import { useApiForm } from '@/shared/form/useApiForm';
+import { useLastValue } from '@/shared/hooks/useLastValue';
 import { useToday } from '@/shared/hooks/useToday';
 import { ActionModal } from '@/shared/ui/ActionModal';
 import { FormActions } from '@/shared/ui/FormActions';
@@ -51,6 +52,7 @@ export function PriceModal({
   onClose,
 }: PriceModalProps) {
   const save = useSetReferencePrice();
+  const shownDate = useLastValue(date);
   const close = (saved?: IsoDate) => {
     save.reset();
     onClose(saved);
@@ -62,12 +64,12 @@ export function PriceModal({
       title="Registrar preço de referência"
       pending={save.isPending}
     >
-      {date !== null && (
+      {shownDate !== null && (
         <PriceForm
           instrument={instrument}
           contracts={contracts}
           contractsStatus={contractsStatus}
-          initialDate={date}
+          initialDate={shownDate}
           save={save}
           onDone={close}
         />
