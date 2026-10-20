@@ -11,12 +11,13 @@ from uuid import UUID
 import pytest
 
 from di1.modules.pnl.public import CalculationCompleteness
-from di1.modules.portfolio.application.services.query_service import PortfolioService
-from di1.modules.portfolio.application.services.repository import (
+from di1.modules.portfolio.application.ports import (
     PublishedPortfolioDay,
     PublishedPosition,
 )
+from di1.modules.portfolio.application.services.query_service import DefaultPortfolioService
 from di1.modules.portfolio.domain.valuation import ValuationStatus
+from di1.modules.portfolio.public import PortfolioService
 from di1.modules.prices.public import PriceSource
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.shared.errors import DomainError, ErrorCode
@@ -26,7 +27,6 @@ from tests.unit.portfolio.fakes import (
     FakeAssetReader,
     FakeDateStatusReader,
     FakePriceReader,
-    FakeUnitOfWork,
     InMemoryPortfolioRepository,
     stored_cash,
 )
@@ -94,25 +94,18 @@ def prices() -> FakePriceReader:
 
 
 @pytest.fixture
-def uow() -> FakeUnitOfWork:
-    return FakeUnitOfWork()
-
-
-@pytest.fixture
 def queries(
     repository: InMemoryPortfolioRepository,
     statuses: FakeDateStatusReader,
     prices: FakePriceReader,
-    uow: FakeUnitOfWork,
 ) -> PortfolioService:
     assets = FakeAssetReader(
         (DI1F27, "DI1F27", DAY - timedelta(days=1)),  # matured yesterday
         (DI1F28, "DI1F28", date(2028, 1, 3)),
         (DI1F29, "DI1F29", date(2029, 1, 2)),
     )
-    return PortfolioService(
+    return DefaultPortfolioService(
         repository,
-        uow=uow,
         assets=assets,
         prices=prices,
         date_statuses=statuses,
@@ -126,7 +119,6 @@ class TestSummary:
         queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
         statuses: FakeDateStatusReader,
-        uow: FakeUnitOfWork,
     ) -> None:
         repository.cash[DAY] = stored_cash(
             DAY, Decimal("50000"), Decimal("-950000"), Decimal("1000000"), Decimal("0")
@@ -153,7 +145,7 @@ class TestSummary:
         assert summary.positions.cumulative_pnl == Decimal("15")
         assert summary.positions.pnl_status is COMPLETE
         assert summary.aum == Decimal("1000000")  # 50000 cash + 950000 market value, on read
-        assert statuses.seen_uows == [uow]  # read in the published rows' transaction
+        assert statuses.reads == 1  # on the published rows' session (the composition's wiring)
         assert repository.snapshots == 1  # started once, before any read
 
     async def test_a_date_never_processed_is_all_null_never_zero(
@@ -452,7 +444,10 @@ class TestReferencePriceChanged:
         assert row.reference_price_changed is False
 
     async def test_a_date_without_a_processing_time_does_not_mark_the_row(
-        self, queries: PortfolioService, prices: FakePriceReader, statuses: FakeDateStatusReader
+        self,
+        queries: PortfolioService,
+        prices: FakePriceReader,
+        statuses: FakeDateStatusReader,
     ) -> None:
         statuses.statuses.pop(DAY)
         prices.add(

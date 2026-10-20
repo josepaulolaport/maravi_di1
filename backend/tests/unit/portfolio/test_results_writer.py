@@ -11,11 +11,11 @@ from uuid import UUID
 import pytest
 
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
-from di1.modules.portfolio.application.services.repository import (
+from di1.modules.portfolio.application.ports import (
     PublishedPortfolioDay,
     PublishedPosition,
 )
-from di1.modules.portfolio.application.services.results_writer import PortfolioResultsWriter
+from di1.modules.portfolio.application.services.results_writer import DefaultResultsWriter
 from di1.modules.portfolio.domain.cash import CashDay
 from di1.modules.portfolio.domain.positions import PositionDay, PositionsDay
 from di1.modules.portfolio.domain.trade import Trade
@@ -25,7 +25,7 @@ from di1.modules.portfolio.domain.valuation import (
     ValuationStatus,
 )
 from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28
-from tests.unit.portfolio.fakes import FakeUnitOfWork, InMemoryPortfolioRepository
+from tests.unit.portfolio.fakes import InMemoryPortfolioRepository
 
 COMPLETE = CalculationCompleteness.COMPLETE
 MISSING = CalculationCompleteness.MISSING
@@ -83,19 +83,18 @@ def repository() -> InMemoryPortfolioRepository:
 
 
 @pytest.fixture
-def writer(repository: InMemoryPortfolioRepository) -> PortfolioResultsWriter:
-    return PortfolioResultsWriter(lambda uow: repository)
+def writer(repository: InMemoryPortfolioRepository) -> DefaultResultsWriter:
+    return DefaultResultsWriter(repository)
 
 
 async def test_a_positions_day_maps_onto_the_published_rows(
-    writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
+    writer: DefaultResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     await writer.write_positions_day(
         _positions(DI1F27),
         _valuation(DI1F27),
         _asset_pnl(DI1F27),
         PNL,
-        uow=FakeUnitOfWork(),
     )
 
     assert repository.positions[DAY] == (
@@ -125,14 +124,13 @@ async def test_a_positions_day_maps_onto_the_published_rows(
 
 
 async def test_a_missing_market_value_is_stored_missing(
-    writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
+    writer: DefaultResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     await writer.write_positions_day(
         _positions(DI1F27),
         _valuation(DI1F27, market_value=None),
         _asset_pnl(DI1F27),
         PNL,
-        uow=FakeUnitOfWork(),
     )
 
     assert repository.days[DAY].positions_market_value is None
@@ -140,19 +138,19 @@ async def test_a_missing_market_value_is_stored_missing(
 
 
 async def test_a_cash_day_maps_onto_its_row(
-    writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
+    writer: DefaultResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     cash = CashDay(
         DAY, Decimal("10"), Decimal("-5"), Decimal("100.25"), Decimal("0.25"), Decimal("105")
     )
 
-    await writer.write_cash_day(cash, uow=FakeUnitOfWork())
+    await writer.write_cash_day(cash)
 
     assert repository.cash[DAY] == cash
 
 
 async def test_a_day_with_no_expected_asset_writes_only_the_portfolio_row(
-    writer: PortfolioResultsWriter, repository: InMemoryPortfolioRepository
+    writer: DefaultResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     # OQ-22 item 5: every position closed earlier; market value 0, P&L 0, cumulative carried.
     carried = PortfolioPnLResult(
@@ -163,7 +161,6 @@ async def test_a_day_with_no_expected_asset_writes_only_the_portfolio_row(
         _valuation(market_value="0"),
         {},
         carried,
-        uow=FakeUnitOfWork(),
     )
 
     day = repository.days[DAY]
@@ -184,7 +181,7 @@ async def test_a_day_with_no_expected_asset_writes_only_the_portfolio_row(
     ],
 )
 async def test_the_three_inputs_must_cover_the_same_assets(
-    writer: PortfolioResultsWriter,
+    writer: DefaultResultsWriter,
     positions: tuple[UUID, ...],
     valued: tuple[UUID, ...],
     with_pnl: tuple[UUID, ...],
@@ -195,11 +192,10 @@ async def test_the_three_inputs_must_cover_the_same_assets(
             _valuation(*valued),
             _asset_pnl(*with_pnl),
             PNL,
-            uow=FakeUnitOfWork(),
         )
 
 
-async def test_the_valuation_must_be_of_the_same_date(writer: PortfolioResultsWriter) -> None:
+async def test_the_valuation_must_be_of_the_same_date(writer: DefaultResultsWriter) -> None:
     other_day = replace(_valuation(DI1F27), date=DAY.replace(day=5))
     with pytest.raises(ValueError):
         await writer.write_positions_day(
@@ -207,7 +203,6 @@ async def test_the_valuation_must_be_of_the_same_date(writer: PortfolioResultsWr
             other_day,
             _asset_pnl(DI1F27),
             PNL,
-            uow=FakeUnitOfWork(),
         )
 
 
@@ -216,7 +211,7 @@ async def test_the_valuation_must_be_of_the_same_date(writer: PortfolioResultsWr
     [(None, ValuationStatus.COMPLETE), ("0", ValuationStatus.MISSING)],
 )
 async def test_a_market_value_must_match_its_status(
-    writer: PortfolioResultsWriter, market_value: str | None, status: ValuationStatus
+    writer: DefaultResultsWriter, market_value: str | None, status: ValuationStatus
 ) -> None:
     # Unavailable data is never stored as complete, nor a figure as missing (spec §8.3).
     inconsistent = replace(
@@ -230,7 +225,6 @@ async def test_a_market_value_must_match_its_status(
             inconsistent,
             _asset_pnl(DI1F27),
             PNL,
-            uow=FakeUnitOfWork(),
         )
 
 
@@ -248,7 +242,7 @@ ZERO_PNL = PortfolioPnLResult(Decimal("0"), Decimal("0"), Decimal("0"), Decimal(
     ],
 )
 async def test_a_day_with_no_expected_asset_has_zero_value_and_zero_pnl(
-    writer: PortfolioResultsWriter, market_value: str | None, pnl: PortfolioPnLResult
+    writer: DefaultResultsWriter, market_value: str | None, pnl: PortfolioPnLResult
 ) -> None:
     # OQ-22 item 5: with no expected asset the market value is 0 and position, trades and daily
     # P&L are exactly 0 (reviewer m4); anything else cannot come from an empty day.
@@ -264,5 +258,4 @@ async def test_a_day_with_no_expected_asset_has_zero_value_and_zero_pnl(
             valuation,
             {},
             pnl,
-            uow=FakeUnitOfWork(),
         )

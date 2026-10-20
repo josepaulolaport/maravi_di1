@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
 from di1.modules.portfolio.dependencies import (
-    portfolio_query_service,
-    portfolio_reader,
-    results_writer,
+    build_portfolio_reader,
+    build_portfolio_service,
+    build_results_writer,
 )
 from di1.modules.portfolio.domain.cash import CashDay
 from di1.modules.portfolio.domain.positions import OpenPosition, PositionDay, PositionsDay
@@ -109,12 +109,11 @@ class Publisher:
             else ValuationStatus.MISSING,
         )
         async with SqlAlchemyUnitOfWork(self._session_factory) as uow:
-            await results_writer().write_positions_day(
+            await build_results_writer(uow.session).write_positions_day(
                 PositionsDay(on, tuple(p for p, _, _ in rows)),
                 valuation,
                 {p.asset_id: r for p, _, r in rows},
                 pnl,
-                uow=uow,
             )
             await uow.commit()
 
@@ -123,7 +122,7 @@ class Publisher:
             on, Decimal("0"), Decimal("0"), Decimal(balance), Decimal("0"), Decimal(balance)
         )
         async with SqlAlchemyUnitOfWork(self._session_factory) as uow:
-            await results_writer().write_cash_day(day, uow=uow)
+            await build_results_writer(uow.session).write_cash_day(day)
             await uow.commit()
 
 
@@ -433,7 +432,9 @@ async def test_a_day_with_no_expected_asset_is_published_and_read_back(
     await publish.positions(D, [], "0", _portfolio_pnl("0", "-8034.1345282660"))
 
     async with session_factory() as session:
-        previous = await portfolio_reader(session).get_previous_positions(D + timedelta(days=1))
+        previous = await build_portfolio_reader(session).get_previous_positions(
+            D + timedelta(days=1)
+        )
         assert await SqlPortfolioRepository(session).get_positions(D) == []
 
     assert previous is not None
@@ -462,7 +463,7 @@ async def test_the_previous_day_reader_carries_open_positions_and_cash(
     )
 
     async with session_factory() as session:
-        reader = portfolio_reader(session)
+        reader = build_portfolio_reader(session)
         previous = await reader.get_previous_positions(D + timedelta(days=1))
         cash = await reader.get_previous_cash(D + timedelta(days=1))
         nothing = await reader.get_previous_positions(D)
@@ -481,9 +482,8 @@ async def test_the_writer_never_commits(
 ) -> None:
     # OQ-23: Processing commits the date; leaving its Unit of Work without a commit discards it.
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        await results_writer().write_cash_day(
+        await build_results_writer(uow.session).write_cash_day(
             CashDay(D, Decimal("0"), Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1")),
-            uow=uow,
         )
 
     async with session_factory() as session:
@@ -511,7 +511,7 @@ async def _aum(
         }
     )
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        summary = await portfolio_query_service(
+        summary = await build_portfolio_service(
             uow,
             assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
@@ -527,7 +527,7 @@ async def test_a_read_keeps_one_snapshot_while_a_date_is_published(
     # Spec §13 item 12 / portfolio.public: figures and statuses come from one snapshot. A read that
     # began before Processing commits D must not see D's rows half-way through (REPEATABLE READ).
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        queries = portfolio_query_service(
+        queries = build_portfolio_service(
             uow,
             assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
@@ -541,7 +541,7 @@ async def test_a_read_keeps_one_snapshot_while_a_date_is_published(
         during = await queries.get_summary(D)
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        after = await portfolio_query_service(
+        after = await build_portfolio_service(
             uow,
             assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
@@ -574,7 +574,7 @@ async def test_a_position_closed_on_d_leaves_d_plus_one_with_no_asset(
         _portfolio_pnl("3", "3"),
     )
     async with session_factory() as session:
-        start = await portfolio_reader(session).get_previous_positions(D + timedelta(days=1))
+        start = await build_portfolio_reader(session).get_previous_positions(D + timedelta(days=1))
     assert start is not None and start.state.positions == ()
 
     next_day = D + timedelta(days=1)
@@ -617,7 +617,7 @@ async def test_case_27_the_range_sum_skips_unprocessed_and_failed_days(
     )
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        points = await portfolio_query_service(
+        points = await build_portfolio_service(
             uow,
             assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),

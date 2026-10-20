@@ -22,13 +22,13 @@ from collections.abc import Awaitable, Sequence
 
 from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.ledger.dependencies import build_ledger_reader
-from di1.modules.portfolio.dependencies import portfolio_reader, results_writer
+from di1.modules.portfolio.dependencies import build_portfolio_reader, build_results_writer
 from di1.modules.prices.dependencies import build_price_reader
 from di1.modules.processing.dependencies import (
     RUN_MESSAGE_TYPE,
     PortfolioRangeProcessor,
-    make_range_processor,
-    make_run_message_handler,
+    build_range_processor,
+    build_run_message_handler,
 )
 from di1.platform.messaging.consumer import Job
 from di1.platform.messaging.topology import QueueSpec
@@ -40,14 +40,14 @@ QUEUES: tuple[QueueSpec, ...] = (RUN_QUEUE,)
 
 
 def _processor(resources: WorkerResources) -> PortfolioRangeProcessor:
-    return make_range_processor(
+    return build_range_processor(
         uow_factory=resources.uow_factory,
         clock=resources.clock,
         ledger_reader=build_ledger_reader,
         price_reader=build_price_reader,
         asset_reader=build_asset_reader,
-        portfolio_reader=portfolio_reader,
-        writer=results_writer(),
+        portfolio_reader=build_portfolio_reader,
+        results_writer=build_results_writer,
     )
 
 
@@ -56,7 +56,7 @@ def consumers(resources: WorkerResources) -> Sequence[ConsumerRegistration]:
         ConsumerRegistration(
             queue=RUN_QUEUE,
             name=RUN_MESSAGE_TYPE,
-            handler=make_run_message_handler(_processor(resources)),
+            handler=build_run_message_handler(_processor(resources)),
         ),
     )
 

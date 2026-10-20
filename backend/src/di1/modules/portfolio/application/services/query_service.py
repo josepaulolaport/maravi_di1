@@ -12,11 +12,11 @@ registered after the date's positions chain was processed (OQ-50 item 3).
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
 from di1.modules.asset.public import AssetReader
-from di1.modules.portfolio.application.services.repository import (
+from di1.modules.portfolio.application.ports import (
     PortfolioRepository,
     PublishedPortfolioDay,
     PublishedPosition,
@@ -33,32 +33,31 @@ from di1.modules.portfolio.public import (
 )
 from di1.modules.prices.public import PriceReader, PriceSource
 from di1.modules.processing.public import ChainStatus, DateStatus, DateStatusReader
-from di1.platform.database.unit_of_work import UnitOfWork
+from di1.shared.calendar import ONE_DAY
 from di1.shared.clock import Clock
-from di1.shared.decimals import financial_context
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail, range_too_long
-
-ZERO = Decimal("0")
-PROCESSED = frozenset({ChainStatus.PROCESSED, ChainStatus.PROCESSED_WITH_ISSUES})
-"""The chain statuses whose published figures a read shows and combines: AUM (OQ-38, OQ-40)
-and a P&L point's daily figures (OQ-41 item 4)."""
+from di1.shared.decimals import ZERO, financial_context
+from di1.shared.errors import DomainError, ErrorDetail, future_date, invalid_range, range_too_long
 
 
-class PortfolioService:
-    """Public `PortfolioService` on one Unit of Work."""
+def _processed(status: ChainStatus | None) -> bool:
+    """Whether a chain's published figures of the date are shown and combined: AUM (OQ-38,
+    OQ-40) and a P&L point's daily figures (OQ-41 item 4)."""
+    return status is not None and status.is_processed
+
+
+class DefaultPortfolioService:
+    """Public `PortfolioService` on one Unit of Work's session (every reader on it)."""
 
     def __init__(
         self,
         repository: PortfolioRepository,
         *,
-        uow: UnitOfWork,
         assets: AssetReader,
         prices: PriceReader,
         date_statuses: DateStatusReader,
         clock: Clock,
     ) -> None:
         self._repository = repository
-        self._uow = uow
         self._assets = assets
         self._prices = prices
         self._date_statuses = date_statuses
@@ -102,7 +101,7 @@ class PortfolioService:
         published = await self._repository.get_positions(on)
         asset_ids = [p.asset_id for p in published]
         instruments = await self._assets.get_instruments(asset_ids)
-        before = on - timedelta(days=1)
+        before = on - ONE_DAY
         prices = await self._prices.get(asset_ids, [before, on]) if asset_ids else {}
         processed_at = None if status is None else status.portfolio_processed_at
         # Q[D−1] per asset, from D−1's published rows (none: zero state or a first trade on D).
@@ -136,34 +135,28 @@ class PortfolioService:
         )
 
     async def get_pnl_series(self, start_date: date, end_date: date) -> tuple[PnLPointView, ...]:
-        errors = []
+        errors: list[ErrorDetail] = []
         if start_date > end_date:
-            errors.append(
-                ErrorDetail(
-                    ErrorCode.INVALID_RANGE,
-                    "A data inicial deve ser anterior ou igual à data final.",
-                    "start_date",
-                )
-            )
+            errors.append(invalid_range())
         elif (too_long := range_too_long(start_date, end_date)) is not None:
             errors.append(too_long)
         if end_date > self._clock.today():
-            errors.append(_future_date("end_date"))
+            errors.append(future_date("end_date"))
         if errors:
             raise DomainError(*errors)
         await self._snapshot()
-        statuses = await self._date_statuses.get_date_statuses(start_date, end_date, uow=self._uow)
+        statuses = await self._date_statuses.get_date_statuses(start_date, end_date)
         days = {d.date: d for d in await self._repository.get_portfolio_days(start_date, end_date)}
         points: list[PnLPointView] = []
         running = ZERO
         for offset in range((end_date - start_date).days + 1):
-            current = start_date + timedelta(days=offset)
+            current = start_date + offset * ONE_DAY
             status = statuses.get(current)
             chain = None if status is None else status.portfolio
             # A date's figures show and count only when its positions chain is processed (OQ-23,
             # OQ-41 item 4): not processed, FAILED or RUNNING show no P&L and add 0, whatever
             # older rows remain.
-            day = days.get(current) if chain in PROCESSED else None
+            day = days.get(current) if _processed(chain) else None
             if day is not None and day.daily_pnl is not None:
                 with financial_context():
                     running = running + day.daily_pnl  # a gap or a null daily adds 0 (OQ-41)
@@ -180,7 +173,7 @@ class PortfolioService:
     def _reject_future(self, on: date, field: str) -> None:
         """A read dated after today in São Paulo is refused (OQ-35)."""
         if on > self._clock.today():
-            raise DomainError(_future_date(field))
+            raise DomainError(future_date(field))
 
     async def _snapshot(self) -> None:
         """Every read of this Unit of Work, the statuses included, sees one snapshot."""
@@ -189,7 +182,7 @@ class PortfolioService:
             self._snapshot_started = True
 
     async def _status(self, on: date) -> DateStatus | None:
-        return (await self._date_statuses.get_date_statuses(on, on, uow=self._uow)).get(on)
+        return (await self._date_statuses.get_date_statuses(on, on)).get(on)
 
 
 def _aum(
@@ -199,16 +192,12 @@ def _aum(
     OQ-28). It follows both chains' statuses on the date, whichever run wrote them (OQ-38,
     OQ-40): null unless both are PROCESSED or PROCESSED_WITH_ISSUES, and null when either side
     is missing, an expected asset without a price included (OQ-10)."""
-    if status is None or status.cash not in PROCESSED or status.portfolio not in PROCESSED:
+    if status is None or not (_processed(status.cash) and _processed(status.portfolio)):
         return None
     if cash is None or day is None or day.positions_market_value is None:
         return None
     with financial_context():
         return cash.cash_balance + day.positions_market_value
-
-
-def _future_date(field: str) -> ErrorDetail:
-    return ErrorDetail(ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", field)
 
 
 def _row(

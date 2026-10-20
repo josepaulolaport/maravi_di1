@@ -13,7 +13,7 @@ from uuid import UUID
 
 import pytest
 
-from di1.modules.pnl.domain.portfolio_pnl import PortfolioPnLCalculator
+from di1.modules.pnl.domain.portfolio_pnl import aggregate_pnl
 from di1.modules.pnl.domain.results import (
     AssetPnLResult,
     CalculationCompleteness,
@@ -51,7 +51,7 @@ def aggregate(
     results: Mapping[UUID, AssetPnLResult],
     previous_cumulative: str | None,
 ) -> PortfolioPnLResult:
-    return PortfolioPnLCalculator().aggregate(
+    return aggregate_pnl(
         expected_assets=expected,
         asset_results=results,
         previous_cumulative=None if previous_cumulative is None else D(previous_cumulative),

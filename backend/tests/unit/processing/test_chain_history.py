@@ -8,8 +8,8 @@ from decimal import Decimal
 from uuid import uuid4
 
 from di1.modules.ledger.public import EntryType, LedgerEntry
-from di1.modules.processing.application.interfaces.repositories import ProcessingChain
-from di1.modules.processing.application.services.chain_history import ChainHistory
+from di1.modules.processing.application.services.chain_history import LedgerChainHistory
+from di1.modules.processing.domain.date_status import Chain
 from di1.shared.clock import SAO_PAULO
 from di1.shared.input_kind import InputKind
 
@@ -74,26 +74,26 @@ def _deposit(day: date) -> LedgerEntry:
 
 
 async def test_oq26_a_deposit_ends_only_the_cash_zero_state() -> None:
-    history = ChainHistory(FakeLedger(cash=[_deposit(date(2026, 10, 5))]))
+    history = LedgerChainHistory(FakeLedger(cash=[_deposit(date(2026, 10, 5))]))
 
-    assert await history.has_entries_on_or_before(ProcessingChain.CASH, date(2026, 10, 5))
-    assert not await history.has_entries_on_or_before(ProcessingChain.CASH, date(2026, 10, 4))
-    assert not await history.has_entries_on_or_before(ProcessingChain.POSITIONS, date(2026, 10, 30))
+    assert await history.has_entries_on_or_before(Chain.CASH, date(2026, 10, 5))
+    assert not await history.has_entries_on_or_before(Chain.CASH, date(2026, 10, 4))
+    assert not await history.has_entries_on_or_before(Chain.POSITIONS, date(2026, 10, 30))
 
 
 async def test_oq26_a_trade_ends_the_zero_state_of_both_chains() -> None:
-    history = ChainHistory(FakeLedger(trades=[_trade(date(2026, 10, 5))]))
+    history = LedgerChainHistory(FakeLedger(trades=[_trade(date(2026, 10, 5))]))
 
-    for chain in ProcessingChain:
+    for chain in Chain:
         assert await history.has_entries_on_or_before(chain, date(2026, 10, 5))
         assert not await history.has_entries_on_or_before(chain, date(2026, 10, 4))
 
 
 async def test_oq37_positions_ask_for_trades_and_cash_for_any_entry() -> None:
     ledger = FakeLedger()
-    history = ChainHistory(ledger)
+    history = LedgerChainHistory(ledger)
 
-    await history.has_entries_on_or_before(ProcessingChain.POSITIONS, date(2026, 10, 4))
-    await history.has_entries_on_or_before(ProcessingChain.CASH, date(2026, 10, 4))
+    await history.has_entries_on_or_before(Chain.POSITIONS, date(2026, 10, 4))
+    await history.has_entries_on_or_before(Chain.CASH, date(2026, 10, 4))
 
     assert ledger.asked == [(date(2026, 10, 4), EntryType.TRADE), (date(2026, 10, 4), None)]

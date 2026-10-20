@@ -7,7 +7,7 @@ from datetime import date
 
 import pytest
 
-from di1.modules.portfolio.domain.errors import AccountingError
+from di1.modules.portfolio.domain.errors import PortfolioError
 from tests.unit.portfolio.factories import trade
 
 
@@ -35,5 +35,5 @@ def test_a_trade_is_immutable() -> None:
 
 def test_a_zero_quantity_trade_is_rejected() -> None:
     # Schema CHECK trades_qty_nonzero (OQ-14).
-    with pytest.raises(AccountingError):
+    with pytest.raises(PortfolioError):
         trade(0, "95000")

@@ -12,17 +12,16 @@ from decimal import Decimal
 import pytest
 
 from di1.modules.portfolio.domain.average_cost import next_average
-from di1.modules.portfolio.domain.errors import AccountingError
+from di1.modules.portfolio.domain.errors import PortfolioError
 from di1.modules.portfolio.domain.positions import (
     OpenPosition,
     PositionDay,
-    PositionsEngine,
     PositionState,
+    calculate_positions_day,
 )
 from di1.modules.portfolio.domain.trade import Trade
 from tests.unit.portfolio.factories import DAY, position, trade
 
-POSITIONS = PositionsEngine()
 YESTERDAY = DAY - timedelta(days=1)
 
 
@@ -31,7 +30,7 @@ def _state(*positions: OpenPosition) -> PositionState:
 
 
 def _only_position(state: PositionState, *trades: Trade) -> PositionDay:
-    day = POSITIONS.calculate_day(state, trades, DAY)
+    day = calculate_positions_day(state, trades, DAY)
     assert len(day.positions) == 1
     return day.positions[0]
 
@@ -123,5 +122,5 @@ def test_a_partial_cover_of_a_short_keeps_the_average() -> None:
 
 def test_an_open_quantity_without_an_average_is_rejected() -> None:
     # A held position always carries an average; a missing one is a broken state, not an opening.
-    with pytest.raises(AccountingError):
+    with pytest.raises(PortfolioError):
         next_average(5, None, 1, Decimal("95000"))

@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
-from di1.modules.processing.infrastructure.persistence.errors import is_transient
+from di1.platform.database.errors import is_transient
 
 
 def _dbapi(kind: type[DBAPIError], *, invalidated: bool = False) -> DBAPIError:

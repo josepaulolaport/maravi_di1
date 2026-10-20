@@ -1,46 +1,36 @@
-"""Reads the facts of the predecessor rule (`domain.predecessor`) for the preview and the run,
-only those the rule asks for, in its order."""
+"""The predecessor rule, per day (interfaces.md "Predecessor rule, per day"; OQ-26 item 8,
+OQ-31 item 4, OQ-37 item 4, OQ-40 item 5): the one copy the preview and the run share."""
 
 from __future__ import annotations
 
 from datetime import date
 
-from di1.modules.processing.application.interfaces.repositories import (
-    ChainHistory,
-    DateStatusRepository,
-    ProcessingChain,
-)
-from di1.modules.processing.domain.predecessor import (
-    PredecessorFact,
-    PredecessorState,
-    predecessor_state,
-)
-from di1.modules.processing.public import ChainStatus
-from di1.platform.database.unit_of_work import UnitOfWork
+from di1.modules.processing.application.ports import ChainHistory, DateStatusRepository
+from di1.modules.processing.domain.date_status import Chain, ChainStatus
+from di1.modules.processing.domain.predecessor import PredecessorState
 
 
 async def read_predecessor(
-    chain: ProcessingChain,
+    chain: Chain,
     day_before: date,
-    recorded: ChainStatus | None,
+    stored: ChainStatus | None,
     *,
     date_statuses: DateStatusRepository,
     history: ChainHistory,
-    uow: UnitOfWork,
 ) -> PredecessorState:
-    """The state of ``day_before`` for ``chain``, given its status there (``None`` without
-    one)."""
-    has_earlier_status: bool | None = None
-    has_chain_entries: bool | None = None
-    while True:
-        state = predecessor_state(
-            PredecessorState(recorded.value) if recorded is not None else None,
-            has_earlier_status=has_earlier_status,
-            has_chain_entries=has_chain_entries,
-        )
-        if state is PredecessorFact.EARLIER_STATUS:
-            has_earlier_status = await date_statuses.has_status_before(chain, day_before, uow=uow)
-        elif state is PredecessorFact.CHAIN_ENTRIES:
-            has_chain_entries = await history.has_entries_on_or_before(chain, day_before)
-        else:
-            return state
+    """The state of ``day_before`` for ``chain``, given its stored status there (``None``
+    without one). Lazy: each fact is read only when the rule needs it, in this order.
+
+    1. A status stored on D−1 is the state, whatever it is (a FAILED D−1 fails D).
+    2. Otherwise a status on an earlier date makes D−1 a gap: NOT_PROCESSED, and the Ledger is
+       not asked (OQ-37 item 4).
+    3. Otherwise an entry of the chain on or before D−1 means it was never processed:
+       NOT_PROCESSED; with none, the chain is in its ZERO_STATE.
+    """
+    if stored is not None:
+        return PredecessorState(stored.value)
+    if await date_statuses.has_status_before(chain, day_before):
+        return PredecessorState.NOT_PROCESSED
+    if await history.has_entries_on_or_before(chain, day_before):
+        return PredecessorState.NOT_PROCESSED
+    return PredecessorState.ZERO_STATE

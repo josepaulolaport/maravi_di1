@@ -10,17 +10,16 @@ from decimal import Decimal
 
 import pytest
 
-from di1.modules.portfolio.domain.errors import AccountingError
+from di1.modules.portfolio.domain.errors import PortfolioError
 from di1.modules.portfolio.domain.positions import (
     OpenPosition,
     PositionDay,
-    PositionsEngine,
     PositionState,
+    calculate_positions_day,
 )
 from di1.modules.portfolio.domain.trade import Trade
 from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28, DI1F29, position, trade
 
-POSITIONS = PositionsEngine()
 YESTERDAY = DAY - timedelta(days=1)
 
 
@@ -29,7 +28,7 @@ def _state(*positions: OpenPosition) -> PositionState:
 
 
 def _only_position(state: PositionState, *trades: Trade) -> PositionDay:
-    day = POSITIONS.calculate_day(state, trades, DAY)
+    day = calculate_positions_day(state, trades, DAY)
     assert len(day.positions) == 1
     return day.positions[0]
 
@@ -86,7 +85,7 @@ def test_expected_assets_are_those_held_yesterday_or_traded_today() -> None:
     # DI1F27 held, not traded; DI1F28 opened today; DI1F29 closed before yesterday (absent).
     state = _state(position(3, "95000", "0.1"))
 
-    day = POSITIONS.calculate_day(state, [trade(1, "91000", asset_id=DI1F28)], DAY)
+    day = calculate_positions_day(state, [trade(1, "91000", asset_id=DI1F28)], DAY)
 
     assert [p.asset_id for p in day.positions] == [DI1F27, DI1F28]
     assert DI1F29 not in {p.asset_id for p in day.positions}
@@ -95,8 +94,8 @@ def test_expected_assets_are_those_held_yesterday_or_traded_today() -> None:
 def test_a_position_closed_today_keeps_its_row_today_and_leaves_tomorrow() -> None:
     state = _state(position(3, "95000", "0.1"))
 
-    today = POSITIONS.calculate_day(state, [trade(-3, "96000")], DAY)
-    tomorrow = POSITIONS.calculate_day(today.closing_state(), [], DAY + timedelta(days=1))
+    today = calculate_positions_day(state, [trade(-3, "96000")], DAY)
+    tomorrow = calculate_positions_day(today.closing_state(), [], DAY + timedelta(days=1))
 
     assert [(p.asset_id, p.quantity) for p in today.positions] == [(DI1F27, 0)]
     assert today.closing_state().positions == ()
@@ -104,7 +103,7 @@ def test_a_position_closed_today_keeps_its_row_today_and_leaves_tomorrow() -> No
 
 
 def test_positions_are_listed_in_asset_id_order() -> None:
-    day = POSITIONS.calculate_day(
+    day = calculate_positions_day(
         PositionState.zero(YESTERDAY),
         [
             trade(1, "90000", asset_id=DI1F29, seq=1),
@@ -118,7 +117,7 @@ def test_positions_are_listed_in_asset_id_order() -> None:
 
 
 def test_trades_of_different_assets_do_not_mix_averages() -> None:
-    day = POSITIONS.calculate_day(
+    day = calculate_positions_day(
         PositionState.zero(YESTERDAY),
         [trade(1, "90000", asset_id=DI1F28, seq=1), trade(1, "95000", asset_id=DI1F27, seq=2)],
         DAY,
@@ -129,10 +128,10 @@ def test_trades_of_different_assets_do_not_mix_averages() -> None:
 
 def test_a_flat_position_is_never_carried() -> None:
     # The next day's state holds open positions only; flat assets are not expected (OQ-10).
-    with pytest.raises(AccountingError):
+    with pytest.raises(PortfolioError):
         position(0, "95000", "0.1")
 
 
 def test_a_state_holding_the_same_asset_twice_is_rejected() -> None:
-    with pytest.raises(AccountingError):
+    with pytest.raises(PortfolioError):
         _state(position(1, "95000", "0.1"), position(2, "95000", "0.1"))

@@ -1,4 +1,4 @@
-"""Which database errors are transient: those a retry, or the worker's restart, can clear."""
+"""Which database errors are transient: those a retry, or a worker's restart, can clear."""
 
 from __future__ import annotations
 

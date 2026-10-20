@@ -13,11 +13,9 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from di1.modules.portfolio.domain.errors import AccountingError, require_next_day
+from di1.modules.portfolio.domain.errors import PortfolioError, require_next_day
 from di1.modules.portfolio.domain.trade import Trade, day_trades
-from di1.shared.decimals import financial_context
-
-ZERO = Decimal("0")
+from di1.shared.decimals import ZERO, financial_context, unsigned
 
 
 @dataclass(frozen=True)
@@ -48,35 +46,30 @@ class CashDay:
         return CashBalance(as_of=self.date, balance=self.cash_balance)
 
 
-class CashCalculator:
-    """The cash chain, callable on its own (Processing may run cash without positions)."""
-
-    def calculate_day(
-        self,
-        previous_balance: CashBalance,
-        trades: Sequence[Trade],
-        deposits: Decimal,
-        withdrawals: Decimal,
-        date: date,
-    ) -> CashDay:
-        """``deposits`` and ``withdrawals`` are the day's totals, ``0`` when there are none."""
-        require_next_day(previous_balance.as_of, date)
-        ordered = day_trades(trades, date)
-        if deposits < 0 or withdrawals < 0:
-            raise AccountingError("deposit and withdrawal totals cannot be negative")
-        # A "-0" total passes the check above; store it unsigned so it never serializes as "-0".
-        deposits, withdrawals = deposits.copy_abs(), withdrawals.copy_abs()
-        with financial_context():
-            # 0 − Σ rather than −Σ: an empty day must not yield a negative zero.
-            trades_cash_flow = ZERO - sum(
-                (t.signed_quantity * t.execution_pu for t in ordered), ZERO
-            )
-            cash_balance = previous_balance.balance + trades_cash_flow + deposits - withdrawals
-        return CashDay(
-            date=date,
-            previous_cash_balance=previous_balance.balance,
-            trades_cash_flow=trades_cash_flow,
-            deposits=deposits,
-            withdrawals=withdrawals,
-            cash_balance=cash_balance,
-        )
+def calculate_cash_day(
+    previous_balance: CashBalance,
+    trades: Sequence[Trade],
+    deposits: Decimal,
+    withdrawals: Decimal,
+    date: date,
+) -> CashDay:
+    """One day of the cash chain, callable on its own (Processing may run cash without
+    positions). ``deposits`` and ``withdrawals`` are the day's totals, ``0`` when there are none."""
+    require_next_day(previous_balance.as_of, date)
+    ordered = day_trades(trades, date)
+    if deposits < 0 or withdrawals < 0:
+        raise PortfolioError("deposit and withdrawal totals cannot be negative")
+    # A "-0" total passes the check above; store it unsigned so it never serializes as "-0".
+    deposits, withdrawals = unsigned(deposits), unsigned(withdrawals)
+    with financial_context():
+        # 0 − Σ rather than −Σ: an empty day must not yield a negative zero.
+        trades_cash_flow = ZERO - sum((t.signed_quantity * t.execution_pu for t in ordered), ZERO)
+        cash_balance = previous_balance.balance + trades_cash_flow + deposits - withdrawals
+    return CashDay(
+        date=date,
+        previous_cash_balance=previous_balance.balance,
+        trades_cash_flow=trades_cash_flow,
+        deposits=deposits,
+        withdrawals=withdrawals,
+        cash_balance=cash_balance,
+    )
