@@ -4,8 +4,8 @@
     positions_market_value[D]  = Σ financial_total[a, D]
 
 Pure: it takes the day's closing quantities, the exact-date reference PUs chosen by the caller and
-the maturities. AUM = cash + market value is not computed here: the repository recomputes it from
-both published chains of the date (OQ-21, OQ-38).
+the maturities. AUM = cash + market value is not computed here: ``PortfolioService`` computes it
+on read from both published chains of the date (OQ-21, OQ-38, OQ-50 item 1).
 A missing required price leaves the dependent figures null, never zero: the portfolio total is
 not complete if any expected asset is missing. A flat position is worth zero without a price.
 After maturity the reference PU is 0 by definition and no price is accepted (OQ-1). The

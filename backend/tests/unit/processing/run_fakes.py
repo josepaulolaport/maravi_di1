@@ -188,13 +188,11 @@ class PositionsWrite:
     valuation: PortfolioValuation
     asset_pnl: Mapping[UUID, AssetPnLResult]
     pnl: PortfolioPnLResult
-    other_chain_processed: bool
 
 
 @dataclass(frozen=True)
 class CashWrite:
     day: CashDay
-    other_chain_processed: bool
 
 
 @dataclass
@@ -210,14 +208,11 @@ class RecordingWriter:
         pnl: PortfolioPnLResult,
         *,
         uow: UnitOfWork,
-        other_chain_processed: bool,
     ) -> None:
-        self.positions.append(PositionsWrite(day, valuation, asset_pnl, pnl, other_chain_processed))
+        self.positions.append(PositionsWrite(day, valuation, asset_pnl, pnl))
 
-    async def write_cash_day(
-        self, day: CashDay, *, uow: UnitOfWork, other_chain_processed: bool
-    ) -> None:
-        self.cash.append(CashWrite(day, other_chain_processed))
+    async def write_cash_day(self, day: CashDay, *, uow: UnitOfWork) -> None:
+        self.cash.append(CashWrite(day))
 
 
 @dataclass

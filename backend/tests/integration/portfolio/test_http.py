@@ -85,6 +85,7 @@ GOLDEN_ROW_OCT_14 = {
     "reference_source": "MANUAL",
     "reference_pu": "89006.4625467350",
     "reference_rate": "0.10",
+    "reference_price_changed": False,
     "financial_total": "890064.6254673500",
     "position_pnl": "0",
     "trades_pnl": "0.0000000000",
@@ -142,7 +143,6 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                     COMPLETE,
                 ),
                 uow=uow,
-                other_chain_processed=False,
             )
             await writer.write_cash_day(
                 CashDay(
@@ -154,7 +154,6 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                     Decimal("609935.3745326500"),
                 ),
                 uow=uow,
-                other_chain_processed=True,
             )
             await uow.commit()
         async with SqlAlchemyUnitOfWork(factory) as uow:
@@ -222,7 +221,6 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                     COMPLETE,
                 ),
                 uow=uow,
-                other_chain_processed=False,
             )
             await uow.commit()
     finally:
@@ -348,6 +346,7 @@ def test_the_15_10_table_matches_the_fixture(client: TestClient) -> None:
             "reference_source": "B3",
             "reference_pu": "89128.4824345118",
             "reference_rate": "0.0990",
+            "reference_price_changed": False,
             "financial_total": "891284.8243451180",
             "position_pnl": "1220.1988777680",
             "trades_pnl": "0",
@@ -364,6 +363,7 @@ def test_the_15_10_table_matches_the_fixture(client: TestClient) -> None:
             "reference_source": "MANUAL",
             "reference_pu": "80206.1333187932",
             "reference_rate": "0.1045",
+            "reference_price_changed": False,
             "financial_total": "401030.6665939660",
             "position_pnl": "0",
             "trades_pnl": "-9254.3334060340",

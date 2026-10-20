@@ -171,7 +171,6 @@ class _Published:
     positions: dict[date, _PositionsWrite] = field(default_factory=dict)
     cash: dict[date, CashDay] = field(default_factory=dict)
     issues: dict[date, list[IssueRecord]] = field(default_factory=dict)
-    aum: dict[date, Decimal | None] = field(default_factory=dict)
 
     async def write_positions_day(
         self,
@@ -181,16 +180,11 @@ class _Published:
         pnl: PortfolioPnLResult,
         *,
         uow: object,
-        other_chain_processed: bool,
     ) -> None:
         self.positions[day.date] = _PositionsWrite(day, valuation, asset_pnl, pnl)
-        self._recompute_aum(day.date, other_chain_processed)
 
-    async def write_cash_day(
-        self, day: CashDay, *, uow: object, other_chain_processed: bool
-    ) -> None:
+    async def write_cash_day(self, day: CashDay, *, uow: object) -> None:
         self.cash[day.date] = day
-        self._recompute_aum(day.date, other_chain_processed)
 
     async def get_previous_positions(self, before_date: date) -> PreviousPositionsDay | None:
         written = self.positions.get(before_date - ONE_DAY)
@@ -212,18 +206,18 @@ class _Published:
             asset_pnl=written.asset_pnl,
             pnl=written.pnl,
             issues=tuple(self.issues[day]),
-            aum=self.aum[day],
+            aum=self._aum(day),
         )
 
-    def _recompute_aum(self, on: date, other_chain_processed: bool) -> None:
+    def _aum(self, on: date) -> Decimal | None:
+        """As the Carteira reads it (OQ-21, OQ-38): the date's cash plus its market value, null
+        when either chain is not published on the date or the market value is missing."""
         cash = self.cash.get(on)
-        positions = self.positions.get(on)
-        market_value = None if positions is None else positions.valuation.positions_market_value
-        if not other_chain_processed or cash is None or market_value is None:
-            self.aum[on] = None
-            return
+        market_value = self.positions[on].valuation.positions_market_value
+        if cash is None or market_value is None:
+            return None
         with financial_context():
-            self.aum[on] = cash.cash_balance + market_value
+            return cash.cash_balance + market_value
 
 
 def _publish(
@@ -252,7 +246,6 @@ def _publish(
                     readers=readers,
                     writer=published,
                     uow=FakeUnitOfWork(),
-                    other_chain_processed=False,  # ALL writes positions first (OQ-21)
                 )
             if cash:
                 await process_cash_day(
@@ -261,7 +254,6 @@ def _publish(
                     readers=readers,
                     writer=published,
                     uow=FakeUnitOfWork(),
-                    other_chain_processed=positions,
                 )
 
     asyncio.run(every_day())

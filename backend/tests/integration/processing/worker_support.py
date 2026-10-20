@@ -61,7 +61,7 @@ Hook = Callable[[str, date], Awaitable[None]]
 
 @dataclass
 class TableWriter:
-    """Writes ``(day, chain, other_chain_processed)`` into ``public.test_writes`` on the
+    """Writes ``(day, chain)`` into ``public.test_writes`` on the
     caller's Unit of Work, then runs ``hook`` (which may raise to simulate a failure)."""
 
     world: World
@@ -76,23 +76,20 @@ class TableWriter:
         pnl: PortfolioPnLResult,
         *,
         uow: UnitOfWork,
-        other_chain_processed: bool,
     ) -> None:
-        await self._write("POSITIONS", day.date, other_chain_processed, uow)
+        await self._write("POSITIONS", day.date, uow)
         self.world.portfolio.positions[day.date] = PreviousPositionsDay(
             day.closing_state(), pnl.cumulative_pnl
         )
 
-    async def write_cash_day(
-        self, day: CashDay, *, uow: UnitOfWork, other_chain_processed: bool
-    ) -> None:
-        await self._write("CASH", day.date, other_chain_processed, uow)
+    async def write_cash_day(self, day: CashDay, *, uow: UnitOfWork) -> None:
+        await self._write("CASH", day.date, uow)
         self.world.portfolio.cash[day.date] = day.closing_balance()
 
-    async def _write(self, chain: str, day: date, other: bool, uow: UnitOfWork) -> None:
+    async def _write(self, chain: str, day: date, uow: UnitOfWork) -> None:
         await uow.session.execute(
-            text("INSERT INTO public.test_writes (day, chain, other) VALUES (:d, :c, :o)"),
-            {"d": day, "c": chain, "o": other},
+            text("INSERT INTO public.test_writes (day, chain) VALUES (:d, :c)"),
+            {"d": day, "c": chain},
         )
         if self.hook is not None:
             await self.hook(chain, day)
@@ -162,9 +159,7 @@ class Worker:
 
     async def setup(self) -> None:
         async with self.engine.begin() as connection:
-            await connection.execute(
-                text("CREATE TABLE public.test_writes (day DATE, chain TEXT, other BOOLEAN)")
-            )
+            await connection.execute(text("CREATE TABLE public.test_writes (day DATE, chain TEXT)"))
 
     async def enqueue(self, scope: str, start: date, end: date) -> UUID:
         """Queues a request through `ProcessingService`, which rings the doorbell (OQ-46)."""
@@ -218,12 +213,12 @@ class Worker:
             result = await connection.execute(text("SELECT * FROM processing.date_status"))
             return {row.date: dict(row._mapping) for row in result}
 
-    async def writes(self) -> list[tuple[date, str, bool]]:
+    async def writes(self) -> list[tuple[date, str]]:
         async with self.engine.connect() as connection:
             result = await connection.execute(
-                text("SELECT day, chain, other FROM public.test_writes ORDER BY day, chain")
+                text("SELECT day, chain FROM public.test_writes ORDER BY day, chain")
             )
-            return [(row[0], row[1], row[2]) for row in result]
+            return [(row[0], row[1]) for row in result]
 
     async def outbox(self) -> list[tuple[str, dict[str, Any]]]:
         async with self.engine.connect() as connection:

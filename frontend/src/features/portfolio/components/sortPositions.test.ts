@@ -13,6 +13,7 @@ function row(assetCode: string, patch: Partial<PositionRow> = {}): PositionRow {
     reference_source: 'MANUAL',
     reference_pu: '100.00',
     reference_rate: '0.100000000000',
+    reference_price_changed: false,
     financial_total: '100.00',
     position_pnl: '0.00',
     trades_pnl: '0.00',
