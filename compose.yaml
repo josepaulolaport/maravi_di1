@@ -132,9 +132,9 @@ services:
     restart: unless-stopped
 
   # Demo data (scripts/seed_demo.py): two weeks of DI1 contracts, ledger entries and reference
-  # prices, dated relative to the first `up`, written through the API once it is healthy. On a
-  # non-empty ledger it adds nothing and exits 0, so later `up`s are no-ops; it queues no
-  # processing. DI1_DEMO=0 turns it off (make e2e does, to keep its ledger empty).
+  # prices, dated relative to the first `up`, written through the API once it is healthy. Once
+  # its last price is there it adds nothing and exits 0, so later `up`s are no-ops; a run that
+  # stopped part-way exits 1 and asks for `down -v`. It queues no processing. DI1_DEMO=0 turns it off (make e2e does, to keep its ledger empty).
   demo:
     <<: *backend
     command: ["python", "/demo/seed_demo.py", "--api", "http://api:8000"]

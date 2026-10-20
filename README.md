@@ -123,8 +123,9 @@ automated acceptance tests with a fixed clock (`backend/tests/acceptance/`,
 `docker compose up` loads two weeks of demo history: after the API is healthy, the one-shot `demo`
 service runs `scripts/seed_demo.py`, which writes through the HTTP API (so every validation and
 pricing rule applies). The dates are relative to the **first** `up`: data written on day X is dated
-X − 14 to X (São Paulo). Every later `up` finds a non-empty ledger and adds nothing ("already
-loaded"); `docker compose down -v` and `up` load a fresh copy dated from that day. `DI1_DEMO=0`
+X − 14 to X (São Paulo). Every later `up` finds the demo's last price and adds nothing ("already
+loaded"); a run that stopped part-way makes the `demo` service exit 1 ("incomplete") instead.
+`docker compose down -v` and `up` load a fresh copy dated from that day. `DI1_DEMO=0`
 turns it off (`make e2e` does, to keep its ledger empty).
 
 - Three contracts: the January DI1 of each of the next three years (DI1F27, DI1F28 and DI1F29 when
