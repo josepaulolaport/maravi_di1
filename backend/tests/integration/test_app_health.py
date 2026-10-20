@@ -39,12 +39,12 @@ def test_health_is_ok_when_the_database_answers(settings: Settings) -> None:
 def test_the_app_configures_logging_when_it_starts(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("LOG_LEVEL", "warning")
+    """``LOG_LEVEL`` is read with the other settings: the app's `Settings`."""
     root = logging.getLogger()
     monkeypatch.setattr(root, "handlers", list(root.handlers))
     monkeypatch.setattr(root, "level", root.level)
 
-    with TestClient(create_app(settings)):
+    with TestClient(create_app(settings.model_copy(update={"log_level": "WARNING"}))):
         names = [handler.get_name() for handler in root.handlers]
 
     assert (names.count("di1"), root.level) == (1, logging.WARNING)

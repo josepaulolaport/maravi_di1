@@ -15,7 +15,7 @@ from alembic.config import Config
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from di1.platform.config import BrokerSettings, Settings
+from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.messaging.connection import connect
@@ -62,7 +62,7 @@ def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
 
 
 @pytest.fixture
-def broker_settings() -> BrokerSettings:
+def broker_url() -> SecretStr:
     """``TEST_RABBITMQ_URL`` is a test broker (``amqp://guest:guest@127.0.0.1:5672/``). Without
     it the broker tests are skipped and reported, so **not verified**; with
     ``REQUIRE_BROKER_TESTS=1`` a missing variable fails the run instead."""
@@ -71,10 +71,7 @@ def broker_settings() -> BrokerSettings:
         if os.environ.get("REQUIRE_BROKER_TESTS") == "1":
             pytest.fail("REQUIRE_BROKER_TESTS=1 but TEST_RABBITMQ_URL is not set")
         pytest.skip("TEST_RABBITMQ_URL is not set: broker tests not run")
-    return BrokerSettings(
-        rabbitmq_url=SecretStr(url),
-        rabbitmq_publish_timeout_seconds=5,
-    )
+    return SecretStr(url)
 
 
 @pytest.fixture
@@ -98,9 +95,9 @@ def topology() -> Topology:
 
 @pytest.fixture
 async def broker(
-    broker_settings: BrokerSettings, topology: Topology
+    broker_url: SecretStr, topology: Topology
 ) -> AsyncIterator[AbstractRobustConnection]:
-    connection = await connect(broker_settings, connection_name=f"{topology.exchange}.test")
+    connection = await connect(broker_url, connection_name=f"{topology.exchange}.test")
     try:
         yield connection
     finally:

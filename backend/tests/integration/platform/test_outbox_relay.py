@@ -15,10 +15,10 @@ from datetime import timedelta
 
 import pytest
 from aio_pika.abc import AbstractQueue, AbstractRobustConnection
+from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from di1.platform.config import BrokerSettings
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, unit_of_work_factory
 from di1.platform.messaging.envelope import Envelope
 from di1.platform.messaging.outbox import OutboxRetention, add_outbox_message
@@ -26,7 +26,7 @@ from di1.platform.messaging.outbox_relay import OutboxRelay
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import Topology, declare_queue
 from tests.integration.platform.conftest import queue_spec
-from tests.integration.platform.support import eventually
+from tests.integration.platform.support import PUBLISH_TIMEOUT_SECONDS, eventually
 
 
 class _CrashError(BaseException):
@@ -77,7 +77,7 @@ async def _drain(queue: AbstractQueue) -> list[Envelope]:
 
 @pytest.fixture
 async def queue(
-    broker: AbstractRobustConnection, broker_settings: BrokerSettings, topology: Topology
+    broker: AbstractRobustConnection, broker_url: SecretStr, topology: Topology
 ) -> AbstractQueue:
     channel = await broker.channel()
     return await declare_queue(channel, topology, queue_spec(topology, "test.command"))
@@ -85,9 +85,11 @@ async def queue(
 
 @pytest.fixture
 async def publisher(
-    broker: AbstractRobustConnection, broker_settings: BrokerSettings, topology: Topology
+    broker: AbstractRobustConnection, broker_url: SecretStr, topology: Topology
 ) -> MessagePublisher:
-    return await MessagePublisher.create(broker, topology, settings=broker_settings)
+    return await MessagePublisher.create(
+        broker, topology, confirm_timeout_seconds=PUBLISH_TIMEOUT_SECONDS
+    )
 
 
 class _Clock:
@@ -183,7 +185,7 @@ async def test_a_failed_row_does_not_block_the_rows_after_it(
     engine: AsyncEngine,
     publisher: MessagePublisher,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     queue: AbstractQueue,
 ) -> None:
@@ -430,7 +432,7 @@ async def test_an_unavailable_broker_stops_the_batch_at_its_first_row(
     session_factory: async_sessionmaker[AsyncSession],
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
     queue: AbstractQueue,
@@ -439,7 +441,9 @@ async def test_an_unavailable_broker_stops_the_batch_at_its_first_row(
     failure and stops, leaving the others untried, and does not pause the row (the broker,
     not the row, failed), so the next poll tries it again."""
     written = await _write(session_factory, *["test.command"] * 3)
-    down = await MessagePublisher.create(broker, topology, settings=broker_settings)
+    down = await MessagePublisher.create(
+        broker, topology, confirm_timeout_seconds=PUBLISH_TIMEOUT_SECONDS
+    )
     await down.close()
     switch = _Switch(down)
     clock = _Clock()
