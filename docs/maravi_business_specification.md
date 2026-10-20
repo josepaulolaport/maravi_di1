@@ -113,6 +113,7 @@ Uma compra/venda inclui contrato, direção, quantidade, data/hora efetiva e PU 
 ### 6.2 Movimentações de caixa
 
 - Dois tipos: **aporte** e **retirada**, cada qual com valor positivo informado e data e hora efetivas (hora obrigatória, OQ-24). O valor é armazenado com sinal: positivo para aporte, negativo para retirada, nunca zero.
+- **Descrição opcional** (enunciado §4.2; OQ-51): texto livre de até 200 caracteres, gravado sem espaços nas pontas; vazia ou em branco vira nula. Só movimentações de caixa têm descrição: uma operação com descrição é rejeitada (422). Como o resto do lançamento, não é editada.
 - Também não podem ser editadas; a exclusão é definitiva, como para todo lançamento (§6, OQ-32).
 - Incluir ou excluir uma movimentação apenas grava o fato; não marca nenhuma data (OQ-31).
 - Aportes/retiradas modificam **saldo de caixa** e AUM, **não** P&L.
@@ -329,6 +330,7 @@ Duas abas: **Pendências** e **Processamentos**.
 
 - Visualizar os lançamentos — operações e movimentações de caixa em uma única lista, na ordem `(data, hora, seq)` (OQ-24) — com filtro de intervalo inclusivo, busca e paginação (§12).
 - Registrar compra, venda, aporte e retirada por formulários/drawers apropriados; todos exigem data e hora.
+- O formulário de aporte e retirada tem o campo opcional **Descrição** (até 200 caracteres); a lista mostra a descrição de cada movimentação, "—" quando vazia (OQ-51). A busca também encontra uma movimentação pela sua descrição, sem diferenciar maiúsculas nem acentos.
 - Distinguir **tipo de instrumento** de **tipo de lançamento**.
 - Excluir um lançamento ou vários com confirmação, sem motivo e em uma única transação (tudo ou nada); a exclusão é definitiva, sem trilha de auditoria (OQ-32); **não editar** lançamentos existentes (OQ-24).
 - Exibir data/hora efetiva e valores com formatação brasileira. Cada operação mostra PU **e** taxa de execução: o valor informado e o calculado pelo backend ao salvar (OQ-19).
@@ -459,6 +461,7 @@ Decididos em 18/10/2026 (detalhes e palavras do usuário em `open-questions.md`)
 - Término de pedido que não pode ser gravado (OQ-47 item 7; leitura do integrador no #115, aprovada pelo usuário em 19/10/2026: "Keep OQ-47 item 7 as is; record that I approved it."): o worker repete a gravação só em erro transitório de banco; qualquer outro erro encerra o pedido `FAILED` com `PROCESSING_ERROR` numa transação nova, devolve as datas em Processando ao status anterior e deixa `failed_date` e `failed_chain` vazios (salvo a primeira falha de cadeia de um Tudo). Emenda OQ-40.
 - Série de P&L da Carteira só com o que o gráfico lê (usuário, 19/10/2026, sessão do integrador: "so shouldnt we remove it and simplify the method?"; "perfect so lets make the changes"; OQ-49): cada ponto de `GET /portfolio/pnl` traz `date`, `daily_pnl`, `range_cumulative_pnl` e o status de posições. Saem do ponto `cumulative_pnl`, `pnl_status` e `published_at`. O `cumulative_pnl` desde o início e o `pnl_status` continuam no resumo e nas linhas de posição; o horário "Processado em …" continua no resumo e na tabela de posições. A soma do gráfico (OQ-41) não muda.
 - Decisões de tela após testar o backend real (usuário, 19/10/2026, sessão do frontend; OQ-48): a página do produto em Ativos registra preço (botão acima da lista e menu "…" de cada contrato, que também remove preço); `Instrument.last_reference` vem preenchido com o preço preferencial mais recente de cada contrato, lido por `prices.public.PriceReader.latest` (reverte OQ-33 item 4); o destaque do card "P&L acumulado" da Carteira é o `range_cumulative_pnl` da data selecionada, rotulado com a data inicial do gráfico, e o `cumulative_pnl` desde o início não muda (§8.3).
+- Descrição opcional nas movimentações de caixa (usuário, 19/10/2026, repassado pela sessão Lead Backend: "Ledger cash entries should have an optional description. We should save that in the table. We should also alter the backend and frontend so the user can input it and see it if he wishes to"; OQ-51): `ledger.entries.description VARCHAR(200)`, só em CASH (operação com descrição → 422), sem espaços nas pontas, vazia → nula, até 200 caracteres (mais → 422), incluída na busca e imutável; leituras do integrador; reverte OQ-26 item 2 e fecha a lacuna do enunciado §4.2.
 
 ### Aberto — requer decisão específica antes de codificar o comportamento
 
