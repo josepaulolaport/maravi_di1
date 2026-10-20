@@ -21,7 +21,6 @@ import { EntriesTable } from './components/EntriesTable';
 import { NewEntryModal } from './components/NewEntryModal';
 import { toRow } from './model/entries';
 import { useEntries, useIsSavingEntry, useLedgerFilters } from './hooks/useLedger';
-import { processCashDraft, processDraft } from './processingDraft';
 
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
@@ -125,7 +124,8 @@ export function LedgerPage() {
             variant="default"
             leftSection={<IconPlayerPlay size={16} stroke={1.5} />}
             onClick={() => {
-              setProcessing(processDraft(start, end));
+              // The whole period, Tudo; the user narrows it before confirming (OQ-21).
+              setProcessing({ start, end, scope: 'ALL' });
             }}
           >
             Processar
@@ -144,7 +144,8 @@ export function LedgerPage() {
       <CashStrip
         end={end}
         onProcessCash={(from) => {
-          setProcessing(processCashDraft(from, end));
+          // The cash chain from the first of D−1 / D0 that is behind.
+          setProcessing({ start: from, end, scope: 'CASH' });
         }}
       />
 

@@ -10,6 +10,7 @@ import {
   VisuallyHidden,
 } from '@mantine/core';
 import { IconArrowDown, IconArrowsSort, IconArrowUp } from '@tabler/icons-react';
+import type { ReactNode } from 'react';
 
 import table from '@/shared/ui/table.module.css';
 import type { PositionRow } from '@/api/contract';
@@ -32,7 +33,7 @@ interface Column {
   key: SortKey;
   label: string;
   numeric: boolean;
-  render: (row: PositionRow) => React.ReactNode;
+  render: (row: PositionRow) => ReactNode;
 }
 
 // The columns of §11.4, in the design's order. No realized/unrealized P&L, no cumulative P&L

@@ -24,10 +24,6 @@ const BADGES: Record<JobStatus, { label: string; color: MantineColor }> = {
   FAILED: { label: 'Falhou', color: 'red' },
 };
 
-export function jobStatusBadge(status: JobStatus): { label: string; color: MantineColor } {
-  return BADGES[status];
-}
-
 /**
  * Whether the user asked to cancel a run that is still running (OQ-46): the API keeps it
  * RUNNING with `cancel_requested_at` set until the current date commits.
@@ -37,8 +33,8 @@ const isCancelling = (job: Pick<ProcessingRequest, 'status' | 'cancel_requested_
 
 /**
  * A run's badge: its status label, or Cancelando for a running run whose cancel was asked
- * (OQ-46, user decision). DISPATCHED and CANCELLING keep their labels but the API never sends
- * them since OQ-46.
+ * (OQ-46, user decision). The API never sends DISPATCHED or CANCELLING since OQ-46; their
+ * labels stay in the map only because the contract type still lists them.
  */
 export function runBadge(job: Pick<ProcessingRequest, 'status' | 'cancel_requested_at'>): {
   label: string;
@@ -47,8 +43,7 @@ export function runBadge(job: Pick<ProcessingRequest, 'status' | 'cancel_request
   return isCancelling(job) ? BADGES.CANCELLING : BADGES[job.status];
 }
 
-// DISPATCHED and CANCELLING are never sent since OQ-46; they stay listed only as a safe default.
-const ACTIVE: readonly JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING', 'CANCELLING'];
+const ACTIVE: readonly JobStatus[] = ['QUEUED', 'RUNNING'];
 /** Ended before their last date: what is left of the range may be asked again (OQ-23). */
 const UNFINISHED: readonly JobStatus[] = ['CANCELLED', 'FAILED'];
 /** Where a Tudo run may end with one chain failed and the other gone on (OQ-36, OQ-40). */

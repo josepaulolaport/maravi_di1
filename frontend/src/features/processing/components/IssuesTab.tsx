@@ -1,17 +1,16 @@
 import { Button, Group, Paper, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
 import { IconAlertTriangle, IconCalendarX } from '@tabler/icons-react';
+import type { UseQueryResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { SearchInput } from '@/shared/ui/SearchInput';
 import { Loading } from '@/shared/ui/Loading';
-import type { Issue, IssueType } from '@/api/contract';
+import type { Issue, IssueType, ListResponse } from '@/api/contract';
 import { assetLinks, ledgerLinks } from '@/app/paths';
 import { UNAVAILABLE, countLabel, formatDate } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { Figure } from '@/shared/ui/Figure';
-
-import type { useIssues } from '../hooks/useProcessing';
 
 const ISSUE_TEXT: Record<IssueType, { text: string; icon: ReactNode }> = {
   MISSING_REFERENCE_PRICE: {
@@ -52,7 +51,7 @@ function matchesSearch(issue: Issue, search: string): boolean {
 }
 
 interface IssuesTabProps {
-  issues: ReturnType<typeof useIssues>;
+  issues: UseQueryResult<ListResponse<Issue>>;
   search: string;
   onSearchChange: (text: string) => void;
 }

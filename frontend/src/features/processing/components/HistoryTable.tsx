@@ -1,5 +1,6 @@
 import { ActionIcon, Menu, Paper, Stack, Table, Text, Title, VisuallyHidden } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
+import type { UseInfiniteQueryResult } from '@tanstack/react-query';
 
 import { SearchInput } from '@/shared/ui/SearchInput';
 import { Loading } from '@/shared/ui/Loading';
@@ -13,7 +14,6 @@ import { formatPeriod } from '@/shared/format';
 import { SCOPE_LABELS } from '@/shared/processing/scope';
 
 import { formatProgress, shortId } from '../model/format';
-import type { useProcessingRequests } from '../hooks/useProcessing';
 import { canCancel, runBadge, progressOf, retryRequests } from '../model/jobStatus';
 import type { RetryRequest } from '../model/jobStatus';
 
@@ -46,7 +46,7 @@ const jobsLabel = (n: number, more: boolean) =>
     : countLabel(n, 'processamento encontrado', 'processamentos encontrados');
 
 interface HistoryTableProps extends JobActions {
-  requests: ReturnType<typeof useProcessingRequests>;
+  requests: UseInfiniteQueryResult<{ items: ProcessingRequest[] }>;
   search: string;
   onSearchChange: (text: string) => void;
 }
@@ -73,7 +73,7 @@ export function HistoryTable({ requests, search, onSearchChange, ...actions }: H
 }
 
 interface HistoryBodyProps {
-  requests: ReturnType<typeof useProcessingRequests>;
+  requests: UseInfiniteQueryResult<{ items: ProcessingRequest[] }>;
   search: string;
   actions: JobActions;
 }

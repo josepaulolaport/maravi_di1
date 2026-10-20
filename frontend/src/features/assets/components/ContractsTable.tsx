@@ -7,10 +7,6 @@ import { assetLinks } from '@/app/paths';
 import { formatDate, formatPu, formatRate, UNAVAILABLE } from '@/shared/format';
 import { Figure } from '@/shared/ui/Figure';
 
-/**
- * A product's contracts (§11.2). The PU and rate are the latest reference observation, always
- * shown with its own date, never as today's price (§5, OQ-19 item 5); none reads "—".
- */
 interface ContractsTableProps {
   instruments: Instrument[];
   /** "Registrar preço" from a row's menu (OQ-48 item 1). */
@@ -19,6 +15,10 @@ interface ContractsTableProps {
   onRemovePrice: (instrument: Instrument) => void;
 }
 
+/**
+ * A product's contracts (§11.2). The PU and rate are the latest reference observation, always
+ * shown with its own date, never as today's price (§5, OQ-19 item 5); none reads "—".
+ */
 export function ContractsTable({
   instruments,
   onRegisterPrice,
