@@ -1168,3 +1168,23 @@ async def test_a_cancel_committing_on_the_oldest_row_during_a_take_still_takes_t
     async with asyncio.timeout(5):
         assert await take == second
     assert (await worker.run_row(second))["status"] == "RUNNING"
+
+
+async def test_a_date_left_running_by_the_old_worker_is_processed_again(worker: Worker) -> None:
+    """Before OQ-50 item 4 a crash could leave a date stored RUNNING with ``*_previous`` set; the
+    run that reprocesses it writes the new status and clears ``*_previous`` (the schema's CHECK
+    allows ``*_previous`` only beside RUNNING)."""
+    await seed_statuses(worker.engine, {D0: (None, "PROCESSED")})
+    worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("0"))
+    await worker.execute(
+        "INSERT INTO processing.date_status (date, cash, cash_previous, updated_at)"
+        " VALUES (:d, 'RUNNING', 'PROCESSED', now())",
+        d=D1,
+    )
+    request_id = await worker.enqueue("CASH", D1, D1)
+
+    await worker.sweep()
+
+    rows = await worker.status_rows()
+    assert (rows[D1]["cash"], rows[D1]["cash_previous"]) == ("PROCESSED", None)
+    assert (await worker.run_row(request_id))["status"] == "COMPLETED"

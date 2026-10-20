@@ -223,12 +223,12 @@ class ProcessingService:
 
     async def list_requests(self, page: PageParams) -> RequestPage:
         """Newest first by ``(created_at, id)``, by keyset (OQ-26 item 1)."""
-        errors = page.errors()
+        if errors := page.errors():
+            raise DomainError(*errors)
+        # The cursor is checked only once the page size is valid.
         after = None if page.cursor is None else RequestCursor.decode(page.cursor)
         if page.cursor is not None and after is None:
-            errors += (invalid_cursor(),)
-        if errors:
-            raise DomainError(*errors)
+            raise DomainError(invalid_cursor())
         keyset = None if after is None else (after.created_at, after.id)
         rows = await self._requests.list_newest_first(page.limit + 1, keyset)
         items = rows[: page.limit]

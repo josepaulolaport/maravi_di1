@@ -428,8 +428,9 @@ async def test_12_an_exact_last_page_has_no_next_cursor(harness: Harness) -> Non
 
 @pytest.mark.parametrize("limit", [0, -1, 201])
 async def test_12_a_limit_outside_1_to_200_is_refused(harness: Harness, limit: int) -> None:
+    # The cursor is checked only once the size is valid: a bad cursor beside it adds nothing.
     with pytest.raises(DomainError) as raised:
-        await harness.service.list_requests(PageParams(limit, None))
+        await harness.service.list_requests(PageParams(limit, "%%%"))
 
     assert _error(raised) == (
         ErrorDetail(ErrorCode.VALIDATION_ERROR, "Use um limite entre 1 e 200.", "limit"),

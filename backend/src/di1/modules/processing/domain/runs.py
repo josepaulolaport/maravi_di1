@@ -62,6 +62,10 @@ class ProcessingErrorCode(StrEnum):
     POSITIONS_PREDECESSOR_MISSING = "POSITIONS_PREDECESSOR_MISSING"
     PROCESSING_ERROR = "PROCESSING_ERROR"
     """A technical failure on a date, or of the run itself."""
+    SUPERSEDED = "SUPERSEDED"
+    """Retired (OQ-23): migration 0003 wrote it on the runs it ended; read, never written."""
+    RECOVERY_EXHAUSTED = "RECOVERY_EXHAUSTED"
+    """Retired (OQ-45 reversed OQ-43): runs ended by the recovery cap; read, never written."""
 
     @classmethod
     def predecessor_missing(cls, chain: Chain) -> ProcessingErrorCode:

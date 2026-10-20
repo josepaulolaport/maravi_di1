@@ -353,3 +353,25 @@ async def test_timestamps_round_trip_with_their_offset(
     assert isinstance(stored.created_at, datetime)
     assert stored.created_at.utcoffset() is not None
     assert stored.created_at == queued.created_at
+
+
+@pytest.mark.parametrize("code", ["SUPERSEDED", "RECOVERY_EXHAUSTED"])
+async def test_a_run_ended_with_a_retired_error_code_still_reads_back(
+    engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession], code: str
+) -> None:
+    """Migration 0003 wrote SUPERSEDED and the OQ-43 code wrote RECOVERY_EXHAUSTED; the history
+    must still read those runs."""
+    service = make_service()
+    run = await _enqueue(session_factory, service)
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE processing.requests SET status = 'FAILED', error_code = :c WHERE id = :id"
+            ),
+            {"c": code, "id": run.id},
+        )
+
+    async with SqlAlchemyUnitOfWork(session_factory) as uow:
+        page = await service.on(uow).list_requests(PageParams(10, None))
+
+    assert page.items[0].error_code == code

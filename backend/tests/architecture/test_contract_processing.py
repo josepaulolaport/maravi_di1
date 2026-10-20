@@ -79,6 +79,8 @@ def test_processing_error_codes_are_one_enum() -> None:
         "CASH_PREDECESSOR_MISSING",
         "POSITIONS_PREDECESSOR_MISSING",
         "PROCESSING_ERROR",
+        "SUPERSEDED",  # retired, still stored on old runs
+        "RECOVERY_EXHAUSTED",  # retired, still stored on old runs
     }
 
 

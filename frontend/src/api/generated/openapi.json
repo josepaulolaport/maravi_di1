@@ -1232,7 +1232,9 @@
         "enum": [
           "CASH_PREDECESSOR_MISSING",
           "POSITIONS_PREDECESSOR_MISSING",
-          "PROCESSING_ERROR"
+          "PROCESSING_ERROR",
+          "SUPERSEDED",
+          "RECOVERY_EXHAUSTED"
         ],
         "title": "ProcessingErrorCode",
         "type": "string"

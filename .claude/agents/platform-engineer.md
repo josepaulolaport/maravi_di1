@@ -32,7 +32,7 @@ You change root configuration and `compose.yaml` only together with the integrat
 
 **Wave 4, with lanes G and E:**
 - the worker and relay processes (no dispatcher, OQ-46);
-- recovery at worker start after a crash: restore `RUNNING` dates, resume after `progress_date` or end `CANCELLED` when `cancel_requested_at` is set (OQ-45), then drain the `QUEUED` requests (OQ-46).
+- recovery at worker start after a crash: resume after `progress_date` or end `CANCELLED` when `cancel_requested_at` is set (OQ-45); no date is stored `RUNNING`, so nothing is restored (OQ-50 item 4); then sweep the `QUEUED` requests (OQ-50 item 2).
 
 ## Rules
 

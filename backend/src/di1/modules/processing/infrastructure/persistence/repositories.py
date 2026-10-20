@@ -109,6 +109,11 @@ class SqlDateStatusRepository:
                     "cash": _value(status.cash),
                     "portfolio_processed_at": status.portfolio_processed_at,
                     "cash_processed_at": status.cash_processed_at,
+                    # Unused since OQ-50 item 4; cleared so a row the old code left RUNNING
+                    # with a previous status can take its new one (the CHECK allows
+                    # ``*_previous`` only beside RUNNING).
+                    "portfolio_previous": None,
+                    "cash_previous": None,
                 },
                 self._clock.now(),
             )

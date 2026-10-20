@@ -730,7 +730,7 @@ export interface components {
          * @description A run's ``error_code`` (OQ-31, OQ-44); its pt-BR text is the run's ``error_message``.
          * @enum {string}
          */
-        ProcessingErrorCode: "CASH_PREDECESSOR_MISSING" | "POSITIONS_PREDECESSOR_MISSING" | "PROCESSING_ERROR";
+        ProcessingErrorCode: "CASH_PREDECESSOR_MISSING" | "POSITIONS_PREDECESSOR_MISSING" | "PROCESSING_ERROR" | "SUPERSEDED" | "RECOVERY_EXHAUSTED";
         /** ProcessingPreviewResponse */
         ProcessingPreviewResponse: {
             /**
