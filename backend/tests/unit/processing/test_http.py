@@ -11,14 +11,13 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from di1.composition.errors import install_problem_handlers
 from di1.modules.processing.domain.issues import IssueRecord, IssueType
 from di1.modules.processing.presentation.http.router import create_router
 from di1.modules.processing.public import Chain, ChainStatus, ProcessingStatus
-from tests.support.http import problem
+from tests.support.builders import di1_contract
+from tests.support.http import app_client, problem
 from tests.unit.processing.fakes import Harness, date_status
 
 # The keys of the fixtures' objects (fixtures.ts `job(...)`, `issues`; processing.ts), with
@@ -68,10 +67,7 @@ def harness() -> Harness:
 
 @pytest.fixture
 def client(harness: Harness) -> Iterator[TestClient]:
-    app = FastAPI()
-    install_problem_handlers(app)
-    app.include_router(create_router(get_service=lambda: harness.service))
-    with TestClient(app) as client:
+    with app_client(create_router(get_service=lambda: harness.service)) as client:
         yield client
 
 
@@ -205,7 +201,7 @@ def test_get_issues_matches_the_fixture(client: TestClient, harness: Harness) ->
     asset_id = UUID("7e000000-0000-4000-8000-000000000029")
     request_id = UUID("7f3c9a02-0000-4000-8000-000000000002")
     issue_id = UUID("7d000000-0000-4000-8000-000000000001")
-    harness.assets.codes[asset_id] = "DI1F29"
+    harness.assets.add(di1_contract("DI1F29", asset_id, date(2029, 1, 2)))
     harness.issues.rows = [
         IssueRecord(
             id=issue_id,

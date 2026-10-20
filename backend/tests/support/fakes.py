@@ -6,7 +6,7 @@ The doubles store and answer; none re-implements a production rule (staff review
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -15,10 +15,23 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.asset.public import Instrument
+from di1.modules.ledger.public import EntryType, LedgerEntry
+from di1.modules.pnl.public import AssetPnLResult, PortfolioPnLResult
+from di1.modules.portfolio.public import (
+    CashBalance,
+    CashDay,
+    PortfolioResultsWriter,
+    PortfolioValuation,
+    PositionsDay,
+    PreviousPositionsDay,
+)
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.modules.pricing.public import Price, Quote
+from di1.modules.processing.application.ports import ChainPorts
+from di1.modules.processing.public import Chain, DateStatus
 from di1.shared.clock import SAO_PAULO
 from di1.shared.input_kind import InputKind
+from tests.support.builders import T0
 
 
 class FakeClock:
@@ -44,6 +57,12 @@ class FakeClock:
 
     def advance(self, seconds: float) -> None:
         self.current += timedelta(seconds=seconds)
+
+
+def stepping_clock(start: datetime = T0) -> FakeClock:
+    """A clock whose every ``now`` is one second after the previous one, from ``start``: FIFO
+    order by ``created_at`` is then observable."""
+    return FakeClock(start.date(), start, step=timedelta(seconds=1))
 
 
 @dataclass
@@ -115,6 +134,21 @@ class FakePriceReader:
         self.records[(record.asset_id, record.reference_date)] = record
         return record
 
+    def set(
+        self,
+        asset_id: UUID,
+        reference_date: date,
+        pu: str,
+        source: PriceSource = PriceSource.MANUAL,
+        rate: str | None = None,
+        *,
+        created_at: datetime = PRICED_AT,
+    ) -> ReferencePriceRecord:
+        """The preferred price of ``(asset_id, reference_date)`` is now this one."""
+        return self.add(
+            reference_price(asset_id, reference_date, pu, rate, source, created_at=created_at)
+        )
+
     async def get(
         self, asset_ids: Collection[UUID], dates: Collection[date]
     ) -> Mapping[tuple[UUID, date], ReferencePriceRecord]:
@@ -155,3 +189,129 @@ class FakePricing:
         if quote.kind is InputKind.PU:
             return Price(pu=quote.value, rate=CALCULATED_RATE, input_kind=quote.kind)
         return Price(pu=CALCULATED_PU, rate=quote.value, input_kind=quote.kind)
+
+
+class FakeDateStatusReader:
+    """`processing.public.DateStatusReader` over the rows it is given; counts its reads."""
+
+    def __init__(self, statuses: Mapping[date, DateStatus] | None = None) -> None:
+        self.statuses = dict(statuses or {})
+        self.reads = 0
+
+    async def get_date_statuses(
+        self, start_date: date, end_date: date
+    ) -> Mapping[date, DateStatus]:
+        self.reads += 1
+        return {d: s for d, s in self.statuses.items() if start_date <= d <= end_date}
+
+
+@dataclass
+class FakeLedger:
+    """`ledger.public.LedgerReader` over the entries it is given; records each existence check."""
+
+    trades: list[LedgerEntry] = field(default_factory=list)
+    movements: list[LedgerEntry] = field(default_factory=list)
+    asked: list[tuple[date, EntryType | None]] = field(default_factory=list)
+
+    async def get_trades(self, start_date: date, end_date: date) -> Sequence[LedgerEntry]:
+        found = [t for t in self.trades if start_date <= t.entry_date <= end_date]
+        return sorted(found, key=lambda t: t.order_key)
+
+    async def get_cash_movements(self, start_date: date, end_date: date) -> Sequence[LedgerEntry]:
+        found = [m for m in self.movements if start_date <= m.entry_date <= end_date]
+        return sorted(found, key=lambda m: m.order_key)
+
+    async def has_entries_on_or_before(
+        self, day: date, *, entry_type: EntryType | None = None
+    ) -> bool:
+        self.asked.append((day, entry_type))
+        trades = any(t.entry_date <= day for t in self.trades)
+        if entry_type is EntryType.TRADE:
+            return trades
+        return trades or any(m.entry_date <= day for m in self.movements)
+
+
+@dataclass
+class FakePortfolio:
+    """`portfolio.public.PortfolioReader`: the published D−1 of each chain, keyed by D−1."""
+
+    positions: dict[date, PreviousPositionsDay] = field(default_factory=dict)
+    cash: dict[date, CashBalance] = field(default_factory=dict)
+
+    async def get_previous_positions(self, before_date: date) -> PreviousPositionsDay | None:
+        return self.positions.get(before_date - timedelta(days=1))
+
+    async def get_previous_cash(self, before_date: date) -> CashBalance | None:
+        return self.cash.get(before_date - timedelta(days=1))
+
+
+# Processing's ports: what its chain steps read and write, and the zero-state question.
+
+
+@dataclass
+class FakeChainHistory:
+    """Processing's `ChainHistory`: the first dated entry of each chain, or none; records each
+    question."""
+
+    first_trade: date | None = None
+    first_cash_movement: date | None = None
+    asked: list[tuple[Chain, date]] = field(default_factory=list)
+
+    async def has_entries_on_or_before(self, chain: Chain, day: date) -> bool:
+        self.asked.append((chain, day))
+        firsts = [self.first_trade]
+        if chain is Chain.CASH:
+            firsts.append(self.first_cash_movement)
+        return any(first is not None and first <= day for first in firsts)
+
+
+@dataclass(frozen=True)
+class PositionsWrite:
+    day: PositionsDay
+    valuation: PortfolioValuation
+    asset_pnl: Mapping[UUID, AssetPnLResult]
+    pnl: PortfolioPnLResult
+
+
+@dataclass(frozen=True)
+class CashWrite:
+    day: CashDay
+
+
+@dataclass
+class RecordingWriter:
+    """`portfolio.public.PortfolioResultsWriter` that records what it was given."""
+
+    positions: list[PositionsWrite] = field(default_factory=list)
+    cash: list[CashWrite] = field(default_factory=list)
+
+    async def write_positions_day(
+        self,
+        day: PositionsDay,
+        valuation: PortfolioValuation,
+        asset_pnl: Mapping[UUID, AssetPnLResult],
+        pnl: PortfolioPnLResult,
+    ) -> None:
+        self.positions.append(PositionsWrite(day, valuation, asset_pnl, pnl))
+
+    async def write_cash_day(self, day: CashDay) -> None:
+        self.cash.append(CashWrite(day))
+
+
+@dataclass
+class World:
+    """Everything Processing's chain steps read: Ledger, Prices, Asset and Portfolio."""
+
+    ledger: FakeLedger = field(default_factory=FakeLedger)
+    prices: FakePriceReader = field(default_factory=FakePriceReader)
+    instruments: FakeAssetReader = field(default_factory=FakeAssetReader)
+    portfolio: FakePortfolio = field(default_factory=FakePortfolio)
+
+    def ports(self, writer: PortfolioResultsWriter) -> ChainPorts:
+        return ChainPorts(
+            ledger=self.ledger,
+            prices=self.prices,
+            assets=self.instruments,
+            portfolio=self.portfolio,
+            writer=writer,
+        )

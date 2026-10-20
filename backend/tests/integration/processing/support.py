@@ -22,7 +22,7 @@ from di1.modules.processing.infrastructure.persistence.repositories import (
 )
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
-from tests.unit.processing.fakes import FakeAssets, FakeChainHistory, SteppingClock
+from tests.support.fakes import FakeAssetReader, FakeChainHistory, stepping_clock
 
 
 @dataclass
@@ -30,9 +30,9 @@ class ServiceFactory:
     """`ProcessingService` on PostgreSQL with in-memory Asset and Ledger, built per Unit of Work
     as the composition does."""
 
-    assets: FakeAssets = field(default_factory=FakeAssets)
+    assets: FakeAssetReader = field(default_factory=FakeAssetReader)
     history: ChainHistory = field(default_factory=FakeChainHistory)
-    clock: Clock = field(default_factory=SteppingClock)
+    clock: Clock = field(default_factory=stepping_clock)
 
     def on(self, uow: UnitOfWork) -> ProcessingService:
         session = uow.session
@@ -50,14 +50,14 @@ class ServiceFactory:
 
 def make_service(
     *,
-    assets: FakeAssets | None = None,
+    assets: FakeAssetReader | None = None,
     history: ChainHistory | None = None,
     clock: Clock | None = None,
 ) -> ServiceFactory:
     return ServiceFactory(
-        assets=assets or FakeAssets(),
+        assets=assets or FakeAssetReader(),
         history=history or FakeChainHistory(),
-        clock=clock or SteppingClock(),
+        clock=clock or stepping_clock(),
     )
 
 

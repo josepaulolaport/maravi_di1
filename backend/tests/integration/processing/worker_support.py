@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -36,27 +36,11 @@ from di1.modules.processing.presentation.messaging.run_message import RunMessage
 from di1.modules.processing.public import DateStatus, ProcessingRequest, ProcessingScope
 from di1.platform.database.unit_of_work import UnitOfWork, unit_of_work_factory
 from di1.platform.messaging.envelope import Envelope
-from di1.shared.clock import SAO_PAULO, Clock
+from di1.shared.clock import Clock
 from tests.integration.processing.support import make_service
+from tests.support.builders import T0
+from tests.support.fakes import FakeClock, World
 from tests.support.waits import wait_for_a_lock_waiter
-from tests.unit.processing.run_fakes import World
-
-T0 = datetime(2026, 10, 19, 9, 0, tzinfo=SAO_PAULO)
-
-
-@dataclass
-class MutableClock:
-    current: datetime = T0
-
-    def today(self) -> date:
-        return self.current.date()
-
-    def now(self) -> datetime:
-        return self.current
-
-    def advance(self, seconds: float) -> None:
-        self.current += timedelta(seconds=seconds)
-
 
 Hook = Callable[[str, date], Awaitable[None]]
 
@@ -167,7 +151,7 @@ class Worker:
         world: World | None = None,
     ) -> None:
         self.engine = engine
-        self.clock = MutableClock()
+        self.clock = FakeClock(T0.date(), T0)
         self.world = world or World()
         self.writer = TableWriter(self.world)
         self.faults = Faults()

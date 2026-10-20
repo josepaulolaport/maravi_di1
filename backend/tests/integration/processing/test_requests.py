@@ -29,10 +29,9 @@ from tests.integration.processing.support import (
     request_statuses,
     seed_statuses,
 )
-from tests.support.builders import DI1F29
+from tests.support.builders import DI1F29, T0
 from tests.support.db import seed_catalogue
-from tests.support.fakes import FakeClock
-from tests.unit.processing.fakes import T0, FakeAssets, FakeChainHistory
+from tests.support.fakes import FakeAssetReader, FakeChainHistory, FakeClock
 
 A, B = date(2026, 10, 1), date(2026, 10, 5)
 ALL = ProcessingScope.ALL
@@ -330,7 +329,7 @@ async def test_10_3_issues_are_listed_newest_first_with_asset_codes(
             ),
             {"r": run.id, "a": asset_id},
         )
-    service = make_service(assets=FakeAssets({asset_id: "DI1F29"}))
+    service = make_service(assets=FakeAssetReader(DI1F29))
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
         issues = await service.on(uow).get_issues()

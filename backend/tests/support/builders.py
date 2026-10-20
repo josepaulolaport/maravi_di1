@@ -16,7 +16,13 @@ from uuid import UUID, uuid4
 
 from di1.modules.asset.public import Instrument
 from di1.modules.ledger.domain.entries import EntryDraft, EntryType, LedgerEntry
+from di1.modules.portfolio.domain.positions import OpenPosition
+from di1.modules.portfolio.domain.trade import Trade
+from di1.shared.clock import SAO_PAULO
 from di1.shared.input_kind import InputKind
+
+T0 = datetime(2026, 10, 19, 9, 0, tzinfo=SAO_PAULO)
+"""The tests' "now" when the time of day matters (queue order, processing times)."""
 
 CREATED_AT = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 """When a hand-built instrument or entry was registered; no test asserts it."""
@@ -143,4 +149,40 @@ def ledger_cash(day: date, amount: str, *, seq: int = 1) -> LedgerEntry:
         execution_rate=None,
         input_kind=None,
         cash_amount=Decimal(amount),
+    )
+
+
+DAY = date(2027, 1, 4)
+"""The portfolio accounting tests' date: a Monday, and DI1F27's maturity."""
+
+
+def portfolio_trade(
+    quantity: int,
+    pu: str,
+    rate: str = "0.1",
+    *,
+    asset_id: UUID = DI1F27.id,
+    on: date = DAY,
+    at: str = "10:00",
+    seq: int = 1,
+) -> Trade:
+    """A Ledger trade as Portfolio reads it: buys positive, sells negative, execution PU/rate."""
+    return Trade(
+        asset_id=asset_id,
+        trade_date=on,
+        trade_time=time.fromisoformat(at),
+        seq=seq,
+        signed_quantity=quantity,
+        execution_pu=Decimal(pu),
+        execution_rate=Decimal(rate),
+    )
+
+
+def open_position(quantity: int, pu: str, rate: str, *, asset_id: UUID = DI1F27.id) -> OpenPosition:
+    """An open position carried from D−1: signed quantity and weighted averages."""
+    return OpenPosition(
+        asset_id=asset_id,
+        quantity=quantity,
+        average_entry_pu=Decimal(pu),
+        average_entry_rate=Decimal(rate),
     )

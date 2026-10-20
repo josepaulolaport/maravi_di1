@@ -6,7 +6,6 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
-from uuid import UUID
 
 import pytest
 
@@ -26,18 +25,17 @@ from di1.modules.processing.application.services.run_chains import (
 )
 from di1.modules.processing.domain.errors import ProcessingError
 from di1.modules.processing.domain.issues import IssueRecord, IssueType
-from tests.unit.processing.run_fakes import RecordingWriter, World, cash_movement, trade
+from tests.support.builders import DI1F29, di1_contract, ledger_cash, ledger_trade
+from tests.support.fakes import RecordingWriter, World
 
 D0 = date(2026, 10, 5)
 D1 = date(2026, 10, 6)
 D2 = date(2026, 10, 7)
-F29 = UUID(int=29)
-MATURITY = date(2029, 1, 2)
 
 
 def world() -> World:
     w = World()
-    w.instruments.maturities[F29] = MATURITY
+    w.instruments.add(DI1F29)
     return w
 
 
@@ -57,7 +55,7 @@ def held(quantity: int, pu: str, cumulative: str | None, as_of: date = D0) -> Pr
     return PreviousPositionsDay(
         state=PositionState(
             as_of=as_of,
-            positions=(OpenPosition(F29, quantity, Decimal(pu), Decimal("0.1")),),
+            positions=(OpenPosition(DI1F29.id, quantity, Decimal(pu), Decimal("0.1")),),
         ),
         cumulative_pnl=None if cumulative is None else Decimal(cumulative),
     )
@@ -68,8 +66,8 @@ def held(quantity: int, pu: str, cumulative: str | None, as_of: date = D0) -> Pr
 
 async def test_cash_from_the_zero_state_adds_trades_deposits_and_withdrawals() -> None:
     w = world()
-    w.ledger.trades.append(trade(F29, D1, 10, "95000.0000000000"))
-    w.ledger.movements += [cash_movement(D1, "1000000.00"), cash_movement(D1, "-200.00", seq=2)]
+    w.ledger.trades.append(ledger_trade(DI1F29.id, D1, 10, "95000.0000000000"))
+    w.ledger.movements += [ledger_cash(D1, "1000000.00"), ledger_cash(D1, "-200.00", seq=2)]
     writer = RecordingWriter()
 
     await process_cash_day(
@@ -89,7 +87,7 @@ async def test_cash_from_the_zero_state_adds_trades_deposits_and_withdrawals() -
 async def test_cash_continues_from_the_published_balance_of_the_day_before() -> None:
     w = world()
     w.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("500.00"))
-    w.ledger.movements.append(cash_movement(D1, "-100.00"))
+    w.ledger.movements.append(ledger_cash(D1, "-100.00"))
     writer = RecordingWriter()
 
     await process_cash_day(
@@ -115,8 +113,8 @@ async def test_cash_with_a_processed_day_before_but_no_published_balance_is_a_da
 
 async def test_first_trade_from_the_zero_state_has_only_trades_pnl() -> None:
     w = world()
-    w.ledger.trades.append(trade(F29, D1, 10, "95000.0000000000"))
-    w.prices.set(F29, D1, "95100.0000000000")
+    w.ledger.trades.append(ledger_trade(DI1F29.id, D1, 10, "95000.0000000000"))
+    w.prices.set(DI1F29.id, D1, "95100.0000000000")
 
     issues, writer = await positions(w, D1, zero_state=True)
 
@@ -124,8 +122,8 @@ async def test_first_trade_from_the_zero_state_has_only_trades_pnl() -> None:
     [written] = writer.positions
     assert [p.quantity for p in written.day.positions] == [10]
     assert written.valuation.positions_market_value == Decimal("951000")
-    assert written.asset_pnl[F29].position_pnl == 0  # Q[D−1] = 0 (OQ-4)
-    assert written.asset_pnl[F29].trades_pnl == Decimal("1000")
+    assert written.asset_pnl[DI1F29.id].position_pnl == 0  # Q[D−1] = 0 (OQ-4)
+    assert written.asset_pnl[DI1F29.id].trades_pnl == Decimal("1000")
     assert written.pnl.daily_pnl == Decimal("1000")
     assert written.pnl.cumulative_pnl == Decimal("1000")  # 0 before the first entry
 
@@ -133,25 +131,25 @@ async def test_first_trade_from_the_zero_state_has_only_trades_pnl() -> None:
 async def test_a_held_position_earns_position_pnl_from_d_minus_1_to_d() -> None:
     w = world()
     w.portfolio.positions[D1] = held(10, "95000.0000000000", "1000", as_of=D1)
-    w.prices.set(F29, D1, "95100.0000000000")
-    w.prices.set(F29, D2, "95200.0000000000")
+    w.prices.set(DI1F29.id, D1, "95100.0000000000")
+    w.prices.set(DI1F29.id, D2, "95200.0000000000")
 
     issues, writer = await positions(w, D2, zero_state=False)
 
     assert issues == []
     written = writer.positions[0]
-    assert written.asset_pnl[F29].position_pnl == Decimal("1000")
+    assert written.asset_pnl[DI1F29.id].position_pnl == Decimal("1000")
     assert written.pnl.cumulative_pnl == Decimal("2000")
 
 
 async def test_a_missing_price_on_d_is_an_issue_and_leaves_the_figures_null() -> None:
     w = world()
     w.portfolio.positions[D1] = held(10, "95000.0000000000", "0", as_of=D1)
-    w.prices.set(F29, D1, "95100.0000000000")
+    w.prices.set(DI1F29.id, D1, "95100.0000000000")
 
     issues, writer = await positions(w, D2, zero_state=False)
 
-    assert issues == [IssueRecord(IssueType.MISSING_REFERENCE_PRICE, F29, D2, D2)]
+    assert issues == [IssueRecord(IssueType.MISSING_REFERENCE_PRICE, DI1F29.id, D2, D2)]
     written = writer.positions[0]
     assert written.day.positions[0].quantity == 10  # the quantity is still computed
     assert written.valuation.status is ValuationStatus.MISSING
@@ -164,13 +162,13 @@ async def test_a_missing_price_on_d_is_an_issue_and_leaves_the_figures_null() ->
 async def test_a_missing_price_on_d_minus_1_is_an_issue_for_that_date() -> None:
     w = world()
     w.portfolio.positions[D1] = held(10, "95000.0000000000", "0", as_of=D1)
-    w.prices.set(F29, D2, "95200.0000000000")
+    w.prices.set(DI1F29.id, D2, "95200.0000000000")
 
     issues, writer = await positions(w, D2, zero_state=False)
 
-    assert issues == [IssueRecord(IssueType.MISSING_REFERENCE_PRICE, F29, D2, D1)]
+    assert issues == [IssueRecord(IssueType.MISSING_REFERENCE_PRICE, DI1F29.id, D2, D1)]
     assert writer.positions[0].valuation.positions_market_value == Decimal("952000")
-    assert writer.positions[0].asset_pnl[F29].position_pnl is None
+    assert writer.positions[0].asset_pnl[DI1F29.id].position_pnl is None
 
 
 async def test_a_day_with_no_expected_asset_is_still_written_with_zero_pnl() -> None:
@@ -192,17 +190,19 @@ async def test_a_day_with_no_expected_asset_is_still_written_with_zero_pnl() -> 
 async def test_an_open_position_after_maturity_is_worth_zero_and_raises_an_issue() -> None:
     w = world()
     maturity = D1
-    w.instruments.maturities[F29] = maturity
+    w.instruments.add(di1_contract("DI1F29", DI1F29.id, maturity))
     w.portfolio.positions[D1] = held(10, "99000.0000000000", "0", as_of=D1)
-    w.prices.set(F29, maturity, "99900.0000000000")  # the maturity-day price, typed by the user
+    w.prices.set(
+        DI1F29.id, maturity, "99900.0000000000"
+    )  # the maturity-day price, typed by the user
 
     issues, writer = await positions(w, D2, zero_state=False)
 
-    assert issues == [IssueRecord(IssueType.EXPIRED_OPEN_POSITION, F29, D2, None)]
+    assert issues == [IssueRecord(IssueType.EXPIRED_OPEN_POSITION, DI1F29.id, D2, None)]
     written = writer.positions[0]
     assert written.valuation.positions_market_value == 0
     # position_pnl = Q × (0 − PU_maturity) (spec §7.4)
-    assert written.asset_pnl[F29].position_pnl == Decimal("-999000")
+    assert written.asset_pnl[DI1F29.id].position_pnl == Decimal("-999000")
 
 
 async def test_positions_with_a_processed_day_before_but_nothing_published_is_a_data_error() -> (
@@ -214,7 +214,7 @@ async def test_positions_with_a_processed_day_before_but_nothing_published_is_a_
 
 async def test_a_traded_asset_without_an_instrument_is_a_data_error() -> None:
     w = World()
-    w.ledger.trades.append(trade(F29, D1, 1, "95000.0000000000"))
+    w.ledger.trades.append(ledger_trade(DI1F29.id, D1, 1, "95000.0000000000"))
     with pytest.raises(ProcessingError):
         await positions(w, D1, zero_state=True)
 
@@ -226,14 +226,14 @@ async def test_a_traded_asset_without_an_instrument_is_a_data_error() -> None:
     "missing", ["asset_id", "signed_quantity", "execution_pu", "execution_rate"]
 )
 def test_a_trade_missing_a_trade_field_is_a_data_error(missing: str) -> None:
-    broken = replace(trade(F29, D1, 1, "95000.0000000000"), **{missing: None})  # type: ignore[arg-type]
+    broken = replace(ledger_trade(DI1F29.id, D1, 1, "95000.0000000000"), **{missing: None})  # type: ignore[arg-type]
 
     with pytest.raises(ProcessingError):
         trade_of(broken)
 
 
 def test_a_cash_movement_without_an_amount_is_a_data_error() -> None:
-    broken = replace(cash_movement(D1, "100.00"), cash_amount=None)
+    broken = replace(ledger_cash(D1, "100.00"), cash_amount=None)
 
     with pytest.raises(ProcessingError):
         cash_totals([broken])

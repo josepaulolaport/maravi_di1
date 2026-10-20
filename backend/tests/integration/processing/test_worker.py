@@ -22,9 +22,8 @@ from di1.modules.prices.public import PriceSource
 from di1.modules.processing.domain.predecessor import PredecessorState
 from tests.integration.processing.support import seed_statuses
 from tests.integration.processing.worker_support import Worker
-from tests.support.builders import DI1F29
+from tests.support.builders import DI1F29, ledger_cash, ledger_trade
 from tests.support.db import seed_catalogue
-from tests.unit.processing.run_fakes import cash_movement, trade
 
 D1, D2, D3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
 D0 = date(2026, 10, 5)
@@ -42,7 +41,7 @@ async def worker(
 async def priced_asset(w: Worker, *days: date, pu: str = "95000.0000000000") -> UUID:
     seed_catalogue(w.engine, (DI1F29,))
     asset_id = DI1F29.id
-    w.world.instruments.maturities[asset_id] = date(2029, 1, 2)
+    w.world.instruments.add(DI1F29)
     for day in days:
         w.world.prices.set(asset_id, day, pu, PriceSource.B3)
     return asset_id
@@ -267,7 +266,7 @@ async def end_completed(worker: Worker) -> UUID:
 
 async def end_completed_with_issues(worker: Worker) -> UUID:
     asset = await priced_asset(worker)  # no price: a Pendência
-    worker.world.ledger.trades.append(trade(asset, D1, 1, "95000.0000000000"))
+    worker.world.ledger.trades.append(ledger_trade(asset, D1, 1, "95000.0000000000"))
     request_id = await worker.enqueue("POSITIONS", D1, D1)
     await worker.sweep()
     return request_id
@@ -323,7 +322,7 @@ async def test_after_every_kind_of_end_the_next_sweep_runs_the_next_request(
 
 
 async def test_a_cash_run_from_the_zero_state_processes_every_date(worker: Worker) -> None:
-    worker.world.ledger.movements.append(cash_movement(D1, "1000.00"))
+    worker.world.ledger.movements.append(ledger_cash(D1, "1000.00"))
     request_id = await worker.enqueue("CASH", D1, D3)
 
     await worker.sweep()
@@ -348,7 +347,7 @@ async def test_an_all_run_writes_both_chains_of_each_date(
     worker: Worker,
 ) -> None:
     asset = await priced_asset(worker, D1, D2)
-    worker.world.ledger.trades.append(trade(asset, D1, 10, "95000.0000000000"))
+    worker.world.ledger.trades.append(ledger_trade(asset, D1, 10, "95000.0000000000"))
     request_id = await worker.enqueue("ALL", D1, D2)
 
     await worker.sweep()
@@ -369,7 +368,7 @@ async def test_an_all_run_writes_both_chains_of_each_date(
 async def test_a_missing_saturday_price_is_an_issue_not_a_failure(worker: Worker) -> None:
     saturday, sunday = date(2026, 10, 10), date(2026, 10, 11)
     asset = await priced_asset(worker, saturday)  # no Sunday price, no carry-forward
-    worker.world.ledger.trades.append(trade(asset, saturday, 5, "95000.0000000000"))
+    worker.world.ledger.trades.append(ledger_trade(asset, saturday, 5, "95000.0000000000"))
     request_id = await worker.enqueue("POSITIONS", saturday, sunday)
 
     await worker.sweep()
@@ -387,7 +386,7 @@ async def test_a_missing_saturday_price_is_an_issue_not_a_failure(worker: Worker
 
 async def test_reprocessing_a_date_replaces_its_issues(worker: Worker) -> None:
     asset = await priced_asset(worker)
-    worker.world.ledger.trades.append(trade(asset, D1, 5, "95000.0000000000"))
+    worker.world.ledger.trades.append(ledger_trade(asset, D1, 5, "95000.0000000000"))
     await worker.enqueue("POSITIONS", D1, D1)
     await worker.sweep()
     assert await worker.issues() == [("MISSING_REFERENCE_PRICE", D1, D1)]
@@ -440,7 +439,7 @@ async def test_a_failed_or_running_day_before_fails_the_date(worker: Worker, pre
 
 async def test_entries_before_an_unprocessed_first_date_fail_it(worker: Worker) -> None:
     asset = await priced_asset(worker)
-    worker.world.ledger.trades.append(trade(asset, D0, 1, "95000.0000000000"))
+    worker.world.ledger.trades.append(ledger_trade(asset, D0, 1, "95000.0000000000"))
     request_id = await worker.enqueue("POSITIONS", D1, D2)
 
     await worker.sweep()
@@ -456,7 +455,7 @@ async def test_entries_before_an_unprocessed_first_date_fail_it(worker: Worker) 
 
 
 async def test_cash_entries_do_not_break_the_positions_zero_state(worker: Worker) -> None:
-    worker.world.ledger.movements.append(cash_movement(D0, "10.00"))
+    worker.world.ledger.movements.append(ledger_cash(D0, "10.00"))
     await worker.enqueue("POSITIONS", D1, D1)
 
     await worker.sweep()
@@ -513,11 +512,11 @@ async def test_the_preview_and_the_run_apply_the_same_predecessor_rule(
     exactly when the preview's state allows it (OQ-31, OQ-37 item 4, OQ-40 item 5)."""
     await seed_statuses(worker.engine, seeded)
     if cash_on_d0:
-        worker.world.ledger.movements.append(cash_movement(D0, "10.00"))
+        worker.world.ledger.movements.append(ledger_cash(D0, "10.00"))
         worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("10.00"))
     if trade_on_d0:
         asset = await priced_asset(worker, D0, D1)
-        worker.world.ledger.trades.append(trade(asset, D0, 1, "95000.0000000000"))
+        worker.world.ledger.trades.append(ledger_trade(asset, D0, 1, "95000.0000000000"))
 
     preview = await worker.preview(scope, D1, D1)
     reported = preview.cash if scope == "CASH" else preview.positions
@@ -831,7 +830,7 @@ async def test_a_deposit_landing_during_a_positions_run_changes_no_status(
 ) -> None:
     async def deposit_during_d1(chain: str, day: date) -> None:
         if day == D1:
-            worker.world.ledger.movements.append(cash_movement(D1, "500.00"))
+            worker.world.ledger.movements.append(ledger_cash(D1, "500.00"))
 
     worker.writer.hook = deposit_during_d1
     await worker.enqueue("POSITIONS", D1, D2)
@@ -853,7 +852,7 @@ async def test_queue_a_backdated_trade_queue_b_cancel_a_finish_b(worker: Worker)
             await worker.wait_for_a_lock_waiter()  # the real cancel waits on A's row lock
 
     worker.writer.hook = cancel_a_during_d2
-    worker.world.ledger.trades.append(trade(asset, D1, 3, "95000.0000000000"))  # backdated
+    worker.world.ledger.trades.append(ledger_trade(asset, D1, 3, "95000.0000000000"))  # backdated
     second = await worker.enqueue("POSITIONS", D1, D2)
     await worker.processor.run(first)
     await asyncio.gather(*pending)

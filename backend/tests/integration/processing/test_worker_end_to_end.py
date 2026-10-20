@@ -26,8 +26,7 @@ from di1.modules.portfolio.dependencies import (
 from di1.modules.prices.dependencies import build_price_reader
 from di1.modules.processing.dependencies import build_date_status_reader, build_range_processor
 from di1.platform.database.unit_of_work import unit_of_work_factory
-from tests.integration.processing.worker_support import MutableClock
-from tests.support.builders import DI1F29
+from tests.support.builders import DI1F29, T0
 from tests.support.db import seed_catalogue
 from tests.support.fakes import FakeClock
 
@@ -37,7 +36,7 @@ D1, D2, D3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
 class RealWorker:
     def __init__(self, engine: AsyncEngine, factory: async_sessionmaker[AsyncSession]) -> None:
         self.engine = engine
-        self.clock = MutableClock()
+        self.clock = FakeClock(T0.date(), T0)
         uow_factory = unit_of_work_factory(factory)
         self.uow_factory = uow_factory
         self.processor = build_range_processor(  # the worker's wiring

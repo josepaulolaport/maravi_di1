@@ -33,8 +33,7 @@ from di1.modules.portfolio.infrastructure.persistence.repositories import SqlPor
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from tests.support.db import Di1Catalogue
-from tests.support.fakes import FakeClock
-from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
+from tests.support.fakes import FakeClock, FakeDateStatusReader, FakePriceReader
 
 COMPLETE = CalculationCompleteness.COMPLETE
 MISSING = CalculationCompleteness.MISSING

@@ -19,7 +19,7 @@ from di1.modules.portfolio.domain.valuation import (
     ValuationStatus,
     value_positions,
 )
-from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28
+from tests.support.builders import DAY, DI1F27, DI1F28
 
 ZERO = Decimal("0")
 
@@ -28,7 +28,7 @@ def _asset(
     quantity: int,
     reference_pu: str | None,
     *,
-    asset_id: UUID = DI1F27,
+    asset_id: UUID = DI1F27.id,
 ) -> AssetValuationInput:
     return AssetValuationInput(
         asset_id=asset_id,
@@ -42,7 +42,7 @@ def test_the_challenge_example_has_market_value_90909_09() -> None:
     on = date(2027, 1, 1)
     result = value_positions(
         on,
-        [_asset(1, "90909.0909090909", asset_id=DI1F28)],
+        [_asset(1, "90909.0909090909", asset_id=DI1F28.id)],
     )
 
     assert result.assets[0].financial_total == Decimal("90909.0909090909")
@@ -59,9 +59,9 @@ def test_a_short_position_has_a_negative_market_value() -> None:
 
 def test_market_value_sums_every_expected_asset() -> None:
     # 2 × 95000 + (−1 × 91000) = 99000
-    result = value_positions(DAY, [_asset(2, "95000"), _asset(-1, "91000", asset_id=DI1F28)])
+    result = value_positions(DAY, [_asset(2, "95000"), _asset(-1, "91000", asset_id=DI1F28.id)])
 
-    assert [a.asset_id for a in result.assets] == [DI1F27, DI1F28]
+    assert [a.asset_id for a in result.assets] == [DI1F27.id, DI1F28.id]
     assert result.positions_market_value == Decimal("99000")
 
 
@@ -76,7 +76,7 @@ def test_a_missing_price_leaves_the_asset_value_null_never_zero() -> None:
 
 def test_one_missing_asset_leaves_the_portfolio_total_null() -> None:
     # Spec §8.3: the total is not complete if any expected asset is missing; no partial sum.
-    result = value_positions(DAY, [_asset(2, "95000"), _asset(1, None, asset_id=DI1F28)])
+    result = value_positions(DAY, [_asset(2, "95000"), _asset(1, None, asset_id=DI1F28.id)])
 
     assert result.assets[0].financial_total == Decimal("190000")
     assert result.assets[1].financial_total is None

@@ -43,8 +43,7 @@ from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
 from tests.support.db import Di1Catalogue, seed_di1
-from tests.support.fakes import FakeClock
-from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
+from tests.support.fakes import FakeClock, FakeDateStatusReader, FakePriceReader
 
 OCT_14, OCT_15, OCT_16 = date(2026, 10, 14), date(2026, 10, 15), date(2026, 10, 16)
 PUBLISHED_AT = datetime(2026, 10, 16, 18, 40, tzinfo=timezone(timedelta(hours=-3)))
@@ -259,14 +258,14 @@ def client(
     settings: Settings, seeded: Di1Catalogue, statuses: FakeDateStatusReader
 ) -> Iterator[TestClient]:
     prices = FakePriceReader()
-    prices.add(
-        seeded.instrument_ids["DI1F28"], OCT_14, PriceSource.MANUAL, "89006.4625467350", "0.10"
+    prices.set(
+        seeded.instrument_ids["DI1F28"], OCT_14, "89006.4625467350", PriceSource.MANUAL, "0.10"
     )
-    prices.add(
-        seeded.instrument_ids["DI1F28"], OCT_15, PriceSource.B3, "89128.4824345118", "0.0990"
+    prices.set(
+        seeded.instrument_ids["DI1F28"], OCT_15, "89128.4824345118", PriceSource.B3, "0.0990"
     )
-    prices.add(
-        seeded.instrument_ids["DI1F29"], OCT_15, PriceSource.MANUAL, "80206.1333187932", "0.1045"
+    prices.set(
+        seeded.instrument_ids["DI1F29"], OCT_15, "80206.1333187932", PriceSource.MANUAL, "0.1045"
     )
 
     def provide(uow: UnitOfWork = REQUEST_UOW) -> PortfolioService:
