@@ -26,6 +26,7 @@ from di1.modules.processing.public import (
 )
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import SAO_PAULO
+from tests.fakes.asset import CREATED_AT
 
 T0 = datetime(2026, 10, 19, 9, 0, tzinfo=SAO_PAULO)
 
@@ -143,6 +144,7 @@ class FakeAssets:
             face_value=Decimal("100000"),
             multiplier=Decimal("1"),
             settlement_method="CASH",
+            created_at=CREATED_AT,
         )
 
 

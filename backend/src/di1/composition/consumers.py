@@ -20,10 +20,10 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Sequence
 
-from di1.modules.asset.dependencies import asset_reader
-from di1.modules.ledger.dependencies import ledger_reader
+from di1.modules.asset.dependencies import build_asset_reader
+from di1.modules.ledger.dependencies import build_ledger_reader
 from di1.modules.portfolio.dependencies import portfolio_reader, results_writer
-from di1.modules.prices.dependencies import price_reader
+from di1.modules.prices.dependencies import build_price_reader
 from di1.modules.processing.dependencies import (
     RUN_MESSAGE_TYPE,
     PortfolioRangeProcessor,
@@ -43,9 +43,9 @@ def _processor(resources: WorkerResources) -> PortfolioRangeProcessor:
     return make_range_processor(
         uow_factory=resources.uow_factory,
         clock=resources.clock,
-        ledger_reader=ledger_reader,
-        price_reader=price_reader,
-        asset_reader=asset_reader,
+        ledger_reader=build_ledger_reader,
+        price_reader=build_price_reader,
+        asset_reader=build_asset_reader,
         portfolio_reader=portfolio_reader,
         writer=results_writer(),
     )

@@ -58,7 +58,7 @@ class Instrument:
     """A contract (``DI1F27``) with the product's specification other modules price from.
 
     ``instrument_type`` and ``asset_class`` are catalogue codes. Futures fields are ``None`` when
-    the product is not a future. ``created_at`` is omitted in tests that do not assert it.
+    the product is not a future.
     """
 
     id: UUID
@@ -71,4 +71,4 @@ class Instrument:
     face_value: Decimal | None
     multiplier: Decimal | None
     settlement_method: str | None
-    created_at: datetime | None = None
+    created_at: datetime

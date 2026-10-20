@@ -1,39 +1,19 @@
 """Prices' public contract: reference prices as other modules read them (interfaces.md "Prices").
 
-Frozen in W0.3b. Lane D implements `PriceReader`; changes go through the integrator.
+Frozen in W0.3b. Lane D implements `PriceReader`; changes go through the integrator. The record
+and the source enum are Prices' domain types, re-exported here.
 """
 
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass
-from datetime import date, datetime
-from decimal import Decimal
+from datetime import date
 from typing import Protocol
 from uuid import UUID
 
-from di1.shared.input_kind import InputKind
-from di1.shared.quotes import PriceSource as PriceSource
+from di1.modules.prices.domain.reference_price import PriceSource, ReferencePriceRecord
 
-
-@dataclass(frozen=True, slots=True)
-class ReferencePriceRecord:
-    """The reference price of one asset, date and source (schema ``prices.reference_prices``).
-
-    There is one per (asset, date, source); a later set of the same key deletes the current row
-    and inserts the new one, and a removal deletes it (OQ-25, OQ-26). Traceability is the current
-    preferred price in this table (OQ-30), not ``id``.
-    """
-
-    id: UUID
-    asset_id: UUID
-    reference_date: date
-    source: PriceSource
-    input_kind: InputKind
-    pu: Decimal
-    rate: Decimal | None
-    created_at: datetime
-    updated_at: datetime
+__all__ = ["PriceReader", "PriceSource", "ReferencePriceRecord"]
 
 
 class PriceReader(Protocol):

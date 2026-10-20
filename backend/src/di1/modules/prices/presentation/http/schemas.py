@@ -4,24 +4,25 @@ the business checks are the service's."""
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
-from di1.modules.prices.application.services.price_service import ReferencePriceDay
-from di1.modules.prices.public import PriceSource, ReferencePriceRecord
-from di1.platform.http import DecimalString
+from di1.modules.prices.domain.reference_price import (
+    PriceSource,
+    ReferencePriceDay,
+    ReferencePriceRecord,
+)
+from di1.platform.http import DecimalString, RequestBody, UtcDatetime
 from di1.shared.decimals import to_plain
 from di1.shared.input_kind import InputKind
 
 
-class SetReferencePriceBody(BaseModel):
+class SetReferencePriceRequest(RequestBody):
     """``POST /reference-prices``: a MANUAL price typed as a PU or as a rate. One flat model, so a
     field error names ``pu`` or ``rate`` as the client sent it."""
-
-    model_config = ConfigDict(extra="forbid")
 
     asset_id: UUID
     reference_date: date
@@ -40,7 +41,7 @@ class ReferencePriceResponse(BaseModel):
     input_kind: InputKind
     pu: str
     rate: str | None
-    created_at: datetime
+    created_at: UtcDatetime
 
     @classmethod
     def of(cls, record: ReferencePriceRecord) -> Self:
@@ -73,7 +74,7 @@ class ReferencePriceDayResponse(BaseModel):
         )
 
 
-class ReferencePriceDayList(BaseModel):
+class ReferencePriceDayListResponse(BaseModel):
     """``ListResponse<ReferencePriceDay>``: newest date first, dates without a price absent."""
 
     items: list[ReferencePriceDayResponse]

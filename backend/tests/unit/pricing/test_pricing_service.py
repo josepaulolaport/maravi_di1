@@ -18,9 +18,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from di1.modules.asset.public import AssetReader, Instrument
-from di1.modules.pricing.dependencies import pricing_service
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.modules.pricing.public import InputKind, Price, PricingService, Quote
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
+from tests.fakes.asset import CREATED_AT
 
 DI1F28 = Instrument(
     id=uuid4(),
@@ -33,6 +34,7 @@ DI1F28 = Instrument(
     face_value=Decimal("100000"),
     multiplier=Decimal("1"),
     settlement_method="CASH",
+    created_at=CREATED_AT,
 )
 ONE_YEAR_BEFORE = date(2027, 1, 1)  # 365 calendar days to DI1F28's maturity
 
@@ -49,7 +51,7 @@ class FakeAssetReader:
 
 def service_for(*instruments: Instrument) -> PricingService:
     reader: AssetReader = FakeAssetReader(*instruments)
-    return pricing_service(reader)
+    return build_pricing_service(reader)
 
 
 def refusal(caught: pytest.ExceptionInfo[DomainError]) -> ErrorDetail:
