@@ -24,12 +24,14 @@ import pytest
 from di1.modules.prices.application.services.price_service import DefaultPriceReader, PriceService
 from di1.modules.prices.public import PriceReader, PriceSource
 from di1.modules.pricing.dependencies import build_pricing_service
+from di1.modules.pricing.public import PricingService
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 from tests.fakes.clock import FixedClock
 from tests.unit.prices.fakes import (
     FakeAssets,
     FakeUnitOfWork,
+    PricingSpy,
     RecordingRepository,
     instrument,
     record,
@@ -43,13 +45,15 @@ ASSETS = FakeAssets()
 DI1F28 = ASSETS.add(instrument(maturity_date=date(2028, 1, 3)))
 
 
-def _service(repository: RecordingRepository, uow: FakeUnitOfWork) -> PriceService:
+def _service(
+    repository: RecordingRepository, uow: FakeUnitOfWork, pricing: PricingService | None = None
+) -> PriceService:
     """The service on ``uow``, as the composition builds one per request."""
     return PriceService(
         repository,
         uow,
         assets=ASSETS,
-        pricing=build_pricing_service(ASSETS),
+        pricing=pricing or build_pricing_service(ASSETS),
         clock=FixedClock(TODAY),
     )
 
@@ -161,13 +165,14 @@ async def test_the_given_source_is_saved() -> None:
 async def test_a_refused_write_writes_nothing(
     request_args: dict[str, Any], errors: tuple[ErrorDetail, ...]
 ) -> None:
-    repository, uow = RecordingRepository(), FakeUnitOfWork()
+    repository, uow, pricing = RecordingRepository(), FakeUnitOfWork(), PricingSpy(ASSETS)
 
     with pytest.raises(DomainError) as excinfo:
-        await _service(repository, uow).set_reference_price(**_request(**request_args))
+        await _service(repository, uow, pricing).set_reference_price(**_request(**request_args))
 
     assert excinfo.value.errors == errors
-    assert (repository.calls, uow.commits) == ([], 0)
+    # Refused before anything is priced or written.
+    assert (pricing.calls, repository.calls, uow.commits) == ([], [], 0)
 
 
 # --- remove -------------------------------------------------------------------------------------

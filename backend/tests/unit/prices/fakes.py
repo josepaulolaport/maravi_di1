@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.asset.public import Instrument
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
+from di1.modules.pricing.dependencies import build_pricing_service
+from di1.modules.pricing.public import Price, Quote
 from di1.shared.clock import SAO_PAULO
 from di1.shared.input_kind import InputKind
 from tests.fakes.asset import CREATED_AT
@@ -73,6 +75,20 @@ class FakeAssets:
 
     async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
         return {i: self.instruments[i] for i in instrument_ids if i in self.instruments}
+
+
+@dataclass
+class PricingSpy:
+    """The real `PricingService` over ``assets``, recording each call Prices makes to it."""
+
+    assets: FakeAssets
+    calls: list[tuple[UUID, date, Quote]] = field(default_factory=list)
+
+    async def calculate(self, instrument_id: UUID, reference_date: date, quote: Quote) -> Price:
+        self.calls.append((instrument_id, reference_date, quote))
+        return await build_pricing_service(self.assets).calculate(
+            instrument_id, reference_date, quote
+        )
 
 
 @dataclass
