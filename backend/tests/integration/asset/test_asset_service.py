@@ -29,10 +29,7 @@ from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from tests.support.builders import DI1_NAME
 from tests.support.db import DI1_FUTURES, Di1Catalogue, Writer
-
-
-def _problems(error: pytest.ExceptionInfo[DomainError]) -> list[tuple[ErrorCode, str | None]]:
-    return [(detail.code, detail.field) for detail in error.value.errors]
+from tests.support.http import errors_of
 
 
 async def _count(session_factory: async_sessionmaker[AsyncSession], table: str) -> int:
@@ -82,7 +79,7 @@ class TestHierarchy:
         with pytest.raises(DomainError) as error:
             await writer.product(asset_class_id, "DI1", DI1_NAME, DI1_FUTURES)
 
-        assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "asset_class_id")]
+        assert errors_of(error) == [(ErrorCode.VALIDATION_ERROR, "asset_class_id")]
 
     @pytest.mark.parametrize("name", ["", "   "])
     async def test_a_product_name_is_not_blank(
@@ -91,7 +88,7 @@ class TestHierarchy:
         with pytest.raises(DomainError) as error:
             await writer.product(di1.interest_rate_class_id, "DAP", name, DI1_FUTURES)
 
-        assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "name")]
+        assert errors_of(error) == [(ErrorCode.VALIDATION_ERROR, "name")]
 
 
 class TestFuturesSpecification:
@@ -104,7 +101,7 @@ class TestFuturesSpecification:
         with pytest.raises(DomainError) as error:
             await writer.product(rates, "DI1", DI1_NAME, None)
 
-        assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "futures")]
+        assert errors_of(error) == [(ErrorCode.VALIDATION_ERROR, "futures")]
         assert await _count(session_factory, "products") == 0
 
     async def test_a_product_of_another_type_cannot_have_one(self, writer: Writer) -> None:
@@ -114,7 +111,7 @@ class TestFuturesSpecification:
         with pytest.raises(DomainError) as error:
             await writer.product(equity, "PETR", "Opção de PETR4", DI1_FUTURES)
 
-        assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "futures")]
+        assert errors_of(error) == [(ErrorCode.VALIDATION_ERROR, "futures")]
 
     async def test_a_product_of_another_type_has_none(
         self, writer: Writer, service: AssetService
@@ -133,7 +130,7 @@ class TestFuturesSpecification:
         with pytest.raises(DomainError) as error:
             await writer.product(rates, "DI1", DI1_NAME, terms)
 
-        assert _problems(error) == [
+        assert errors_of(error) == [
             (ErrorCode.VALIDATION_ERROR, "futures.face_value"),
             (ErrorCode.VALIDATION_ERROR, "futures.contract_multiplier"),
             (ErrorCode.VALIDATION_ERROR, "futures.settlement_method"),
@@ -148,7 +145,7 @@ class TestDuplicateCodes:
         with pytest.raises(DomainError) as error:
             await writer.product(di1.interest_rate_class_id, code, "Outro", DI1_FUTURES)
 
-        assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "code")]
+        assert errors_of(error) == [(ErrorCode.VALIDATION_ERROR, "code")]
 
     @pytest.mark.parametrize("code", ["DI1F27", "di1f27", "  Di1F27 "])
     async def test_instruments_case_insensitively(
@@ -188,7 +185,7 @@ class TestDuplicateCodes:
             with pytest.raises(DomainError) as error:
                 await service.create_instrument(di1.di1_id, "DI1F27", date(2027, 1, 4))
 
-        assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "code")]
+        assert errors_of(error) == [(ErrorCode.VALIDATION_ERROR, "code")]
         assert await _count(session_factory, "instruments") == 4
 
 
@@ -239,7 +236,7 @@ class TestInstruments:
         with pytest.raises(DomainError) as error:
             await writer.instrument(uuid4(), "  ", None)
 
-        assert _problems(error) == [
+        assert errors_of(error) == [
             (ErrorCode.VALIDATION_ERROR, "code"),
             (ErrorCode.VALIDATION_ERROR, "product_id"),
         ]
@@ -251,7 +248,7 @@ class TestInstruments:
         with pytest.raises(DomainError) as error:
             await writer.instrument(di1.di1_id, "DI1\x00N27", date(2027, 7, 1))
 
-        assert _problems(error) == [(ErrorCode.VALIDATION_ERROR, "code")]
+        assert errors_of(error) == [(ErrorCode.VALIDATION_ERROR, "code")]
 
     async def test_a_past_maturity_is_accepted(
         self, di1: Di1Catalogue, writer: Writer, service: AssetService

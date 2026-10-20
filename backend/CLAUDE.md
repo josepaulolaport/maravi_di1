@@ -28,7 +28,7 @@ backend/
       presentation/http/{router.py, schemas.py}
       presentation/messaging/            # this module's RabbitMQ consumers and handlers
     workers/{main.py, outbox_relay.py}   # lane H; no dispatcher (OQ-46)
-  tests/{unit/<module>/, integration/, architecture/, fakes/}
+  tests/{unit/<module>/, integration/, architecture/, support/}  # support/: shared fakes, builders, db, http, broker
   tests/acceptance/                  # spec §13 phase 1, pure; acceptance-tests session
   tests/integration/acceptance/      # spec §13 phase 2; acceptance-tests session
 ```

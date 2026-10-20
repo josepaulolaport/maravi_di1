@@ -22,6 +22,7 @@ from di1.modules.processing.application.interfaces.repositories import (
 from di1.modules.processing.presentation.http.router import create_router
 from di1.modules.processing.public import ChainStatus, ProcessingScope, ProcessingStatus
 from di1.platform.database.unit_of_work import UnitOfWork
+from tests.support.http import problem
 from tests.unit.processing.fakes import FakeUnitOfWork, Harness, date_status
 
 # The keys of the fixtures' objects (fixtures.ts `job(...)`, `issues`; processing.ts), with
@@ -61,7 +62,6 @@ ISSUE_KEYS = {
     "required_price_date",
     "request_id",
 }
-PROBLEM_KEYS = {"type", "title", "status", "detail", "errors"}
 BODY = {"start_date": "2026-10-14", "end_date": "2026-10-16", "scope": "ALL"}
 
 
@@ -89,15 +89,6 @@ def _assert_request_shape(body: dict[str, Any]) -> None:
     date.fromisoformat(body["end_date"])
     assert datetime.fromisoformat(body["created_at"]).tzinfo is not None
     assert datetime.fromisoformat(body["updated_at"]).tzinfo is not None
-
-
-def _problem(response: Any, status: int) -> list[dict[str, Any]]:
-    assert response.status_code == status
-    assert response.headers["content-type"] == "application/problem+json"
-    body = response.json()
-    assert set(body) == PROBLEM_KEYS
-    errors: list[dict[str, Any]] = body["errors"]
-    return errors
 
 
 def test_post_request_answers_201_with_the_queued_run(client: TestClient) -> None:
@@ -131,7 +122,7 @@ def test_post_request_answers_201_with_the_queued_run(client: TestClient) -> Non
 def test_post_request_refuses_a_malformed_range(
     client: TestClient, harness: Harness, body: dict[str, str], field: str, code: str
 ) -> None:
-    errors = _problem(client.post("/processing/requests", json=body), 422)
+    errors = problem(client.post("/processing/requests", json=body), 422)["errors"]
 
     assert [(e["code"], e["field"]) for e in errors] == [(code, field)]
     assert harness.requests.rows == {}
@@ -153,8 +144,8 @@ def test_get_requests_is_a_page_newest_first(client: TestClient) -> None:
 
 
 def test_get_requests_refuses_a_bad_limit_or_cursor(client: TestClient) -> None:
-    bad_limit = _problem(client.get("/processing/requests", params={"limit": 500}), 422)
-    bad_cursor = _problem(client.get("/processing/requests", params={"cursor": "x"}), 422)
+    bad_limit = problem(client.get("/processing/requests", params={"limit": 500}), 422)["errors"]
+    bad_cursor = problem(client.get("/processing/requests", params={"cursor": "x"}), 422)["errors"]
 
     assert [(e["code"], e["field"]) for e in bad_limit] == [("VALIDATION_ERROR", "limit")]
     assert [(e["code"], e["field"]) for e in bad_cursor] == [("VALIDATION_ERROR", "cursor")]
@@ -167,7 +158,7 @@ def test_get_request_by_id_or_404(client: TestClient) -> None:
     missing = client.get(f"/processing/requests/{uuid4()}")
 
     assert (found.status_code, found.json()) == (200, created)
-    assert [e["code"] for e in _problem(missing, 404)] == ["NOT_FOUND"]
+    assert [e["code"] for e in problem(missing, 404)["errors"]] == ["NOT_FOUND"]
 
 
 def test_cancel_answers_200_then_409(client: TestClient) -> None:
@@ -179,7 +170,7 @@ def test_cancel_answers_200_then_409(client: TestClient) -> None:
     assert cancelled.status_code == 200
     _assert_request_shape(cancelled.json())
     assert cancelled.json()["status"] == "CANCELLED"
-    assert [e["code"] for e in _problem(again, 409)] == ["JOB_NOT_CANCELLABLE"]
+    assert [e["code"] for e in problem(again, 409)["errors"]] == ["JOB_NOT_CANCELLABLE"]
 
 
 def test_get_preview_reports_both_chains(client: TestClient, harness: Harness) -> None:
@@ -206,12 +197,12 @@ def test_get_preview_reports_both_chains(client: TestClient, harness: Harness) -
 
 
 def test_get_preview_requires_the_scope(client: TestClient) -> None:
-    errors = _problem(
+    errors = problem(
         client.get(
             "/processing/preview", params={"start_date": "2026-10-14", "end_date": "2026-10-16"}
         ),
         422,
-    )
+    )["errors"]
 
     assert [(e["code"], e["field"]) for e in errors] == [("VALIDATION_ERROR", "scope")]
 

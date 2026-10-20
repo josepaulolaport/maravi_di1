@@ -30,8 +30,6 @@ from di1.platform.messaging.worker import WorkerResources
 from tests.support.db import migrated_database_url, psycopg_url, seed_catalogue_roots
 from tests.support.fakes import FakeClock
 
-PROBLEM_JSON = "application/problem+json"
-
 
 def expected_pu(rate: str, calendar_days: int) -> str:
     """Spec §4.1: ``PU = 100000 / (1 + taxa)^(dias_corridos/365)``, stored at 10 places."""
@@ -182,13 +180,3 @@ def derived_rows(database_url: str) -> dict[str, int]:
     return {
         table: sql(database_url, f"SELECT count(*) FROM {table}")[0][0] for table in DERIVED_TABLES
     }
-
-
-def problem(response: Any, status: int) -> list[tuple[str, str | None]]:
-    """The ``(code, field)`` pairs of an RFC 9457 problem response (OQ-15)."""
-    assert response.status_code == status, response.text
-    assert response.headers["content-type"] == PROBLEM_JSON
-    body = response.json()
-    assert body["status"] == status
-    assert all(e["message"] for e in body["errors"])  # a pt-BR message for every error
-    return [(e["code"], e["field"]) for e in body["errors"]]
