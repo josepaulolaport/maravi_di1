@@ -4,7 +4,6 @@ import {
   canCancel,
   isActive,
   isFinal,
-  jobStatusBadge,
   runBadge,
   nextDate,
   progressOf,
@@ -22,11 +21,11 @@ describe('job status (§10.3, OQ-20)', () => {
     ['COMPLETED_WITH_ISSUES', 'Concluído com pendências', 'yellow'],
     ['FAILED', 'Falhou', 'red'],
   ])('§10.3 labels %s as "%s" in %s', (status, label, color) => {
-    expect(jobStatusBadge(status)).toEqual({ label, color });
+    expect(runBadge({ status, cancel_requested_at: null })).toEqual({ label, color });
   });
 
-  it('§11.1 polls only while a job is queued, dispatched, running or cancelling', () => {
-    const active: JobStatus[] = ['QUEUED', 'DISPATCHED', 'RUNNING', 'CANCELLING'];
+  it('§11.1 OQ-46 polls only while a job is queued or running', () => {
+    const active: JobStatus[] = ['QUEUED', 'RUNNING'];
     const final: JobStatus[] = ['CANCELLED', 'COMPLETED', 'COMPLETED_WITH_ISSUES', 'FAILED'];
     for (const status of active) {
       expect(isActive(status)).toBe(true);
@@ -63,7 +62,9 @@ describe('job status (§10.3, OQ-20)', () => {
   });
 
   it('OQ-23 there are eight statuses: no SUPERSEDED (Obsoleto)', () => {
-    expect(jobStatusBadge('SUPERSEDED' as JobStatus)).toBeUndefined();
+    expect(
+      runBadge({ status: 'SUPERSEDED' as JobStatus, cancel_requested_at: null }),
+    ).toBeUndefined();
   });
 
   const run = (changes: Partial<ProcessingRequest>) =>

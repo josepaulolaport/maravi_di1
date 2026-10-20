@@ -1,11 +1,14 @@
 import { Button, Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconPlayerPlay } from '@tabler/icons-react';
+import type { UseQueryResult } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 
 import { Loading } from '@/shared/ui/Loading';
-import type { IsoDate } from '@/api/contract';
+import type { IsoDate, PortfolioSummary } from '@/api/contract';
 import { addDays, formatDate, formatMoney, UNAVAILABLE } from '@/shared/format';
 import { DATE_STATUS, needsProcessing, processedAt } from '@/shared/ui/dateStatus';
 import { useSummary } from '@/shared/queries';
+import { Figure } from '@/shared/ui/Figure';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 // OQ-19 item 3, amended by OQ-21: Caixa D0 is the published cash on the range's end
@@ -14,21 +17,25 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 // computed from the rows.
 
 /** A day's cash needs processing when its last attempt failed or it was never processed. */
-function useCashBehind(date: IsoDate): boolean {
-  const status = useSummary(date).data?.cash.status;
+function cashBehind(summary: UseQueryResult<PortfolioSummary>): boolean {
+  const status = summary.data?.cash.status;
   return status !== undefined && needsProcessing(status);
 }
 
-function CashCard({ label, date }: { label: string; date: IsoDate }) {
-  const summary = useSummary(date);
+interface CashCardProps {
+  label: string;
+  date: IsoDate;
+  summary: UseQueryResult<PortfolioSummary>;
+}
 
-  let value: React.ReactNode;
-  let marker: React.ReactNode = null;
+function CashCard({ label, date, summary }: CashCardProps) {
+  let value: ReactNode;
+  let marker: ReactNode = null;
   let time: string | null = null;
   if (summary.isPending) {
     value = <Loading label={`Carregando ${label}`} h={24} w={140} />;
   } else if (summary.isError) {
-    value = <span title="Indisponível">{UNAVAILABLE}</span>;
+    value = <Figure text={UNAVAILABLE} />;
     marker = <StatusBadge label="Erro ao carregar" color="red" />;
   } else {
     // The published cash, if any (a failed date keeps what it had), with its processing time
@@ -37,9 +44,9 @@ function CashCard({ label, date }: { label: string; date: IsoDate }) {
     time = processedAt(summary.data.cash.published_at);
     value =
       status === 'NOT_PROCESSED' ? (
-        <span title="Indisponível">{UNAVAILABLE}</span>
+        <Figure text={UNAVAILABLE} />
       ) : (
-        formatMoney(summary.data.cash.balance)
+        <Figure text={formatMoney(summary.data.cash.balance)} />
       );
     if (status !== 'PROCESSED') {
       marker = <StatusBadge label={DATE_STATUS[status].label} color={DATE_STATUS[status].color} />;
@@ -79,14 +86,15 @@ interface CashStripProps {
 
 export function CashStrip({ end, onProcessCash }: CashStripProps) {
   const before = addDays(end, -1);
-  const beforeBehind = useCashBehind(before);
-  const endBehind = useCashBehind(end);
-  const from = beforeBehind ? before : endBehind ? end : null;
+  // One read per date, shared with Carteira's cache entry for it.
+  const beforeSummary = useSummary(before);
+  const endSummary = useSummary(end);
+  const from = cashBehind(beforeSummary) ? before : cashBehind(endSummary) ? end : null;
   return (
     <Stack gap="xs">
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-        <CashCard label="Caixa D−1" date={before} />
-        <CashCard label="Caixa D0" date={end} />
+        <CashCard label="Caixa D−1" date={before} summary={beforeSummary} />
+        <CashCard label="Caixa D0" date={end} summary={endSummary} />
       </SimpleGrid>
       {from !== null && (
         <Group justify="flex-end">

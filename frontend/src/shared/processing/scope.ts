@@ -25,16 +25,9 @@ export function chainsOf(scope: ProcessingScope): ProcessingChain[] {
   return scope === 'ALL' ? ['CASH', 'POSITIONS'] : [scope];
 }
 
-/** The scope's value in the URL (`escopo`), and back. */
-const URL_VALUES: Record<ProcessingScope, string> = {
+/** The scope's text in the URL (`escopo`). */
+export const SCOPE_URL: Record<ProcessingScope, string> = {
   CASH: 'caixa',
   POSITIONS: 'posicoes',
   ALL: 'tudo',
 };
-
-export const scopeToUrl = (scope: ProcessingScope) => URL_VALUES[scope];
-
-export function scopeFromUrl(value: string | null): ProcessingScope | null {
-  const found = Object.entries(URL_VALUES).find(([, v]) => v === value);
-  return found ? (found[0] as ProcessingScope) : null;
-}

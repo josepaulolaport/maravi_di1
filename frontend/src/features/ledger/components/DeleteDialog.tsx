@@ -3,11 +3,12 @@ import { notifications } from '@mantine/notifications';
 import { useEffect, useRef, useState } from 'react';
 
 import { ApiError } from '@/api/http';
+import { useLastValue } from '@/shared/hooks/useLastValue';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
+import { countLabel } from '@/shared/format';
 import { problemMessages } from '@/shared/ui/problemMessages';
 
-import { entryLabel } from './EntriesTable';
-import type { LedgerEntry } from '../entries';
+import { entryLabel, type LedgerEntry } from '../model/entries';
 import { useDeleteEntries } from '../hooks/useLedger';
 
 export type DeleteTarget =
@@ -35,9 +36,8 @@ export function DeleteDialog({
 }) {
   // One request for one entry or many, of either type (`POST /ledger/entries/deletions`).
   const mutation = useDeleteEntries();
-  // The last target stays on screen while the dialog closes, so its text does not flicker.
-  const [shown, setShown] = useState(target);
-  if (target !== null && target !== shown) setShown(target);
+  // Still shown while the dialog closes.
+  const shown = useLastValue(target);
 
   const close = () => {
     mutation.reset();
@@ -53,23 +53,24 @@ export function DeleteDialog({
   }, [target]);
 
   const confirm = () => {
-    if (!target || refreshing) return;
+    if (!target) return Promise.resolve();
     const entries = target.mode === 'one' ? [target.entry] : target.entries;
-    mutation.mutate(entries, {
-      onSuccess: () => {
-        const n = entries.length;
+    return mutation.mutateAsync(entries).then(
+      () => {
         notifications.show({
           color: 'teal',
-          message: n === 1 ? 'Lançamento excluído.' : `${String(n)} lançamentos excluídos.`,
+          message:
+            entries.length === 1
+              ? 'Lançamento excluído.'
+              : `${countLabel(entries.length, 'lançamento excluído', 'lançamentos excluídos')}.`,
         });
         close();
       },
-      onError: (error) => {
-        if (error instanceof ApiError && error.status === 404) {
-          void dropVanished(target, problemMessages(error).join(' '));
-        }
-      },
-    });
+      (error: unknown) =>
+        error instanceof ApiError && error.status === 404
+          ? dropVanished(target, problemMessages(error).join(' '))
+          : undefined,
+    );
   };
 
   const dropVanished = async (stale: DeleteTarget, message: string) => {
@@ -125,7 +126,7 @@ export function DeleteDialog({
             <Text inherit>
               {many.length === 1
                 ? '1 lançamento selecionado será excluído:'
-                : `${String(many.length)} lançamentos selecionados serão excluídos, todos ou nenhum:`}
+                : `${countLabel(many.length, 'lançamento selecionado', 'lançamentos selecionados')} serão excluídos, todos ou nenhum:`}
             </Text>
             <List size="sm" spacing={2}>
               {many.map((entry) => (

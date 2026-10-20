@@ -3,24 +3,11 @@ import { ApiError } from '@/api/http';
 const UNEXPECTED = 'Ocorreu um erro inesperado. Tente novamente.';
 
 /**
- * The pt-BR messages of a failed request (RFC 9457 problem+json, OQ-15), for a modal. A form
- * that shows a field's message on its own input (the first one, as
- * `ApiError.fieldErrors()` keeps) names that field in `shownOnFields`; that message is left
- * out here, and any further message for the field stays, so none is lost.
+ * The pt-BR messages of a failed request (RFC 9457 problem+json, OQ-15), all of them, for a
+ * read or a dialog that has no fields to show them on.
  */
-export function problemMessages(error: unknown, shownOnFields: readonly string[] = []): string[] {
-  if (error === undefined || error === null) return [];
-  if (!(error instanceof ApiError)) return [UNEXPECTED];
-  const errors = error.problem.errors ?? [];
-  if (errors.length === 0) return [error.message];
-  const shown = new Set<string>();
-  return errors
-    .filter((e) => {
-      if (e.field === null || !shownOnFields.includes(e.field) || shown.has(e.field)) return true;
-      shown.add(e.field);
-      return false;
-    })
-    .map((e) => e.message);
+export function problemMessages(error: unknown): string[] {
+  return splitProblem(error, {}).page;
 }
 
 /**
@@ -40,7 +27,7 @@ export function splitProblem(
   const fields: Record<string, string> = {};
   const page: string[] = [];
   for (const { field, message } of errors) {
-    const formField = field ? fieldMap[field] : undefined;
+    const formField = field && Object.hasOwn(fieldMap, field) ? fieldMap[field] : undefined;
     if (!formField) page.push(message);
     else fields[formField] = fields[formField] ? `${fields[formField]} ${message}` : message;
   }
