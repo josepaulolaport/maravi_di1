@@ -100,6 +100,10 @@ class BrokerSettings(BaseSettings):
     inbox_retention_days: int = Field(default=7, ge=1)
     """Inbox records older than this are deleted by the outbox relay (user decision M9)."""
     inbox_retention_interval_seconds: float = Field(default=3600.0, gt=0)
+    outbox_retention_days: int = Field(default=7, ge=1)
+    """Outbox rows published longer ago than this are deleted by the outbox relay; an
+    unpublished row is never deleted."""
+    outbox_retention_interval_seconds: float = Field(default=3600.0, gt=0)
 
     @field_validator("rabbitmq_url")
     @classmethod

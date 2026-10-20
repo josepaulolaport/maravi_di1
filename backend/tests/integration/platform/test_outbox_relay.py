@@ -22,7 +22,7 @@ from di1.platform.config import BrokerSettings
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, unit_of_work_factory
 from di1.platform.messaging.envelope import Envelope
 from di1.platform.messaging.inbox import InboxRetention
-from di1.platform.messaging.outbox import add_outbox_message
+from di1.platform.messaging.outbox import OutboxRetention, add_outbox_message
 from di1.platform.messaging.outbox_relay import OutboxRelay
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import Topology, declare_queue
@@ -485,7 +485,7 @@ async def test_run_deletes_old_inbox_rows(
     stop = asyncio.Event()
     running = asyncio.create_task(
         _relay(session_factory, publisher).run(
-            stop, poll_interval_seconds=0.05, inbox_retention=retention
+            stop, poll_interval_seconds=0.05, retentions=[retention]
         )
     )
 
@@ -503,3 +503,42 @@ async def test_run_deletes_old_inbox_rows(
 
 async def _only_new(consumers: Callable[[], Awaitable[list[str]]]) -> bool:
     return await consumers() == ["new"]
+
+
+async def test_run_deletes_old_published_outbox_rows(
+    session_factory: async_sessionmaker[AsyncSession],
+    engine: AsyncEngine,
+    publisher: MessagePublisher,
+) -> None:
+    """The outbox otherwise grows by one row per processing request, forever."""
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO platform.outbox_messages"
+                " (message_id, message_type, schema_version, payload, created_at, published_at)"
+                " VALUES (:m, 'old', 1, '{}', now() - interval '9 days',"
+                " now() - interval '8 days'),"
+                " (:n, 'new', 1, '{}', now(), now())"
+            ),
+            {"m": uuid.uuid4(), "n": uuid.uuid4()},
+        )
+    retention = OutboxRetention(
+        unit_of_work_factory(session_factory), older_than=timedelta(days=7), interval_seconds=3600
+    )
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        _relay(session_factory, publisher).run(
+            stop, poll_interval_seconds=0.05, retentions=[retention]
+        )
+    )
+
+    async def message_types() -> list[str]:
+        async with engine.connect() as connection:
+            rows = await connection.execute(
+                text("SELECT message_type FROM platform.outbox_messages")
+            )
+            return [row[0] for row in rows]
+
+    await eventually(lambda: _only_new(message_types))
+    stop.set()
+    await asyncio.wait_for(running, timeout=5)

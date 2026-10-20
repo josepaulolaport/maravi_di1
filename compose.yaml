@@ -150,7 +150,8 @@ services:
     restart: "no"
 
   # Publishes the outbox to RabbitMQ and, once an hour, deletes the inbox records older than
-  # INBOX_RETENTION_DAYS (default 7). Its heartbeat is touched after each poll (every second when
+  # INBOX_RETENTION_DAYS and the outbox rows published more than OUTBOX_RETENTION_DAYS ago
+  # (default 7 each). Its heartbeat is touched after each poll (every second when
   # idle), so a fresh file means the loop is progressing.
   outbox-relay:
     <<: *backend
