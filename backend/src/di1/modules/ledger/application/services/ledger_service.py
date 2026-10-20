@@ -19,6 +19,7 @@ from di1.modules.ledger.domain.entries import (
     EntryDraft,
     EntryType,
     LedgerEntry,
+    cash_description,
     entries_to_delete,
     validate_cash_movement,
     validate_trade,
@@ -76,7 +77,9 @@ class LedgerService:
         today = self._clock.today()
         if draft.type is EntryType.CASH:
             amount = validate_cash_movement(draft, today=today)
-            entry = await repository.add_cash_movement(draft, amount=amount)
+            entry = await repository.add_cash_movement(
+                draft, amount=amount, description=cash_description(draft)
+            )
             await uow.commit()
             return LedgerEntryView(entry, asset_code=None, instrument_type_code=None)
 
