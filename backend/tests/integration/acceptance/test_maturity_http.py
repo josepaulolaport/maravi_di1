@@ -88,7 +88,7 @@ def test_after_maturity_the_value_is_zero_and_the_open_position_loses_its_pu(
 
     thursday = desk.positions(THU)["DI1F27"]
     # Still expected (Q[D−1] = 1); valued at PU 0, which is a price, not a missing one.
-    assert thursday["quantity"] == 1
+    assert (thursday["quantity"], thursday["reference_pu"]) == (1, Decimal(0))
     assert (thursday["financial_total"], thursday["valuation_status"]) == (Decimal(0), "COMPLETE")
     assert thursday["position_pnl"] == Decimal(-100000)
     totals = desk.portfolio_pnl(THU)

@@ -108,7 +108,7 @@ def test_pnl_per_asset_then_aggregated(desk: Desk) -> None:
         Decimal(0),
         Decimal(1100),
     )
-    assert totals["cumulative_pnl"] == Decimal(9800)
+    assert (totals["cumulative_pnl"], totals["pnl_status"]) == (Decimal(9800), "COMPLETE")
 
 
 def test_market_value_is_signed_and_aum_is_cash_plus_market_value(desk: Desk) -> None:
@@ -143,7 +143,7 @@ def test_cash_only_then_positions_only(desk: Desk) -> None:
 
     assert (cash_run["status"], cash_run["error_code"]) == ("COMPLETED", None), cash_run
     assert desk.statuses() == {MON: ("PROCESSED", None), TUE: ("PROCESSED", None)}
-    assert desk.cash_balance(TUE) == Decimal(152000)
+    assert (desk.cash_balance(MON), desk.cash_balance(TUE)) == (Decimal(122000), Decimal(152000))
     assert desk.summary(TUE)["positions"]["status"] == "NOT_PROCESSED"
     assert desk.aum(MON) is None
     assert desk.aum(TUE) is None
@@ -162,6 +162,13 @@ def test_positions_only_then_cash_only(desk: Desk) -> None:
 
     assert (positions_run["status"], positions_run["error_code"]) == ("COMPLETED", None)
     assert desk.statuses() == {MON: (None, "PROCESSED"), TUE: (None, "PROCESSED")}
+    # The positions chain needs no cash: the same quantities as an ALL run (OQ-21).
+    assert [desk.positions(d)[c]["quantity"] for d in (MON, TUE) for c in ("DI1F28", "DI1F29")] == [
+        -3,
+        2,
+        -3,
+        2,
+    ]
     assert desk.portfolio_pnl(TUE)["market_value"] == Decimal(-112200)
     assert desk.summary(TUE)["cash"]["status"] == "NOT_PROCESSED"
     assert desk.aum(TUE) is None
