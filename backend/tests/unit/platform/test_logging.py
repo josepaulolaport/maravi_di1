@@ -13,7 +13,6 @@ from collections.abc import Iterator
 
 import pytest
 
-from di1.platform.config import LoggingSettings
 from di1.platform.observability.logging_setup import configure_logging
 
 LINE = re.compile(
@@ -34,7 +33,7 @@ def restore_root_logger() -> Iterator[None]:
 
 def _configure(level: str = "INFO") -> io.StringIO:
     stream = io.StringIO()
-    configure_logging(LoggingSettings(log_level=level), stream=stream)  # type: ignore[arg-type]
+    configure_logging(level, stream=stream)  # type: ignore[arg-type]
     return stream
 
 

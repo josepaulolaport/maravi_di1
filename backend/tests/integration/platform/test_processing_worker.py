@@ -28,7 +28,7 @@ from pydantic import SecretStr
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from di1.platform.config import BrokerSettings, Settings
+from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.platform.messaging.connection import connect
 from di1.platform.messaging.consumer import Job
@@ -47,10 +47,12 @@ from di1.workers.main import JobFailedError, run_worker
 from tests.integration.platform.conftest import queue_spec
 from tests.integration.platform.support import (
     EFFECT,
+    PUBLISH_TIMEOUT_SECONDS,
     close_connections,
     effects,
     eventually,
     make_envelope,
+    with_broker,
 )
 
 
@@ -120,16 +122,18 @@ async def _ready_messages(broker: AbstractRobustConnection, queue_name: str) -> 
 
 @pytest.fixture
 async def publisher(
-    broker: AbstractRobustConnection, broker_settings: BrokerSettings, topology: Topology
+    broker: AbstractRobustConnection, broker_url: SecretStr, topology: Topology
 ) -> MessagePublisher:
-    return await MessagePublisher.create(broker, topology, settings=broker_settings)
+    return await MessagePublisher.create(
+        broker, topology, confirm_timeout_seconds=PUBLISH_TIMEOUT_SECONDS
+    )
 
 
 async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
     settings: Settings,
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
 ) -> None:
@@ -142,8 +146,7 @@ async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             consumers=_consumers(spec, handler, given),
             stop=stop,
             topology=topology,
@@ -166,7 +169,7 @@ async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
 
 async def test_the_worker_beats_its_heartbeat_from_its_start_until_it_stops(
     settings: Settings,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     tmp_path: Path,
 ) -> None:
@@ -181,14 +184,12 @@ async def test_the_worker_beats_its_heartbeat_from_its_start_until_it_stops(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url, heartbeat_interval_seconds=0.05),
             consumers=lambda resources: [],
             stop=stop,
             topology=topology,
             on_startup=recover,
             heartbeat=Heartbeat(path),
-            heartbeat_interval_seconds=0.05,
         )
     )
     await eventually(path.exists)
@@ -223,7 +224,7 @@ async def test_a_stop_during_the_run_after_the_ack_cancels_it_and_the_message_st
     settings: Settings,
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
 ) -> None:
@@ -234,8 +235,7 @@ async def test_a_stop_during_the_run_after_the_ack_cancels_it_and_the_message_st
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             consumers=_consumers(spec, handler),
             stop=stop,
             topology=topology,
@@ -259,7 +259,7 @@ async def test_a_failure_after_the_ack_ends_the_worker_with_an_error(
     settings: Settings,
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
 ) -> None:
@@ -271,8 +271,7 @@ async def test_a_failure_after_the_ack_ends_the_worker_with_an_error(
     handler = _Run(fail_after_ack=True)
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             consumers=_consumers(spec, handler),
             stop=asyncio.Event(),
             topology=topology,
@@ -294,7 +293,7 @@ async def test_a_stop_before_the_ack_rolls_back_and_returns_the_message(
     settings: Settings,
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
 ) -> None:
@@ -305,8 +304,7 @@ async def test_a_stop_before_the_ack_rolls_back_and_returns_the_message(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             consumers=_consumers(spec, handler),
             stop=stop,
             topology=topology,
@@ -333,7 +331,7 @@ async def test_a_dropped_broker_connection_does_not_cancel_the_run(
     settings: Settings,
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
     management_url: str,
@@ -345,8 +343,7 @@ async def test_a_dropped_broker_connection_does_not_cancel_the_run(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             consumers=_consumers(spec, handler),
             stop=stop,
             topology=topology,
@@ -372,7 +369,7 @@ async def test_a_message_arriving_during_a_run_is_acked_at_once_and_starts_nothi
     settings: Settings,
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
 ) -> None:
@@ -392,8 +389,7 @@ async def test_a_message_arriving_during_a_run_is_acked_at_once_and_starts_nothi
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             consumers=_consumers(spec, handler),
             stop=stop,
             topology=topology,
@@ -421,7 +417,7 @@ async def test_a_message_arriving_during_a_run_is_acked_at_once_and_starts_nothi
 
 async def test_the_sweep_runs_on_every_interval_without_any_message(
     settings: Settings,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
 ) -> None:
     """A request whose message was lost still runs: the sweep does not wait for a message."""
@@ -436,8 +432,7 @@ async def test_the_sweep_runs_on_every_interval_without_any_message(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings.model_copy(update={"worker_sweep_interval_seconds": 0.05}),
+            with_broker(settings, broker_url, worker_sweep_interval_seconds=0.05),
             consumers=lambda resources: [],
             stop=stop,
             topology=topology,
@@ -452,7 +447,7 @@ async def test_the_sweep_runs_on_every_interval_without_any_message(
 
 async def test_a_failing_sweep_ends_the_worker_with_an_error(
     settings: Settings,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
 ) -> None:
     """The process then exits 1 and Docker restarts it; the startup recovery repairs whatever
@@ -467,8 +462,7 @@ async def test_a_failing_sweep_ends_the_worker_with_an_error(
     with pytest.raises(JobFailedError) as raised:
         await asyncio.wait_for(
             run_worker(
-                settings,
-                broker_settings.model_copy(update={"worker_sweep_interval_seconds": 0.05}),
+                with_broker(settings, broker_url, worker_sweep_interval_seconds=0.05),
                 consumers=lambda resources: [],
                 stop=asyncio.Event(),
                 topology=topology,
@@ -498,13 +492,12 @@ async def hanging_database_settings() -> AsyncIterator[Settings]:
 
 
 async def test_a_stop_while_the_database_hangs_at_startup_ends_the_worker(
-    hanging_database_settings: Settings, broker_settings: BrokerSettings
+    hanging_database_settings: Settings, broker_url: SecretStr
 ) -> None:
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            hanging_database_settings,
-            broker_settings,
+            with_broker(hanging_database_settings, broker_url),
             consumers=lambda resources: (),
             stop=stop,
         )
@@ -518,7 +511,7 @@ async def test_a_stop_while_the_database_hangs_at_startup_ends_the_worker(
 
 
 async def test_an_unreachable_database_ends_the_worker_before_it_consumes(
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
 ) -> None:
     """Otherwise every message would fail its start and be dropped."""
     unreachable = Settings(
@@ -528,8 +521,7 @@ async def test_an_unreachable_database_ends_the_worker_before_it_consumes(
     with pytest.raises(OperationalError, match="port 1 failed"):
         await asyncio.wait_for(
             run_worker(
-                unreachable,
-                broker_settings,
+                with_broker(unreachable, broker_url),
                 consumers=lambda resources: (),
                 stop=asyncio.Event(),
             ),
@@ -564,8 +556,7 @@ async def test_a_stop_while_connecting_to_the_broker_ends_the_worker(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            BrokerSettings(rabbitmq_url=SecretStr(hanging_broker_url)),
+            with_broker(settings, SecretStr(hanging_broker_url)),
             consumers=lambda resources: (),
             stop=stop,
         )
@@ -584,7 +575,7 @@ async def _hang(*args: object, **kwargs: object) -> None:
 
 async def test_a_stop_while_the_broker_stalls_after_connecting_ends_the_worker(
     settings: Settings,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -608,8 +599,7 @@ async def test_a_stop_while_the_broker_stalls_after_connecting_ends_the_worker(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             consumers=_consumers(queue_spec(topology, "test.command"), _Run()),
             stop=stop,
             topology=topology,
@@ -625,7 +615,7 @@ async def test_a_stop_while_the_broker_stalls_after_connecting_ends_the_worker(
 
 
 async def test_a_connection_made_as_the_worker_is_cancelled_is_closed(
-    settings: Settings, broker_settings: BrokerSettings, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, broker_url: SecretStr, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     connections: list[AbstractRobustConnection] = []
     running: asyncio.Task[None] | None = None
@@ -639,7 +629,9 @@ async def test_a_connection_made_as_the_worker_is_cancelled_is_closed(
 
     monkeypatch.setattr(worker, "connect", connect_then_cancel)
     running = asyncio.create_task(
-        run_worker(settings, broker_settings, consumers=lambda resources: (), stop=asyncio.Event())
+        run_worker(
+            with_broker(settings, broker_url), consumers=lambda resources: (), stop=asyncio.Event()
+        )
     )
 
     with pytest.raises(asyncio.CancelledError):
@@ -650,13 +642,13 @@ async def test_a_connection_made_as_the_worker_is_cancelled_is_closed(
 
 
 async def test_the_worker_process_stops_cleanly_on_sigterm(
-    settings: Settings, broker_settings: BrokerSettings, tmp_path: Path
+    settings: Settings, broker_url: SecretStr, tmp_path: Path
 ) -> None:
     """The process runs the composition's startup step and its one consumer
     (``processing.run``), then stops on SIGTERM."""
     environment = os.environ | {
         "DATABASE_URL": settings.database_url.get_secret_value(),
-        "RABBITMQ_URL": broker_settings.rabbitmq_url.get_secret_value(),
+        "RABBITMQ_URL": broker_url.get_secret_value(),
         "LOG_LEVEL": "INFO",
     }
     process = await asyncio.create_subprocess_exec(
@@ -689,7 +681,7 @@ async def test_the_worker_process_stops_cleanly_on_sigterm(
     assert "worker startup step done" in output
     assert "worker started (1 consumers)" in output
     assert "worker stopped" in output
-    assert broker_settings.rabbitmq_url.get_secret_value() not in output
+    assert broker_url.get_secret_value() not in output
     assert settings.database_url.get_secret_value() not in output
 
 
@@ -727,7 +719,7 @@ async def test_the_startup_hook_runs_once_before_the_first_delivery(
     settings: Settings,
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
 ) -> None:
@@ -758,8 +750,7 @@ async def test_the_startup_hook_runs_once_before_the_first_delivery(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             consumers=_consumers(spec, handler),
             stop=stop,
             topology=topology,
@@ -781,7 +772,7 @@ async def test_the_startup_hook_runs_once_before_the_first_delivery(
 
 async def _queued_before_start(
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
 ) -> QueueSpec:
@@ -799,13 +790,13 @@ async def test_a_failing_startup_hook_ends_the_worker_before_it_consumes(
     settings: Settings,
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
 ) -> None:
     """The process then exits 1 (`di1.workers.lifecycle.run_process`) and Docker restarts it.
     The hook takes a moment before failing, so a worker that consumed early would claim."""
-    spec = await _queued_before_start(broker, broker_settings, topology, publisher)
+    spec = await _queued_before_start(broker, broker_url, topology, publisher)
     handler = _Run()
 
     async def recover(resources: WorkerResources) -> None:
@@ -815,8 +806,7 @@ async def test_a_failing_startup_hook_ends_the_worker_before_it_consumes(
     with pytest.raises(RuntimeError, match="recovery failed"):
         await asyncio.wait_for(
             run_worker(
-                settings,
-                broker_settings,
+                with_broker(settings, broker_url),
                 consumers=_consumers(spec, handler),
                 stop=asyncio.Event(),
                 topology=topology,
@@ -833,14 +823,14 @@ async def test_a_stop_during_the_startup_hook_cancels_it_and_consumes_nothing(
     settings: Settings,
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A long recovery must not keep SIGTERM waiting; it runs again on the next start."""
     caplog.set_level(logging.INFO, logger=worker.__name__)
-    spec = await _queued_before_start(broker, broker_settings, topology, publisher)
+    spec = await _queued_before_start(broker, broker_url, topology, publisher)
     handler = _Run()
     entered = asyncio.Event()
     cancelled = asyncio.Event()
@@ -856,8 +846,7 @@ async def test_a_stop_during_the_startup_hook_cancels_it_and_consumes_nothing(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             consumers=_consumers(spec, handler),
             stop=stop,
             topology=topology,
@@ -877,7 +866,7 @@ async def test_a_stop_during_the_startup_hook_cancels_it_and_consumes_nothing(
 
 async def test_a_startup_hook_that_ignores_its_cancellation_does_not_hold_the_stop(
     settings: Settings,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -897,8 +886,7 @@ async def test_a_startup_hook_that_ignores_its_cancellation_does_not_hold_the_st
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             consumers=lambda resources: (),
             stop=stop,
             on_startup=recover,

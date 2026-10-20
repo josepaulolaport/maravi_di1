@@ -22,7 +22,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlalchemy.pool import NullPool
 
-from di1.platform.config import get_settings
+from di1.platform.config import Settings
 
 config = context.config
 
@@ -32,7 +32,7 @@ def _database_url() -> str:
     if url:
         return url
     try:
-        return get_settings().database_url.get_secret_value()
+        return Settings().database_url.get_secret_value()
     except ValidationError as error:
         raise RuntimeError(
             "DATABASE_URL is missing or invalid: set it, in the environment or .env, to"

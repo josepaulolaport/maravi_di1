@@ -13,15 +13,14 @@ from __future__ import annotations
 import aio_pika
 from aio_pika.abc import AbstractRobustConnection
 from aio_pika.connection import make_url
+from pydantic import SecretStr
 
-from di1.platform.config import BrokerSettings
 
-
-async def connect(settings: BrokerSettings, *, connection_name: str) -> AbstractRobustConnection:
-    """Open a robust connection; ``connection_name`` identifies the process in the broker's
-    management UI."""
+async def connect(url: SecretStr, *, connection_name: str) -> AbstractRobustConnection:
+    """Open a robust connection to ``url`` (`di1.platform.config.Settings.broker_url`);
+    ``connection_name`` identifies the process in the broker's management UI."""
     connection = aio_pika.RobustConnection(
-        make_url(settings.rabbitmq_url.get_secret_value()),
+        make_url(url.get_secret_value()),
         client_properties={"connection_name": connection_name},
     )
     try:

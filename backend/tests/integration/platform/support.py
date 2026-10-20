@@ -17,14 +17,33 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from aio_pika.abc import AbstractQueue
+from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.platform.messaging.consumer import Job, JobLoop, MessageConsumer, MessageHandler
 from di1.platform.messaging.envelope import Envelope
+
+PUBLISH_TIMEOUT_SECONDS = 5.0
+"""The tests' publisher confirm timeout (``RABBITMQ_PUBLISH_TIMEOUT_SECONDS``)."""
+
+
+def with_broker(settings: Settings, broker_url: SecretStr, **updates: Any) -> Settings:
+    """``settings`` (the test's database) with the test broker and ``updates`` (sweep and
+    heartbeat intervals): what a worker process reads."""
+    return settings.model_copy(
+        update={
+            "rabbitmq_url": broker_url,
+            "rabbitmq_publish_timeout_seconds": PUBLISH_TIMEOUT_SECONDS,
+            **updates,
+        }
+    )
+
 
 CREATE_EFFECTS = text(
     "CREATE TABLE IF NOT EXISTS public.test_effects (message_id UUID PRIMARY KEY,"

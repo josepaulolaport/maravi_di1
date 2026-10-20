@@ -2,9 +2,9 @@
 
     python -m di1.workers.main
 
-It reads ``DATABASE_URL``, ``RABBITMQ_URL``, the optional broker settings (among them
-``WORKER_SWEEP_INTERVAL_SECONDS``) and ``LOG_LEVEL`` (`di1.platform.config`), configures logging
-once, builds its consumers with the composition root's `ConsumerFactory`
+It reads its `Settings` (``DATABASE_URL``, ``RABBITMQ_URL``, ``WORKER_SWEEP_INTERVAL_SECONDS``,
+``LOG_LEVEL``, ...; a missing ``RABBITMQ_URL`` fails it at startup), configures logging once,
+builds its consumers with the composition root's `ConsumerFactory`
 (`di1.platform.messaging.worker`), declares each one's queue and consumes it through the
 consumer base (`di1.platform.messaging.consumer`) until SIGTERM or SIGINT. Everything is built
 with plain factories, not FastAPI dependencies (interfaces.md "DI composition").
@@ -39,7 +39,7 @@ status 1, Docker restarts it, and the startup hook resumes the run (OQ-45).
 Then it closes the broker connection and the engine. A failure is logged through the
 configured logging and ends the process with status 1.
 
-With ``HEARTBEAT_FILE`` set (`di1.platform.config.HeartbeatSettings`), a task of the event loop
+With ``HEARTBEAT_FILE`` set (`di1.platform.config.Settings`), a task of the event loop
 touches that file every ``HEARTBEAT_INTERVAL_SECONDS`` while the process runs; compose.yaml's
 health check (`di1.workers.healthcheck`) reads its age.
 
@@ -59,13 +59,7 @@ from aio_pika.abc import AbstractIncomingMessage, AbstractQueue, AbstractRobustC
 
 from di1.composition import consumers as composition
 from di1.platform.clock import SystemClock
-from di1.platform.config import (
-    BrokerSettings,
-    Settings,
-    get_broker_settings,
-    get_heartbeat_settings,
-    get_settings,
-)
+from di1.platform.config import Settings
 from di1.platform.database.engine import check_connection, create_worker_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import unit_of_work_factory
@@ -108,7 +102,6 @@ async def _no_sweep() -> None:
 
 async def run_worker(
     settings: Settings,
-    broker_settings: BrokerSettings,
     *,
     consumers: ConsumerFactory,
     stop: asyncio.Event,
@@ -117,7 +110,6 @@ async def run_worker(
     on_startup: StartupHook | None = None,
     sweep: SweepFactory | None = None,
     heartbeat: Heartbeat | None = None,
-    heartbeat_interval_seconds: float = 5.0,
 ) -> None:
     """`_serve`, with ``heartbeat`` beaten every ``heartbeat_interval_seconds`` from a task of
     the event loop, from the start (the startup step included) until the worker stops: a
@@ -125,7 +117,6 @@ async def run_worker(
     if heartbeat is None:
         await _serve(
             settings,
-            broker_settings,
             consumers=consumers,
             stop=stop,
             topology=topology,
@@ -136,12 +127,11 @@ async def run_worker(
         return
     stopped = asyncio.Event()
     beating = asyncio.create_task(
-        beat_until_stopped(heartbeat, stopped, interval_seconds=heartbeat_interval_seconds)
+        beat_until_stopped(heartbeat, stopped, interval_seconds=settings.heartbeat_interval_seconds)
     )
     try:
         await _serve(
             settings,
-            broker_settings,
             consumers=consumers,
             stop=stop,
             topology=topology,
@@ -156,7 +146,6 @@ async def run_worker(
 
 async def _serve(
     settings: Settings,
-    broker_settings: BrokerSettings,
     *,
     consumers: ConsumerFactory,
     stop: asyncio.Event,
@@ -168,6 +157,7 @@ async def _serve(
     """Run ``on_startup`` once, then run the job loop and consume until ``stop`` is set or a job
     fails; then stop consuming, cancel the deliveries and the job in progress, and close the
     broker connection and the engine. A failed job is then raised as `JobFailedError`."""
+    broker_url = settings.broker_url()
     topology = topology if topology is not None else Topology()
     engine = create_worker_engine(settings)
     try:
@@ -189,12 +179,12 @@ async def _serve(
             logger.info("worker startup step done")
         jobs = JobLoop(
             sweep=sweep(resources) if sweep is not None else _no_sweep,
-            sweep_interval_seconds=broker_settings.worker_sweep_interval_seconds,
+            sweep_interval_seconds=settings.worker_sweep_interval_seconds,
         )
         loop = asyncio.create_task(jobs.run())
         try:
             connection = await unless_stopped(
-                connect(broker_settings, connection_name=CONNECTION_NAME),
+                connect(broker_url, connection_name=CONNECTION_NAME),
                 stop,
                 discard=close_connection,
             )
@@ -342,18 +332,15 @@ class _RunningConsumers:
 
 
 def main() -> None:
-    def run(stop: asyncio.Event) -> Awaitable[None]:
-        heartbeat_settings = get_heartbeat_settings()
-        path = heartbeat_settings.heartbeat_file
+    def run(settings: Settings, stop: asyncio.Event) -> Awaitable[None]:
+        path = settings.heartbeat_file
         return run_worker(
-            get_settings(),
-            get_broker_settings(),
+            settings,
             consumers=composition.consumers,
             on_startup=composition.processing_startup,
             sweep=composition.processing_sweep,
             stop=stop,
             heartbeat=Heartbeat(path) if path is not None else None,
-            heartbeat_interval_seconds=heartbeat_settings.heartbeat_interval_seconds,
         )
 
     run_process("processing worker", run, logger)
