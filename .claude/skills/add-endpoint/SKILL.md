@@ -27,13 +27,13 @@ Run them and see them fail.
 
 ## 3. Build the layers in your module only
 
-1. **`application/services/`:** the service method. It receives `*, uow` for writes, calls the pure domain code, and commits once.
+1. **`application/services/`:** the service method. The service is built per request on the Unit of Work (`build_<module>_service(uow, ...)`) and keeps it; a write calls the pure domain code and commits once, and no method takes `uow`.
 2. **`infrastructure/persistence/`:**
    - the models mirror `docs/schema.sql` exactly;
    - queries go in `queries/`;
    - repositories return DTOs and hold no rules.
-3. **`presentation/http/schemas.py`:** Pydantic v2 schemas, with decimal fields as strings.
-4. **`presentation/http/router.py`:** parse the request, call the service, return the response. No business logic.
+3. **`presentation/http/schemas.py`:** Pydantic v2 schemas named `*Request`/`*Response`/`*ListResponse`/`*PageResponse`, each response built by `of(cls, x) -> Self`. Request bodies extend `di1.platform.http.RequestBody` (`extra="forbid"`); decimals are `DecimalString` in, plain strings out; instants are `UtcDatetime`; enums and UUIDs keep their types; database integer ranges are `Field` bounds here.
+4. **`presentation/http/router.py`:** `create_router(*, get_service, ...)`, keyword-only, every collaborator through `Depends`; `APIRouter(prefix=..., tags=[...])`, `fastapi.status`, return annotations (no `response_model`). Parse the request, call the service, return the response. No business logic.
 5. **`dependencies.py`:** the module's own providers.
 
 Router registration and cross-module wiring belong to the integrator (`composition/`). Ask for them in your PR description.
