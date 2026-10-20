@@ -11,7 +11,6 @@ import {
   answerCancel,
   serveWith,
   RUNNING,
-  jobRow,
   findJobRow,
   openMenu,
 } from '@/test/screens/processing';
@@ -67,7 +66,8 @@ describe('Processamentos: cancel (§10.2)', () => {
       expect(screen.queryByRole('dialog', { name: 'Cancelar processamento?' })).toBeNull();
     });
     expect(cancels.count).toBe(0);
-    expect(jobRow('17/10/2026 a 18/10/2026', 'Na fila')).toBeTruthy();
+    // Waited for: the history is hidden from the accessibility tree until the dialog is gone.
+    expect(await findJobRow('17/10/2026 a 18/10/2026', 'Na fila')).toBeTruthy();
   });
 
   it('§10.2 OQ-23 OQ-46 cancels a running job cooperatively: Cancelando, then Cancelado', async () => {

@@ -312,7 +312,9 @@ describe('Carteira (§11.4)', () => {
 
     await router.navigate('/carteira?date=2026-10-16');
 
+    // The new date's figures, not the old date's rows still on screen.
     await waitFor(() => {
+      expect(summaryReads).toContain('2026-10-16');
       expect(screen.getByText('DI1F29', { selector: 'td *' })).toBeInTheDocument();
     });
     // Only the JobWatcher refreshes the portfolio, when a run ends: nothing is re-read here.
