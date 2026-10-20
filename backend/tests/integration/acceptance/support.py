@@ -83,8 +83,8 @@ def acceptance_app(today: date) -> Iterator[tuple[TestClient, str]]:
 
 def run_worker(database_url: str, now: datetime) -> None:
     """The processing worker starting at ``now``, in-process on the same database, with the real
-    composition (``processing_startup``): it recovers, then drains every QUEUED request oldest
-    first (OQ-45, OQ-46). The doorbell left in the outbox is not relayed; RabbitMQ delivery is the
+    composition (``processing_startup``): it recovers, then sweeps every QUEUED request oldest
+    first (OQ-45). The run messages left in the outbox are not relayed; RabbitMQ delivery is the
     worker's end-to-end test, not these."""
     asyncio.run(_run_worker(database_url, now))
 

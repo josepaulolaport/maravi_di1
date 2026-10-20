@@ -39,9 +39,7 @@ async def test_a_published_message_is_persistent_and_carries_the_envelope(
     broker: AbstractRobustConnection, broker_settings: BrokerSettings, topology: Topology
 ) -> None:
     channel = await broker.channel()
-    queue = await declare_queue(
-        channel, topology, queue_spec(topology, "test.command"), settings=broker_settings
-    )
+    queue = await declare_queue(channel, topology, queue_spec(topology, "test.command"))
     publisher = await MessagePublisher.create(broker, topology, settings=broker_settings)
     envelope = _envelope()
 

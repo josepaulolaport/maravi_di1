@@ -3,6 +3,8 @@ boundaries" 3 to 7; OQ-45, OQ-46). The only composition module the workers impor
 
 - `consumers`: the processing worker's one consumer, on Processing's run message queue. Each
   message names one request: the handler starts it, if still QUEUED, and runs it after the ack;
+- `processing_sweep`: the worker's periodic sweep, which runs the QUEUED requests oldest first,
+  so a request whose message was lost still runs;
 - `processing_startup`: run once by the worker before it consumes. Exactly one worker exists
   (OQ-45), so an interrupted run is resumed after its ``progress_date``, or a run with
   ``cancel_requested_at`` set is ended CANCELLED (OQ-46), inline; then the queue is swept;
@@ -27,6 +29,7 @@ from di1.modules.processing.dependencies import (
     make_range_processor,
     make_run_message_handler,
 )
+from di1.platform.messaging.consumer import Job
 from di1.platform.messaging.topology import QueueSpec
 from di1.platform.messaging.worker import ConsumerRegistration, WorkerResources
 
@@ -51,7 +54,7 @@ def consumers(resources: WorkerResources) -> Sequence[ConsumerRegistration]:
     return (
         ConsumerRegistration(
             queue=RUN_QUEUE,
-            consumer_name=RUN_MESSAGE_TYPE,
+            name=RUN_MESSAGE_TYPE,
             handler=make_run_message_handler(_processor(resources)),
         ),
     )
@@ -59,3 +62,7 @@ def consumers(resources: WorkerResources) -> Sequence[ConsumerRegistration]:
 
 def processing_startup(resources: WorkerResources) -> Awaitable[None]:
     return _processor(resources).recover_at_startup()
+
+
+def processing_sweep(resources: WorkerResources) -> Job:
+    return _processor(resources).sweep

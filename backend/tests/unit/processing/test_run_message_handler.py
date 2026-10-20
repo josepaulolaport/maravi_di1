@@ -11,10 +11,11 @@ from uuid import UUID
 
 import pytest
 
-from di1.modules.processing.presentation.messaging.run_message import RunMessageHandler
-from di1.platform.messaging.consumer import PermanentMessageError
+from di1.modules.processing.presentation.messaging.run_message import (
+    InvalidRunMessageError,
+    RunMessageHandler,
+)
 from di1.platform.messaging.envelope import Envelope
-from tests.unit.processing.fakes import FakeUnitOfWork
 
 REQUEST_ID = UUID(int=7)
 
@@ -48,9 +49,7 @@ def envelope(
 async def test_the_named_request_starts_and_runs_only_after_the_handler_returns() -> None:
     processor = FakeProcessor()
 
-    after_ack = await RunMessageHandler(processor)(
-        envelope({"request_id": str(REQUEST_ID)}), uow=FakeUnitOfWork()
-    )
+    after_ack = await RunMessageHandler(processor)(envelope({"request_id": str(REQUEST_ID)}))
 
     assert processor.started == [REQUEST_ID]
     assert processor.ran == []
@@ -62,9 +61,7 @@ async def test_the_named_request_starts_and_runs_only_after_the_handler_returns(
 async def test_a_request_that_does_not_start_hands_back_no_run() -> None:
     processor = FakeProcessor(startable=False)  # cancelled, ended, or a run is RUNNING
 
-    after_ack = await RunMessageHandler(processor)(
-        envelope({"request_id": str(REQUEST_ID)}), uow=FakeUnitOfWork()
-    )
+    after_ack = await RunMessageHandler(processor)(envelope({"request_id": str(REQUEST_ID)}))
 
     assert after_ack is None
     assert processor.started == [REQUEST_ID]
@@ -84,7 +81,7 @@ async def test_a_request_that_does_not_start_hands_back_no_run() -> None:
 async def test_a_message_that_is_not_a_run_message_is_refused(bad: Envelope) -> None:
     processor = FakeProcessor()
 
-    with pytest.raises(PermanentMessageError):
-        await RunMessageHandler(processor)(bad, uow=FakeUnitOfWork())
+    with pytest.raises(InvalidRunMessageError):
+        await RunMessageHandler(processor)(bad)
 
     assert processor.started == []

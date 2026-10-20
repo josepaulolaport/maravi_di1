@@ -161,10 +161,9 @@ async def test_a_stop_while_connecting_to_the_broker_ends_the_relay(
 async def test_the_relay_process_stops_cleanly_on_sigterm(
     settings: Settings, broker_settings: BrokerSettings, tmp_path: Path
 ) -> None:
-    """The process runs its real topology (``di1.commands``, ``di1.dead-letter``): the one
-    exception to test-owned broker names. It declares the composition's one queue,
-    ``processing.run_request``, with the default settings; the declarations are idempotent, so it
-    leaves nothing that another test could conflict with."""
+    """The process runs its real topology (``di1.commands``): the one exception to test-owned
+    broker names. It declares the composition's one queue, ``processing.run``; the declarations
+    are idempotent, so it leaves nothing that another test could conflict with."""
     environment = os.environ | {
         "DATABASE_URL": settings.database_url.get_secret_value(),
         "RABBITMQ_URL": broker_settings.rabbitmq_url.get_secret_value(),

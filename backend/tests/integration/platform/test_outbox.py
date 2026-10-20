@@ -1,6 +1,6 @@
 """The outbox row is part of the business write's transaction.
 
-OQ-46 (Processing's doorbell is saved in the same transaction as the fact it signals);
+Processing's run message is saved in the same transaction as the request it names;
 backend/CLAUDE.md "Messaging" (publish only through ``platform.outbox_messages`` and the
 relay); CLAUDE.md §2 (JSON carries decimal strings).
 """
