@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from di1.modules.ledger.public import EntryType
 from di1.modules.portfolio.public import CashBalance
 from di1.modules.prices.public import PriceSource
-from di1.modules.processing.domain.predecessor import PredecessorState, allows_run
+from di1.modules.processing.domain.predecessor import PredecessorState
 from tests.integration.processing.support import seed_instrument, seed_statuses
 from tests.integration.processing.worker_support import Worker
 from tests.unit.processing.run_fakes import cash_movement, trade
@@ -524,7 +524,7 @@ async def test_the_preview_and_the_run_apply_the_same_predecessor_rule(
     assert reported == state
     portfolio, cash = (await worker.statuses())[D1]
     ran = (cash if scope == "CASH" else portfolio) == "PROCESSED"
-    assert ran is allows_run(reported)
+    assert ran is reported.allows_run
     if not ran:
         assert (await worker.run_row(request_id))["error_code"] == f"{scope}_PREDECESSOR_MISSING"
 
@@ -571,7 +571,7 @@ async def test_both_chains_failing_on_different_dates_ends_the_run_failed(worker
 async def test_a_failure_outside_the_chains_fails_the_date_for_every_live_chain(
     worker: Worker,
 ) -> None:
-    worker.fail_reading_on_date_transaction = 2  # D2's transaction
+    worker.faults.fail_on_date_transaction = 2  # D2's transaction
     request_id = await worker.enqueue("CASH", D1, D3)
 
     await worker.sweep()
@@ -808,7 +808,7 @@ async def test_a_failure_outside_the_chains_after_one_stopped_fails_only_the_liv
     worker: Worker,
 ) -> None:
     worker.writer.fail.add(("CASH", D1))
-    worker.fail_reading_on_date_transaction = 2  # D2's transaction
+    worker.faults.fail_on_date_transaction = 2  # D2's transaction
     request_id = await worker.enqueue("ALL", D1, D3)
 
     await worker.sweep()
@@ -1000,19 +1000,19 @@ async def test_a_crash_mid_run_resumes_at_restart_then_sweeps_the_queue(worker: 
 async def test_a_transient_failure_recording_the_end_is_retried(worker: Worker) -> None:
     request_id = await worker.enqueue("CASH", D1, D2)
     queued = await worker.enqueue("CASH", D3, D3)
-    worker.store.end_failures = 2  # the third attempt succeeds
+    worker.faults.end_failures = 2  # the third attempt succeeds
 
     await worker.sweep()
 
     assert (await worker.run_row(request_id))["status"] == "COMPLETED"
     assert (await worker.run_row(queued))["status"] == "COMPLETED"
-    assert worker.store.end_failures == 0
+    assert worker.faults.end_failures == 0
 
 
 async def test_a_transient_failure_recording_a_failed_date_is_retried(worker: Worker) -> None:
-    worker.fail_reading_on_date_transaction = 1  # D1 fails outside the chains
+    worker.faults.fail_on_date_transaction = 1  # D1 fails outside the chains
     request_id = await worker.enqueue("CASH", D1, D2)
-    worker.store.end_failures = 1
+    worker.faults.end_failures = 1
 
     await worker.sweep()
 
@@ -1033,7 +1033,7 @@ async def test_a_persistent_failure_recording_the_end_escapes_and_the_restart_en
     and sweeps the queue (OQ-45)."""
     request_id = await worker.enqueue("CASH", D1, D2)
     queued = await worker.enqueue("CASH", D3, D3)
-    worker.store.end_failures = 3  # every attempt fails
+    worker.faults.end_failures = 3  # every attempt fails
 
     with pytest.raises(OperationalError, match="database blip"):
         await worker.sweep()
@@ -1073,7 +1073,7 @@ async def test_an_end_that_committed_before_its_error_is_not_written_twice(
     assert calls == [request_id, request_id, queued]  # one retry, then the next run
     run = await worker.run_row(request_id)
     assert (run["status"], run["error_code"]) == ("COMPLETED", None)
-    assert worker.store.end_attempts == 2  # the retry stopped at the lock: no second write
+    assert worker.faults.end_attempts == 2  # the retry stopped at the lock: no second write
     assert (await worker.run_row(queued))["status"] == "COMPLETED"
 
 
@@ -1085,11 +1085,11 @@ async def test_a_bug_recording_the_end_is_not_retried_and_ends_the_run_failed(
     PROCESSING_ERROR in a fresh transaction; the dates it committed keep their statuses."""
     request_id = await worker.enqueue("CASH", D1, D2)
     queued = await worker.enqueue("CASH", D3, D3)
-    worker.store.end_bugs = 1
+    worker.faults.end_bugs = 1
 
     await worker.sweep()
 
-    assert worker.store.end_attempts == 3  # the end once, the FAILED end, then the next run
+    assert worker.faults.end_attempts == 3  # the end once, the FAILED end, then the next run
     run = await worker.run_row(request_id)
     assert (run["status"], run["error_code"], run["error_message"]) == (
         "FAILED",
@@ -1112,9 +1112,9 @@ async def test_a_bug_recording_the_end_is_not_retried_and_ends_the_run_failed(
 async def test_a_bug_recording_a_failed_date_ends_the_run_failed_and_writes_no_status(
     worker: Worker,
 ) -> None:
-    worker.fail_reading_on_date_transaction = 1  # D1 fails outside the chains
+    worker.faults.fail_on_date_transaction = 1  # D1 fails outside the chains
     request_id = await worker.enqueue("CASH", D1, D2)
-    worker.store.end_bugs = 1  # recording D1's failure fails, not retried
+    worker.faults.end_bugs = 1  # recording D1's failure fails, not retried
 
     await worker.sweep()
 
@@ -1131,7 +1131,7 @@ async def test_a_bug_that_also_blocks_the_failed_end_escapes_for_a_restart(
     worker: Worker,
 ) -> None:
     request_id = await worker.enqueue("CASH", D1, D1)
-    worker.store.end_bugs = 2  # the end and the FAILED end both fail
+    worker.faults.end_bugs = 2  # the end and the FAILED end both fail
 
     with pytest.raises(ValueError, match="bug while ending the run"):
         await worker.sweep()

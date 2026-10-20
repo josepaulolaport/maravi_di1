@@ -98,10 +98,9 @@ def test_the_writer_publishes_one_date_per_chain() -> None:
     positions = inspect.signature(PortfolioResultsWriter.write_positions_day)
     cash = inspect.signature(PortfolioResultsWriter.write_cash_day)
 
-    assert list(positions.parameters) == ["self", "day", "valuation", "asset_pnl", "pnl", "uow"]
-    assert list(cash.parameters) == ["self", "day", "uow"]
-    for signature in (positions, cash):
-        assert signature.parameters["uow"].kind is inspect.Parameter.KEYWORD_ONLY
+    # The writer is built on the date's session (build_results_writer): no ``uow`` per call.
+    assert list(positions.parameters) == ["self", "day", "valuation", "asset_pnl", "pnl"]
+    assert list(cash.parameters) == ["self", "day"]
     assert not hasattr(PortfolioResultsWriter, "publish_range")
 
 

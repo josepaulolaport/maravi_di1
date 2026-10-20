@@ -4,19 +4,18 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
-from di1.modules.portfolio.application.services.repository import PortfolioRepository
+from di1.modules.portfolio.application.ports import PortfolioRepository
 from di1.modules.portfolio.domain.cash import CashBalance
 from di1.modules.portfolio.domain.errors import PortfolioError
 from di1.modules.portfolio.domain.positions import OpenPosition, PositionState
 from di1.modules.portfolio.public import PreviousPositionsDay
+from di1.shared.calendar import ONE_DAY
 
-ONE_DAY = timedelta(days=1)
 
-
-class PortfolioReader:
-    """Public `PortfolioReader` on the caller's session."""
+class DefaultPortfolioReader:
+    """Public `PortfolioReader` on the repository of the caller's session."""
 
     def __init__(self, repository: PortfolioRepository) -> None:
         self._repository = repository

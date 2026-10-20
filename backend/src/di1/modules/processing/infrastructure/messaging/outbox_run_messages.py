@@ -5,15 +5,18 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from di1.modules.processing.application.interfaces.run_messages import RUN_MESSAGE_TYPE
+from di1.modules.processing.application.ports import RUN_MESSAGE_TYPE
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.platform.messaging.outbox import add_outbox_message
 
 
 class OutboxRunMessages:
-    """Satisfies `RunMessages`."""
+    """Implements `RunMessages` in ``uow``'s transaction."""
 
-    async def publish(self, request_id: UUID, *, uow: UnitOfWork) -> None:
+    def __init__(self, uow: UnitOfWork) -> None:
+        self._uow = uow
+
+    async def publish(self, request_id: UUID) -> None:
         await add_outbox_message(
-            uow, message_type=RUN_MESSAGE_TYPE, payload={"request_id": str(request_id)}
+            self._uow, message_type=RUN_MESSAGE_TYPE, payload={"request_id": str(request_id)}
         )

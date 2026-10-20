@@ -110,7 +110,7 @@ MODULE_ENTRIES = frozenset(
 # Allowed entries directly under a layer; a layer missing here (domain, infrastructure) may hold
 # any sub-package: infrastructure/ holds every outbound adapter a module needs.
 LAYER_ENTRIES = {
-    "application": frozenset({"__init__.py", "ports.py", "services", "interfaces"}),
+    "application": frozenset({"__init__.py", "ports.py", "services"}),
     "presentation": frozenset({"__init__.py", "http", "messaging"}),
 }
 

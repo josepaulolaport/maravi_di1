@@ -3,31 +3,27 @@ Processing's date transaction, never committed here (OQ-23)."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from uuid import UUID
 
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
-from di1.modules.portfolio.application.services.repository import (
+from di1.modules.portfolio.application.ports import (
     PortfolioRepository,
     PublishedPortfolioDay,
     PublishedPosition,
 )
 from di1.modules.portfolio.domain.cash import CashDay
+from di1.modules.portfolio.domain.errors import PortfolioError
 from di1.modules.portfolio.domain.positions import PositionsDay
 from di1.modules.portfolio.domain.valuation import PortfolioValuation, ValuationStatus
-from di1.platform.database.unit_of_work import UnitOfWork
 
 
-class PortfolioResultsWriter:
-    """Public `PortfolioResultsWriter`.
+class DefaultResultsWriter:
+    """Public `PortfolioResultsWriter` on the repository of Processing's date transaction, so
+    the rows land in it. AUM is not written: the read models compute it (OQ-21, OQ-38)."""
 
-    ``repository_for`` builds the repository on the caller's Unit of Work, so the rows land in
-    Processing's transaction for the date. AUM is not written: the read models compute it
-    (OQ-21, OQ-38).
-    """
-
-    def __init__(self, repository_for: Callable[[UnitOfWork], PortfolioRepository]) -> None:
-        self._repository_for = repository_for
+    def __init__(self, repository: PortfolioRepository) -> None:
+        self._repository = repository
 
     async def write_positions_day(
         self,
@@ -35,25 +31,27 @@ class PortfolioResultsWriter:
         valuation: PortfolioValuation,
         asset_pnl: Mapping[UUID, AssetPnLResult],
         pnl: PortfolioPnLResult,
-        *,
-        uow: UnitOfWork,
     ) -> None:
         if valuation.date != day.date:
-            raise ValueError(f"the valuation is of {valuation.date}, the positions of {day.date}")
+            raise PortfolioError(
+                f"the valuation is of {valuation.date}, the positions of {day.date}"
+            )
         if (valuation.status is ValuationStatus.MISSING) != (
             valuation.positions_market_value is None
         ):
-            raise ValueError("a market value is missing exactly when its valuation is MISSING")
+            raise PortfolioError("a market value is missing exactly when its valuation is MISSING")
         if not day.positions and (
             valuation.positions_market_value != 0
             or any(v != 0 for v in (pnl.position_pnl, pnl.trades_pnl, pnl.daily_pnl))
         ):
             # OQ-22 item 5: a day with no expected asset is worth 0 and its P&L is exactly 0.
-            raise ValueError(f"{day.date} has no expected asset but a market value or P&L")
+            raise PortfolioError(f"{day.date} has no expected asset but a market value or P&L")
         held = {p.asset_id for p in day.positions}
         valued = {v.asset_id: v for v in valuation.assets}
         if held != set(valued) or held != set(asset_pnl):
-            raise ValueError(f"positions, valuation and P&L of {day.date} cover different assets")
+            raise PortfolioError(
+                f"positions, valuation and P&L of {day.date} cover different assets"
+            )
         positions = [
             PublishedPosition(
                 asset_id=p.asset_id,
@@ -79,7 +77,7 @@ class PortfolioResultsWriter:
             valuation_status=CalculationCompleteness(valuation.status),
             pnl_status=pnl.status,
         )
-        await self._repository_for(uow).replace_positions_day(portfolio_day, positions)
+        await self._repository.replace_positions_day(portfolio_day, positions)
 
-    async def write_cash_day(self, day: CashDay, *, uow: UnitOfWork) -> None:
-        await self._repository_for(uow).upsert_cash_day(day)
+    async def write_cash_day(self, day: CashDay) -> None:
+        await self._repository.upsert_cash_day(day)

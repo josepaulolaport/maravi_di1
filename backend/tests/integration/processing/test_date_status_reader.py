@@ -11,13 +11,15 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from di1.modules.processing.dependencies import make_date_status_reader
+from di1.modules.processing.dependencies import build_date_status_reader
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.clock import SAO_PAULO
+from tests.fakes.clock import FixedClock
 from tests.integration.processing.support import seed_statuses
 
 PROCESSED_AT = datetime(2026, 10, 17, 18, 30, tzinfo=SAO_PAULO)
+CLOCK = FixedClock(PROCESSED_AT.date(), PROCESSED_AT)
 
 
 async def test_oq31_reads_each_date_of_the_range_with_its_processing_times(
@@ -35,8 +37,8 @@ async def test_oq31_reads_each_date_of_the_range_with_its_processing_times(
     )
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        statuses = await make_date_status_reader().get_date_statuses(
-            date(2026, 10, 2), date(2026, 10, 5), uow=uow
+        statuses = await build_date_status_reader(uow.session, CLOCK).get_date_statuses(
+            date(2026, 10, 2), date(2026, 10, 5)
         )
 
     assert statuses == {
@@ -66,8 +68,8 @@ async def test_the_read_sees_the_callers_own_transaction(
                 "INSERT INTO processing.date_status (date, cash) VALUES ('2026-10-03', 'PROCESSED')"
             )
         )
-        statuses = await make_date_status_reader().get_date_statuses(
-            date(2026, 10, 3), date(2026, 10, 3), uow=uow
+        statuses = await build_date_status_reader(uow.session, CLOCK).get_date_statuses(
+            date(2026, 10, 3), date(2026, 10, 3)
         )
 
     assert statuses[date(2026, 10, 3)].cash is ChainStatus.PROCESSED
@@ -114,7 +116,7 @@ async def _read(
 ) -> dict[date, tuple[ChainStatus | None, ChainStatus | None]]:
     """``{date: (portfolio, cash)}`` as the reader shows them."""
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        statuses = await make_date_status_reader().get_date_statuses(start, end, uow=uow)
+        statuses = await build_date_status_reader(uow.session, CLOCK).get_date_statuses(start, end)
     return {day: (status.portfolio, status.cash) for day, status in statuses.items()}
 
 
@@ -131,7 +133,7 @@ async def test_oq50_the_active_runs_current_date_reads_processando_over_its_old_
         D2: (ChainStatus.PROCESSED, ChainStatus.RUNNING),  # stored FAILED, being reprocessed
     }
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        d2 = (await make_date_status_reader().get_date_statuses(D2, D2, uow=uow))[D2]
+        d2 = (await build_date_status_reader(uow.session, CLOCK).get_date_statuses(D2, D2))[D2]
     assert d2.cash_processed_at == PROCESSED_AT  # the last commit's time is kept
 
 

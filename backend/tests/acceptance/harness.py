@@ -38,14 +38,13 @@ from di1.modules.portfolio.public import (
     PreviousPositionsDay,
     Trade,
 )
-from di1.modules.processing.application.interfaces.repositories import IssueRecord
+from di1.modules.processing.application.ports import ChainPorts
 from di1.modules.processing.application.services.run_chains import (
-    DayReaders,
     process_cash_day,
     process_positions_day,
 )
+from di1.modules.processing.domain.issues import IssueRecord
 from di1.shared.decimals import financial_context
-from tests.unit.processing.fakes import FakeUnitOfWork
 from tests.unit.processing.run_fakes import (
     FakeInstruments,
     FakeLedger,
@@ -178,12 +177,10 @@ class _Published:
         valuation: PortfolioValuation,
         asset_pnl: Mapping[UUID, AssetPnLResult],
         pnl: PortfolioPnLResult,
-        *,
-        uow: object,
     ) -> None:
         self.positions[day.date] = _PositionsWrite(day, valuation, asset_pnl, pnl)
 
-    async def write_cash_day(self, day: CashDay, *, uow: object) -> None:
+    async def write_cash_day(self, day: CashDay) -> None:
         self.cash[day.date] = day
 
     async def get_previous_positions(self, before_date: date) -> PreviousPositionsDay | None:
@@ -229,11 +226,12 @@ def _publish(
     if any(on < first_day for on in dated):
         raise ValueError(f"a fact is dated before {first_day}, which starts from the zero state")
     published = _Published()
-    readers = DayReaders(
+    ports = ChainPorts(
         ledger=_ledger(facts),
         prices=_prices(facts),
         assets=FakeInstruments(maturities=dict(MATURITIES)),
         portfolio=published,
+        writer=published,
     )
 
     async def every_day() -> None:
@@ -243,17 +241,13 @@ def _publish(
                 published.issues[day] = await process_positions_day(
                     day,
                     zero_state=zero_state,
-                    readers=readers,
-                    writer=published,
-                    uow=FakeUnitOfWork(),
+                    ports=ports,
                 )
             if cash:
                 await process_cash_day(
                     day,
                     zero_state=zero_state,
-                    readers=readers,
-                    writer=published,
-                    uow=FakeUnitOfWork(),
+                    ports=ports,
                 )
 
     asyncio.run(every_day())

@@ -40,7 +40,6 @@ from di1.modules.portfolio.domain.valuation import (
 )
 from di1.modules.prices.public import PriceSource
 from di1.modules.processing.public import ChainStatus
-from di1.platform.database.unit_of_work import UnitOfWork
 
 __all__ = [
     "AssetValuation",
@@ -76,7 +75,8 @@ __all__ = [
 
 
 class PortfolioResultsWriter(Protocol):
-    """Publishes one date of a chain inside Processing's date transaction; never commits. Each
+    """Publishes one date of a chain inside Processing's date transaction (built on its session);
+    never commits. Each
     call replaces that date's rows (rows of assets no longer expected on the date are deleted,
     OQ-10). AUM is not written: ``PortfolioService`` computes it on read from the date's
     published cash and market value when both chains are processed (OQ-21, OQ-38). ALL writes
@@ -89,8 +89,6 @@ class PortfolioResultsWriter(Protocol):
         valuation: PortfolioValuation,
         asset_pnl: Mapping[UUID, AssetPnLResult],
         pnl: PortfolioPnLResult,
-        *,
-        uow: UnitOfWork,
     ) -> None:
         """``positions``, ``position_metrics`` and ``portfolio_metrics`` for ``day.date``: the
         quantities and averages of ``day``, each expected asset's ``financial_total`` and P&L
@@ -98,10 +96,10 @@ class PortfolioResultsWriter(Protocol):
         in the price table (OQ-30).
 
         The assets of ``day.positions``, ``valuation.assets`` and ``asset_pnl`` must be the same
-        set, the expected assets of the date; the writer raises ``ValueError`` otherwise."""
+        set, the expected assets of the date; the writer raises ``PortfolioError`` otherwise."""
         ...
 
-    async def write_cash_day(self, day: CashDay, *, uow: UnitOfWork) -> None:
+    async def write_cash_day(self, day: CashDay) -> None:
         """The ``cash_balances`` row for ``day.date``."""
         ...
 
@@ -239,7 +237,7 @@ class PnLPointView:
 class PortfolioService(Protocol):
     """Published data only, never recalculated on read (spec §11.4); each date's chain statuses
     come from ``processing.date_status`` (OQ-23), read in the same transaction as the published
-    rows (``DateStatusReader`` takes the caller's Unit of Work), so figures and statuses always
+    rows (``DateStatusReader`` is built on the same session), so figures and statuses always
     come from one snapshot."""
 
     async def get_summary(self, on: date) -> PortfolioSummaryView: ...

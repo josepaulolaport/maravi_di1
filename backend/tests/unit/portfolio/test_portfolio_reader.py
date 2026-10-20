@@ -7,11 +7,11 @@ from decimal import Decimal
 from uuid import UUID
 
 from di1.modules.pnl.public import CalculationCompleteness
-from di1.modules.portfolio.application.services.portfolio_reader import PortfolioReader
-from di1.modules.portfolio.application.services.repository import (
+from di1.modules.portfolio.application.ports import (
     PublishedPortfolioDay,
     PublishedPosition,
 )
+from di1.modules.portfolio.application.services.portfolio_reader import DefaultPortfolioReader
 from di1.modules.portfolio.domain.cash import CashBalance
 from di1.modules.portfolio.domain.positions import PositionState
 from di1.modules.portfolio.domain.valuation import ValuationStatus
@@ -53,7 +53,7 @@ def _portfolio_day(cumulative: str | None) -> PublishedPortfolioDay:
 
 
 async def test_nothing_published_the_day_before_reads_none() -> None:
-    reader = PortfolioReader(InMemoryPortfolioRepository())
+    reader = DefaultPortfolioReader(InMemoryPortfolioRepository())
 
     assert await reader.get_previous_positions(DAY) is None
     assert await reader.get_previous_cash(DAY) is None
@@ -68,7 +68,7 @@ async def test_the_positions_start_from_the_open_positions_and_cumulative_pnl() 
         _published(DI1F28, 0, None, None),
     )
 
-    previous = await PortfolioReader(repository).get_previous_positions(DAY)
+    previous = await DefaultPortfolioReader(repository).get_previous_positions(DAY)
 
     assert previous is not None
     assert previous.state == PositionState(
@@ -82,7 +82,7 @@ async def test_a_published_day_with_no_position_starts_empty() -> None:
     repository = InMemoryPortfolioRepository()
     repository.days[YESTERDAY] = _portfolio_day(None)
 
-    previous = await PortfolioReader(repository).get_previous_positions(DAY)
+    previous = await DefaultPortfolioReader(repository).get_previous_positions(DAY)
 
     assert previous is not None
     assert previous.state == PositionState.zero(YESTERDAY)
@@ -93,6 +93,6 @@ async def test_the_cash_starts_from_the_published_balance() -> None:
     repository = InMemoryPortfolioRepository()
     repository.cash[YESTERDAY] = stored_cash(YESTERDAY, Decimal("109090.9090909091"))
 
-    previous = await PortfolioReader(repository).get_previous_cash(DAY)
+    previous = await DefaultPortfolioReader(repository).get_previous_cash(DAY)
 
     assert previous == CashBalance(as_of=YESTERDAY, balance=Decimal("109090.9090909091"))
