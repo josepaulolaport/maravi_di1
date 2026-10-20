@@ -1,13 +1,12 @@
 """The worker processes' wiring (integrator; interfaces.md "DI composition", "Transaction
 boundaries" 3 to 7; OQ-45, OQ-46). The only composition module the workers import.
 
-- `consumers`: the processing worker's one consumer, on Processing's doorbell queue. The message
-  only says there is work (OQ-46): after it is acked the handler drains the oldest QUEUED
-  requests;
+- `consumers`: the processing worker's one consumer, on Processing's run message queue. Each
+  message names one request: the handler starts it, if still QUEUED, and runs it after the ack;
 - `processing_startup`: run once by the worker before it consumes. Exactly one worker exists
   (OQ-45), so an interrupted run is resumed after its ``progress_date``, or a run with
-  ``cancel_requested_at`` set is ended CANCELLED (OQ-46), inline; then the queue is drained;
-- `QUEUES`: the consumers' queues, which the outbox relay also declares at startup, so a doorbell
+  ``cancel_requested_at`` set is ended CANCELLED (OQ-46), inline; then the queue is swept;
+- `QUEUES`: the consumers' queues, which the outbox relay also declares at startup, so a message
   published before the worker starts is queued instead of refused.
 
 Processing builds its own internals (``processing.dependencies``); the composition passes the
@@ -23,19 +22,17 @@ from di1.modules.ledger.dependencies import ledger_reader
 from di1.modules.portfolio.dependencies import portfolio_reader, results_writer
 from di1.modules.prices.dependencies import price_reader
 from di1.modules.processing.dependencies import (
-    DOORBELL_CONSUMER_NAME,
-    DOORBELL_QUEUE_NAME,
-    DOORBELL_ROUTING_KEY,
+    RUN_MESSAGE_TYPE,
     PortfolioRangeProcessor,
-    make_doorbell_handler,
     make_range_processor,
+    make_run_message_handler,
 )
 from di1.platform.messaging.topology import QueueSpec
 from di1.platform.messaging.worker import ConsumerRegistration, WorkerResources
 
-DOORBELL_QUEUE = QueueSpec(DOORBELL_QUEUE_NAME, routing_keys=(DOORBELL_ROUTING_KEY,))
+RUN_QUEUE = QueueSpec(RUN_MESSAGE_TYPE, routing_keys=(RUN_MESSAGE_TYPE,))
 
-QUEUES: tuple[QueueSpec, ...] = (DOORBELL_QUEUE,)
+QUEUES: tuple[QueueSpec, ...] = (RUN_QUEUE,)
 
 
 def _processor(resources: WorkerResources) -> PortfolioRangeProcessor:
@@ -53,9 +50,9 @@ def _processor(resources: WorkerResources) -> PortfolioRangeProcessor:
 def consumers(resources: WorkerResources) -> Sequence[ConsumerRegistration]:
     return (
         ConsumerRegistration(
-            queue=DOORBELL_QUEUE,
-            consumer_name=DOORBELL_CONSUMER_NAME,
-            handler=make_doorbell_handler(_processor(resources)),
+            queue=RUN_QUEUE,
+            consumer_name=RUN_MESSAGE_TYPE,
+            handler=make_run_message_handler(_processor(resources)),
         ),
     )
 

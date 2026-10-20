@@ -33,7 +33,7 @@ class RealWorker:
         self.clock = MutableClock()
         uow_factory = unit_of_work_factory(factory)
         self.uow_factory = uow_factory
-        self.processor = make_range_processor(  # the worker's wiring (OQ-46)
+        self.processor = make_range_processor(  # the worker's wiring
             uow_factory=uow_factory,
             clock=self.clock,
             ledger_reader=ledger_reader,
@@ -57,7 +57,7 @@ class RealWorker:
                 ),
                 {"s": scope, "a": start, "b": end, "t": self.clock.now()},
             )
-        await self.processor.drain()  # the doorbell (OQ-46)
+        await self.processor.sweep()  # the run message is not relayed here
         async with self.engine.connect() as connection:
             row = (
                 await connection.execute(

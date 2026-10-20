@@ -167,7 +167,7 @@ class Worker:
             )
 
     async def enqueue(self, scope: str, start: date, end: date) -> UUID:
-        """Queues a request through `ProcessingService`, which rings the doorbell (OQ-46)."""
+        """Queues a request through `ProcessingService`, which publishes its run message."""
         self.clock.advance(1)
         async with self.uow_factory() as uow:
             request = await self.service.enqueue_range(ProcessingScope(scope), start, end, uow=uow)
@@ -183,17 +183,25 @@ class Worker:
         async with self.uow_factory() as uow:
             await self.service.request_cancel(request_id, uow=uow)
 
-    async def ring(self) -> None:
-        """The worker consumes a doorbell: it drains the queue (OQ-46)."""
-        await self.processor.drain()
+    async def deliver(self, request_id: UUID) -> bool:
+        """The worker handles ``request_id``'s run message: it starts that request, then runs
+        it; `False` when the message is skipped (the request is not QUEUED, or a run is)."""
+        if not await self.processor.start(request_id):
+            return False
+        await self.processor.run(request_id)
+        return True
+
+    async def sweep(self) -> None:
+        """The worker's periodic sweep: it runs the QUEUED requests, oldest first."""
+        await self.processor.sweep()
 
     async def take_next(self) -> UUID | None:
         """The worker takes the oldest QUEUED request (RUNNING) without running it yet."""
         return await self.processor.take_next()
 
     async def restart(self) -> None:
-        """The worker starts again: it recovers the interrupted run, then drains the queue
-        (OQ-45, OQ-46)."""
+        """The worker starts again: it recovers the interrupted run, then sweeps the queue
+        (OQ-45)."""
         await self.processor.recover_at_startup()
 
     async def run_row(self, request_id: UUID) -> dict[str, Any]:
