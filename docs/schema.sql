@@ -84,6 +84,7 @@ CREATE TABLE ledger.entries (
     execution_rate NUMERIC,                                              -- TRADE only
     input_kind VARCHAR(8),                                               -- TRADE only
     cash_amount NUMERIC(20,2),         -- CASH only: positive = deposit (aporte), negative = withdrawal
+    description VARCHAR(200),          -- CASH only, optional: trimmed, NULL when blank (OQ-51)
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT entries_type_check CHECK (type IN ('TRADE','CASH')),
     CONSTRAINT entries_trade_shape CHECK (type <> 'TRADE' OR (
@@ -94,7 +95,8 @@ CREATE TABLE ledger.entries (
     CONSTRAINT entries_cash_shape CHECK (type <> 'CASH' OR (
         cash_amount IS NOT NULL AND cash_amount <> 0
         AND asset_id IS NULL AND signed_quantity IS NULL AND execution_pu IS NULL
-        AND execution_rate IS NULL AND input_kind IS NULL))
+        AND execution_rate IS NULL AND input_kind IS NULL)),
+    CONSTRAINT entries_description_cash_only CHECK (type = 'CASH' OR description IS NULL)
 );
 CREATE INDEX entries_ordered_idx ON ledger.entries (entry_date, entry_time, seq);
 CREATE INDEX entries_trade_asset_date_idx ON ledger.entries (asset_id, entry_date, seq) WHERE type = 'TRADE';
@@ -233,9 +235,8 @@ CREATE TABLE portfolio.position_metrics (
 );
 CREATE INDEX position_metrics_date_idx ON portfolio.position_metrics (metric_date, asset_id);
 
--- aum = cash_balances.cash_balance + positions_market_value for the same date. The two live in
--- different tables (OQ-21), so this is a publish invariant: whichever scope publishes recomputes
--- aum for its days in the same transaction. A row can only check that aum needs a market value.
+-- aum is kept but unused (NULL): AUM = cash_balances.cash_balance + positions_market_value of the
+-- same date is computed on read, when both chains of the date are processed (OQ-21, OQ-38).
 CREATE TABLE portfolio.portfolio_metrics (
     metric_date DATE PRIMARY KEY,
     positions_market_value NUMERIC,

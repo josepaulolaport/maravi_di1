@@ -41,6 +41,8 @@ interface TradeEntry extends BaseEntry {
 
 interface CashEntry extends BaseEntry {
   kind: 'cash';
+  /** The aporte's or retirada's text, `null` when absent (OQ-51). */
+  description: string | null;
 }
 
 export type LedgerEntry = TradeEntry | CashEntry;
@@ -71,18 +73,23 @@ export function toRow(entry: ApiLedgerEntry): LedgerEntry {
     ...base,
     kind: 'cash',
     entryType: entry.cash_amount.startsWith('-') ? 'WITHDRAWAL' : 'DEPOSIT',
+    description: entry.description,
   };
 }
 
 /**
  * Names a row for screen readers and the delete dialogs, with enough of its figures to tell
  * same-day entries apart: "Venda DI1F28 -4 16/10/2026 15:00 PU 89.102,22",
- * "Retirada 16/10/2026 17:30 -R$ 50.000,00".
+ * "Retirada 16/10/2026 17:30 -R$ 50.000,00", "Aporte 14/10/2026 09:00 +R$ 1.500.000,00 (Aporte
+ * inicial)" for a cash entry with a description (OQ-51).
  */
 export function entryLabel(entry: LedgerEntry): string {
   const type = ENTRY_TYPE_LABELS[entry.entryType];
   const when = `${formatDate(entry.date)} ${formatTime(entry.time)}`;
-  if (entry.kind === 'cash') return `${type} ${when} ${formatSignedMoney(entry.signedAmount)}`;
+  if (entry.kind === 'cash') {
+    const label = `${type} ${when} ${formatSignedMoney(entry.signedAmount)}`;
+    return entry.description ? `${label} (${entry.description})` : label;
+  }
   const quantity = formatSignedQuantity(entry.signedQuantity);
   return `${type} ${entry.assetCode} ${quantity} ${when} PU ${formatPu(entry.pu)}`;
 }

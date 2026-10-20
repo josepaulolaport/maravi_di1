@@ -65,6 +65,20 @@ describe('Lançamentos (§11.3)', () => {
       ).not.toBeInTheDocument();
     });
 
+    it('OQ-51 names a cash entry with its description in the delete dialog', async () => {
+      const deposit = 'Aporte 14/10/2026 09:00 +R$\u00a01.500.000,00 (Aporte inicial)';
+      const { user } = await openLedger();
+
+      await user.click(rowNamed(deposit).getByRole('button', { name: `Ações de ${deposit}` }));
+      await user.click(await screen.findByRole('menuitem', { name: 'Excluir' }));
+
+      const dialog = within(await screen.findByRole('dialog', { name: 'Excluir lançamento' }));
+      // getByText normalizes the no-break space to a plain one.
+      expect(
+        dialog.getByText(deposit.replace('\u00a0', ' '), { exact: false }),
+      ).toBeInTheDocument();
+    });
+
     it('§6.1 a failed single delete keeps the entry and shows why', async () => {
       server.use(
         http.post(url('/ledger/entries/deletions'), () =>

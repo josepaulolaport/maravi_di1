@@ -145,6 +145,7 @@ export const cashEntries: CashLedgerEntry[] = [
     time: '09:00:00',
     seq: 1,
     cash_amount: '1500000.00',
+    description: 'Aporte inicial',
     created_at: '2026-10-14T09:00:00-03:00',
   },
   {
@@ -154,6 +155,7 @@ export const cashEntries: CashLedgerEntry[] = [
     time: '17:30:00',
     seq: 5,
     cash_amount: '-50000.00',
+    description: null,
     created_at: '2026-10-16T17:30:00-03:00',
   },
 ];
@@ -348,6 +350,7 @@ const DI1F28_15: PositionRow = {
   reference_source: 'B3',
   reference_pu: '89128.4824345118',
   reference_rate: '0.0990',
+  reference_price_changed: false,
   financial_total: '891284.8243451180',
   position_pnl: '1220.1988777680',
   trades_pnl: '0',
@@ -366,6 +369,7 @@ const DI1F29_15: PositionRow = {
   reference_source: 'MANUAL',
   reference_pu: '80206.1333187932',
   reference_rate: '0.1045',
+  reference_price_changed: false,
   financial_total: '401030.6665939660',
   position_pnl: '0',
   trades_pnl: '-9254.3334060340',
@@ -412,6 +416,7 @@ export const positions: Record<string, PortfolioPositions> = {
         reference_source: 'MANUAL',
         reference_pu: '89250.3147019396',
         reference_rate: '0.0980',
+        reference_price_changed: true, // set after the 16/10 processing (A10)
         financial_total: '535205.4053049072',
         position_pnl: '724.1844963940',
         trades_pnl: '-394.7129232316',

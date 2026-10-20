@@ -217,3 +217,29 @@ def test_a_code_search_selects_no_cash_entry() -> None:
 def test_an_empty_search_is_none() -> None:
     assert EntrySearch.parse(None) is None
     assert EntrySearch.parse("   ") is None
+
+
+def test_a_description_matches_ignoring_case_and_accents() -> None:
+    search = EntrySearch.parse("Aplicacao")
+
+    assert search is not None
+    assert search.matches_description("Aplicação inicial")
+    assert not search.matches_description("Resgate")
+    assert not search.matches_description(None)
+    assert search.matches_description("APLICAÇÃO")
+
+
+def test_the_description_fold_is_the_sql_one_for_portuguese_letters() -> None:
+    # The list folds the stored description in SQL with lower() and a fixed table of accented
+    # letters (no unaccent); a letter outside it, like "ß", is not folded (OQ-51).
+    search = EntrySearch.parse("strasse")
+
+    assert search is not None
+    assert not search.matches_description("Straße")
+
+
+def test_a_search_with_a_nul_character_matches_no_description() -> None:
+    search = EntrySearch.parse("a\x00")
+
+    assert search is not None
+    assert not search.matches_description("a\x00")

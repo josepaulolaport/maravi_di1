@@ -84,6 +84,28 @@ describe('Carteira (§11.4)', () => {
     expect(rowContaining('DI1F29').queryByText('P&L indisponível')).not.toBeInTheDocument();
   });
 
+  it('§11.4 OQ-30/OQ-31 marks a row whose price was set after the processing (A10)', async () => {
+    const { user } = await openCarteira('2026-10-16');
+
+    const badge = rowContaining('DI1F28').getByText('Preço alterado', { exact: false });
+    expect(badge).toHaveTextContent('Preço alterado após o processamento — reprocesse');
+    expect(
+      rowContaining('DI1F29').queryByText('Preço alterado', { exact: false }),
+    ).not.toBeInTheDocument();
+    await user.hover(badge);
+    expect(
+      await screen.findByRole('tooltip', {
+        name: 'Preço alterado após o processamento — reprocesse',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('§11.4 marks no row while every price predates the processing (A10)', async () => {
+    await openCarteira('2026-10-15');
+
+    expect(screen.queryByText('Preço alterado', { exact: false })).not.toBeInTheDocument();
+  });
+
   it('§11.4 shows an empty table when no asset is expected on the date', async () => {
     override15({}, { items: [] });
     await openCarteira('2026-10-15');

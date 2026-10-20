@@ -56,7 +56,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from functools import partial
@@ -94,7 +94,6 @@ logger = logging.getLogger(__name__)
 
 ONE_DAY = timedelta(days=1)
 
-PROCESSED_STATUSES = frozenset({ChainStatus.PROCESSED, ChainStatus.PROCESSED_WITH_ISSUES})
 FINISHED = frozenset(
     {
         ProcessingStatus.COMPLETED,
@@ -407,7 +406,6 @@ class PortfolioRangeProcessor:
             failures: list[ChainFailure] = []
             issues: list[IssueRecord] = []
             for chain in alive:
-                other_processed = self._other_chain_processed(chain, alive, outcomes, current)
                 try:
                     async with self._store.savepoint(uow=uow):
                         zero_state = await self._predecessor(chain, previous, readers, uow)
@@ -423,7 +421,6 @@ class PortfolioRangeProcessor:
                                 readers=readers,
                                 writer=self._writer,
                                 uow=uow,
-                                other_chain_processed=other_processed,
                             )
                             outcomes[chain] = ChainStatus.PROCESSED
                         else:
@@ -433,7 +430,6 @@ class PortfolioRangeProcessor:
                                 readers=readers,
                                 writer=self._writer,
                                 uow=uow,
-                                other_chain_processed=other_processed,
                             )
                             outcomes[chain] = (
                                 ChainStatus.PROCESSED_WITH_ISSUES
@@ -537,20 +533,6 @@ class PortfolioRangeProcessor:
         if request is None or request.status in FINISHED:
             raise RunEndedError(str(request_id))
         return request
-
-    @staticmethod
-    def _other_chain_processed(
-        chain: ProcessingChain,
-        alive: tuple[ProcessingChain, ...],
-        outcomes: Mapping[ProcessingChain, ChainStatus],
-        current: DateStatusRow,
-    ) -> bool:
-        """OQ-38, OQ-40 item 2: on ALL the positions call passes ``False`` and the cash call the
-        positions outcome; otherwise the other chain's status on D, whichever run wrote it."""
-        other = ProcessingChain.POSITIONS if chain is ProcessingChain.CASH else ProcessingChain.CASH
-        if other in alive:
-            return other in outcomes
-        return current.status(other) in PROCESSED_STATUSES
 
     async def _predecessor(
         self,

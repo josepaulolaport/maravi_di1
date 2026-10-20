@@ -152,7 +152,7 @@ def test_cash_only_then_positions_only(desk: Desk) -> None:
 
     assert (positions_run["status"], positions_run["error_code"]) == ("COMPLETED", None)
     assert desk.statuses() == {MON: ("PROCESSED", "PROCESSED"), TUE: ("PROCESSED", "PROCESSED")}
-    # The scope that publishes recomputes AUM from the other chain's published cash (OQ-21).
+    # AUM is read from both chains' published rows once both are processed (OQ-21, OQ-50).
     assert desk.aum(MON) == Decimal(8700)
     assert desk.aum(TUE) == Decimal(39800)
 

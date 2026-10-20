@@ -307,6 +307,7 @@ describe('Lançamentos (§11.3)', () => {
         time: '11:20:00',
         seq: 6,
         cash_amount: '2500.50',
+        description: null,
         created_at: '2026-10-18T12:00:00-03:00',
       });
       const bodies = captureBodies('/ledger/entries');
@@ -339,6 +340,7 @@ describe('Lançamentos (§11.3)', () => {
         time: '09:05:00',
         seq: 6,
         cash_amount: '-1000',
+        description: null,
         created_at: '2026-10-18T12:00:00-03:00',
       });
       const bodies = captureBodies('/ledger/entries');
@@ -377,6 +379,65 @@ describe('Lançamentos (§11.3)', () => {
       await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
       expect(modal.getByText('Informe um valor maior que zero.')).toBeInTheDocument();
       expect(bodies).toEqual([]);
+    });
+
+    it('OQ-51 sends an optional description, trimmed, and shows how many characters are left', async () => {
+      const bodies = captureBodies('/ledger/entries');
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Aporte');
+      const description = modal.getByRole('textbox', { name: 'Descrição' });
+      expect(description).toHaveAttribute('maxlength', '200');
+      expect(modal.getByText('Opcional. 0/200 caracteres.')).toBeInTheDocument();
+
+      await typeDate(user, modal.getByRole('textbox', { name: 'Data' }), '15/10/2026');
+      fireEvent.change(modal.getByLabelText('Hora', { exact: false }), {
+        target: { value: '09:00' },
+      });
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
+      await user.type(description, '  Aporte inicial ');
+      // Counted as the backend does: the trimmed text, by characters (OQ-51).
+      expect(modal.getByText('Opcional. 14/200 caracteres.')).toBeInTheDocument();
+      await user.click(modal.getByRole('button', { name: 'Registrar aporte' }));
+
+      await waitFor(() => {
+        expect(bodies).toEqual([
+          {
+            type: 'CASH',
+            date: '2026-10-15',
+            time: '09:00:00',
+            cash_amount: '100.00',
+            description: 'Aporte inicial',
+          },
+        ]);
+      });
+    });
+
+    it('OQ-51 shows the description error of the backend on its field', async () => {
+      server.use(
+        http.post(url('/ledger/entries'), () =>
+          problem(422, [
+            fieldError(
+              'VALIDATION_ERROR',
+              'A descrição deve ter no máximo 200 caracteres.',
+              'description',
+            ),
+          ]),
+        ),
+      );
+      const { user } = await openLedger();
+      const modal = await openNew(user, 'Retirada');
+
+      await user.type(modal.getByRole('textbox', { name: 'Valor (R$)' }), '100,00');
+      await user.type(modal.getByRole('textbox', { name: 'Descrição' }), 'Resgate');
+      await user.click(modal.getByRole('button', { name: 'Registrar retirada' }));
+
+      expect(
+        await modal.findByText('A descrição deve ter no máximo 200 caracteres.'),
+      ).toBeInTheDocument();
+      expect(modal.getByRole('textbox', { name: 'Descrição' })).toHaveAttribute(
+        'aria-invalid',
+        'true',
+      );
     });
 
     it('OQ-3 shows the decimal-place error of an amount on its field', async () => {

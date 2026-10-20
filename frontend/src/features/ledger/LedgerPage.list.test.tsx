@@ -45,6 +45,7 @@ describe('Lançamentos (§11.3)', () => {
         'Tipo de ativo',
         'Tipo',
         'Ativo',
+        'Descrição',
         'Qtd.',
         'PU',
         'Taxa',
@@ -72,13 +73,14 @@ describe('Lançamentos (§11.3)', () => {
       await screen.findAllByText('Futuros');
 
       expect(bodyRows().map(cellTexts)).toEqual([
-        ['', '16/10/2026 17:30', 'Caixa', 'Retirada', '—', '—', '—', '—', '-R$ 50.000,00', ''],
+        ['', '16/10/2026 17:30', 'Caixa', 'Retirada', '—', '—', '—', '—', '—', '-R$ 50.000,00', ''],
         [
           '',
           '16/10/2026 15:00',
           'Futuros',
           'Venda',
           'DI1F28',
+          '—',
           '-4',
           '89.102,22',
           '9,9500%',
@@ -91,6 +93,7 @@ describe('Lançamentos (§11.3)', () => {
           'Futuros',
           'Compra',
           'DI1F29',
+          '—',
           '+5',
           '82.057,00',
           '9,3203%',
@@ -103,14 +106,45 @@ describe('Lançamentos (§11.3)', () => {
           'Futuros',
           'Compra',
           'DI1F28',
+          '—',
           '+10',
           '89.006,46',
           '10,0000%',
           '-R$ 890.064,63',
           '',
         ],
-        ['', '14/10/2026 09:00', 'Caixa', 'Aporte', '—', '—', '—', '—', '+R$ 1.500.000,00', ''],
+        [
+          '',
+          '14/10/2026 09:00',
+          'Caixa',
+          'Aporte',
+          '—',
+          'Aporte inicial',
+          '—',
+          '—',
+          '—',
+          '+R$ 1.500.000,00',
+          '',
+        ],
       ]);
+    });
+
+    it('OQ-51 shows a long cash description truncated, in full in a tooltip', async () => {
+      const long = `Aporte do cotista A para a abertura da carteira ${'e '.repeat(60)}fim`;
+      server.use(
+        http.get(url('/ledger/entries'), () =>
+          HttpResponse.json({
+            items: [{ ...(cashEntries[0] as LedgerEntry), description: long }],
+            next_cursor: null,
+          }),
+        ),
+      );
+      const { user } = await openLedger();
+
+      const cell = await within(table()).findByText(long);
+      await user.hover(cell);
+
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(long);
     });
 
     it('§11.3 sorts by Data e hora, descending by default, ascending on click', async () => {
