@@ -11,9 +11,12 @@ no positions or P&L: the user processes today − 14 .. today in the Central de 
 on the run's today. The ledger's earliest entry is the opening deposit, dated the run's today − 14,
 so a later `up` (on another day) finds that today again. With the marker it adds nothing and exits
 0, so every later `up` is a no-op. With the opening deposit but no marker, an earlier run stopped
-part-way: it exits 1 ("DEMO DATA INCOMPLETE") and asks for a fresh stack, since ledger entries
-cannot be written twice safely. A ledger whose earliest entry is not the demo's is left alone
-(exit 0).
+part-way: it adds nothing and asks for a fresh stack, since ledger entries cannot be written twice
+safely. A ledger whose earliest entry is not the demo's is left alone.
+
+It always exits 0, so a failure never keeps the web service (which waits for it) from starting: a
+failure prints "DEMO DATA NOT LOADED: <reason>" on stderr, and the marker check above still
+reports a partial load on every later `up`.
 
 The trades exercise the accounting rules (spec §7): buys typed as a rate and as a PU, a partial
 sale (the average PU stays), a sale that crosses zero into a short, two trades of one contract on
@@ -305,7 +308,8 @@ def demo(api: str, call: Call, today: date) -> None:
 
 
 def run(api: str, *, call: Call = call, today: date | None = None) -> int:
-    """The exit status; ``today`` defaults to today in São Paulo."""
+    """The exit status, always 0 (see the module docstring); ``today`` defaults to today in São
+    Paulo."""
     if today is None:
         today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     try:
@@ -316,12 +320,15 @@ def run(api: str, *, call: Call = call, today: date | None = None) -> int:
     except NotTheDemoLedgerError:
         say("DEMO DATA SKIPPED: the ledger has entries that are not the demo's; nothing added")
         return 0
-    except IncompleteDemoError as error:
-        say(f"DEMO DATA INCOMPLETE: {error}", error=True)
-        return 1
-    except (DemoError, urllib.error.URLError, TimeoutError, ValueError) as error:
-        say(f"DEMO DATA NOT CREATED: {error}", error=True)
-        return 1
+    except (
+        IncompleteDemoError,
+        DemoError,
+        urllib.error.URLError,
+        TimeoutError,
+        ValueError,
+    ) as error:
+        say(f"DEMO DATA NOT LOADED: {error}", error=True)
+        return 0
     say("DEMO DATA CREATED")
     return 0
 
