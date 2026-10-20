@@ -21,7 +21,11 @@ class LedgerRepository(Protocol):
         """Insert a trade with its execution price; returns the stored row (id, seq, time)."""
         ...
 
-    async def add_cash_movement(self, draft: EntryDraft, *, amount: Decimal) -> LedgerEntry: ...
+    async def add_cash_movement(
+        self, draft: EntryDraft, *, amount: Decimal, description: str | None
+    ) -> LedgerEntry:
+        """Insert an aporte or a retirada with its validated amount and description."""
+        ...
 
     async def lock_existing(self, ids: Collection[UUID]) -> set[UUID]:
         """Which of ``ids`` name an entry, those entries locked until the transaction ends."""

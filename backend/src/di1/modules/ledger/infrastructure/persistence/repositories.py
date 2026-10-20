@@ -42,13 +42,16 @@ class SqlLedgerRepository:
             }
         )
 
-    async def add_cash_movement(self, draft: EntryDraft, *, amount: Decimal) -> LedgerEntry:
+    async def add_cash_movement(
+        self, draft: EntryDraft, *, amount: Decimal, description: str | None
+    ) -> LedgerEntry:
         return await self._insert(
             {
                 "type": EntryType.CASH.value,
                 "entry_date": draft.entry_date,
                 "entry_time": draft.entry_time,
                 "cash_amount": amount,
+                "description": description,
             }
         )
 
@@ -113,4 +116,5 @@ def _entry(row: Row[Any]) -> LedgerEntry:
         execution_rate=row.execution_rate,
         input_kind=InputKind(row.input_kind) if row.input_kind is not None else None,
         cash_amount=row.cash_amount,
+        description=row.description,
     )

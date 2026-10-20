@@ -149,7 +149,9 @@ class InMemoryLedgerRepository:
             cash_amount=None,
         )
 
-    async def add_cash_movement(self, draft: EntryDraft, *, amount: Decimal) -> LedgerEntry:
+    async def add_cash_movement(
+        self, draft: EntryDraft, *, amount: Decimal, description: str | None
+    ) -> LedgerEntry:
         return self._add(
             type=EntryType.CASH,
             entry_date=draft.entry_date,
@@ -160,6 +162,7 @@ class InMemoryLedgerRepository:
             execution_rate=None,
             input_kind=None,
             cash_amount=amount,
+            description=description,
         )
 
     async def lock_existing(self, ids: Collection[UUID]) -> set[UUID]:
@@ -189,6 +192,8 @@ class InMemoryLedgerRepository:
                 if row.type is EntryType.TRADE:
                     return row.asset_id in set(matching_asset_ids)
                 assert row.cash_amount is not None
+                if search.matches_description(row.description):
+                    return True
                 if row.cash_amount > 0:
                     return search.includes_deposits
                 return search.includes_withdrawals

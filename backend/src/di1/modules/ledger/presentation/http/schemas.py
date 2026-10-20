@@ -41,7 +41,8 @@ WallTime = Annotated[
 
 class CreateLedgerEntryBody(BaseModel):
     """``POST /ledger/entries``: a TRADE (contract, signed quantity, and the PU or the rate named
-    by ``input_kind``) or a CASH entry (signed ``cash_amount``)."""
+    by ``input_kind``) or a CASH entry (signed ``cash_amount`` and an optional ``description``,
+    OQ-51)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -54,6 +55,9 @@ class CreateLedgerEntryBody(BaseModel):
     execution_pu: DecimalString | None = None
     execution_rate: DecimalString | None = None
     cash_amount: DecimalString | None = None
+    description: str | None = Field(
+        default=None, description="CASH only: trimmed, blank as null, at most 200 characters"
+    )
 
     def to_draft(self) -> EntryDraft:
         return EntryDraft(
@@ -66,6 +70,7 @@ class CreateLedgerEntryBody(BaseModel):
             execution_pu=self.execution_pu,
             execution_rate=self.execution_rate,
             cash_amount=self.cash_amount,
+            description=self.description,
         )
 
 
@@ -102,6 +107,7 @@ class TradeEntryResponse(_EntryBase):
 
 class CashEntryResponse(_EntryBase):
     type: Literal["CASH"] = "CASH"
+    description: str | None = Field(description="The aporte's or retirada's text, or null (OQ-51)")
 
 
 LedgerEntryResponse = Annotated[TradeEntryResponse | CashEntryResponse, Field(discriminator="type")]
@@ -124,7 +130,7 @@ def entry_response(view: LedgerEntryView) -> TradeEntryResponse | CashEntryRespo
         "created_at": entry.created_at.astimezone(UTC),
     }
     if entry.type is EntryType.CASH:
-        return CashEntryResponse(**common)  # type: ignore[arg-type]
+        return CashEntryResponse(**common, description=entry.description)  # type: ignore[arg-type]
     assert entry.asset_id is not None and entry.signed_quantity is not None
     assert entry.execution_pu is not None and entry.execution_rate is not None
     assert entry.input_kind is not None
