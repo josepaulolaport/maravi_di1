@@ -52,7 +52,7 @@ export function useProcessingRequests() {
 
 /**
  * Follows the jobs on every screen (§10.4, §12). The history is polled only while some loaded
- * job is queued, dispatched, running or cancelling (§11.1); a poll rereads the loaded pages.
+ * job is queued or running (§11.1, OQ-46); a poll rereads the loaded pages.
  * When a job reaches a final status, the published results and the job views are refreshed
  * once, whichever screen is open (Carteira, the Lançamentos cash strip).
  */

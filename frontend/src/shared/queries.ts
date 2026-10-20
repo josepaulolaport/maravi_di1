@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 
 import type { IsoDate, PortfolioSummary } from '@/api/contract';
 import { assetsApi, portfolioApi } from '@/api/endpoints';
@@ -18,14 +19,21 @@ const isRunning = (summary: PortfolioSummary | undefined) =>
  * The portfolio summary of a date (§11.4, OQ-21). While either chain is being processed it is
  * read again every 2 s, so a "Processando" badge turns into the result without a reload. The
  * other portfolio reads (positions, the P&L series) are refreshed by the JobWatcher when the
- * run ends.
+ * run ends; a RUNNING date re-reads the job list, so the JobWatcher follows a run it had not
+ * seen (queued from another tab or the API) and refreshes them too.
  */
 export function useSummary(date: IsoDate) {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const query = useQuery({
     queryKey: queryKeys.portfolio.summary(date),
     queryFn: () => portfolioApi.getSummary(date),
     refetchInterval: (q) => (isRunning(q.state.data) ? RUNNING_POLL_MS : false),
   });
+  const running = isRunning(query.data);
+  useEffect(() => {
+    if (running) void queryClient.invalidateQueries({ queryKey: queryKeys.processing.requests() });
+  }, [running, date, queryClient]);
+  return query;
 }
 
 /** The instrument types with their asset classes (the catalogue tabs, §11.2). */

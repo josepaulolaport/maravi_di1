@@ -3,7 +3,7 @@ import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
 import type { PortfolioPositions, PortfolioSummary } from '@/api/contract';
-import { job } from '@/test/msw/fixtures';
+import { job, processingRequests } from '@/test/msw/fixtures';
 import { url, rowContaining } from '@/test/helpers';
 import { server, serveJobs } from '@/test/msw/server';
 import { renderRoute } from '@/test/render';
@@ -253,6 +253,44 @@ describe('Carteira (§11.4)', () => {
       await screen.findByText('DI1F28', { selector: 'td *' }, { timeout: 5_000 }),
     ).toBeInTheDocument();
     expect(positionsReads).toBeGreaterThanOrEqual(2);
+  });
+
+  it('§10.4 a run queued elsewhere: a RUNNING date makes the JobWatcher follow it to its end', async () => {
+    // The first read of the jobs has nothing active (queued from another tab or the API), so
+    // the JobWatcher is not polling; only the RUNNING summary can tell it a run is going on.
+    const run = { start_date: '2026-10-15', end_date: '2026-10-15', started_at: null };
+    let jobReads = 0;
+    let finished = false;
+    server.use(
+      http.get(url('/processing/requests'), () => {
+        jobReads += 1;
+        const items =
+          jobReads === 1
+            ? processingRequests
+            : [job({ ...run, status: finished ? 'COMPLETED' : 'RUNNING' })];
+        return HttpResponse.json({ items, next_cursor: null });
+      }),
+      http.get(url('/portfolio/summary'), () => {
+        const summary = summaryOf('2026-10-15');
+        const running = { ...summary.positions, status: 'RUNNING' as const };
+        return HttpResponse.json<PortfolioSummary>(
+          finished ? summary : { ...summary, positions: running },
+        );
+      }),
+      http.get(url('/portfolio/positions'), () =>
+        HttpResponse.json<PortfolioPositions>(
+          finished
+            ? POSITIONS_15
+            : { date: '2026-10-15', status: 'RUNNING', published_at: null, items: [] },
+        ),
+      ),
+    );
+    await openCarteira('2026-10-15');
+    finished = true;
+
+    expect(
+      await screen.findByText('DI1F28', { selector: 'td *' }, { timeout: 6_000 }),
+    ).toBeInTheDocument();
   });
 
   it('OQ-23 moving from a date being processed to another date reads the new date once', async () => {
