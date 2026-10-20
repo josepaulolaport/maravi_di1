@@ -498,7 +498,7 @@ async def test_run_deletes_old_published_outbox_rows(
             )
             return [row[0] for row in rows]
 
-    await eventually(lambda: _only_new(message_types))
+    await eventually(lambda: _only_new(message_types), every=0.05)
     stop.set()
     await asyncio.wait_for(running, timeout=5)
 

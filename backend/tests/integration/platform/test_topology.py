@@ -63,7 +63,7 @@ async def test_a_queue_receives_only_its_message_types(
         await message.ack()
 
     await work.consume(take)
-    await eventually(lambda: bool(received))
+    await eventually(lambda: bool(received), every=0.05)
     # A window in which nothing may happen: there is no event to wait for.
     await asyncio.sleep(0.2)
     assert received == [b"test.command"]

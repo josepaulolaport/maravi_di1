@@ -1,5 +1,6 @@
 """Test data: the one DI1 catalogue the tests share, and builders for the values they hand to the
-code under test.
+code under test: public DTOs, and the domain values (`EntryDraft`, Portfolio's `Trade` and
+`OpenPosition`) that a module's own tests pass to its services and calculators.
 
 The catalogue is the frontend's test fixtures (``frontend/src/test/msw/fixtures.ts``): the DI1
 product and DI1F27…DI1F30, each with one id and one maturity, plus DI1V26, a contract that matured
@@ -15,7 +16,8 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 from di1.modules.asset.public import Instrument
-from di1.modules.ledger.domain.entries import EntryDraft, EntryType, LedgerEntry
+from di1.modules.ledger.domain.entries import EntryDraft
+from di1.modules.ledger.public import EntryType, LedgerEntry
 from di1.modules.portfolio.domain.positions import OpenPosition
 from di1.modules.portfolio.domain.trade import Trade
 from di1.shared.clock import SAO_PAULO

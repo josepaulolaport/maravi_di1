@@ -84,7 +84,7 @@ async def test_the_relay_beats_its_heartbeat_once_it_relays(
         )
     )
 
-    await eventually(lambda: path.exists() and path.stat().st_mtime > 1000.0)
+    await eventually(lambda: path.exists() and path.stat().st_mtime > 1000.0, every=0.05)
     stop.set()
     await asyncio.wait_for(running, timeout=10)
 
@@ -133,7 +133,9 @@ async def test_a_stop_while_connecting_to_the_broker_ends_the_relay(
         )
     )
     await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
-    assert not running.done()
+    # A window in which nothing may happen: the connection keeps hanging.
+    done, _ = await asyncio.wait({running}, timeout=0.3)
+    assert not done
 
     stop.set()
 

@@ -1,5 +1,6 @@
-"""Test doubles shared by every module's tests. Like production code, they reach other modules
-only through their ``public.py``. A module's in-memory repositories stay with its unit tests.
+"""Test doubles shared by every module's tests. They reach other modules through their
+``public.py``, except Processing's `ChainPorts` (the chain steps' port bundle, which `World`
+builds). A module's in-memory repositories stay with its unit tests.
 
 The doubles store and answer; none re-implements a production rule (staff review §6, H2).
 """

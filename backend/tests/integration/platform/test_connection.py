@@ -38,7 +38,7 @@ async def test_a_refused_first_connection_raises_and_leaves_no_task() -> None:
     with pytest.raises(AMQPConnectionError):
         await connect(_broker("amqp://guest:guest@127.0.0.1:1/"), connection_name="test")
 
-    await eventually(lambda: _connection_tasks() == [])
+    await eventually(lambda: _connection_tasks() == [], every=0.05)
 
 
 async def test_a_cancelled_first_connection_leaves_no_task(
@@ -46,10 +46,12 @@ async def test_a_cancelled_first_connection_leaves_no_task(
 ) -> None:
     connecting = asyncio.create_task(connect(_broker(hanging_broker_url), connection_name="test"))
     await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
-    assert not connecting.done()
+    # A window in which nothing may happen: the connection keeps hanging.
+    done, _ = await asyncio.wait({connecting}, timeout=0.3)
+    assert not done
 
     connecting.cancel()
     with pytest.raises(asyncio.CancelledError):
         await connecting
 
-    await eventually(lambda: _connection_tasks() == [])
+    await eventually(lambda: _connection_tasks() == [], every=0.05)

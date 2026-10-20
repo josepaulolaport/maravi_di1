@@ -146,11 +146,11 @@ async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
 
     await publisher.publish(envelope)
 
-    await eventually(lambda: handler.ran == [envelope])
+    await eventually(lambda: handler.ran == [envelope], every=0.05)
     stop.set()
     await asyncio.wait_for(running, timeout=10)
     assert await effects(engine) == [envelope.message_id]
@@ -186,9 +186,11 @@ async def test_the_worker_beats_its_heartbeat_from_its_start_until_it_stops(
             heartbeat_interval_seconds=0.05,
         )
     )
-    await eventually(path.exists)
+    await eventually(path.exists, every=0.05)
     os.utime(path, (1000.0, 1000.0))
-    await eventually(lambda: path.stat().st_mtime > 1000.0)  # still beating, mid-startup
+    await eventually(
+        lambda: path.stat().st_mtime > 1000.0, every=0.05
+    )  # still beating, mid-startup
 
     release.set()
     stop.set()
@@ -238,7 +240,7 @@ async def test_a_stop_during_the_run_after_the_ack_cancels_it_and_the_message_st
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
     await publisher.publish(envelope)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
@@ -275,7 +277,7 @@ async def test_a_failure_after_the_ack_ends_the_worker_with_an_error(
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
 
     await publisher.publish(envelope)
 
@@ -309,7 +311,7 @@ async def test_a_stop_before_the_ack_rolls_back_and_returns_the_message(
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
     await publisher.publish(envelope)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
@@ -318,7 +320,7 @@ async def test_a_stop_before_the_ack_rolls_back_and_returns_the_message(
     await asyncio.wait_for(running, timeout=10)
     assert handler.cancelled.is_set()
     assert await effects(engine) == []
-    await eventually(lambda: _has_ready(broker, spec.name, 1))
+    await eventually(lambda: _has_ready(broker, spec.name, 1), every=0.05)
 
 
 async def _has_ready(broker: AbstractRobustConnection, name: str, count: int) -> bool:
@@ -349,7 +351,7 @@ async def test_a_dropped_broker_connection_does_not_cancel_the_run(
         )
     )
     envelope = make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
     await publisher.publish(envelope)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
@@ -359,7 +361,7 @@ async def test_a_dropped_broker_connection_does_not_cancel_the_run(
     assert not handler.cancelled.is_set()
     handler.release.set()
 
-    await eventually(lambda: handler.ran == [envelope])
+    await eventually(lambda: handler.ran == [envelope], every=0.05)
     stop.set()
     await asyncio.wait_for(running, timeout=10)
     assert handler.claimed == [envelope]
@@ -398,7 +400,7 @@ async def test_a_message_arriving_during_a_run_is_acked_at_once_and_starts_nothi
         )
     )
     first, second = make_envelope(), make_envelope()
-    await eventually(lambda: _is_consumed(broker, spec.name))
+    await eventually(lambda: _is_consumed(broker, spec.name), every=0.05)
     await publisher.publish(first)
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
@@ -409,7 +411,7 @@ async def test_a_message_arriving_during_a_run_is_acked_at_once_and_starts_nothi
     assert handler.claimed == [first]
     assert sweeps == []
     handler.release.set()
-    await eventually(lambda: sweeps == [1])  # the sweep right after the run
+    await eventually(lambda: sweeps == [1], every=0.05)  # the sweep right after the run
     stop.set()
     await asyncio.wait_for(running, timeout=10)
     assert handler.claimed == [first]
@@ -443,7 +445,7 @@ async def test_the_sweep_runs_on_every_interval_without_any_message(
         )
     )
 
-    await eventually(lambda: len(sweeps) >= 3)
+    await eventually(lambda: len(sweeps) >= 3, every=0.05)
     stop.set()
     await asyncio.wait_for(running, timeout=10)
 
@@ -490,7 +492,9 @@ async def test_a_stop_while_the_database_hangs_at_startup_ends_the_worker(
         )
     )
     await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
-    assert not running.done()
+    # A window in which nothing may happen: the connection keeps hanging.
+    done, _ = await asyncio.wait({running}, timeout=0.3)
+    assert not done
 
     stop.set()
 
@@ -530,7 +534,9 @@ async def test_a_stop_while_connecting_to_the_broker_ends_the_worker(
         )
     )
     await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
-    assert not running.done()
+    # A window in which nothing may happen: the connection keeps hanging.
+    done, _ = await asyncio.wait({running}, timeout=0.3)
+    assert not done
 
     stop.set()
 
@@ -725,14 +731,14 @@ async def test_the_startup_hook_runs_once_before_the_first_delivery(
             on_startup=recover,
         )
     )
-    await eventually(lambda: order == ["startup"])
+    await eventually(lambda: order == ["startup"], every=0.05)
     # A window in which nothing may happen: there is no event to wait for.
     await asyncio.sleep(0.3)
     assert order == ["startup"]
 
     release.set()
 
-    await eventually(lambda: handler.ran == [queued])
+    await eventually(lambda: handler.ran == [queued], every=0.05)
     stop.set()
     await asyncio.wait_for(running, timeout=10)
     assert order == ["startup", "claim"]
