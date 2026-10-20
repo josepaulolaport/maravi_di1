@@ -2,7 +2,10 @@
 face value come from the catalogue (interfaces "Pricing"; plan §4.B; spec §4.1, §15 D4).
 
 The catalogue is lane A's seed (``tests/integration/asset/conftest.py``): DI1 with face value
-100000 and DI1F27…DI1F30.
+100000 and DI1F27…DI1F30. Only what needs the real reader is here: the catalogue's maturity and face
+value reach the calculator (a day off would change the PU), an absent id is NOT_FOUND, and a
+non-DI1 row is refused. The calculator's rules (maturity, precision, bounds) are unit-tested in
+tests/unit/pricing/futures/.
 """
 
 from __future__ import annotations
@@ -56,35 +59,6 @@ async def test_a_di1_contract_is_priced_from_the_catalogue(
     assert price == Price(
         pu=Decimal("90909.0909090909"), rate=Decimal("0.10"), input_kind=InputKind.RATE
     )
-
-
-async def test_on_the_catalogue_maturity_date_the_rate_is_zero(
-    catalogue_and_session: tuple[Di1Catalogue, Writer, AsyncSession],
-) -> None:
-    catalogue, _, session = catalogue_and_session
-
-    price = await service_on(session).calculate(
-        catalogue.instrument_ids["DI1F27"],
-        date(2027, 1, 4),
-        Quote(InputKind.PU, Decimal("99998.5")),
-    )
-
-    assert (price.pu, price.rate) == (Decimal("99998.5"), Decimal("0.000000000000"))
-
-
-async def test_after_the_catalogue_maturity_the_contract_is_matured(
-    catalogue_and_session: tuple[Di1Catalogue, Writer, AsyncSession],
-) -> None:
-    catalogue, _, session = catalogue_and_session
-
-    with pytest.raises(DomainError) as caught:
-        await service_on(session).calculate(
-            catalogue.instrument_ids["DI1F27"],
-            date(2027, 1, 5),
-            Quote(InputKind.PU, Decimal("99998.5")),
-        )
-
-    assert caught.value.code is ErrorCode.CONTRACT_MATURED
 
 
 async def test_an_unknown_instrument_is_not_found(

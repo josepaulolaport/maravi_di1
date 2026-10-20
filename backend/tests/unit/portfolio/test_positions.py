@@ -206,6 +206,23 @@ def test_a_position_closed_today_keeps_its_row_today_and_leaves_tomorrow() -> No
     assert tomorrow.positions == ()
 
 
+def test_two_sells_that_reach_zero_close_the_position_without_an_average() -> None:
+    # Spec §7.2: a partial reduction keeps the average; the trade that reaches 0 closes it.
+    day = calculate_positions_day(
+        _state(open_position(4, "90000", "0.11")),
+        [
+            portfolio_trade(-1, "90500", "0.10", at="10:00", seq=2),
+            portfolio_trade(-3, "90600", "0.10", at="15:00", seq=3),
+        ],
+        DAY,
+    )
+
+    closed = day.positions[0]
+    assert (closed.previous_quantity, closed.quantity) == (4, 0)
+    assert (closed.average_entry_pu, closed.average_entry_rate) == (None, None)
+    assert len(closed.trades) == 2
+
+
 def test_assets_are_listed_in_id_order_and_never_mix_averages() -> None:
     day = calculate_positions_day(
         PositionState.zero(YESTERDAY),

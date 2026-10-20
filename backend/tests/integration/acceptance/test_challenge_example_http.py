@@ -164,6 +164,9 @@ def test_the_challenge_example_end_to_end() -> None:
         assert (run["status"], run["error_code"]) == ("COMPLETED", None), run
         assert desk.statuses() == {TODAY: ("PROCESSED", "PROCESSED")}
         assert desk.cash_balance(TODAY) == Decimal("109090.9090909091")
+        # "-90.909,09": −1 × the trade's PU (spec §7.3).
+        trades_cash_flow = desk.summary(TODAY)["cash"]["trades_cash_flow"]
+        assert Decimal(trades_cash_flow) == Decimal("-90909.0909090909")
         row = desk.positions(TODAY)["DI1F28"]
         assert (row["quantity"], row["average_entry_pu"], row["average_entry_rate"]) == (
             1,
@@ -175,11 +178,14 @@ def test_the_challenge_example_end_to_end() -> None:
             Decimal(PU_AT_10_PERCENT),
             Decimal("0.10"),
         )
-        assert row["financial_total"] == Decimal(PU_AT_10_PERCENT)
-        totals = desk.portfolio_pnl(TODAY)
-        assert (totals["market_value"], totals["daily_pnl"], totals["cumulative_pnl"]) == (
+        assert (row["financial_total"], row["valuation_status"]) == (
             Decimal(PU_AT_10_PERCENT),
-            Decimal(0),
-            Decimal(0),
+            "COMPLETE",
         )
+        totals = desk.portfolio_pnl(TODAY)
+        assert tuple(
+            totals[k]
+            for k in ("market_value", "position_pnl", "trades_pnl", "daily_pnl", "cumulative_pnl")
+        ) == (Decimal(PU_AT_10_PERCENT), Decimal(0), Decimal(0), Decimal(0), Decimal(0))
+        assert (totals["valuation_status"], totals["pnl_status"]) == ("COMPLETE", "COMPLETE")
         assert desk.aum(TODAY) == Decimal(200000)

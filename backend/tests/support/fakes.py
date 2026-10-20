@@ -27,6 +27,7 @@ from di1.modules.portfolio.public import (
     PreviousPositionsDay,
 )
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.modules.pricing.public import Price, Quote
 from di1.modules.processing.application.ports import ChainPorts
 from di1.modules.processing.public import Chain, DateStatus
@@ -167,29 +168,19 @@ class FakePriceReader:
         return latest
 
 
-CALCULATED_PU = Decimal("89006.4625467350")
-CALCULATED_RATE = Decimal("0.100000000000")
-
-
-@dataclass(frozen=True, slots=True)
-class CalculationCall:
-    instrument_id: UUID
-    reference_date: date
-    quote: Quote
-
-
 @dataclass
-class FakePricing:
-    """A `pricing.public.PricingService` that keeps the typed value and returns a fixed one for
-    the other side (`CALCULATED_PU`, `CALCULATED_RATE`), recording each call."""
+class PricingSpy:
+    """The real, pure `pricing.public.PricingService` over ``assets``, recording each call: a test
+    sees what its caller passed to Pricing without a copy of the DC/365 formula."""
 
-    calls: list[CalculationCall] = field(default_factory=list)
+    assets: FakeAssetReader
+    calls: list[tuple[UUID, date, Quote]] = field(default_factory=list)
 
     async def calculate(self, instrument_id: UUID, reference_date: date, quote: Quote) -> Price:
-        self.calls.append(CalculationCall(instrument_id, reference_date, quote))
-        if quote.kind is InputKind.PU:
-            return Price(pu=quote.value, rate=CALCULATED_RATE, input_kind=quote.kind)
-        return Price(pu=CALCULATED_PU, rate=quote.value, input_kind=quote.kind)
+        self.calls.append((instrument_id, reference_date, quote))
+        return await build_pricing_service(self.assets).calculate(
+            instrument_id, reference_date, quote
+        )
 
 
 class FakeDateStatusReader:

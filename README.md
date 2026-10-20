@@ -158,8 +158,7 @@ dated **today** rather than 01/01/2027 (deviation D4 below):
 6. Carteira for today: cash **109.090,91**, market value 90.909,09, AUM **200.000,00**.
 
 The same steps can be done by hand in the UI. The exact example dated 01/01/2027 runs in the
-automated acceptance tests with a fixed clock (`backend/tests/acceptance/`,
-`backend/tests/integration/acceptance/`).
+automated acceptance tests with a fixed clock (`backend/tests/integration/acceptance/`).
 
 ## Demo data
 

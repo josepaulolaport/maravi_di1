@@ -15,13 +15,13 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
+import pytest
 from alembic import command
 
 from tests.support.db import alembic_config, execute, fresh_database_url, psycopg_url
 
 BACKEND = Path(__file__).resolve().parents[2]
 SCHEMA_SQL = BACKEND.parent / "docs" / "schema.sql"
-INITIAL_SQL = BACKEND / "migrations" / "sql" / "0001_initial.sql"
 SCHEMAS = ["asset", "ledger", "prices", "portfolio", "processing", "platform"]
 
 COLUMNS = """
@@ -70,59 +70,16 @@ def test_upgrade_to_head_builds_exactly_the_documented_schema(database_url: str)
         assert migrated[part] == documented[part], part
 
 
-def test_downgrade_to_0001_gives_back_the_initial_schema(database_url: str) -> None:
+@pytest.mark.parametrize("revision", ["0001", "0002", "0003", "0004", "0005", "0006"])
+def test_downgrade_from_head_gives_back_the_revisions_schema(
+    database_url: str, revision: str
+) -> None:
     command.upgrade(alembic_config(database_url), "head")
-    command.downgrade(alembic_config(database_url), "0001")
-
-    downgraded = catalog(database_url)
-    initial = _catalog_of_sql(INITIAL_SQL.read_text())
-    for part in ("columns", "constraints", "indexes"):
-        assert downgraded[part] == initial[part], part
-
-
-def test_downgrade_to_0002_gives_back_its_schema(database_url: str) -> None:
-    command.upgrade(alembic_config(database_url), "head")
-    command.downgrade(alembic_config(database_url), "0002")
+    command.downgrade(alembic_config(database_url), revision)
 
     downgraded = catalog(database_url)
     with database() as reference_url:
-        command.upgrade(alembic_config(reference_url), "0002")
-        at_0002 = catalog(reference_url)
+        command.upgrade(alembic_config(reference_url), revision)
+        upgraded = catalog(reference_url)
     for part in ("columns", "constraints", "indexes"):
-        assert downgraded[part] == at_0002[part], part
-
-
-def test_downgrade_to_0003_gives_back_its_schema(database_url: str) -> None:
-    command.upgrade(alembic_config(database_url), "head")
-    command.downgrade(alembic_config(database_url), "0003")
-
-    downgraded = catalog(database_url)
-    with database() as reference_url:
-        command.upgrade(alembic_config(reference_url), "0003")
-        at_0003 = catalog(reference_url)
-    for part in ("columns", "constraints", "indexes"):
-        assert downgraded[part] == at_0003[part], part
-
-
-def test_downgrade_to_0004_gives_back_its_schema(database_url: str) -> None:
-    command.upgrade(alembic_config(database_url), "head")
-    command.downgrade(alembic_config(database_url), "0004")
-
-    downgraded = catalog(database_url)
-    with database() as reference_url:
-        command.upgrade(alembic_config(reference_url), "0004")
-        at_0004 = catalog(reference_url)
-    for part in ("columns", "constraints", "indexes"):
-        assert downgraded[part] == at_0004[part], part
-
-
-def test_downgrade_to_0005_gives_back_its_schema(database_url: str) -> None:
-    command.upgrade(alembic_config(database_url), "head")
-    command.downgrade(alembic_config(database_url), "0005")
-
-    downgraded = catalog(database_url)
-    with database() as reference_url:
-        command.upgrade(alembic_config(reference_url), "0005")
-        at_0005 = catalog(reference_url)
-    for part in ("columns", "constraints", "indexes"):
-        assert downgraded[part] == at_0005[part], part
+        assert downgraded[part] == upgraded[part], part

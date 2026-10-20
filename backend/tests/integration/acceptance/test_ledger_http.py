@@ -1,5 +1,6 @@
-"""Ledger entries over HTTP (spec §6, §13 cases 1, 9, 16, 22; OQ-1, OQ-3, OQ-13, OQ-14, OQ-24,
-OQ-31, OQ-32, OQ-37).
+"""Ledger entries over HTTP, the spec §13 scenarios only (cases 1, 9, 16, 22; OQ-1, OQ-3, OQ-24,
+OQ-31, OQ-32, OQ-37). Other rules live once at their own level: validation in tests/unit/ledger,
+SQL and HTTP problems in tests/integration/ledger.
 
 Today is Friday 08/01/2027. DI1F28 matures on 01/01/2028; DI1F27 matured on Monday 04/01/2027.
 Expected PUs are spec §4.1's formula (``expected_pu``): from 06/01/2027 to 01/01/2028 there are
@@ -129,23 +130,6 @@ def test_trades_and_cash_share_one_order(client: TestClient, contracts: dict[str
     assert trade_ten["seq"] < cash_ten["seq"]  # same time: the later entry has the higher seq
 
 
-def test_entries_page_by_cursor(client: TestClient) -> None:
-    ids = [
-        _post(client, cash_body("2027-01-0" + str(day), "09:00", "100"))["id"] for day in (2, 3, 4)
-    ]
-
-    first = client.get("/api/ledger/entries", params={**WEEK, "order": "asc", "limit": 2}).json()
-    second = client.get(
-        "/api/ledger/entries",
-        params={**WEEK, "order": "asc", "limit": 2, "cursor": first["next_cursor"]},
-    ).json()
-
-    assert [e["id"] for e in first["items"]] == ids[:2]
-    assert first["next_cursor"] is not None
-    assert [e["id"] for e in second["items"]] == ids[2:]
-    assert second["next_cursor"] is None
-
-
 @pytest.mark.parametrize("limit", [0, 201])
 @pytest.mark.parametrize(
     ("path", "params"),
@@ -185,12 +169,6 @@ def test_mixed_batch_delete_is_hard_and_all_or_nothing(
     assert problem_errors(again, 404) == [("NOT_FOUND", None)]
 
 
-def test_an_empty_deletion_is_refused(client: TestClient) -> None:
-    response = client.post("/api/ledger/entries/deletions", json={"ids": []})
-
-    assert problem_errors(response, 422) == [("VALIDATION_ERROR", "ids")]
-
-
 def test_a_write_saves_only_the_fact(
     app: tuple[TestClient, str], contracts: dict[str, str]
 ) -> None:
@@ -203,23 +181,6 @@ def test_a_write_saves_only_the_fact(
     assert deleted.status_code == 204, deleted.text
     assert client.get("/api/processing/requests").json()["items"] == []
     assert set(derived_rows(database_url).values()) == {0}
-
-
-def test_weekends_and_holidays_are_accepted(client: TestClient, contracts: dict[str, str]) -> None:
-    # Saturday 02/01/2027 and the 01/01 holiday (OQ-7).
-    _post(client, cash_body("2027-01-01", "09:00", "1000"))
-    _post(client, trade_body(contracts["DI1F28"], "2027-01-02", "10:00", 1, rate="0.10"))
-
-
-def test_an_entry_after_today_is_refused(client: TestClient, contracts: dict[str, str]) -> None:
-    cash = client.post("/api/ledger/entries", json=cash_body("2027-01-09", "09:00", "1000"))
-    trade = client.post(
-        "/api/ledger/entries",
-        json=trade_body(contracts["DI1F28"], "2027-01-09", "10:00", 1, rate="0.10"),
-    )
-
-    assert problem_errors(cash, 422) == [("FUTURE_DATE", "date")]
-    assert problem_errors(trade, 422) == [("FUTURE_DATE", "date")]
 
 
 def test_maturity_date_takes_a_typed_pu_and_stores_rate_zero(

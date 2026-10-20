@@ -146,6 +146,7 @@ def test_both_prices_missing(desk: Desk, di1f28: str) -> None:
     assert (row["quantity"], row["position_pnl"], row["financial_total"]) == (2, None, None)
     assert desk.cash_balance(SUN) == Decimal(-180000)
     assert desk.aum(SUN) is None
+    assert desk.portfolio_pnl(SUN)["daily_pnl"] is None
     # One pendência per (asset, required price date), each with its earliest affected date.
     assert desk.issues() == [(MISSING, "DI1F28", SAT, SAT), (MISSING, "DI1F28", SUN, SUN)]
 
@@ -189,7 +190,8 @@ def test_same_day_round_trip_needs_the_day_price(desk: Desk, di1f28: str) -> Non
     )
     assert desk.aum(FRI) == Decimal(300)  # cash 90300 − 90000
     # ... but its trades P&L needs the day's price (§8.3).
-    assert desk.portfolio_pnl(FRI)["trades_pnl"] is None
+    without = desk.portfolio_pnl(FRI)
+    assert (without["trades_pnl"], without["pnl_status"]) == (None, "MISSING")
     assert desk.issues() == [(MISSING, "DI1F28", FRI, FRI)]
 
     desk.price(di1f28, FRI, pu="90200")

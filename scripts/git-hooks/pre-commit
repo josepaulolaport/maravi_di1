@@ -56,12 +56,12 @@ if [[ $backend_any -eq 1 ]]; then
         uv run --frozen --quiet mypy "${targets[@]}" || exit 1
       fi
       fast=()
-      for d in tests/unit tests/architecture tests/acceptance; do [[ -d $d ]] && fast+=("$d"); done
+      for d in tests/unit tests/architecture; do [[ -d $d ]] && fast+=("$d"); done
       if [[ ${#fast[@]} -gt 0 ]]; then
         uv run --frozen --quiet pytest "${fast[@]}" -q -x -p no:cacheprovider; rc=$?
         [[ $rc -eq 0 || $rc -eq 5 ]] || exit 1
       fi
-    ) || fail "backend checks failed (ruff / mypy / unit, architecture and acceptance tests)"
+    ) || fail "backend checks failed (ruff / mypy / unit and architecture tests)"
   fi
 fi
 

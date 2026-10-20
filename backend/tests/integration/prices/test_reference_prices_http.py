@@ -1,11 +1,18 @@
 """``/reference-prices`` over HTTP against PostgreSQL, compared with the frozen frontend contract
 (``frontend/src/api/contract/prices.ts`` and the MSW fixtures and handler at 57b4df0; OQ-26
-item 8): shapes, decimals as strings, status codes and problem+json errors."""
+item 8): shapes, decimals as strings, status codes and problem+json errors. The scenarios of
+spec §13 items 7 and 17 (exact date, a correction, MANUAL removal) run end to end in
+``tests/integration/acceptance/test_reference_prices_http.py``.
+
+The service runs with the real Asset reader and Pricing service. DI1F28 matures on 03/01/2028 and
+DI1F29 on 02/01/2029: on 16/10/2026 (444 days) the PU 89250.3147019396 of DI1F28 is the rate
+0.098000000000, and on 15/10/2026 (810 days) the rate 0.1045 of DI1F29 is the PU 80206.1333187932
+(the fixtures below, recomputed with ``decimal`` at 34 digits, half-up; spec §4.1)."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -17,21 +24,17 @@ from pydantic import SecretStr
 
 from di1.composition.dependencies import get_unit_of_work as composition_unit_of_work
 from di1.main import create_app
+from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.prices.application.services.price_service import PriceService
 from di1.modules.prices.dependencies import build_price_service
 from di1.modules.prices.presentation.http.router import create_router
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import UnitOfWork
 from tests.integration.prices.support import CONTRACTS, TODAY
 from tests.support.builders import DI1F28, DI1F29, DI1V26
 from tests.support.db import psycopg_url, seed_catalogue
-from tests.support.fakes import (
-    CALCULATED_PU,
-    CALCULATED_RATE,
-    FakeAssetReader,
-    FakeClock,
-    FakePricing,
-)
+from tests.support.fakes import FakeClock
 
 # frontend/src/api/mocks/fixtures.ts `referencePrices`, DI1F28 and DI1F29.
 FIXTURES = [
@@ -132,15 +135,16 @@ class Api:
 
 
 @pytest.fixture
-def api(migrated_database_url: str, assets: FakeAssetReader) -> Iterator[Api]:
+def api(migrated_database_url: str) -> Iterator[Api]:
     _seed(migrated_database_url)
     app = create_app(Settings(database_url=SecretStr(migrated_database_url)))
 
     uow_dependency = Depends(composition_unit_of_work)
 
     def service(uow: UnitOfWork = uow_dependency) -> PriceService:
+        assets = build_asset_reader(uow.session)
         return build_price_service(
-            uow, assets=assets, pricing=FakePricing(), clock=FakeClock(TODAY)
+            uow, assets=assets, pricing=build_pricing_service(assets), clock=FakeClock(TODAY)
         )
 
     app.include_router(create_router(get_service=service))
@@ -171,328 +175,290 @@ def _same(actual: dict[str, Any], expected: dict[str, Any]) -> None:
     )
 
 
-class TestList:
-    def test_one_day_per_date_with_a_price_newest_first_manual_preferred(self, api: Api) -> None:
-        response = api.client.get(
-            "/reference-prices",
-            params={
-                "asset_id": str(DI1F28.id),
-                "start_date": "2026-09-01",
-                "end_date": "2026-10-19",
-            },
-        )
-
-        assert response.status_code == 200
-        items = response.json()["items"]
-        assert set(response.json()) == {"items"}
-        expected_days = [
-            ("2026-10-16", 8, [8, 10]),
-            ("2026-10-15", 7, [7]),
-            ("2026-10-14", 6, [6]),
-            ("2026-10-09", 5, [5]),
-            ("2026-10-08", 4, [4]),
-            ("2026-10-05", 3, [3]),
-            ("2026-09-30", 2, [2]),
-            ("2026-09-24", 1, [1]),
-        ]
-        assert [set(item) for item in items] == [{"reference_date", "preferred", "sources"}] * 8
-        assert [item["reference_date"] for item in items] == [d for d, _, _ in expected_days]
-        for item, (_, preferred, sources) in zip(items, expected_days, strict=True):
-            _same(item["preferred"], _fixture(preferred))
-            assert len(item["sources"]) == len(sources)
-            for actual, n in zip(item["sources"], sources, strict=True):
-                _same(actual, _fixture(n))
-
-    def test_decimals_keep_their_typed_scale_as_strings(self, api: Api) -> None:
-        response = api.client.get(
-            "/reference-prices",
-            params={
-                "asset_id": str(DI1F28.id),
-                "start_date": "2026-10-14",
-                "end_date": "2026-10-14",
-            },
-        )
-
-        price = response.json()["items"][0]["preferred"]
-        assert (price["pu"], price["rate"]) == ("89006.4625467350", "0.10")
-
-    def test_a_range_without_prices_is_empty_no_carry_forward(self, api: Api) -> None:
-        response = api.client.get(
-            "/reference-prices",
-            params={
-                "asset_id": str(DI1F28.id),
-                "start_date": "2026-10-17",
-                "end_date": "2026-10-19",
-            },
-        )
-
-        assert (response.status_code, response.json()) == (200, {"items": []})
-
-    def test_a_range_ending_after_today_is_accepted_and_future_days_are_empty(
-        self, api: Api
-    ) -> None:
-        # GAP-D-1 (user, 2026-10-19): reads accept dates after today (19/10) and return no
-        # day for them; only writes are refused after today.
-        response = api.client.get(
-            "/reference-prices",
-            params={
-                "asset_id": str(DI1F28.id),
-                "start_date": "2026-10-15",
-                "end_date": "2026-11-30",
-            },
-        )
-
-        assert response.status_code == 200
-        assert [item["reference_date"] for item in response.json()["items"]] == [
-            "2026-10-16",
-            "2026-10-15",
-        ]
-
-    def test_a_range_entirely_after_today_is_empty(self, api: Api) -> None:
-        response = api.client.get(
-            "/reference-prices",
-            params={
-                "asset_id": str(DI1F28.id),
-                "start_date": "2026-10-20",
-                "end_date": "2026-12-31",
-            },
-        )
-
-        assert (response.status_code, response.json()) == (200, {"items": []})
-
-    def test_an_unknown_asset_and_an_inverted_range_are_422(self, api: Api) -> None:
-        response = api.client.get(
-            "/reference-prices",
-            params={
-                "asset_id": "6f1c2a10-0000-4000-8000-00000000dead",
-                "start_date": "2026-10-16",
-                "end_date": "2026-10-15",
-            },
-        )
-
-        assert response.status_code == 422
-        assert response.headers["content-type"] == "application/problem+json"
-        assert response.json()["errors"] == [
-            {
-                "code": "INVALID_RANGE",
-                "message": "A data inicial deve ser anterior ou igual à data final.",
-                "field": "start_date",
-            },
-            {"code": "VALIDATION_ERROR", "message": "Selecione um contrato.", "field": "asset_id"},
-        ]
-
-    def test_missing_query_parameters_are_422(self, api: Api) -> None:
-        response = api.client.get("/reference-prices", params={"asset_id": str(DI1F28.id)})
-
-        assert response.status_code == 422
-        assert {e["field"] for e in response.json()["errors"]} == {"start_date", "end_date"}
-
-
-class TestSet:
-    def test_a_typed_pu_answers_201_with_a_manual_price(self, api: Api) -> None:
-        response = api.client.post(
-            "/reference-prices",
-            json={
-                "asset_id": str(DI1F28.id),
-                "reference_date": "2026-10-19",
-                "input_kind": "PU",
-                "pu": "89300.1234567890",
-            },
-        )
-
-        assert response.status_code == 201
-        body = response.json()
-        assert set(body) == REFERENCE_PRICE_KEYS
-        assert {k: body[k] for k in ("asset_id", "reference_date", "source", "input_kind")} == {
-            "asset_id": str(DI1F28.id),
-            "reference_date": "2026-10-19",
-            "source": "MANUAL",
-            "input_kind": "PU",
-        }
-        assert (body["pu"], body["rate"]) == ("89300.1234567890", str(CALCULATED_RATE))
-
-    def test_a_typed_rate_answers_with_the_calculated_pu(self, api: Api) -> None:
-        response = api.client.post(
-            "/reference-prices",
-            json={
-                "asset_id": str(DI1F29.id),
-                "reference_date": "2026-10-16",
-                "input_kind": "RATE",
-                "rate": "0.1040",
-            },
-        )
-
-        assert response.status_code == 201
-        assert (response.json()["pu"], response.json()["rate"]) == (str(CALCULATED_PU), "0.1040")
-
-    def test_corrigir_replaces_the_manual_price_with_a_new_id_and_keeps_b3(self, api: Api) -> None:
-        response = api.client.post(
-            "/reference-prices",
-            json={
-                "asset_id": str(DI1F28.id),
-                "reference_date": "2026-10-16",
-                "input_kind": "PU",
-                "pu": "89255",
-            },
-        )
-
-        assert response.status_code == 201
-        new_id = response.json()["id"]
-        assert new_id != _fixture_id(8)
-        on_the_day = [row for row in api.rows() if row[2] == date(2026, 10, 16)]
-        assert [(str(r[0]), r[3], r[5]) for r in on_the_day] == [
-            (_fixture_id(10), "B3", "89240.4279488087"),
-            (new_id, "MANUAL", "89255"),
-        ]
-
-    @pytest.mark.parametrize(
-        ("body", "status", "errors"),
-        [
-            (
-                {"reference_date": "2026-10-20", "input_kind": "PU", "pu": "89000"},
-                422,
-                [
-                    {
-                        "code": "FUTURE_DATE",
-                        "message": "A data não pode ser posterior a hoje.",
-                        "field": "reference_date",
-                    }
-                ],
-            ),
-            (
-                {"asset_id": str(DI1V26.id), "input_kind": "PU", "pu": "100000"},
-                422,
-                [
-                    {
-                        "code": "CONTRACT_MATURED",
-                        "message": "O contrato já venceu nesta data.",
-                        "field": "reference_date",
-                    }
-                ],
-            ),
-            (
-                {"input_kind": "PU", "pu": "89000.12345678901"},
-                422,
-                [
-                    {
-                        "code": "VALIDATION_ERROR",
-                        "message": "Use no máximo 10 casas decimais.",
-                        "field": "pu",
-                    }
-                ],
-            ),
-            (
-                {"input_kind": "RATE", "rate": "0.1234567890123"},
-                422,
-                [
-                    {
-                        "code": "VALIDATION_ERROR",
-                        "message": "Use no máximo 12 casas decimais.",
-                        "field": "rate",
-                    }
-                ],
-            ),
-            (
-                {"input_kind": "PU", "pu": "0"},
-                422,
-                [
-                    {
-                        "code": "VALIDATION_ERROR",
-                        "message": "O PU deve ser maior que zero.",
-                        "field": "pu",
-                    }
-                ],
-            ),
-            (
-                {"input_kind": "RATE"},
-                422,
-                [{"code": "VALIDATION_ERROR", "message": "Informe a taxa.", "field": "rate"}],
-            ),
-            (
-                {"asset_id": "6f1c2a10-0000-4000-8000-00000000dead", "input_kind": "PU", "pu": "1"},
-                422,
-                [
-                    {
-                        "code": "VALIDATION_ERROR",
-                        "message": "Selecione um contrato.",
-                        "field": "asset_id",
-                    }
-                ],
-            ),
-            (
-                {
-                    "asset_id": "6f1c2a10-0000-4000-8000-00000000dead",
-                    "reference_date": "2026-10-20",
-                    "input_kind": "PU",
-                    "pu": "0",
-                },
-                422,
-                [
-                    {
-                        "code": "VALIDATION_ERROR",
-                        "message": "Selecione um contrato.",
-                        "field": "asset_id",
-                    },
-                    {
-                        "code": "FUTURE_DATE",
-                        "message": "A data não pode ser posterior a hoje.",
-                        "field": "reference_date",
-                    },
-                    {
-                        "code": "VALIDATION_ERROR",
-                        "message": "O PU deve ser maior que zero.",
-                        "field": "pu",
-                    },
-                ],
-            ),
-            (
-                # Digits other than ASCII 0-9 are not a typed number (Arabic-Indic 89250).
-                {"input_kind": "PU", "pu": "\u0668\u0669\u0662\u0665\u0660"},
-                422,
-                [{"code": "VALIDATION_ERROR", "message": "Valor inválido.", "field": "pu"}],
-            ),
-            (
-                {"input_kind": "PU", "pu": 89000.5},
-                422,
-                [{"code": "VALIDATION_ERROR", "message": "Valor inválido.", "field": "pu"}],
-            ),
-        ],
+def _days(api: Api, start: str, end: str, asset_id: UUID = DI1F28.id) -> Any:
+    return api.client.get(
+        "/reference-prices",
+        params={"asset_id": str(asset_id), "start_date": start, "end_date": end},
     )
-    def test_refusals_are_problem_json_and_write_nothing(
-        self, api: Api, body: dict[str, Any], status: int, errors: list[dict[str, Any]]
-    ) -> None:
-        before = api.rows()
-        payload = {"asset_id": str(DI1F28.id), "reference_date": "2026-10-16", **body}
-
-        response = api.client.post("/reference-prices", json=payload)
-
-        assert response.status_code == status
-        assert response.headers["content-type"] == "application/problem+json"
-        assert response.json()["errors"] == errors
-        assert api.rows() == before
 
 
-class TestDelete:
-    def test_delete_answers_204_and_b3_becomes_preferred(self, api: Api) -> None:
-        response = api.client.delete(f"/reference-prices/{_fixture_id(8)}")
+# --- GET /reference-prices ---------------------------------------------------------------------
 
-        assert (response.status_code, response.content) == (204, b"")
-        day = api.client.get(
-            "/reference-prices",
-            params={
+
+def test_one_day_per_date_with_a_price_newest_first_manual_preferred(api: Api) -> None:
+    response = _days(api, "2026-09-01", "2026-10-19")
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert set(response.json()) == {"items"}
+    expected_days = [
+        ("2026-10-16", 8, [8, 10]),
+        ("2026-10-15", 7, [7]),
+        ("2026-10-14", 6, [6]),
+        ("2026-10-09", 5, [5]),
+        ("2026-10-08", 4, [4]),
+        ("2026-10-05", 3, [3]),
+        ("2026-09-30", 2, [2]),
+        ("2026-09-24", 1, [1]),
+    ]
+    assert [set(item) for item in items] == [{"reference_date", "preferred", "sources"}] * 8
+    assert [item["reference_date"] for item in items] == [d for d, _, _ in expected_days]
+    for item, (_, preferred, sources) in zip(items, expected_days, strict=True):
+        _same(item["preferred"], _fixture(preferred))
+        assert len(item["sources"]) == len(sources)
+        for actual, n in zip(item["sources"], sources, strict=True):
+            _same(actual, _fixture(n))
+
+
+def test_decimals_keep_their_typed_scale_as_strings(api: Api) -> None:
+    price = _days(api, "2026-10-14", "2026-10-14").json()["items"][0]["preferred"]
+
+    assert (price["pu"], price["rate"]) == ("89006.4625467350", "0.10")
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "days"),
+    [
+        pytest.param("2026-10-15", "2026-11-30", ["2026-10-16", "2026-10-15"], id="ending-after"),
+        pytest.param("2026-10-20", "2026-12-31", [], id="entirely-after"),
+    ],
+)
+def test_a_range_after_today_is_accepted_and_its_future_days_are_empty(
+    api: Api, start: str, end: str, days: list[str]
+) -> None:
+    # OQ-42 (GAP-D-1, user, 2026-10-19): reads accept dates after today (19/10) and return no
+    # day for them; only writes are refused after today.
+    response = _days(api, start, end)
+
+    assert response.status_code == 200
+    assert [item["reference_date"] for item in response.json()["items"]] == days
+
+
+def test_an_unknown_asset_and_an_inverted_range_are_422(api: Api) -> None:
+    response = _days(
+        api, "2026-10-16", "2026-10-15", asset_id=UUID("6f1c2a10-0000-4000-8000-00000000dead")
+    )
+
+    assert response.status_code == 422
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["errors"] == [
+        {
+            "code": "INVALID_RANGE",
+            "message": "A data inicial deve ser anterior ou igual à data final.",
+            "field": "start_date",
+        },
+        {"code": "VALIDATION_ERROR", "message": "Selecione um contrato.", "field": "asset_id"},
+    ]
+
+
+def test_missing_query_parameters_are_422(api: Api) -> None:
+    response = api.client.get("/reference-prices", params={"asset_id": str(DI1F28.id)})
+
+    assert response.status_code == 422
+    assert {e["field"] for e in response.json()["errors"]} == {"start_date", "end_date"}
+
+
+# --- POST /reference-prices --------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("typed", "expected"),
+    [
+        pytest.param(
+            {
                 "asset_id": str(DI1F28.id),
-                "start_date": "2026-10-16",
-                "end_date": "2026-10-16",
+                "reference_date": "2026-10-16",
+                "input_kind": "PU",
+                "pu": "89250.3147019396",
             },
-        ).json()["items"][0]
-        _same(day["preferred"], _fixture(10))
-        assert [s["id"] for s in day["sources"]] == [_fixture_id(10)]
+            ("89250.3147019396", "0.098000000000"),
+            id="typed-pu",
+        ),
+        pytest.param(
+            {
+                "asset_id": str(DI1F29.id),
+                "reference_date": "2026-10-15",
+                "input_kind": "RATE",
+                "rate": "0.1045",
+            },
+            ("80206.1333187932", "0.1045"),
+            id="typed-rate",
+        ),
+        pytest.param(
+            # DI1V26 matures on 01/10/2026: on that date the PU is typed, the rate is 0 (OQ-1).
+            {
+                "asset_id": str(DI1V26.id),
+                "reference_date": "2026-10-01",
+                "input_kind": "PU",
+                "pu": "99987.5",
+            },
+            ("99987.5", "0.000000000000"),
+            id="maturity-day",
+        ),
+    ],
+)
+def test_a_typed_value_answers_201_with_a_manual_price_and_the_calculated_value(
+    api: Api, typed: dict[str, str], expected: tuple[str, str]
+) -> None:
+    response = api.client.post("/reference-prices", json=typed)
 
-    def test_an_unknown_price_is_404_problem_json(self, api: Api) -> None:
-        response = api.client.delete(f"/reference-prices/{UUID(int=1)}")
+    assert response.status_code == 201
+    body = response.json()
+    assert set(body) == REFERENCE_PRICE_KEYS
+    assert {k: body[k] for k in ("asset_id", "reference_date", "source", "input_kind")} == {
+        "asset_id": typed["asset_id"],
+        "reference_date": typed["reference_date"],
+        "source": "MANUAL",
+        "input_kind": typed["input_kind"],
+    }
+    assert (body["pu"], body["rate"]) == expected
 
-        assert response.status_code == 404
-        assert response.headers["content-type"] == "application/problem+json"
-        assert response.json()["errors"] == [
-            {"code": "NOT_FOUND", "message": "Preço de referência não encontrado.", "field": None}
-        ]
+
+@pytest.mark.parametrize(
+    ("body", "status", "errors"),
+    [
+        (
+            {"reference_date": "2026-10-20", "input_kind": "PU", "pu": "89000"},
+            422,
+            [
+                {
+                    "code": "FUTURE_DATE",
+                    "message": "A data não pode ser posterior a hoje.",
+                    "field": "reference_date",
+                }
+            ],
+        ),
+        (
+            {"asset_id": str(DI1V26.id), "input_kind": "PU", "pu": "100000"},
+            422,
+            [
+                {
+                    "code": "CONTRACT_MATURED",
+                    "message": "O contrato já venceu nesta data.",
+                    "field": "reference_date",
+                }
+            ],
+        ),
+        (
+            {"input_kind": "PU", "pu": "89000.12345678901"},
+            422,
+            [
+                {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Use no máximo 10 casas decimais.",
+                    "field": "pu",
+                }
+            ],
+        ),
+        (
+            {"input_kind": "RATE", "rate": "0.1234567890123"},
+            422,
+            [
+                {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Use no máximo 12 casas decimais.",
+                    "field": "rate",
+                }
+            ],
+        ),
+        (
+            {"input_kind": "PU", "pu": "0"},
+            422,
+            [
+                {
+                    "code": "VALIDATION_ERROR",
+                    "message": "O PU deve ser maior que zero.",
+                    "field": "pu",
+                }
+            ],
+        ),
+        (
+            {"input_kind": "RATE"},
+            422,
+            [{"code": "VALIDATION_ERROR", "message": "Informe a taxa.", "field": "rate"}],
+        ),
+        (
+            {"asset_id": "6f1c2a10-0000-4000-8000-00000000dead", "input_kind": "PU", "pu": "1"},
+            422,
+            [
+                {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Selecione um contrato.",
+                    "field": "asset_id",
+                }
+            ],
+        ),
+        (
+            {
+                "asset_id": "6f1c2a10-0000-4000-8000-00000000dead",
+                "reference_date": "2026-10-20",
+                "input_kind": "PU",
+                "pu": "0",
+            },
+            422,
+            [
+                {
+                    "code": "VALIDATION_ERROR",
+                    "message": "Selecione um contrato.",
+                    "field": "asset_id",
+                },
+                {
+                    "code": "FUTURE_DATE",
+                    "message": "A data não pode ser posterior a hoje.",
+                    "field": "reference_date",
+                },
+                {
+                    "code": "VALIDATION_ERROR",
+                    "message": "O PU deve ser maior que zero.",
+                    "field": "pu",
+                },
+            ],
+        ),
+        (
+            # Digits other than ASCII 0-9 are not a typed number (Arabic-Indic 89250).
+            {"input_kind": "PU", "pu": "\u0668\u0669\u0662\u0665\u0660"},
+            422,
+            [{"code": "VALIDATION_ERROR", "message": "Valor inválido.", "field": "pu"}],
+        ),
+        (
+            {"input_kind": "PU", "pu": 89000.5},
+            422,
+            [{"code": "VALIDATION_ERROR", "message": "Valor inválido.", "field": "pu"}],
+        ),
+    ],
+)
+def test_refusals_are_problem_json_and_write_nothing(
+    api: Api, body: dict[str, Any], status: int, errors: list[dict[str, Any]]
+) -> None:
+    before = api.rows()
+    payload = {"asset_id": str(DI1F28.id), "reference_date": "2026-10-16", **body}
+
+    response = api.client.post("/reference-prices", json=payload)
+
+    assert response.status_code == status
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["errors"] == errors
+    assert api.rows() == before
+
+
+# --- DELETE /reference-prices/{id} -------------------------------------------------------------
+
+
+def test_delete_answers_204_without_a_body_and_deletes_the_row(api: Api) -> None:
+    response = api.client.delete(f"/reference-prices/{_fixture_id(8)}")
+
+    assert (response.status_code, response.content) == (204, b"")
+    assert _fixture_id(8) not in {str(row[0]) for row in api.rows()}
+
+
+def test_an_unknown_price_is_404_problem_json(api: Api) -> None:
+    before = api.rows()
+
+    response = api.client.delete(f"/reference-prices/{UUID(int=1)}")
+
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/problem+json"
+    assert response.json()["errors"] == [
+        {"code": "NOT_FOUND", "message": "Preço de referência não encontrado.", "field": None}
+    ]
+    assert api.rows() == before

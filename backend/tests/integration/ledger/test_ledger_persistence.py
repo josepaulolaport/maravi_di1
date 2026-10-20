@@ -275,19 +275,6 @@ async def test_a_mixed_batch_is_all_or_nothing(
     assert [row.id for row in rows] == [buy]
 
 
-async def test_a_deleted_entry_is_gone_for_good(
-    service: ServiceOn, session_factory: Sessions
-) -> None:
-    entry = await create(service, session_factory, draft_cash())
-    await delete(service, session_factory, entry)
-
-    with pytest.raises(DomainError) as error:
-        await delete(service, session_factory, entry)
-
-    assert error.value.code is ErrorCode.NOT_FOUND
-    assert await fetch(session_factory, "SELECT id FROM ledger.entries") == []
-
-
 async def test_an_overlapping_deletion_waits_then_deletes_nothing(
     service: ServiceOn, session_factory: Sessions, engine: AsyncEngine
 ) -> None:
@@ -365,15 +352,6 @@ async def test_an_execution_price_never_becomes_a_reference_price(
     )
 
     assert await fetch(session_factory, "SELECT id FROM prices.reference_prices") == []
-
-
-async def test_a_rejected_entry_writes_nothing(
-    service: ServiceOn, session_factory: Sessions
-) -> None:
-    with pytest.raises(DomainError):
-        await create(service, session_factory, draft_trade(date(2026, 10, 19)))
-
-    assert await fetch(session_factory, "SELECT id FROM ledger.entries") == []
 
 
 class _ReadOnly:

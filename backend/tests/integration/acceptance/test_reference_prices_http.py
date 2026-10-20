@@ -1,5 +1,6 @@
-"""Reference prices over HTTP (spec §5, §7.4, §13 cases 9 and 17; OQ-1, OQ-25, OQ-26, OQ-31,
-OQ-42).
+"""Reference prices over HTTP (spec §5, §7.4, §13 cases 1, 7, 9 and 17; OQ-1, OQ-25, OQ-26,
+OQ-31). A write dated after today and reads after today (OQ-42) are in
+``tests/integration/prices/test_reference_prices_http.py``.
 
 Today is Friday 08/01/2027. DI1F28 matures on 01/01/2028 (360 calendar days from 06/01/2027);
 DI1F27 matured on Monday 04/01/2027. B3 prices have no HTTP route yet (a future import), so the
@@ -133,25 +134,6 @@ def test_exact_date_only_without_carry_forward(
     assert [d["reference_date"] for d in days] == [DAY]
 
 
-def test_reads_after_today_are_accepted_and_empty(
-    client: TestClient, contracts: dict[str, str]
-) -> None:
-    # OQ-42: price reads accept any range; days after today come back empty.
-    asset = contracts["DI1F28"]
-    _set(client, price_body(asset, DAY, rate="0.10"))
-
-    assert [d["reference_date"] for d in _days(client, asset, DAY, "2027-01-31")] == [DAY]
-    assert _days(client, asset, "2027-01-09", "2027-01-31") == []
-
-
-def test_a_price_after_today_is_refused(client: TestClient, contracts: dict[str, str]) -> None:
-    response = client.post(
-        "/api/reference-prices", json=price_body(contracts["DI1F28"], "2027-01-09", rate="0.10")
-    )
-
-    assert problem_errors(response, 422) == [("FUTURE_DATE", "reference_date")]
-
-
 def test_maturity_day_price_is_a_typed_pu_with_rate_zero(
     client: TestClient, contracts: dict[str, str]
 ) -> None:
@@ -174,9 +156,19 @@ def test_maturity_day_price_is_a_typed_pu_with_rate_zero(
 def test_a_price_write_saves_only_the_fact(
     app: tuple[TestClient, str], contracts: dict[str, str]
 ) -> None:
-    # OQ-31: setting, correcting and removing a price marks nothing and creates no job.
+    # OQ-31: setting, correcting and removing a price, also on processed dates, marks nothing,
+    # keeps every date's status and processing time, and creates no job.
     client, database_url = app
     asset = contracts["DI1F28"]
+    sql(
+        database_url,
+        "INSERT INTO processing.date_status (date, portfolio, portfolio_processed_at)"
+        " SELECT d::date, 'PROCESSED', now()"
+        " FROM generate_series(date '2027-01-05', date '2027-01-07', interval '1 day') AS d",
+    )
+    statuses = "SELECT * FROM processing.date_status ORDER BY date"
+    before = (sql(database_url, statuses), derived_rows(database_url))
+
     _set(client, price_body(asset, DAY, rate="0.10"))
     corrected = _set(client, price_body(asset, DAY, rate="0.11"))
     removed = client.delete(f"/api/reference-prices/{corrected['id']}")
@@ -184,4 +176,6 @@ def test_a_price_write_saves_only_the_fact(
     assert removed.status_code == 204, removed.text
     assert _days(client, asset, DAY, DAY) == []
     assert client.get("/api/processing/requests").json()["items"] == []
-    assert set(derived_rows(database_url).values()) == {0}
+    assert (sql(database_url, statuses), derived_rows(database_url)) == before
+    # Only the three seeded statuses: no request, outbox message or result was ever written.
+    assert {table: n for table, n in before[1].items() if n} == {"processing.date_status": 3}

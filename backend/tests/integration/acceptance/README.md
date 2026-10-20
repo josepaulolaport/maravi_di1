@@ -1,6 +1,7 @@
-# Acceptance tests, phase 2 (spec §13, over HTTP and PostgreSQL)
+# Acceptance tests (spec §13, over HTTP and PostgreSQL)
 
-The same proof as `tests/acceptance/` (phase 1, pure engines), now through the real app:
+The one home of each spec §13 scenario (the former phase 1 over the pure engines repeated them;
+the engines' rules are in `tests/unit/`). The proof runs through the real app:
 `create_app` on a fresh PostgreSQL 16 database migrated to head, with an injected clock
 (OQ-14; spec §15 D4), driven only through `/api`. Only the catalogue roots (instrument type,
 asset class) and B3 prices, which have no route, are inserted directly. Expected values come
@@ -20,7 +21,6 @@ These tests need `TEST_DATABASE_URL`; CI sets it and runs them.
 | 17 (second half) a used price corrected then removed after a run: allowed, marks nothing, no job or pendência; the Carteira shows the current price beside the old figures, the date keeps its status, time and figures until the user reprocesses (worker run in-process, `run_worker`) | `test_price_change_after_a_run_http.py` |
 | 22 page `limit` 0 and 201 refused, ledger entries and processing history | `test_ledger_http.py` |
 | 23 Carteira summary, positions and P&L series after today refused | `test_challenge_example_http.py` |
-| OQ-42 price reads after today accepted and empty | `test_reference_prices_http.py` |
 | OQ-33 catalogue: codes upper-cased, accent-insensitive search, unknown `product_id` / `asset_class_id` → 422 | `test_catalogue_http.py` |
 
 ## Scenarios with a processing run
