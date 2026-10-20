@@ -69,6 +69,9 @@ also answers directly on http://127.0.0.1:8000 (`/health`, `/api/...`), PostgreS
 http://127.0.0.1:15672 (user `di1`, password `di1`). Those are the defaults: set `DI1_WEB_PORT`,
 `DI1_API_PORT`, `DI1_DB_PORT` and `DI1_RABBITMQ_MANAGEMENT_PORT` in `.env` to publish them elsewhere
 (for example `DI1_DB_PORT=55432` when a local PostgreSQL already uses 5432).
+PostgreSQL is now published on `127.0.0.1:${DI1_DB_PORT:-5432}`, so with a local PostgreSQL already
+on 5432, `docker compose up` fails ("port is already allocated") until `DI1_DB_PORT` is changed in
+`.env`.
 `docker compose down -v` removes the stack and its data.
 
 For frontend development, run the Vite dev server against the same stack (it needs the backend;
