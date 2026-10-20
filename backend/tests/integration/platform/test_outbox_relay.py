@@ -165,7 +165,7 @@ async def test_a_crash_after_publish_resends_the_message(
     queue: AbstractQueue,
 ) -> None:
     """The broker has the message but the row was never marked: the next relay sends it
-    again, and the worker skips the duplicate (its request is no longer QUEUED)."""
+    again; the duplicate takes the next QUEUED request or finds none (OQ-50 item 2)."""
     [envelope] = await _write(session_factory, "test.command")
 
     with pytest.raises(_CrashError):

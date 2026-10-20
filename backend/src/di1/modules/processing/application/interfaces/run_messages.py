@@ -1,10 +1,10 @@
-"""The run message: one per request, naming it, so the worker starts that request.
+"""The run message: one per queued request, saying that work is waiting.
 
 Queueing a request saves it QUEUED and writes its run message in the same Unit of Work; the
 relay publishes it once the request commits. PostgreSQL stays the source of truth for status and
-order: the worker skips a message whose request is no longer QUEUED (cancelled, ended, already
-taken by the sweep) or that arrives while a run is RUNNING, and its periodic sweep runs any
-QUEUED request whose message was lost, so a lost message only delays its run.
+order: on any run message the worker takes the oldest QUEUED request by ``(created_at, id)``, so
+the message's ``request_id`` serves the logs only, and its periodic sweep does the same, so a
+lost message only delays a run (OQ-50 item 2).
 """
 
 from __future__ import annotations

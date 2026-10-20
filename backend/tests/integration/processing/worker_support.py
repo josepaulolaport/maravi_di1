@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
@@ -22,6 +22,7 @@ from di1.modules.portfolio.public import (
     PositionsDay,
     PreviousPositionsDay,
 )
+from di1.modules.processing.application.interfaces.run_messages import RUN_MESSAGE_TYPE
 from di1.modules.processing.application.services.chain_history import ChainHistory
 from di1.modules.processing.application.services.processing import ProcessingPreview
 from di1.modules.processing.application.services.run_chains import DayReaders
@@ -33,8 +34,10 @@ from di1.modules.processing.infrastructure.persistence.repositories import (
     SqlDateStatusRepository,
 )
 from di1.modules.processing.infrastructure.persistence.run_store import SqlRunStore
+from di1.modules.processing.presentation.messaging.run_message import RunMessageHandler
 from di1.modules.processing.public import ProcessingRequest, ProcessingScope
 from di1.platform.database.unit_of_work import UnitOfWork, unit_of_work_factory
+from di1.platform.messaging.envelope import Envelope
 from di1.shared.clock import SAO_PAULO
 from tests.integration.processing.support import make_service
 from tests.unit.processing.run_fakes import World
@@ -184,11 +187,21 @@ class Worker:
             await self.service.request_cancel(request_id, uow=uow)
 
     async def deliver(self, request_id: UUID) -> bool:
-        """The worker handles ``request_id``'s run message: it starts that request, then runs
-        it; `False` when the message is skipped (the request is not QUEUED, or a run is)."""
-        if not await self.processor.start(request_id):
+        """The worker handles ``request_id``'s run message through the real handler: it takes
+        the oldest QUEUED request and runs it (OQ-50 item 2); `False` when the message starts
+        nothing (nothing QUEUED, or a run is RUNNING)."""
+        run = await RunMessageHandler(self.processor)(
+            Envelope(
+                message_id=uuid4(),
+                message_type=RUN_MESSAGE_TYPE,
+                schema_version=1,
+                created_at=self.clock.now(),
+                payload={"request_id": str(request_id)},
+            )
+        )
+        if run is None:
             return False
-        await self.processor.run(request_id)
+        await run()
         return True
 
     async def sweep(self) -> None:

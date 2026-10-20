@@ -73,7 +73,9 @@ async def test_each_request_publishes_one_run_message_naming_it(worker: Worker) 
     ]
 
 
-async def test_a_run_message_starts_and_runs_its_request(worker: Worker) -> None:
+async def test_a_run_message_takes_and_runs_its_request_when_it_is_the_oldest(
+    worker: Worker,
+) -> None:
     request_id = await worker.enqueue("CASH", D1, D1)
 
     assert await worker.deliver(request_id) is True
@@ -83,14 +85,30 @@ async def test_a_run_message_starts_and_runs_its_request(worker: Worker) -> None
     assert await worker.writes() == [(D1, "CASH", False)]
 
 
-async def test_a_run_message_takes_its_own_request_not_the_oldest(worker: Worker) -> None:
-    older = await worker.enqueue("CASH", D1, D1)  # its message is lost
+async def test_a_run_message_takes_the_oldest_queued_request_not_its_own(worker: Worker) -> None:
+    """The relay does not guarantee publication order, so FIFO by (created_at, id) decides;
+    the message's request_id is for the logs only (OQ-50 item 2)."""
+    older = await worker.enqueue("CASH", D1, D1)  # its message is lost, or arrives later
     newer = await worker.enqueue("CASH", D2, D2)
 
     assert await worker.deliver(newer) is True
 
-    assert (await worker.run_row(newer))["status"] == "COMPLETED"  # from the zero state
-    assert (await worker.run_row(older))["status"] == "QUEUED"  # the sweep takes it
+    assert (await worker.run_row(older))["status"] == "COMPLETED"
+    assert (await worker.run_row(newer))["status"] == "QUEUED"  # the next take runs it
+
+
+async def test_a_cancelled_requests_message_takes_the_next_queued_request(
+    worker: Worker,
+) -> None:
+    cancelled = await worker.enqueue("CASH", D1, D1)
+    queued = await worker.enqueue("CASH", D2, D2)  # its message is lost
+    await worker.cancel(cancelled)
+
+    assert await worker.deliver(cancelled) is True
+
+    assert (await worker.run_row(cancelled))["status"] == "CANCELLED"
+    assert (await worker.run_row(queued))["status"] == "COMPLETED"
+    assert await worker.writes() == [(D2, "CASH", False)]
 
 
 async def test_a_cancelled_requests_message_is_skipped(worker: Worker) -> None:
@@ -136,7 +154,7 @@ async def test_a_run_message_while_a_run_is_running_is_skipped(worker: Worker) -
 
     assert await worker.deliver(second) is False  # one run at a time
 
-    assert (await worker.run_row(second))["status"] == "QUEUED"  # the sweep takes it later
+    assert (await worker.run_row(second))["status"] == "QUEUED"  # the sweep after the run
     assert (await worker.run_row(second))["started_at"] is None
 
 

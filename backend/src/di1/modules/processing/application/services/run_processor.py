@@ -4,14 +4,14 @@ OQ-11, OQ-23, OQ-26, OQ-31, OQ-36, OQ-37, OQ-38, OQ-40, OQ-44, OQ-45).
 
 The system runs exactly one processing worker (OQ-45), which handles one run at a time: there is
 no lease, claim token, fencing, recovery cap, dispatcher or active slot (OQ-46). Queueing a
-request publishes one run message naming it; the worker starts that request (`start`). A
-periodic sweep (`sweep`) takes the oldest QUEUED request by ``(created_at, id)`` and runs it,
-until none is left, so a request whose message was lost still runs, only later. Each step is its
-own Unit of Work under a row lock on the run's ``requests`` row:
+request publishes one run message; on any run message the worker takes the oldest QUEUED request
+by ``(created_at, id)`` (`take_next`) and runs it, and a periodic sweep (`sweep`) does the same
+until none is left, so a request whose message was lost still runs, only later (OQ-50 item 2).
+Each step is its own Unit of Work under a row lock on the run's ``requests`` row:
 
-1. **take** (`start` or `sweep`): only while no run is RUNNING, the named request (if still
-   QUEUED) or the oldest QUEUED one is locked and set RUNNING with ``started_at``; a message for
-   a request that is not QUEUED, or a sweep with nothing QUEUED, is a no-op;
+1. **take** (`take_next`, on a run message or in `sweep`): under the queue's advisory lock and
+   only while no run is RUNNING, the oldest QUEUED request is locked and set RUNNING with
+   ``started_at``; with nothing QUEUED it is a no-op;
 2. per date D, in calendar order, from ``start_date`` or the day after ``progress_date``:
    a. a short transaction checks the cancel flag (a cancel ends the run CANCELLED between
       dates) and sets D's live chains RUNNING, keeping ``*_previous``;
@@ -196,22 +196,6 @@ class PortfolioRangeProcessor:
         while (request_id := await self.take_next()) is not None:
             await self.run(request_id)
 
-    async def start(self, request_id: UUID) -> bool:
-        """Sets ``request_id`` RUNNING with ``started_at``, in one transaction, if it is still
-        QUEUED and no run is RUNNING; `False` otherwise (cancelled, ended, already taken by the
-        sweep, unknown, or another run is RUNNING), and nothing is written. What a run message
-        triggers; the caller then runs it."""
-        async with self._uow_factory() as uow:
-            if await self._store.lock_running_runs(uow=uow):
-                await uow.commit()
-                return False
-            request = await self._store.get_run(request_id, uow=uow, for_update=True)
-            if request is None or request.status is not ProcessingStatus.QUEUED:
-                await uow.commit()
-                return False
-            await self._set_running(request, uow)
-            return True
-
     async def take_next(self) -> UUID | None:
         """Locks the oldest QUEUED request and sets it RUNNING, in one transaction. ``None`` only
         when none is queued (a cancel and a take on the same row: whichever commits first wins),
@@ -231,17 +215,14 @@ class PortfolioRangeProcessor:
                 if not await self._store.has_queued(uow=uow):
                     await uow.commit()
                     return None
-            await self._set_running(queued, uow)
+            now = self._clock.now()
+            await self._store.save_run(
+                replace(queued, status=ProcessingStatus.RUNNING, started_at=now, updated_at=now),
+                uow=uow,
+            )
+            await uow.commit()
+            logger.info("processing request %s started", queued.id)
             return queued.id
-
-    async def _set_running(self, request: ProcessingRequest, uow: UnitOfWork) -> None:
-        now = self._clock.now()
-        await self._store.save_run(
-            replace(request, status=ProcessingStatus.RUNNING, started_at=now, updated_at=now),
-            uow=uow,
-        )
-        await uow.commit()
-        logger.info("processing request %s started", request.id)
 
     # --- recovery at worker start (OQ-45) -------------------------------------------------
 

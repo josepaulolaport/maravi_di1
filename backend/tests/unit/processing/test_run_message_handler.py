@@ -1,5 +1,6 @@
-"""The run message handler: it starts the request the message names and hands back its run, to
-go on after the acknowledgement; a message for a request that is not QUEUED is skipped."""
+"""The run message handler: on any run message it takes the oldest QUEUED request and hands back
+its run, to go on after the acknowledgement; the message's request_id is for the logs only
+(OQ-50 item 2). With nothing QUEUED, or while a run is RUNNING, it starts nothing."""
 
 from __future__ import annotations
 
@@ -20,15 +21,18 @@ from di1.platform.messaging.envelope import Envelope
 REQUEST_ID = UUID(int=7)
 
 
+OLDEST = UUID(int=1)
+
+
 @dataclass
 class FakeProcessor:
-    startable: bool = True
-    started: list[UUID] = field(default_factory=list)
+    queued: list[UUID] = field(default_factory=lambda: [OLDEST])
+    takes: int = 0
     ran: list[UUID] = field(default_factory=list)
 
-    async def start(self, request_id: UUID) -> bool:
-        self.started.append(request_id)
-        return self.startable
+    async def take_next(self) -> UUID | None:
+        self.takes += 1
+        return self.queued.pop(0) if self.queued else None
 
     async def run(self, request_id: UUID) -> None:
         self.ran.append(request_id)
@@ -46,25 +50,25 @@ def envelope(
     )
 
 
-async def test_the_named_request_starts_and_runs_only_after_the_handler_returns() -> None:
+async def test_the_oldest_queued_request_is_taken_and_runs_after_the_handler_returns() -> None:
     processor = FakeProcessor()
 
     after_ack = await RunMessageHandler(processor)(envelope({"request_id": str(REQUEST_ID)}))
 
-    assert processor.started == [REQUEST_ID]
+    assert processor.takes == 1
     assert processor.ran == []
     assert after_ack is not None
     await after_ack()
-    assert processor.ran == [REQUEST_ID]
+    assert processor.ran == [OLDEST]  # not the message's REQUEST_ID
 
 
-async def test_a_request_that_does_not_start_hands_back_no_run() -> None:
-    processor = FakeProcessor(startable=False)  # cancelled, ended, or a run is RUNNING
+async def test_nothing_taken_hands_back_no_run() -> None:
+    processor = FakeProcessor(queued=[])  # nothing QUEUED, or a run is RUNNING
 
     after_ack = await RunMessageHandler(processor)(envelope({"request_id": str(REQUEST_ID)}))
 
     assert after_ack is None
-    assert processor.started == [REQUEST_ID]
+    assert processor.takes == 1
     assert processor.ran == []
 
 
@@ -84,4 +88,4 @@ async def test_a_message_that_is_not_a_run_message_is_refused(bad: Envelope) -> 
     with pytest.raises(InvalidRunMessageError):
         await RunMessageHandler(processor)(bad)
 
-    assert processor.started == []
+    assert processor.takes == 0

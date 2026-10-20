@@ -1,10 +1,11 @@
 """The worker's consumer and its job loop: one job at a time, a message only a hint.
 
-PostgreSQL holds the state and the order of the work; a message only says which piece of work
-to start (Processing's run message names one request). Delivery is at least once and a message
-may be lost, so the worker also sweeps: `JobLoop` calls the module's ``sweep`` after every job
-and every ``sweep_interval_seconds``, and the sweep takes whatever work is still waiting. A lost
-message only delays its work; a duplicate finds its work no longer waiting and starts nothing.
+PostgreSQL holds the state and the order of the work; a message only says that work is waiting
+(Processing's run message; the handler takes the oldest waiting request, OQ-50 item 2).
+Delivery is at least once and a message may be lost, so the worker also sweeps: `JobLoop` calls
+the module's ``sweep`` after every job and every ``sweep_interval_seconds``, and the sweep takes
+whatever work is still waiting. A lost message only delays its work; a duplicate takes the next
+waiting work or finds none.
 
 `JobLoop` runs everything in one task the worker owns, not in aiormq's delivery task, which a
 closed channel (a broker restart, a missed heartbeat) cancels. For each delivery,
@@ -15,9 +16,8 @@ closed channel (a broker restart, a missed heartbeat) cancels. For each delivery
    commits the start (a request set RUNNING) and hands back the work that follows (the run),
    or nothing when the message starts nothing;
 3. acknowledges the delivery. If the process dies before the ack, the broker delivers it again
-   and the handler finds its work already started; if the delivery is cancelled while its start
-   is decided, the loop still finishes the start, and the message is delivered again and
-   skipped.
+   and the handler takes the next waiting work or finds none; the same happens when the
+   delivery is cancelled while its start is decided (the loop still finishes that start).
 
 A message that arrives while a job runs is acknowledged at once and starts nothing: its work
 stays waiting in the database, and the sweep after the running job takes it. Nothing waits
@@ -158,7 +158,7 @@ class MessageConsumer:
         try:
             await message.ack()
         except Exception:
-            # The delivery comes back and is skipped: its work started, or the sweep takes it.
+            # The delivery comes back: it takes the next waiting work, or finds none.
             logger.exception("%s: the ack failed", description)
 
 

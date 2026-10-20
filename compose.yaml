@@ -166,9 +166,9 @@ services:
     restart: unless-stopped
 
   # Exactly one processing worker (OQ-45), and no dispatcher (OQ-46): at startup it recovers an
-  # interrupted run and sweeps the queued requests; then it starts the request each run message
-  # names, and sweeps after every run and every WORKER_SWEEP_INTERVAL_SECONDS (5 s). It must
-  # never be scaled. It stops on SIGTERM within the default grace period. It exits 1 on
+  # interrupted run and sweeps the queued requests; then, on each run message, it takes the oldest
+  # queued request, and sweeps after every run and every WORKER_SWEEP_INTERVAL_SECONDS (5 s). It
+  # must never be scaled. It stops on SIGTERM within the default grace period. It exits 1 on
   # a startup failure, and when a run cannot record its end (the run would stay RUNNING and hold
   # the queue): the restart's recovery then finishes the run. Its heartbeat is touched every 5 s
   # by a task of its event loop, the startup recovery included, so a fresh file means the

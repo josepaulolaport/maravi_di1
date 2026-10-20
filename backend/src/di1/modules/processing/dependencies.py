@@ -92,6 +92,6 @@ def make_range_processor(
 
 
 def make_run_message_handler(processor: PortfolioRangeProcessor) -> RunMessageHandler:
-    """The consumer handler of the `RUN_MESSAGE_TYPE` queue: each message starts the request it
-    names, if still QUEUED."""
+    """The consumer handler of the `RUN_MESSAGE_TYPE` queue: each message takes the oldest QUEUED
+    request, if any (OQ-50 item 2)."""
     return RunMessageHandler(processor)

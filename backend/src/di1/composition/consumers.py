@@ -1,8 +1,9 @@
 """The worker processes' wiring (integrator; interfaces.md "DI composition", "Transaction
 boundaries" 3 to 7; OQ-45, OQ-46). The only composition module the workers import.
 
-- `consumers`: the processing worker's one consumer, on Processing's run message queue. Each
-  message names one request: the handler starts it, if still QUEUED, and runs it after the ack;
+- `consumers`: the processing worker's one consumer, on Processing's run message queue. On each
+  message the handler takes the oldest QUEUED request, if any, and runs it after the ack
+  (OQ-50 item 2);
 - `processing_sweep`: the worker's periodic sweep, which runs the QUEUED requests oldest first,
   so a request whose message was lost still runs;
 - `processing_startup`: run once by the worker before it consumes. Exactly one worker exists

@@ -80,26 +80,29 @@ MSW is used only in the frontend's component tests, as static fixtures.
 
 Processing runs only when the user requests it, in one worker process (OQ-45).
 `POST /processing/requests` saves the request as `QUEUED` in PostgreSQL and, in the same
-transaction, one outbox message `processing.run` naming it (`{"request_id": ...}`). The outbox
-relay publishes it to RabbitMQ with publisher confirms. The worker (prefetch 1) locks that
-request: if it is still `QUEUED` and no run is `RUNNING`, it sets it `RUNNING`, acknowledges the
-message and runs it; otherwise (cancelled, finished, already taken) it acknowledges and skips the
-message. After every run, and every `WORKER_SWEEP_INTERVAL_SECONDS` (5 s), a sweep runs the
-oldest `QUEUED` request until none is left.
+transaction, one outbox message `processing.run` (`{"request_id": ...}`). The outbox relay
+publishes it to RabbitMQ with publisher confirms. On any run message the worker (prefetch 1)
+takes the **oldest** `QUEUED` request by `(created_at, id)` under a row lock, provided no run is
+`RUNNING`, sets it `RUNNING`, acknowledges the message and runs it; with nothing to take it
+acknowledges and does nothing. The message's `request_id` is for the logs only: the relay does not
+guarantee publication order, so FIFO is decided in PostgreSQL (OQ-50 item 2). After every run, and
+every `WORKER_SWEEP_INTERVAL_SECONDS` (5 s), a sweep takes the oldest `QUEUED` request the same
+way, until none is left.
 
 - **PostgreSQL is the source of truth** for the requests, their order and their status;
   RabbitMQ never records what is pending.
 - **RabbitMQ is the push trigger**: the API answers at once, and a request starts as soon as its
   message arrives, in a separate process. This is where messaging adds value (challenge §8).
 - **A lost message only delays its run**: the sweep, or the next worker start (recovery, then
-  one sweep), takes every `QUEUED` request. A duplicate finds its request no longer `QUEUED` and
-  is skipped. So there is no inbox, dead-letter queue, delivery limit or redelivery backoff: the
+  one sweep), takes every `QUEUED` request. A duplicate takes the next `QUEUED` request or finds
+  none. So there is no inbox, dead-letter queue, delivery limit or redelivery backoff: the
   worker acknowledges every delivery, and a bad one is logged and dropped.
 - Rejected alternatives: the sweep alone (polling) or PostgreSQL LISTEN/NOTIFY. Either removes a
   service, but drops the messaging part of the challenge; the sweep is kept only as the safety
   net.
 
-**Decided, implemented in later PRs on `simplify` (OQ-50, 2026-10-19):** the user asked "Is it
+**Decided (OQ-50, 2026-10-19); the queue part (item 2) is implemented, the rest lands in later
+PRs on `simplify`:** the user asked "Is it
 really necessary? I want to keep the queue" about the doorbell and chose option 1. Each request
 gets its own message, carrying its `request_id`, published through the outbox; the `request_id` is for tracing and logs only.
 The worker consumes one at a time and, on any message, takes the oldest `QUEUED` request by

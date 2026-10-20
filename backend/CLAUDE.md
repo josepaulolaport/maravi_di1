@@ -64,7 +64,7 @@ Create only the files and packages that are used. Initially only Processing has 
   - Fractional powers use `Decimal ** Decimal`; never `math.pow` or a float exponent.
   - One shared context: 34 digits, `ROUND_HALF_UP` (OQ-3). Quantize only on storage (a calculated PU to 10 dp, a calculated rate to 12 dp). A typed value with more decimals is rejected.
 - **Messaging:**
-  - RabbitMQ delivery is at least once, and a message is only a hint: a handler checks the state in PostgreSQL and skips a message whose work is no longer waiting, and the worker's periodic sweep takes work whose message was lost. There is no inbox, dead-letter queue or redelivery.
+  - RabbitMQ delivery is at least once, and a message is only a hint: a handler takes the waiting work from PostgreSQL (the oldest `QUEUED` request, OQ-50) or finds none, so a duplicate is harmless, and the worker's periodic sweep takes work whose message was lost. There is no inbox, dead-letter queue or redelivery.
   - Acknowledge once the start the message asks for is committed or skipped.
   - Publish only through `platform.outbox_messages` and the relay.
 - **Errors** are RFC 9457 problem+json with `errors[{code, message, field}]`; codes from the catalogue in `docs/interfaces.md` "Errors" (OQ-15).
