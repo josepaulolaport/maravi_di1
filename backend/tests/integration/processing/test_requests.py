@@ -153,14 +153,15 @@ async def test_13_10_concurrent_overlapping_requests_are_all_queued(
     assert len({r.id for r in created}) == 10
     assert set((await request_statuses(engine)).values()) == {"QUEUED"}
     assert await count(engine, "processing.requests") == 10
-    # Each request rings the doorbell once, in its own transaction (OQ-46).
+    # Each request publishes one run message naming it, in its own transaction.
     async with engine.connect() as connection:
-        doorbells = (
+        messages = (
             await connection.execute(
                 text("SELECT message_type, payload FROM platform.outbox_messages")
             )
         ).all()
-    assert [tuple(d) for d in doorbells] == [("processing.run_request", {})] * 10
+    assert [m.message_type for m in messages] == ["processing.run"] * 10
+    assert sorted(m.payload["request_id"] for m in messages) == sorted(str(r.id) for r in created)
 
 
 async def test_13_10_cancelling_a_queued_run_is_immediate(

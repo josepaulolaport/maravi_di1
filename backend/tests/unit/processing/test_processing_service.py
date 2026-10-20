@@ -311,7 +311,7 @@ async def test_10_1_enqueue_records_a_queued_run_of_exactly_the_range_and_commit
     )
     assert request.created_at == request.updated_at == harness.clock.current
     assert uow.commits == 1
-    assert harness.doorbell.rung == [uow]  # in the same transaction (OQ-46)
+    assert harness.run_messages.published == [(request.id, uow)]  # in the same transaction
 
 
 async def test_10_2_overlapping_and_repeated_requests_are_all_queued(harness: Harness) -> None:
@@ -334,7 +334,7 @@ async def test_enqueue_refuses_a_start_after_the_end_and_stores_nothing(
     assert raised.value.code is ErrorCode.INVALID_RANGE
     assert harness.requests.rows == {}
     assert uow.commits == 0
-    assert harness.doorbell.rung == []
+    assert harness.run_messages.published == []
 
 
 # Cancel

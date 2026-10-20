@@ -1,153 +1,243 @@
-"""The consumer's retry pause and its name bound.
-
-interfaces.md "Transaction boundaries" 7 (retries for transient failures only); schema.sql
-``platform.inbox_messages.consumer_name VARCHAR(128)``.
-"""
+"""The consumer and the worker's job loop, without a broker: one job at a time, the message acked
+once its start is decided, a message arriving during a job acked at once and skipped, and the
+sweep after every job and on every interval."""
 
 from __future__ import annotations
 
 import asyncio
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import cast
+from datetime import UTC, datetime
 
 import pytest
-from aio_pika.abc import AbstractIncomingMessage
-from pydantic import SecretStr
 
-from di1.platform.config import BrokerSettings
-from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
-from di1.platform.messaging.consumer import AfterAck, AfterAckRunner, MessageConsumer
+from di1.platform.messaging.consumer import Job, JobLoop, MessageConsumer, MessageHandler
 from di1.platform.messaging.envelope import Envelope
 
-SETTINGS = BrokerSettings(
-    rabbitmq_url=SecretStr("amqp://unused/"),
-    rabbitmq_retry_base_delay_seconds=0.5,
-    rabbitmq_retry_max_delay_seconds=3,
-)
+LONG = 3600.0
+"""A sweep interval no test reaches: the sweep then runs only after a job."""
 
 
-async def _handler(envelope: Envelope, *, uow: UnitOfWork) -> None:
-    raise AssertionError("not called")
-
-
-def _unused_uow() -> SqlAlchemyUnitOfWork:
-    raise AssertionError("not called")
-
-
-def _consumer(name: str = "worker") -> MessageConsumer:
-    return MessageConsumer(
-        consumer_name=name, handler=_handler, uow_factory=_unused_uow, settings=SETTINGS
+def make_envelope() -> Envelope:
+    return Envelope(
+        message_id=uuid.uuid4(),
+        message_type="test.command",
+        schema_version=1,
+        created_at=datetime(2026, 10, 19, tzinfo=UTC),
+        payload={},
     )
 
 
 @dataclass
-class _Delivery:
-    headers: dict[str, object] = field(default_factory=dict)
+class FakeMessage:
+    body: bytes
+    message_id: str | None = None
+    acks: int = 0
+    events: list[str] | None = None
+
+    async def ack(self) -> None:
+        self.acks += 1
+        if self.events is not None:
+            self.events.append("ack")
 
 
-def _delay(headers: dict[str, object]) -> float:
-    return _consumer().retry_delay(cast(AbstractIncomingMessage, _Delivery(headers)))
+@dataclass
+class Recorder:
+    events: list[str] = field(default_factory=list)
+    hold: asyncio.Event | None = None
+
+    async def sweep(self) -> None:
+        self.events.append("sweep")
+
+    def handler(self, *, start: bool = True, fail: bool = False) -> MessageHandler:
+        async def handle(envelope: Envelope) -> Job | None:
+            self.events.append("start")
+            if fail:
+                raise RuntimeError("the database is down")
+            if not start:
+                return None
+
+            async def work() -> None:
+                if self.hold is not None:
+                    await self.hold.wait()
+                self.events.append("work")
+
+            return work
+
+        return handle
 
 
-async def wait_idle(runner: AfterAckRunner) -> None:
-    while True:
-        running = runner._running
-        if running is None or running.done():
-            return
-        await asyncio.wait({running})
+async def wait_for(condition: Callable[[], bool]) -> None:
+    """Poll the recorder: the loop runs in a task of its own, with no event to await."""
+    async with asyncio.timeout(5):
+        while not condition():  # noqa: ASYNC110
+            await asyncio.sleep(0.005)
 
 
-@pytest.mark.parametrize(
-    ("headers", "expected"),
-    [
-        ({}, 0.5),
-        ({"x-delivery-count": 0}, 0.5),
-        ({"x-delivery-count": 1}, 1.0),
-        ({"x-delivery-count": 2}, 2.0),
-        ({"x-delivery-count": 3}, 3.0),
-        ({"x-delivery-count": 10_000}, 3.0),
-        ({"x-delivery-count": -1}, 0.5),
-        ({"x-delivery-count": "2"}, 0.5),
-    ],
-)
-def test_the_retry_pause_doubles_per_redelivery_up_to_the_maximum(
-    headers: dict[str, object], expected: float
-) -> None:
-    assert _delay(headers) == expected
+async def serving(loop: JobLoop) -> asyncio.Task[None]:
+    task = asyncio.create_task(loop.run())
+    await asyncio.sleep(0)
+    return task
 
 
-@pytest.mark.parametrize("name", ["", "x" * 129])
-def test_the_consumer_name_must_fit_the_inbox_column(name: str) -> None:
-    with pytest.raises(ValueError, match="1 to 128"):
-        _consumer(name)
+async def stop(task: asyncio.Task[None]) -> None:
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
-def test_a_name_of_128_characters_is_accepted() -> None:
-    _consumer("x" * 128)
+async def test_the_message_is_acked_once_its_start_ran_and_the_job_then_a_sweep_run() -> None:
+    recorder = Recorder()
+    loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=LONG)
+    task = await serving(loop)
+    message = FakeMessage(make_envelope().to_json(), events=recorder.events)
+
+    await MessageConsumer(name="test", handler=recorder.handler(), jobs=loop).handle(message)
+    await wait_for(lambda: "sweep" in recorder.events)
+
+    assert [e for e in recorder.events if e != "ack"] == ["start", "work", "sweep"]
+    assert recorder.events.count("ack") == 1
+    await stop(task)
 
 
-async def test_work_submitted_after_the_runner_stopped_never_runs(
+async def test_a_message_whose_request_does_not_start_is_acked_and_the_sweep_runs() -> None:
+    recorder = Recorder()
+    loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=LONG)
+    task = await serving(loop)
+    message = FakeMessage(make_envelope().to_json(), events=recorder.events)
+
+    await MessageConsumer(name="test", handler=recorder.handler(start=False), jobs=loop).handle(
+        message
+    )
+    await wait_for(lambda: "sweep" in recorder.events)
+
+    assert [e for e in recorder.events if e != "ack"] == ["start", "sweep"]
+    assert recorder.events.count("ack") == 1
+    await stop(task)
+
+
+async def test_a_message_during_a_job_is_acked_at_once_and_skipped() -> None:
+    """Its request stays QUEUED; the sweep after the running job takes it. Nothing waits
+    unacknowledged behind a long run (RabbitMQ's consumer timeout)."""
+    recorder = Recorder(hold=asyncio.Event())
+    loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=LONG)
+    task = await serving(loop)
+    consumer = MessageConsumer(name="test", handler=recorder.handler(), jobs=loop)
+    await consumer.handle(FakeMessage(make_envelope().to_json()))
+    await wait_for(lambda: recorder.events == ["start"])
+    second = FakeMessage(make_envelope().to_json())
+
+    await consumer.handle(second)
+
+    assert second.acks == 1
+    assert recorder.events == ["start"]  # the second message started nothing
+    assert recorder.hold is not None
+    recorder.hold.set()
+    await wait_for(lambda: recorder.events == ["start", "work", "sweep"])
+    await stop(task)
+
+
+async def test_a_failing_start_is_logged_the_message_acked_and_the_sweep_runs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A delivery that outlived the worker's shutdown commits its run's start late: the run must
-    not begin while the connection and the engine close. The worker recovers it when it starts
-    again (OQ-45)."""
-    runner = AfterAckRunner()
-    ran: list[str] = []
+    """The message is only a hint: the sweep retries whatever is still QUEUED."""
+    recorder = Recorder()
+    loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=LONG)
+    task = await serving(loop)
+    message = FakeMessage(make_envelope().to_json())
 
-    async def work() -> None:
-        ran.append("ran")
+    await MessageConsumer(name="test", handler=recorder.handler(fail=True), jobs=loop).handle(
+        message
+    )
+    await wait_for(lambda: recorder.events == ["start", "sweep"])
 
-    await runner.stop()
-    runner.submit(work, "late work")
-    await asyncio.sleep(0.05)
-    await wait_idle(runner)
-
-    assert ran == []
-    assert "late work dropped: the worker is stopping" in caplog.text
-
-
-async def test_the_runner_runs_its_work_in_order() -> None:
-    runner = AfterAckRunner()
-    ran: list[int] = []
-
-    def work(n: int) -> AfterAck:
-        async def run() -> None:
-            await asyncio.sleep(0.01 * (3 - n))
-            ran.append(n)
-
-        return run
-
-    for n in range(3):
-        runner.submit(work(n), f"work {n}")
-    await asyncio.wait_for(wait_idle(runner), timeout=5)
-
-    assert ran == [0, 1, 2]
+    assert message.acks == 1
+    assert "the database is down" in caplog.text
+    assert not task.done()
+    await stop(task)
 
 
-async def test_a_failing_work_stops_the_runner_and_drops_the_waiting_work(
+async def test_a_body_that_is_not_an_envelope_is_acked_and_dropped(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Work that fails after its ack left state only a restart repairs (a run that could not
-    record its end stays RUNNING): the runner keeps the failure, runs nothing more, and the
-    worker stops on it (OQ-45: its startup recovery resumes the run)."""
-    runner = AfterAckRunner()
-    ran: list[str] = []
+    recorder = Recorder()
+    loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=LONG)
+    message = FakeMessage(b"not json", message_id="m-1")
 
-    async def fails() -> None:
-        raise RuntimeError("the end of the run was not recorded")
+    await MessageConsumer(name="test", handler=recorder.handler(), jobs=loop).handle(message)
 
-    async def later() -> None:
-        ran.append("later")
+    assert message.acks == 1
+    assert recorder.events == []
+    assert "m-1" in caplog.text
 
-    runner.submit(fails, "failing work")
-    runner.submit(later, "waiting work")
-    await asyncio.wait_for(runner.failed.wait(), timeout=5)
-    await wait_idle(runner)
-    runner.submit(later, "late work")
-    await asyncio.sleep(0.05)
 
-    assert ran == []
-    assert isinstance(runner.failure, RuntimeError)
-    assert "failing work failed" in caplog.text
-    assert "late work dropped" in caplog.text
+async def test_the_sweep_runs_on_every_interval() -> None:
+    recorder = Recorder()
+    loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=0.01)
+    task = await serving(loop)
+
+    await wait_for(lambda: recorder.events.count("sweep") >= 3)
+
+    await stop(task)
+
+
+@pytest.mark.parametrize("where", ["work", "sweep"])
+async def test_a_failing_job_or_sweep_ends_the_loop_with_its_error(where: str) -> None:
+    """A run that could not record its end stays RUNNING and blocks every later run: the
+    worker stops with an error, and its startup recovery repairs the run (OQ-45)."""
+
+    async def sweep() -> None:
+        if where == "sweep":
+            raise RuntimeError("the sweep failed")
+
+    async def handle(envelope: Envelope) -> Job | None:
+        async def work() -> None:
+            if where == "work":
+                raise RuntimeError("the run failed")
+
+        return work
+
+    loop = JobLoop(sweep=sweep, sweep_interval_seconds=LONG)
+    task = await serving(loop)
+
+    await MessageConsumer(name="test", handler=handle, jobs=loop).handle(
+        FakeMessage(make_envelope().to_json())
+    )
+
+    with pytest.raises(RuntimeError, match=f"the {'run' if where == 'work' else 'sweep'} failed"):
+        await asyncio.wait_for(task, timeout=5)
+
+
+async def test_a_cancelled_delivery_leaves_the_message_unacked_and_the_job_runs() -> None:
+    """A stop or a closed channel cancels the delivery while its start is decided: the message
+    is not acked (the broker delivers it again, and it is then skipped), and the start the loop
+    began still commits and its job runs."""
+    release = asyncio.Event()
+    recorder = Recorder()
+
+    async def handle(envelope: Envelope) -> Job | None:
+        await release.wait()
+        recorder.events.append("start")
+
+        async def work() -> None:
+            recorder.events.append("work")
+
+        return work
+
+    loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=LONG)
+    task = await serving(loop)
+    message = FakeMessage(make_envelope().to_json())
+    delivery = asyncio.create_task(
+        MessageConsumer(name="test", handler=handle, jobs=loop).handle(message)
+    )
+    await asyncio.sleep(0.01)
+
+    delivery.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await delivery
+    release.set()
+
+    await wait_for(lambda: recorder.events == ["start", "work", "sweep"])
+    assert message.acks == 0
+    await stop(task)

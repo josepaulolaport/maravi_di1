@@ -82,14 +82,6 @@ class BrokerSettings(BaseSettings):
 
     rabbitmq_url: SecretStr
     """``amqp://user:password@host:port/vhost``."""
-    rabbitmq_prefetch_count: int = Field(default=1, ge=1)
-    """Unacknowledged deliveries per consumer."""
-    rabbitmq_delivery_limit: int = Field(default=5, ge=1)
-    """Redeliveries of a failing message before the broker dead-letters it."""
-    rabbitmq_retry_base_delay_seconds: float = Field(default=1.0, gt=0)
-    """Pause before a failed delivery returns to the queue, doubled on each redelivery, so a
-    short outage (a database restart) does not exhaust the delivery limit."""
-    rabbitmq_retry_max_delay_seconds: float = Field(default=30.0, gt=0)
     rabbitmq_publish_timeout_seconds: float = Field(default=10.0, gt=0)
     outbox_relay_batch_size: int = Field(default=100, ge=1)
     outbox_relay_poll_interval_seconds: float = Field(default=1.0, gt=0)
@@ -97,13 +89,13 @@ class BrokerSettings(BaseSettings):
     """Pause before the relay retries a row it failed to publish, doubled on each attempt, so a
     failing row is not retried on every poll."""
     outbox_relay_retry_max_delay_seconds: float = Field(default=60.0, gt=0)
-    inbox_retention_days: int = Field(default=7, ge=1)
-    """Inbox records older than this are deleted by the outbox relay (user decision M9)."""
-    inbox_retention_interval_seconds: float = Field(default=3600.0, gt=0)
     outbox_retention_days: int = Field(default=7, ge=1)
     """Outbox rows published longer ago than this are deleted by the outbox relay; an
     unpublished row is never deleted."""
     outbox_retention_interval_seconds: float = Field(default=3600.0, gt=0)
+    worker_sweep_interval_seconds: float = Field(default=5.0, gt=0)
+    """How often the worker sweeps the queue when idle, so a request whose run message was lost
+    waits at most this long (`di1.platform.messaging.consumer.JobLoop`)."""
 
     @field_validator("rabbitmq_url")
     @classmethod

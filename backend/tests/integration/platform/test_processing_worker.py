@@ -1,8 +1,9 @@
 """The processing worker process: consumes its registered queues through the consumer base,
-runs the work after the ack, and shuts down cleanly on SIGTERM, during startup and during work.
+runs one job at a time in its job loop (a message's start, its work, then the sweep; and the
+sweep on every interval), and shuts down cleanly on SIGTERM, during startup and during work.
 
-interfaces.md "Transaction boundaries" 7 (at-least-once; ACK only after the durable state
-change) and "DI composition" (plain factories); plan §7. One worker only (user decision): a run
+interfaces.md "Transaction boundaries" 7 (at-least-once; ACK once the start is decided) and "DI
+composition" (plain factories); plan §7. One worker only (user decision): a run
 left RUNNING resumes at the worker's next start, through ``on_startup``. The handler here is a
 fake: the real one is Processing's.
 """
@@ -15,7 +16,7 @@ import os
 import re
 import signal
 import sys
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -28,9 +29,9 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from di1.platform.config import BrokerSettings, Settings
-from di1.platform.database.unit_of_work import UnitOfWork
+from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.platform.messaging.connection import connect
-from di1.platform.messaging.consumer import AfterAck, AfterAckFailedError
+from di1.platform.messaging.consumer import Job
 from di1.platform.messaging.envelope import Envelope
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import QueueSpec, Topology, declare_queue
@@ -41,7 +42,7 @@ from di1.platform.messaging.worker import (
 )
 from di1.platform.observability.heartbeat import Heartbeat
 from di1.workers import main as worker
-from di1.workers.main import run_worker
+from di1.workers.main import JobFailedError, run_worker
 from tests.fakes.clock import FixedClock
 from tests.integration.platform.conftest import queue_spec
 from tests.integration.platform.support import (
@@ -49,15 +50,15 @@ from tests.integration.platform.support import (
     close_connections,
     effects,
     eventually,
-    has_effects,
     make_envelope,
 )
 
 
 @dataclass
 class _Run:
-    """The fake processing handler: the claim is the effect row; ``hold_before_ack`` blocks
-    before the claim commits, ``hold_after_ack`` blocks the run after the ack."""
+    """The fake processing handler: the start is the effect row; ``hold_before_ack`` blocks
+    before the start commits, ``hold_after_ack`` blocks the run after the ack. The factory
+    gives it the worker's Units of Work."""
 
     hold_before_ack: bool = False
     hold_after_ack: bool = False
@@ -67,12 +68,16 @@ class _Run:
     entered: asyncio.Event = field(default_factory=asyncio.Event)
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
     release: asyncio.Event = field(default_factory=asyncio.Event)
+    uow_factory: Callable[[], SqlAlchemyUnitOfWork] | None = None
 
-    async def __call__(self, envelope: Envelope, *, uow: UnitOfWork) -> AfterAck:
+    async def __call__(self, envelope: Envelope) -> Job:
         self.claimed.append(envelope)
-        await uow.session.execute(EFFECT, {"m": envelope.message_id})
-        if self.hold_before_ack:
-            await self._hold()
+        assert self.uow_factory is not None
+        async with self.uow_factory() as uow:
+            await uow.session.execute(EFFECT, {"m": envelope.message_id})
+            if self.hold_before_ack:
+                await self._hold()
+            await uow.commit()
 
         async def run() -> None:
             if self.hold_after_ack and not self.ran:
@@ -98,7 +103,8 @@ def _consumers(
     def factory(resources: WorkerResources) -> Sequence[ConsumerRegistration]:
         if given is not None:
             given.append(resources)
-        return [ConsumerRegistration(queue=spec, consumer_name="worker", handler=handler)]
+        handler.uow_factory = resources.uow_factory
+        return [ConsumerRegistration(queue=spec, name="worker", handler=handler)]
 
     return factory
 
@@ -277,7 +283,7 @@ async def test_a_failure_after_the_ack_ends_the_worker_with_an_error(
 
     await publisher.publish(envelope)
 
-    with pytest.raises(AfterAckFailedError) as raised:
+    with pytest.raises(JobFailedError) as raised:
         await asyncio.wait_for(running, timeout=15)
     assert isinstance(raised.value.__cause__, RuntimeError)
     assert await effects(engine) == [envelope.message_id]
@@ -362,7 +368,7 @@ async def test_a_dropped_broker_connection_does_not_cancel_the_run(
     assert handler.claimed == [envelope]
 
 
-async def test_a_command_arriving_during_a_run_is_claimed_and_acked_at_once(
+async def test_a_message_arriving_during_a_run_is_acked_at_once_and_starts_nothing(
     settings: Settings,
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
@@ -370,18 +376,28 @@ async def test_a_command_arriving_during_a_run_is_claimed_and_acked_at_once(
     topology: Topology,
     publisher: MessagePublisher,
 ) -> None:
-    """With a prefetch of 2, the second command is not left unacked behind the first run
-    (RabbitMQ's consumer timeout); the runs still go one after the other."""
+    """The second message is not left unacked behind the first run (RabbitMQ's consumer
+    timeout) and starts nothing: its work stays waiting in the database, and the sweep after the
+    first run takes it."""
     spec = queue_spec(topology, "test.command")
     handler = _Run(hold_after_ack=True)
+    sweeps: list[int] = []
+
+    def sweep(resources: WorkerResources) -> Job:
+        async def run() -> None:
+            sweeps.append(len(handler.ran))
+
+        return run
+
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(
             settings,
-            broker_settings.model_copy(update={"rabbitmq_prefetch_count": 2}),
+            broker_settings,
             consumers=_consumers(spec, handler),
             stop=stop,
             topology=topology,
+            sweep=sweep,
         )
     )
     first, second = make_envelope(), make_envelope()
@@ -391,13 +407,76 @@ async def test_a_command_arriving_during_a_run_is_claimed_and_acked_at_once(
 
     await publisher.publish(second)
 
-    await eventually(lambda: has_effects(engine, [first.message_id, second.message_id]))
-    assert handler.ran == []
+    await asyncio.sleep(0.3)
+    assert handler.claimed == [first]
+    assert sweeps == []
     handler.release.set()
-    await eventually(lambda: handler.ran == [first, second])
+    await eventually(lambda: sweeps == [1])  # the sweep right after the run
     stop.set()
     await asyncio.wait_for(running, timeout=10)
-    assert await _ready_messages(broker, spec.name) == 0
+    assert handler.claimed == [first]
+    assert await effects(engine) == [first.message_id]
+    assert await _ready_messages(broker, spec.name) == 0  # both acknowledged
+
+
+async def test_the_sweep_runs_on_every_interval_without_any_message(
+    settings: Settings,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+) -> None:
+    """A request whose message was lost still runs: the sweep does not wait for a message."""
+    sweeps: list[WorkerResources] = []
+
+    def sweep(resources: WorkerResources) -> Job:
+        async def run() -> None:
+            sweeps.append(resources)
+
+        return run
+
+    stop = asyncio.Event()
+    running = asyncio.create_task(
+        run_worker(
+            settings,
+            broker_settings.model_copy(update={"worker_sweep_interval_seconds": 0.05}),
+            consumers=lambda resources: [],
+            stop=stop,
+            topology=topology,
+            sweep=sweep,
+        )
+    )
+
+    await eventually(lambda: len(sweeps) >= 3)
+    stop.set()
+    await asyncio.wait_for(running, timeout=10)
+
+
+async def test_a_failing_sweep_ends_the_worker_with_an_error(
+    settings: Settings,
+    broker_settings: BrokerSettings,
+    topology: Topology,
+) -> None:
+    """The process then exits 1 and Docker restarts it; the startup recovery repairs whatever
+    the sweep's run left (OQ-45)."""
+
+    def sweep(resources: WorkerResources) -> Job:
+        async def run() -> None:
+            raise RuntimeError("the sweep's run could not record its end")
+
+        return run
+
+    with pytest.raises(JobFailedError) as raised:
+        await asyncio.wait_for(
+            run_worker(
+                settings,
+                broker_settings.model_copy(update={"worker_sweep_interval_seconds": 0.05}),
+                consumers=lambda resources: [],
+                stop=asyncio.Event(),
+                topology=topology,
+                sweep=sweep,
+            ),
+            timeout=10,
+        )
+    assert isinstance(raised.value.__cause__, RuntimeError)
 
 
 @pytest.fixture
@@ -441,7 +520,7 @@ async def test_a_stop_while_the_database_hangs_at_startup_ends_the_worker(
 async def test_an_unreachable_database_ends_the_worker_before_it_consumes(
     broker_settings: BrokerSettings,
 ) -> None:
-    """Otherwise every command would fail, be retried and be dead-lettered."""
+    """Otherwise every message would fail its start and be dropped."""
     unreachable = Settings(
         database_url=SecretStr("postgresql+psycopg://u:s3cret-pw@127.0.0.1:1/db")
     )
@@ -574,7 +653,7 @@ async def test_the_worker_process_stops_cleanly_on_sigterm(
     settings: Settings, broker_settings: BrokerSettings, tmp_path: Path
 ) -> None:
     """The process runs the composition's startup step and its one consumer
-    (``processing.run_request``), then stops on SIGTERM."""
+    (``processing.run``), then stops on SIGTERM."""
     environment = os.environ | {
         "DATABASE_URL": settings.database_url.get_secret_value(),
         "RABBITMQ_URL": broker_settings.rabbitmq_url.get_secret_value(),
@@ -655,7 +734,7 @@ async def test_the_startup_hook_runs_once_before_the_first_delivery(
     """A command already queued waits until the recovery has committed."""
     spec = queue_spec(topology, "test.command")
     channel = await broker.channel()
-    await declare_queue(channel, topology, spec, settings=broker_settings)
+    await declare_queue(channel, topology, spec)
     await channel.close()
     queued = make_envelope()
     await publisher.publish(queued)
@@ -671,9 +750,9 @@ async def test_the_startup_hook_runs_once_before_the_first_delivery(
             await uow.commit()
 
     class _Claim(_Run):
-        async def __call__(self, envelope: Envelope, *, uow: UnitOfWork) -> AfterAck:
+        async def __call__(self, envelope: Envelope) -> Job:
             order.append("claim")
-            return await super().__call__(envelope, uow=uow)
+            return await super().__call__(envelope)
 
     handler = _Claim()
     stop = asyncio.Event()
@@ -709,7 +788,7 @@ async def _queued_before_start(
     """A command waiting in the worker's queue before the worker starts."""
     spec = queue_spec(topology, "test.command")
     channel = await broker.channel()
-    await declare_queue(channel, topology, spec, settings=broker_settings)
+    await declare_queue(channel, topology, spec)
     await channel.close()
     envelope = make_envelope()
     await publisher.publish(envelope)

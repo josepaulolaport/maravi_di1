@@ -14,6 +14,7 @@ from aio_pika.abc import AbstractRobustConnection
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.platform.config import BrokerSettings
+from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.connection import connect
 from di1.platform.messaging.consumer import open_consumer_channel
 from di1.platform.messaging.publisher import MessagePublisher
@@ -22,9 +23,9 @@ from tests.integration.platform.conftest import queue_spec
 from tests.integration.platform.support import (
     RecordingHandler,
     close_connections,
+    consuming,
     effects,
     eventually,
-    make_consumer,
     make_envelope,
 )
 
@@ -53,21 +54,19 @@ async def test_consuming_and_publishing_resume_after_a_reconnect(
     connection, name = dropped_connection
     reconnected = asyncio.Event()
     connection.reconnect_callbacks.add(lambda *_: reconnected.set())
-    channel = await open_consumer_channel(connection, broker_settings)
-    own_queue = await declare_queue(
-        channel, topology, queue_spec(topology, "test.command"), settings=broker_settings
-    )
-    handler = RecordingHandler()
-    await make_consumer(session_factory, handler, broker_settings).start(own_queue)
-    publisher = await MessagePublisher.create(connection, topology, settings=broker_settings)
-    before, after = make_envelope(), make_envelope()
-    await publisher.publish(before)
-    await eventually(lambda: len(handler.calls) == 1)
+    channel = await open_consumer_channel(connection)
+    own_queue = await declare_queue(channel, topology, queue_spec(topology, "test.command"))
+    handler = RecordingHandler(unit_of_work_factory(session_factory))
+    async with consuming(own_queue, handler):
+        publisher = await MessagePublisher.create(connection, topology, settings=broker_settings)
+        before, after = make_envelope(), make_envelope()
+        await publisher.publish(before)
+        await eventually(lambda: len(handler.calls) == 1)
 
-    assert await close_connections(management_url, name) >= 1
-    await asyncio.wait_for(reconnected.wait(), timeout=30)
-    await publisher.publish(after)
+        assert await close_connections(management_url, name) >= 1
+        await asyncio.wait_for(reconnected.wait(), timeout=30)
+        await publisher.publish(after)
 
-    await eventually(lambda: len(handler.calls) == 2, within=30)
+        await eventually(lambda: len(handler.calls) == 2, within=30)
     assert handler.calls == [before.message_id, after.message_id]
     assert sorted(await effects(engine)) == sorted([before.message_id, after.message_id])

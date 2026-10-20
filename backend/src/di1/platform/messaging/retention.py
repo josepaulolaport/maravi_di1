@@ -1,5 +1,5 @@
-"""Periodic deletion of old platform rows (inbox records, published outbox rows), run by the
-outbox relay's poll loop, the platform's only periodic loop."""
+"""Periodic deletion of old platform rows (published outbox rows), run by the outbox relay's
+poll loop."""
 
 from __future__ import annotations
 
