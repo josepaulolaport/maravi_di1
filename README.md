@@ -95,14 +95,14 @@ request from PostgreSQL under a row lock, runs it, and repeats until none is lef
 
 **Decided, implemented in later PRs on `simplify` (OQ-50, 2026-10-19):** the user asked "Is it
 really necessary? I want to keep the queue" about the doorbell and chose option 1. Each request
-gets its own message, carrying its `request_id`, published through the outbox in creation order.
-The worker consumes one at a time, locks that request and runs it only if it is still `QUEUED`
-(otherwise it acks and skips). A sweep in the worker, every few seconds, runs any `QUEUED` request
-left without a message, oldest first, so a lost message only delays a run. The inbox and its
+gets its own message, carrying its `request_id`, published through the outbox; the `request_id` is for tracing and logs only.
+The worker consumes one at a time and, on any message, takes the oldest `QUEUED` request by
+`(created_at, id)`, so FIFO is unchanged. A sweep in the worker, every few seconds, does the same
+while anything is `QUEUED`, so a lost message only delays a run. The inbox and its
 retention, the dead-letter queues, the delivery limit, the redelivery backoff and the after-ack job
 queue go. The same decision computes AUM at read time instead of storing it, derives "Processando"
 from the active run instead of writing it per date, and marks a Carteira row whose price changed
-after processing. See [docs/open-questions.md](docs/open-questions.md) (OQ-50).
+after processing (the price of the date or of the day before). See [docs/open-questions.md](docs/open-questions.md) (OQ-50).
 
 ## Demo: the challenge example, end to end
 
