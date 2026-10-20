@@ -73,11 +73,11 @@ class TestHierarchy:
 
         assert [(t.code, t.asset_classes) for t in types] == [("OPTION", ())]
 
-    @pytest.mark.parametrize("asset_class_id", [999, 0, -1])
+    @pytest.mark.parametrize("asset_class_id", [999, 0, -1, 32768, 10**12])
     async def test_a_product_needs_an_existing_class(
         self, writer: Writer, asset_class_id: int
     ) -> None:
-        # Out of the SMALLINT range is refused by the HTTP schema (test_http.py).
+        # Out of the SMALLINT range is simply not an existing class, never a database error.
         with pytest.raises(DomainError) as error:
             await writer.product(asset_class_id, "DI1", DI1_NAME, DI1_FUTURES)
 

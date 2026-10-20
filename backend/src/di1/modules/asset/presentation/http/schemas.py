@@ -1,15 +1,15 @@
 """HTTP shapes of the Asset routes: the frontend contract ``frontend/src/api/contract/asset.ts``
 (OQ-26 item 8). Decimals cross as strings in plain notation; absent values are ``null``.
-Schemas check syntax and the database's integer ranges only; business rules are the service's."""
+Schemas check syntax only; business rules are the service's."""
 
 from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Annotated, Self
+from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from di1.modules.asset.domain.model import (
     AssetClass,
@@ -21,9 +21,6 @@ from di1.modules.asset.domain.model import (
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.platform.http import DecimalString, RequestBody, UtcDatetime
 from di1.shared.decimals import to_plain
-
-SMALLINT_MAX = 32767
-"""The largest instrument type or asset class id (``SMALLINT`` identities)."""
 
 
 class AssetClassResponse(BaseModel):
@@ -186,7 +183,7 @@ class CreateProductRequest(RequestBody):
     """``POST /products`` (interfaces.md "HTTP endpoints"). ``futures`` is required exactly for a
     product whose type is FUTURE, which the service checks."""
 
-    asset_class_id: Annotated[int, Field(ge=1, le=SMALLINT_MAX)]
+    asset_class_id: int
     code: str
     name: str
     futures: FuturesSpecRequest | None = None

@@ -11,6 +11,7 @@ from di1.modules.asset.application.ports import AssetRepository
 from di1.modules.asset.domain.model import FuturesTerms, Instrument, InstrumentType, Product
 from di1.modules.asset.domain.rules import (
     PRODUCT_NAME_LENGTH,
+    SMALLINT_MAX,
     has_nul,
     normalize_code,
     validate_futures_for_type,
@@ -75,7 +76,12 @@ class AssetService:
             *validate_name(name, max_length=PRODUCT_NAME_LENGTH, non_blank=True),
         ]
         code = normalize_code(code)
-        classified = await self._repository.get_asset_class(asset_class_id)
+        # Out of the SMALLINT range is simply not an existing class, never a database error.
+        classified = (
+            await self._repository.get_asset_class(asset_class_id)
+            if 1 <= asset_class_id <= SMALLINT_MAX
+            else None
+        )
         if classified is None:
             errors.append(
                 ErrorDetail.validation("Classe de ativo não encontrada.", "asset_class_id")

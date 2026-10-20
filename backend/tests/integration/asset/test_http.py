@@ -356,27 +356,16 @@ class TestCreateProduct:
             ("VALIDATION_ERROR", "Informe a especificação do contrato futuro.", "futures")
         ]
 
-    def test_an_unknown_class_is_422_on_asset_class_id(self, client: TestClient) -> None:
-        body = DAP | {"asset_class_id": 999}
-
-        assert _problem(client.post("/products", json=body)) == (
-            422,
-            PROBLEM,
-            [("VALIDATION_ERROR", "Classe de ativo não encontrada.", "asset_class_id")],
-        )
-
-    @pytest.mark.parametrize("asset_class_id", [0, -1, 40000, 10**12])
-    def test_a_class_id_outside_the_smallint_identity_is_422_on_asset_class_id(
+    @pytest.mark.parametrize("asset_class_id", [999, 0, -1, 40000, 10**12])
+    def test_an_unknown_class_is_422_on_asset_class_id(
         self, client: TestClient, asset_class_id: int
     ) -> None:
-        # SMALLINT identities are 1..32767: anything else names no class, and never reaches the
-        # database, whose cast would fail.
         body = DAP | {"asset_class_id": asset_class_id}
 
         assert _problem(client.post("/products", json=body)) == (
             422,
             PROBLEM,
-            [("VALIDATION_ERROR", "Valor inválido.", "asset_class_id")],
+            [("VALIDATION_ERROR", "Classe de ativo não encontrada.", "asset_class_id")],
         )
 
     @pytest.mark.parametrize(

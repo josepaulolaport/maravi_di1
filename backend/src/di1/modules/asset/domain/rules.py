@@ -21,6 +21,8 @@ PRODUCT_CODE_LENGTH = 32
 INSTRUMENT_CODE_LENGTH = 128
 PRODUCT_NAME_LENGTH = 200
 SETTLEMENT_METHOD_LENGTH = 32
+SMALLINT_MAX = 32767
+"""The largest instrument type or asset class id (``SMALLINT`` identities)."""
 
 _PRODUCT_CODE = re.compile(r"[A-Za-z0-9_./-]+")
 

@@ -465,13 +465,16 @@ def test_the_time_is_required(client: TestClient) -> None:
 def test_a_quantity_outside_the_integer_column_is_refused(
     client: TestClient, quantity: int
 ) -> None:
-    # signed_quantity is INTEGER: the HTTP schema refuses what the column cannot hold.
-    body = {**FIXTURE_REQUESTS[2], "signed_quantity": quantity}
+    # signed_quantity is INTEGER: out of its range is the domain's 422, never a database error.
+    body = {**FIXTURE_REQUESTS[2], "signed_quantity": quantity, "date": "2026-10-19"}
 
     errors = assert_problem(
-        client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "signed_quantity")
+        client.post("/ledger/entries", json=body),
+        422,
+        ("FUTURE_DATE", "date"),
+        ("VALIDATION_ERROR", "signed_quantity"),
     )
-    assert errors[0]["message"] == "Valor inválido."
+    assert errors[1]["message"] == "A quantidade deve ser um inteiro diferente de zero."
 
 
 @pytest.mark.parametrize("field", ["note", "deleted_at"])

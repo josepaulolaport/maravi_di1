@@ -10,8 +10,7 @@
 - Nothing is dated after today (OQ-14). The typed PU or rate, its decimals, its bounds and the
   maturity rules (OQ-1, OQ-3, OQ-14) are Pricing's one quote validation, which the service runs
   next to these rules (``pricing.public.validate_quote``): domain code imports no other module.
-  The other value bounds are only the schema's CHECKs and column ranges (OQ-14); the ``INTEGER``
-  range of the quantity is the HTTP schema's.
+  The other value bounds are only the schema's CHECKs and column ranges (OQ-14).
 - Each validator returns every problem it finds, empty when the draft is valid; the service
   raises them together and then writes a typed `NewTrade` or `NewCashMovement`.
 - A trade's cash effect is not stored: −signed_quantity × execution_pu, computed on read (§7.3).
@@ -41,6 +40,9 @@ CASH_PLACES = 2
 
 _CASH_LIMIT = Decimal(10) ** (20 - CASH_PLACES)
 """``NUMERIC(20,2)`` holds absolute values below 10^18."""
+
+_INTEGER_MIN, _INTEGER_MAX = -(2**31), 2**31 - 1
+"""``signed_quantity INTEGER``."""
 
 DESCRIPTION_MAX_LENGTH = 200
 """``description VARCHAR(200)``: characters, as PostgreSQL counts them (OQ-51)."""
@@ -152,7 +154,11 @@ def validate_trade(draft: EntryDraft, *, today: date, known: bool) -> tuple[Erro
     errors = _date_errors(draft.entry_date, today) + _time_errors(draft.entry_time)
     if draft.asset_id is None or not known:
         errors.append(unknown_asset())
-    if not draft.signed_quantity:
+    if (
+        draft.signed_quantity is None
+        or draft.signed_quantity == 0
+        or not _INTEGER_MIN <= draft.signed_quantity <= _INTEGER_MAX
+    ):
         errors.append(
             ErrorDetail.validation(
                 "A quantidade deve ser um inteiro diferente de zero.", "signed_quantity"

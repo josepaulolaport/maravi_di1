@@ -1,7 +1,7 @@
 """HTTP shapes of ``/ledger/entries``: the frozen frontend contract
 ``frontend/src/api/contract/ledger.ts`` at 57b4df0 (OQ-24, OQ-26 item 8).
 
-Pydantic checks syntax and the column ranges only; every business rule (dates, maturity, decimal
+Pydantic checks syntax only; every business rule (dates, maturity, decimal
 places, bounds, which fields a type takes) is the service's, so its pt-BR messages reach the
 client. Decimals cross HTTP as strings. The create body is one flat model rather than a
 discriminated union, so an error names the field the client knows (``execution_pu``, not
@@ -23,9 +23,6 @@ from di1.shared.decimals import to_plain
 from di1.shared.input_kind import InputKind
 
 _WALL_TIME = re.compile(r"^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$")
-
-INTEGER_MIN, INTEGER_MAX = -(2**31), 2**31 - 1
-"""``signed_quantity INTEGER``."""
 
 
 def _wall_time(value: object) -> time:
@@ -51,7 +48,7 @@ class CreateLedgerEntryRequest(RequestBody):
     date: date
     time: WallTime
     asset_id: UUID | None = None
-    signed_quantity: Annotated[StrictInt, Field(ge=INTEGER_MIN, le=INTEGER_MAX)] | None = None
+    signed_quantity: StrictInt | None = None
     input_kind: InputKind | None = None
     execution_pu: DecimalString | None = None
     execution_rate: DecimalString | None = None

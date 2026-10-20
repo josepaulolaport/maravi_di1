@@ -117,9 +117,8 @@ def test_an_unknown_or_missing_contract_is_a_validation_error_on_asset_id() -> N
     assert _errors(missing) == {(ErrorCode.VALIDATION_ERROR, "asset_id")}
 
 
-@pytest.mark.parametrize("quantity", [None, 0])
-def test_the_quantity_is_a_nonzero_integer(quantity: int | None) -> None:
-    # Its INTEGER column range is the HTTP schema's (tests/integration/ledger/test_ledger_http.py).
+@pytest.mark.parametrize("quantity", [None, 0, 2**31, -(2**31) - 1])
+def test_the_quantity_is_a_nonzero_integer_within_the_column(quantity: int | None) -> None:
     with pytest.raises(DomainError) as error:
         validate_trade(_trade(signed_quantity=quantity), today=TODAY, instrument=DI1F28)
 
