@@ -124,7 +124,7 @@ frontend/src/
   - a spec gap.
 
   Never edit those paths, even "just one line".
-- **Worktree setup.** Run `npm ci` once in your worktree before the first commit. The pre-commit hook runs eslint, tsc and vitest on staged frontend files as soon as `frontend/package.json` exists, and fails without `node_modules`. `npm run dev` always talks to the real API through the dev server's `/api` proxy, so it needs the backend running (README "Run the application"). Compose serves the built UI as the `web` service (#99).
+- **Worktree setup.** Run `npm ci` once in your worktree before the first commit. The pre-commit hook runs eslint, tsc and vitest on staged frontend files as soon as `frontend/package.json` exists, and fails without `node_modules`. `npm run dev` always talks to the real API through the dev server's `/api` proxy, so it needs the backend running (docs/development.md, "Run the application"). Compose serves the built UI as the `web` service (#99).
 
 ## Commands (from `frontend/`)
 
