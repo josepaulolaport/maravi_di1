@@ -224,6 +224,10 @@ rather than refactor before delivery (OQ-47); none changes a business result.
   and the frontend keeps the two status labels as a safe default.
 - **Unused inbox table (OQ-50 item 2):** `platform.inbox_messages` stays in the schema, unused
   since the worker needs no deduplication, with no migration (A9 excluded), like the columns above.
+- **Orphaned broker objects on an existing RabbitMQ volume (OQ-50 item 2):** the old
+  `processing.run_request` quorum queue, its `.dead-letter` queue and the `di1.dead-letter`
+  exchange are no longer declared but stay on a volume created before this change. They are
+  harmless (nothing publishes to them or consumes them); `docker compose down -v` removes them.
 - **Outbox retention is unbatched:** the retention `DELETE` of `platform.outbox_messages` rows
   published more than `OUTBOX_RETENTION_DAYS` ago runs as one statement, and `published_at` has
   no index; fine at one row per processing request.
