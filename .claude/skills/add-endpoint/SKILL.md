@@ -32,7 +32,7 @@ Run them and see them fail.
    - the models mirror `docs/schema.sql` exactly;
    - queries go in `queries/`;
    - repositories return DTOs and hold no rules.
-3. **`presentation/http/schemas.py`:** Pydantic v2 schemas named `*Request`/`*Response`/`*ListResponse`/`*PageResponse`, each response built by `of(cls, x) -> Self`. Request bodies extend `di1.platform.http.RequestBody` (`extra="forbid"`); decimals are `DecimalString` in, plain strings out; instants are `UtcDatetime`; enums and UUIDs keep their types; database integer ranges are `Field` bounds here.
+3. **`presentation/http/schemas.py`:** Pydantic v2 schemas named `*Request`/`*Response`/`*ListResponse`/`*PageResponse`, each response built by `of(cls, x) -> Self`. Request bodies extend `di1.platform.http.RequestBody` (`extra="forbid"`); decimals are `DecimalString` in, plain strings out; instants are `UtcDatetime`; enums and UUIDs keep their types. Range checks that carry a pt-BR message stay in the service or domain, since a schema error is the generic "Valor inválido.".
 4. **`presentation/http/router.py`:** `create_router(*, get_service, ...)`, keyword-only, every collaborator through `Depends`; `APIRouter(prefix=..., tags=[...])`, `fastapi.status`, return annotations (no `response_model`). Parse the request, call the service, return the response. No business logic.
 5. **`dependencies.py`:** the module's own providers.
 
