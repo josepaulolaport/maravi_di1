@@ -2,7 +2,7 @@
 
 The frontend's API types are generated from it (`npm run gen:api`; user decision, 2026-10-19):
 
-    uv run python scripts/dump_openapi.py > ../frontend/src/api/openapi.json
+    uv run python scripts/dump_openapi.py > ../frontend/src/api/generated/openapi.json
 
 `create_app` reads no environment until the app starts, and `openapi()` does not start it.
 """
