@@ -4,28 +4,29 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Collection, Mapping
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
 from di1.modules.asset.public import AssetReader
-from di1.modules.prices.application.services.repository import (
-    ReferencePriceRepository,
-    RepositoryFactory,
+from di1.modules.prices.application.ports import ReferencePriceRepository
+from di1.modules.prices.domain.reference_price import (
+    PriceSource,
+    ReferencePriceDay,
+    ReferencePriceRecord,
+    choose_preferred,
+    reference_days,
+    validate_reference_date,
 )
-from di1.modules.prices.domain.reference_price import choose_preferred, validate_reference_date
-from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.modules.pricing.public import PricingService, Quote, validate_quote
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
+from di1.shared.errors import DomainError, ErrorCode, ErrorDetail, invalid_range, unknown_asset
 from di1.shared.input_kind import InputKind
 
 logger = logging.getLogger(__name__)
 
-_UNKNOWN_ASSET = ErrorDetail.validation("Selecione um contrato.", "asset_id")
 _PRICE_NOT_FOUND = ErrorDetail(ErrorCode.NOT_FOUND, "Preço de referência não encontrado.")
 
 
@@ -45,28 +46,22 @@ def validate_new_price(
     )
 
 
-@dataclass(frozen=True, slots=True)
-class ReferencePriceDay:
-    """One date of an asset with at least one observation: the preferred one (MANUAL > B3)
-    and the observation of each source, preferred first."""
-
-    reference_date: date
-    preferred: ReferencePriceRecord
-    sources: tuple[ReferencePriceRecord, ...]
-
-
 class PriceService:
+    """Reference prices on one request's Unit of Work: each write commits it once."""
+
     def __init__(
         self,
+        repository: ReferencePriceRepository,
+        uow: UnitOfWork,
         *,
         assets: AssetReader,
         pricing: PricingService,
-        repositories: RepositoryFactory,
         clock: Clock,
     ) -> None:
+        self._repository = repository
+        self._uow = uow
         self._assets = assets
         self._pricing = pricing
-        self._repositories = repositories
         self._clock = clock
 
     async def set_reference_price(
@@ -78,13 +73,11 @@ class PriceService:
         rate: Decimal | None,
         *,
         source: PriceSource = PriceSource.MANUAL,
-        uow: UnitOfWork,
     ) -> ReferencePriceRecord:
         """Save the price of (asset, date, source); one already there is replaced, with a new
         id (OQ-26 item 7)."""
         priced_pu, priced_rate = await self._priced(asset_id, reference_date, input_kind, pu, rate)
-        repository = self._repositories(uow)
-        record = await repository.replace(
+        record = await self._repository.replace(
             asset_id=asset_id,
             reference_date=reference_date,
             source=source,
@@ -92,7 +85,7 @@ class PriceService:
             pu=priced_pu,
             rate=priced_rate,
         )
-        await uow.commit()
+        await self._uow.commit()
         logger.info(
             "reference price set: asset %s, %s, %s",
             record.asset_id,
@@ -101,49 +94,27 @@ class PriceService:
         )
         return record
 
-    async def remove_reference_price(self, price_id: UUID, *, uow: UnitOfWork) -> None:
+    async def remove_reference_price(self, price_id: UUID) -> None:
         """Delete a price; with MANUAL gone, B3 becomes preferred for that date (OQ-25)."""
-        removed = await self._repositories(uow).delete(price_id)
+        removed = await self._repository.delete(price_id)
         if removed is None:
             raise DomainError(_PRICE_NOT_FOUND)
-        await uow.commit()
+        await self._uow.commit()
         logger.info("reference price %s removed", removed.id)
 
     async def list_reference_days(
-        self, asset_id: UUID, start_date: date, end_date: date, *, uow: UnitOfWork
+        self, asset_id: UUID, start_date: date, end_date: date
     ) -> list[ReferencePriceDay]:
         """The dates of [start_date, end_date] that have a price, newest first; a date without
         one is absent (no carry-forward). Reads only; nothing is committed."""
         errors = []
         if start_date > end_date:
-            errors.append(
-                ErrorDetail(
-                    ErrorCode.INVALID_RANGE,
-                    "A data inicial deve ser anterior ou igual à data final.",
-                    "start_date",
-                )
-            )
+            errors.append(invalid_range())
         if asset_id not in await self._assets.get_instruments([asset_id]):
-            errors.append(_UNKNOWN_ASSET)
+            errors.append(unknown_asset())
         if errors:
             raise DomainError(*errors)
-        observations = await self._repositories(uow).find_in_range(asset_id, start_date, end_date)
-        by_date: defaultdict[date, list[ReferencePriceRecord]] = defaultdict(list)
-        for observation in observations:
-            by_date[observation.reference_date].append(observation)
-        days = []
-        for reference_date in sorted(by_date, reverse=True):
-            sources = by_date[reference_date]
-            preferred = choose_preferred(sources)
-            assert preferred is not None  # every date here has an observation
-            days.append(
-                ReferencePriceDay(
-                    reference_date=reference_date,
-                    preferred=preferred,
-                    sources=tuple(sorted(sources, key=lambda o: o is not preferred)),
-                )
-            )
-        return days
+        return reference_days(await self._repository.find_in_range(asset_id, start_date, end_date))
 
     async def _priced(
         self,
@@ -165,19 +136,19 @@ class PriceService:
             rate=rate,
         )
         if instrument is None:
-            errors = (_UNKNOWN_ASSET, *errors)
-        if errors:
-            raise DomainError(*errors)
+            errors = (unknown_asset(), *errors)
         typed = pu if input_kind is InputKind.PU else rate
-        assert instrument is not None and typed is not None
+        if errors or instrument is None or typed is None:  # the last two always come with errors
+            raise DomainError(*errors)
         price = await self._pricing.calculate(
             instrument.id, reference_date, Quote(input_kind, typed)
         )
         return price.pu, price.rate
 
 
-class PriceReader:
-    """Public `PriceReader`: winning MANUAL/B3 price on the caller's session."""
+class DefaultPriceReader:
+    """Implements `prices.public.PriceReader`: the winning MANUAL/B3 price on the caller's
+    session."""
 
     def __init__(self, repository: ReferencePriceRepository) -> None:
         self._repository = repository
@@ -187,20 +158,21 @@ class PriceReader:
     ) -> Mapping[tuple[UUID, date], ReferencePriceRecord]:
         if not asset_ids or not dates:
             return {}
-        observations: Sequence[ReferencePriceRecord] = await self._repository.find(asset_ids, dates)
         by_pair: defaultdict[tuple[UUID, date], list[ReferencePriceRecord]] = defaultdict(list)
-        for observation in observations:
-            by_pair[(observation.asset_id, observation.reference_date)].append(observation)
-        winning = {pair: choose_preferred(found) for pair, found in by_pair.items()}
-        return {pair: record for pair, record in winning.items() if record is not None}
+        for record in await self._repository.find(asset_ids, dates):
+            by_pair[(record.asset_id, record.reference_date)].append(record)
+        return _winning(by_pair)
 
     async def latest(self, asset_ids: Collection[UUID]) -> Mapping[UUID, ReferencePriceRecord]:
         """Winning price of the latest date that has one, for ``last_reference`` (OQ-48)."""
         if not asset_ids:
             return {}
-        observations = await self._repository.find_on_latest_date(asset_ids)
         by_asset: defaultdict[UUID, list[ReferencePriceRecord]] = defaultdict(list)
-        for observation in observations:
-            by_asset[observation.asset_id].append(observation)
-        winning = {asset_id: choose_preferred(found) for asset_id, found in by_asset.items()}
-        return {asset_id: record for asset_id, record in winning.items() if record is not None}
+        for record in await self._repository.find_on_latest_date(asset_ids):
+            by_asset[record.asset_id].append(record)
+        return _winning(by_asset)
+
+
+def _winning[K](groups: Mapping[K, list[ReferencePriceRecord]]) -> dict[K, ReferencePriceRecord]:
+    winning = {key: choose_preferred(records) for key, records in groups.items()}
+    return {key: record for key, record in winning.items() if record is not None}

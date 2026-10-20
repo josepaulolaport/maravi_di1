@@ -18,7 +18,7 @@ from pydantic import SecretStr
 from di1.composition.dependencies import get_unit_of_work as composition_unit_of_work
 from di1.main import create_app
 from di1.modules.prices.application.services.price_service import PriceService
-from di1.modules.prices.dependencies import price_service
+from di1.modules.prices.dependencies import build_price_service
 from di1.modules.prices.presentation.http.router import create_router
 from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import UnitOfWork
@@ -93,9 +93,11 @@ def api(migrated_database_url: str, assets: FakeAssets) -> Iterator[Api]:
     uow_dependency = Depends(composition_unit_of_work)
 
     def service(uow: UnitOfWork = uow_dependency) -> PriceService:
-        return price_service(uow, assets=assets, pricing=FakePricing(), clock=FixedClock(TODAY))
+        return build_price_service(
+            uow, assets=assets, pricing=FakePricing(), clock=FixedClock(TODAY)
+        )
 
-    app.include_router(create_router(service, composition_unit_of_work))
+    app.include_router(create_router(get_service=service))
     with TestClient(app) as client:
         yield Api(client, migrated_database_url)
 

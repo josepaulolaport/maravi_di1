@@ -33,10 +33,10 @@ from di1.modules.portfolio.domain.valuation import (
     AssetValuation,
     AssetValuationInput,
     PortfolioValuation,
-    PriceSource,
     ValuationCalculator,
     ValuationStatus,
 )
+from di1.modules.prices.public import PriceSource
 from di1.modules.processing.public import ChainStatus
 from di1.platform.database.unit_of_work import UnitOfWork
 
@@ -62,7 +62,6 @@ __all__ = [
     "PositionsEngine",
     "PositionsSummaryView",
     "PreviousPositionsDay",
-    "PriceSource",
     "Trade",
     "ValuationCalculator",
     "ValuationStatus",

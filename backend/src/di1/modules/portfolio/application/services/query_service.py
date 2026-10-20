@@ -19,7 +19,6 @@ from di1.modules.portfolio.application.services.repository import (
     PublishedPosition,
 )
 from di1.modules.portfolio.domain.maturity import is_past_maturity, reference_pu_on
-from di1.modules.portfolio.domain.valuation import PriceSource
 from di1.modules.portfolio.public import (
     CashSummaryView,
     PnLPointView,
@@ -28,7 +27,7 @@ from di1.modules.portfolio.public import (
     PositionsSummaryView,
     PositionTableView,
 )
-from di1.modules.prices.public import PriceReader
+from di1.modules.prices.public import PriceReader, PriceSource
 from di1.modules.processing.public import ChainStatus, DateStatus, DateStatusReader
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock

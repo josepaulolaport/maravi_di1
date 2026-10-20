@@ -3,7 +3,7 @@ the instruments of the frontend's demo fixtures (``frontend/src/api/mocks/fixtur
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -18,12 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.asset.public import Instrument
 from di1.modules.prices.application.services.price_service import PriceService
-from di1.modules.prices.infrastructure.persistence.repositories import (
-    SqlReferencePriceRepository,
-)
+from di1.modules.prices.dependencies import build_price_service
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
+from di1.platform.database.unit_of_work import UnitOfWork
 from tests.fakes.asset import CREATED_AT
 from tests.fakes.clock import FixedClock
 from tests.integration.databases import fresh_database_url
@@ -94,14 +93,18 @@ def assets() -> FakeAssets:
     return fake
 
 
+ServiceOn = Callable[[UnitOfWork], PriceService]
+"""Builds the service on a Unit of Work, as the composition does per request."""
+
+
 @pytest.fixture
-def service(assets: FakeAssets) -> PriceService:
-    return PriceService(
-        assets=assets,
-        pricing=FakePricing(),
-        repositories=SqlReferencePriceRepository.of,
-        clock=FixedClock(TODAY),
-    )
+def service(assets: FakeAssets) -> ServiceOn:
+    def on(uow: UnitOfWork) -> PriceService:
+        return build_price_service(
+            uow, assets=assets, pricing=FakePricing(), clock=FixedClock(TODAY)
+        )
+
+    return on
 
 
 async def _seed_instruments(engine: AsyncEngine) -> None:

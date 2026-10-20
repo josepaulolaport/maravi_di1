@@ -22,7 +22,7 @@ from di1.modules.ledger.dependencies import create_ledger_service, ledger_reader
 from di1.modules.portfolio.dependencies import portfolio_query_service
 from di1.modules.portfolio.public import PortfolioService
 from di1.modules.prices.application.services.price_service import PriceService
-from di1.modules.prices.dependencies import price_reader, price_service
+from di1.modules.prices.dependencies import build_price_reader, build_price_service
 from di1.modules.prices.public import PriceReader
 from di1.modules.pricing.dependencies import build_pricing_service
 from di1.modules.processing.application.services.processing import ProcessingService
@@ -66,12 +66,14 @@ def get_ledger_service(uow: RequestUnitOfWork, clock: AppClock) -> LedgerService
 def get_price_reader(uow: RequestUnitOfWork) -> PriceReader:
     """Prices on ``uow``'s session, including ``latest`` for Asset HTTP ``last_reference``
     (OQ-48)."""
-    return price_reader(uow.session)
+    return build_price_reader(uow.session)
 
 
 def get_price_service(uow: RequestUnitOfWork, clock: AppClock) -> PriceService:
     assets = build_asset_reader(uow.session)
-    return price_service(uow, assets=assets, pricing=build_pricing_service(assets), clock=clock)
+    return build_price_service(
+        uow, assets=assets, pricing=build_pricing_service(assets), clock=clock
+    )
 
 
 async def get_portfolio_query_service(
@@ -83,7 +85,7 @@ async def get_portfolio_query_service(
     yield portfolio_query_service(
         uow,
         assets=build_asset_reader(uow.session),
-        prices=price_reader(uow.session),
+        prices=build_price_reader(uow.session),
         date_statuses=make_date_status_reader(),
         clock=clock,
     )

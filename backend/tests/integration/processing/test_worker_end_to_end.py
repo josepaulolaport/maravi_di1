@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.ledger.dependencies import ledger_reader
 from di1.modules.portfolio.dependencies import portfolio_reader, results_writer
-from di1.modules.prices.dependencies import price_reader
+from di1.modules.prices.dependencies import build_price_reader
 from di1.modules.processing.dependencies import make_range_processor
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from tests.integration.processing.support import seed_instrument
@@ -37,7 +37,7 @@ class RealWorker:
             uow_factory=uow_factory,
             clock=self.clock,
             ledger_reader=ledger_reader,
-            price_reader=price_reader,
+            price_reader=build_price_reader,
             asset_reader=build_asset_reader,
             portfolio_reader=portfolio_reader,
             writer=results_writer(),

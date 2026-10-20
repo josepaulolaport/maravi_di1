@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Sequence
 from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.ledger.dependencies import ledger_reader
 from di1.modules.portfolio.dependencies import portfolio_reader, results_writer
-from di1.modules.prices.dependencies import price_reader
+from di1.modules.prices.dependencies import build_price_reader
 from di1.modules.processing.dependencies import (
     DOORBELL_CONSUMER_NAME,
     DOORBELL_QUEUE_NAME,
@@ -43,7 +43,7 @@ def _processor(resources: WorkerResources) -> PortfolioRangeProcessor:
         uow_factory=resources.uow_factory,
         clock=resources.clock,
         ledger_reader=ledger_reader,
-        price_reader=price_reader,
+        price_reader=build_price_reader,
         asset_reader=build_asset_reader,
         portfolio_reader=portfolio_reader,
         writer=results_writer(),

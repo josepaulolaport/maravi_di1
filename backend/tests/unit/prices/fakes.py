@@ -124,9 +124,6 @@ class InMemoryRepository:
         self.rows[record.id] = record
         return record
 
-    async def get(self, price_id: UUID) -> ReferencePriceRecord | None:
-        return self.rows.get(price_id)
-
     async def delete(self, price_id: UUID) -> ReferencePriceRecord | None:
         return self.rows.pop(price_id, None)
 
