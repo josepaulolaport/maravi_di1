@@ -3,6 +3,7 @@ writes, not by "any ledger entry": a run that died part-way is reported, never t
 
 from __future__ import annotations
 
+import http.client
 import importlib.util
 import sys
 from datetime import date, timedelta
@@ -141,6 +142,42 @@ def test_an_unreachable_api_exits_0_and_says_why(capsys: pytest.CaptureFixture[s
 
     assert int(seed_demo.run(API, call=down, today=TODAY)) == 0
     assert "DEMO DATA NOT LOADED" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "unexpected",
+    [
+        http.client.RemoteDisconnected("Remote end closed connection without response"),
+        KeyError("execution_pu"),
+        RuntimeError("boom"),
+    ],
+    ids=["remote-disconnected", "malformed-response", "anything-else"],
+)
+def test_an_unexpected_error_still_exits_0_and_says_why(
+    unexpected: Exception, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Not only the known failures: anything the run did not foresee must not keep the web
+    service, which waits for the demo, from starting."""
+
+    def broken(*_: object, **__: object) -> None:
+        raise unexpected
+
+    assert int(seed_demo.run(API, call=broken, today=TODAY)) == 0
+    assert "DEMO DATA NOT LOADED: " in capsys.readouterr().err
+
+
+def test_every_demo_cash_entry_has_a_description() -> None:
+    api = FakeApi()
+
+    run(api)
+
+    cash = [e for e in api.entries if e["type"] == "CASH"]
+    assert [e["description"] for e in cash] == [
+        "Aporte inicial",
+        "Aporte do exemplo",
+        "Segundo aporte",
+        "Retirada parcial",
+    ]
 
 
 def test_a_ledger_that_is_not_the_demos_is_left_alone(capsys: pytest.CaptureFixture[str]) -> None:
