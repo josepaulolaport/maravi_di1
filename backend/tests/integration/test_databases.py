@@ -6,8 +6,13 @@ a green run can never hide that the migration was not applied.
 
 from __future__ import annotations
 
-import pytest
+import os
 
+import psycopg
+import pytest
+from psycopg import sql
+
+from tests.support import db
 from tests.support.db import fresh_database_url
 
 
@@ -25,3 +30,25 @@ def test_missing_server_fails_when_database_tests_are_required(
     monkeypatch.setenv("REQUIRE_DATABASE_TESTS", "1")
     with pytest.raises(pytest.fail.Exception, match="REQUIRE_DATABASE_TESTS"):
         next(fresh_database_url())
+
+
+def test_a_template_left_by_a_dead_session_is_dropped_and_a_live_one_kept() -> None:
+    # A killed run never reaches pytest_sessionfinish; the next session drops its template.
+    admin_url = db._admin_url()
+    dead, live = "di1_template_999999999_deadbeef0000", f"di1_template_{os.getpid()}_live00000000"
+    for name in (dead, live):
+        db._execute(admin_url, sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    try:
+        db._drop_stale_templates(admin_url)
+
+        with psycopg.connect(db.psycopg_url(admin_url)) as admin:
+            left = {
+                row[0]
+                for row in admin.execute(
+                    "SELECT datname FROM pg_database WHERE datname = ANY(%s)", ([dead, live],)
+                )
+            }
+        assert left == {live}
+    finally:
+        for name in (dead, live):
+            db._drop(admin_url, name)

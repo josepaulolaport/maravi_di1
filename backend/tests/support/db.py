@@ -133,10 +133,39 @@ def migrated_database_url() -> Iterator[str]:
     yield from _database("migrated")
 
 
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _drop_stale_templates(admin_url: str) -> None:
+    """Drop the templates a killed test session left behind: their name carries the pid of the
+    session that made them, and that process is gone. A template without a pid in its name is from
+    before this naming and is dropped too. A live session's template is kept."""
+    with psycopg.connect(psycopg_url(admin_url), autocommit=True) as admin:
+        names = [
+            row[0]
+            for row in admin.execute(
+                "SELECT datname FROM pg_database WHERE datname LIKE 'di1\\_template\\_%'"
+            )
+        ]
+    for name in names:
+        parts = name.removeprefix("di1_template_").split("_")
+        if len(parts) == 2 and parts[0].isdigit() and _alive(int(parts[0])):
+            continue
+        _drop(admin_url, name)
+
+
 def _migrated_template(admin_url: str) -> str:
     global _template
     if _template is None:
-        name = f"di1_template_{uuid.uuid4().hex[:12]}"
+        _drop_stale_templates(admin_url)
+        name = f"di1_template_{os.getpid()}_{uuid.uuid4().hex[:12]}"
         _execute(admin_url, sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
         try:
             command.upgrade(alembic_config(_url_of(admin_url, name)), "head")
