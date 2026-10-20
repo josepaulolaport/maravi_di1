@@ -145,7 +145,8 @@ the UI from starting: the app works without its data, and `docker compose logs d
   loaded in 2026, maturing 04/01/2027, 03/01/2028 and 02/01/2029).
 - An opening deposit of 1.000.000, a second deposit, a withdrawal and, as in the challenge example,
   a deposit of 200.000 with a buy of 1 DI1F28 at 10% (DI1F28 does not mature in 365 days, so the
-  challenge's figures are those of `make e2e`, not these).
+  challenge's figures are those of `make e2e`, not these). Each cash entry has a short description
+  ("Aporte inicial", "Aporte do exemplo", "Segundo aporte", "Retirada parcial"; OQ-51).
 - Trades typed as a rate and as a PU, a partial sale, a sale that crosses zero into a short, and a
   buy and a sale of the longest contract on one day, applied in time order.
 - MANUAL reference prices typed as a rate for every calendar day, weekends included, with **one

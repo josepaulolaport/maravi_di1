@@ -160,6 +160,7 @@ class InMemoryLedgerRepository:
             execution_rate=None,
             input_kind=None,
             cash_amount=movement.amount,
+            description=movement.description,
         )
 
     async def lock_existing(self, ids: Collection[UUID]) -> set[UUID]:
@@ -189,6 +190,8 @@ class InMemoryLedgerRepository:
                 if row.type is EntryType.TRADE:
                     return row.asset_id in set(matching_asset_ids)
                 assert row.cash_amount is not None
+                if search.matches_description(row.description):
+                    return True
                 if row.cash_amount > 0:
                     return search.includes_deposits
                 return search.includes_withdrawals

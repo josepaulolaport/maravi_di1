@@ -2,7 +2,9 @@
 
 - A TRADE carries the contract, the signed quantity and the execution PU and rate, one of them
   typed (``input_kind``) and the other calculated by Pricing. A CASH entry carries a signed
-  amount: positive aporte, negative retirada, never 0.
+  amount: positive aporte, negative retirada, never 0, and an optional description (challenge
+  §4.2; OQ-51): trimmed, ``None`` when blank, at most 200 characters, rejected rather than cut. A
+  trade has no description.
 - Both have a date and a required time (São Paulo) and one ``seq`` shared by both types; their
   order is ``(entry_date, entry_time, seq)`` (OQ-13, OQ-24).
 - Nothing is dated after today (OQ-14). The typed PU or rate, its decimals, its bounds and the
@@ -22,6 +24,7 @@ client keys its messages on (frontend contract ``ledger.ts``).
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, datetime, time
@@ -38,6 +41,9 @@ CASH_PLACES = 2
 
 _CASH_LIMIT = Decimal(10) ** (20 - CASH_PLACES)
 """``NUMERIC(20,2)`` holds absolute values below 10^18."""
+
+DESCRIPTION_MAX_LENGTH = 200
+"""``description VARCHAR(200)``: characters, as PostgreSQL counts them (OQ-51)."""
 
 
 class EntryType(StrEnum):
@@ -61,6 +67,7 @@ class EntryDraft:
     execution_pu: Decimal | None = None
     execution_rate: Decimal | None = None
     cash_amount: Decimal | None = None
+    description: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,17 +86,20 @@ class NewTrade:
 
 @dataclass(frozen=True, slots=True)
 class NewCashMovement:
-    """A validated aporte (positive) or retirada (negative), as it is written."""
+    """A validated aporte (positive) or retirada (negative), as it is written, with its stored
+    description (`cash_description`)."""
 
     entry_date: date
     entry_time: time
     amount: Decimal
+    description: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class LedgerEntry:
     """One row of ``ledger.entries``. The trade fields are set only on a TRADE and
-    ``cash_amount`` only on a CASH entry (schema ``entries_trade_shape``/``entries_cash_shape``).
+    ``cash_amount`` only on a CASH entry (schema ``entries_trade_shape``/``entries_cash_shape``);
+    ``description`` is a CASH entry's, if any (``entries_description_cash_only``, OQ-51).
     """
 
     id: UUID
@@ -104,6 +114,7 @@ class LedgerEntry:
     execution_rate: Decimal | None
     input_kind: InputKind | None
     cash_amount: Decimal | None
+    description: str | None = None
 
     @property
     def order_key(self) -> tuple[date, time, int]:
@@ -149,6 +160,8 @@ def validate_trade(draft: EntryDraft, *, today: date, known: bool) -> tuple[Erro
         )
     if draft.cash_amount is not None:
         errors.append(ErrorDetail.validation("Uma operação não tem valor de caixa.", "cash_amount"))
+    if (draft.description or "").strip():  # blank is absent, as on a cash entry (OQ-51)
+        errors.append(ErrorDetail.validation("Uma operação não tem descrição.", "description"))
     if draft.input_kind is None:
         errors.append(ErrorDetail.validation("Informe o PU ou a taxa.", "input_kind"))
     return tuple(errors)
@@ -180,7 +193,27 @@ def validate_cash_movement(draft: EntryDraft, *, today: date) -> tuple[ErrorDeta
         errors.append(ErrorDetail.validation("O valor deve ser diferente de zero.", "cash_amount"))
     elif abs(amount) >= _CASH_LIMIT:
         errors.append(ErrorDetail.validation("O valor excede o limite permitido.", "cash_amount"))
+    description = cash_description(draft)
+    if description is not None and "\x00" in description:
+        # PostgreSQL text cannot hold NUL (OQ-15): malformed input, as in Asset.
+        errors.append(
+            ErrorDetail.validation("O texto não pode conter o caractere nulo.", "description")
+        )
+    elif description is not None and len(description) > DESCRIPTION_MAX_LENGTH:
+        errors.append(
+            ErrorDetail.validation(
+                f"A descrição deve ter no máximo {DESCRIPTION_MAX_LENGTH} caracteres.",
+                "description",
+            )
+        )
     return tuple(errors)
+
+
+def cash_description(draft: EntryDraft) -> str | None:
+    """The description a CASH draft stores (OQ-51): trimmed, ``None`` when blank, and composed
+    (NFC), so the list's SQL search folds its accents as `EntrySearch` does.
+    `validate_cash_movement` checks its length."""
+    return unicodedata.normalize("NFC", (draft.description or "").strip()) or None
 
 
 def validate_deletion(

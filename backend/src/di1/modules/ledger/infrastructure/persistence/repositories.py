@@ -81,4 +81,5 @@ def _to_entry(row: LedgerEntryRow) -> LedgerEntry:
         execution_rate=row.execution_rate,
         input_kind=None if row.input_kind is None else InputKind(row.input_kind),
         cash_amount=row.cash_amount,
+        description=row.description,
     )

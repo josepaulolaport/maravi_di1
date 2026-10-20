@@ -162,7 +162,7 @@ Use a separate DB/schema namespace per worktree for integration testing, or a fr
 ## 5. Wave 2 — input persistence + processing request API (parallel)
 
 ### C. Ledger
-- `LedgerService` and repository over the one table `ledger.entries` (OQ-24): create entries (trade or cash movement), list them paginated, batch hard delete (OQ-32); deterministic order `(entry_date, entry_time, seq)` across both types; automatic PU/rate conversion via Pricing, product lookup via Asset.
+- `LedgerService` and repository over the one table `ledger.entries` (OQ-24): create entries (trade or cash movement, the latter with an optional description, OQ-51), list them paginated, batch hard delete (OQ-32); deterministic order `(entry_date, entry_time, seq)` across both types; automatic PU/rate conversion via Pricing, product lookup via Asset.
 - Only immutable economic fields, never edited; `delete_entries` is a real `DELETE` without a reason, all or nothing, and an unknown or already-deleted id answers 404 `NOT_FOUND` with nothing deleted; no audit trail, no `deleted_at` or `deletion_batch_id` (OQ-32). Each write only saves the fact in its UoW: no Processing call, no invalidation (OQ-31), no recalculation enqueue.
 - Tests: multiple trades same date, trade and cash movement ordered by time and `seq`, mixed batch delete all or nothing, a batch with one unknown or already-deleted id deletes nothing (404), deleted entries absent from every read, execution price not added to `prices.reference_prices`.
 
@@ -258,7 +258,7 @@ Run locally on 2026-10-19 on `bbf7027` (#108) plus this PR's docs-only commits (
 | Area | On `main` (merged PRs) |
 |---|---|
 | Docs and decisions | spec, schema, interfaces, plan and challenge audit (#1–#3, #8); OQ-19/OQ-20 (#12); OQ-21/OQ-22 (#36); OQ-23–OQ-26 (#43); OQ-27 (#40); OQ-28 (#46); OQ-29–OQ-31 (#49); OQ-32–OQ-40 (#54); OQ-41 (#59); OQ-42 (#68); OQ-43/OQ-44 (#82); OQ-45 (#85, reverses OQ-43); OQ-46 (#91); commit freely, review at PR time (#67); plan §12 and status lines (#98); process docs (#102); 4-decimal rate display (#107); OQ-47, the code-review decisions (this PR) |
-| Schema | Alembic 0001 to 0006, head `0006` = `docs/schema.sql`, equivalence-tested (#6, #36, #43, #50, #53, #58) |
+| Schema | Alembic 0001 to 0007, head `0007` = `docs/schema.sql`, equivalence-tested (#6, #36, #43, #50, #53, #58; 0007 for OQ-51) |
 | Backend scaffold and shared | scaffold and import-boundary tests (#4, #5); decimals and clock (#7); error catalogue and problem+json (#26) |
 | Platform (H) | config, clock, async database, Unit of Work (#23); messaging: envelope, outbox, inbox, publisher, relay, consumer (#31); logging and relay process (#57); worker processes (#74) and startup recovery hook (#89); publish test fix (#80) |
 | Composition (X) | public contracts (#37, #49); app factory, `/health` (#45); routes under `/api` (#61, #62, #77); backend image, Compose and API logging (#75); worker and relay wired to Processing and run in Compose (#92); `make e2e` and README demo (#86); RabbitMQ in CI (#69); DI1 catalogue seeded on every `docker compose up` by the one-shot `seed` service, ledger timestamps in UTC (#102); two weeks of demo history loaded on `up` by the one-shot `demo` service through the HTTP API, `scripts/seed_demo.py` (#104); `make e2e` safe in several worktrees at once, project from `DI1_E2E_PROJECT` (#106, #108) |

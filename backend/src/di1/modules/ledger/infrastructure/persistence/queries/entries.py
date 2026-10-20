@@ -15,6 +15,7 @@ from sqlalchemy import (
     delete,
     exists,
     false,
+    func,
     insert,
     literal,
     or_,
@@ -24,7 +25,13 @@ from sqlalchemy import (
 from sqlalchemy.sql.dml import ReturningInsert
 
 from di1.modules.ledger.domain.entries import EntryType, NewCashMovement, NewTrade
-from di1.modules.ledger.domain.listing import EntrySearch, ListOrder, PageRequest
+from di1.modules.ledger.domain.listing import (
+    DESCRIPTION_ACCENTED,
+    DESCRIPTION_PLAIN,
+    EntrySearch,
+    ListOrder,
+    PageRequest,
+)
 from di1.modules.ledger.infrastructure.persistence.models import LedgerEntryRow
 
 _ORDER_KEY = (LedgerEntryRow.entry_date, LedgerEntryRow.entry_time, LedgerEntryRow.seq)
@@ -57,6 +64,7 @@ def insert_cash_movement(movement: NewCashMovement) -> ReturningInsert[LedgerEnt
             entry_date=movement.entry_date,
             entry_time=movement.entry_time,
             cash_amount=movement.amount,
+            description=movement.description,
         )
         .returning(LedgerEntryRow)
     )
@@ -149,4 +157,11 @@ def _matches(search: EntrySearch, matching_asset_ids: Collection[uuid.UUID]) -> 
         options.append(and_(is_cash, LedgerEntryRow.cash_amount > 0))
     if search.includes_withdrawals:
         options.append(and_(is_cash, LedgerEntryRow.cash_amount < 0))
+    if not search.has_nul:
+        # `EntrySearch.matches_description` in SQL. A NULL description matches nothing; "%" and
+        # "_" in the search are literal (OQ-51).
+        folded = func.translate(
+            func.lower(LedgerEntryRow.description), DESCRIPTION_ACCENTED, DESCRIPTION_PLAIN
+        )
+        options.append(and_(is_cash, folded.contains(search.needle, autoescape=True)))
     return or_(*options) if options else false()

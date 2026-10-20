@@ -81,12 +81,14 @@ def cash(
     entry_time: time = time(9, 0),
     *,
     amount: str = "1500000.00",
+    description: str | None = None,
 ) -> EntryDraft:
     return EntryDraft(
         type=EntryType.CASH,
         entry_date=entry_date,
         entry_time=entry_time,
         cash_amount=Decimal(amount),
+        description=description,
     )
 
 

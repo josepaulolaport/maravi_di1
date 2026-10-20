@@ -8,7 +8,7 @@ OQ-24, OQ-26 item 1).
   write is refused.
 - Search (frozen frontend contract, mock ``handlers/ledger.ts``): case- and accent-insensitive,
   by substring; a trade matches its contract code, a cash entry the label of its sign, "Aporte"
-  (positive) or "Retirada" (negative).
+  (positive) or "Retirada" (negative), or its description (OQ-51).
 """
 
 from __future__ import annotations
@@ -30,6 +30,15 @@ _SEQ = re.compile(r"[1-9][0-9]{0,18}")
 
 _SEQ_MAX = 2**63 - 1
 """``seq BIGINT``: a larger key could not be compared with the column."""
+
+DESCRIPTION_ACCENTED = "áàâãäåéèêëíìîïóòôõöúùûüçñýÿ"
+DESCRIPTION_PLAIN = "aaaaaaeeeeiiiiooooouuuucnyy"
+"""How the list folds a stored description, in SQL as ``translate(lower(description), ...)``:
+the schema does not install ``unaccent`` (as for Asset's search). It covers the accented
+letters of Portuguese and their Latin-1 kin; any other letter (e.g. "ß") is only lowercased
+(OQ-51). Descriptions are stored composed (NFC), so these precomposed letters are what is there."""
+
+_DESCRIPTION_FOLD = str.maketrans(DESCRIPTION_ACCENTED, DESCRIPTION_PLAIN)
 
 DEPOSIT_LABEL = "Aporte"
 WITHDRAWAL_LABEL = "Retirada"
@@ -83,6 +92,19 @@ class EntrySearch:
 
     def matches_code(self, code: str) -> bool:
         return self.needle in fold(code)
+
+    @property
+    def has_nul(self) -> bool:
+        """PostgreSQL text cannot hold NUL (OQ-15): such a search is never sent to the database
+        and matches no description, as no stored text holds it."""
+        return "\x00" in self.needle
+
+    def matches_description(self, description: str | None) -> bool:
+        """What the list's SQL does with ``ledger.entries.description``: a substring of the
+        description lowercased and folded with `DESCRIPTION_ACCENTED` (OQ-51)."""
+        if description is None or self.has_nul:
+            return False
+        return self.needle in description.lower().translate(_DESCRIPTION_FOLD)
 
     @property
     def includes_deposits(self) -> bool:

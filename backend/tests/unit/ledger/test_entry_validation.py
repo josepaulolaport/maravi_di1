@@ -20,7 +20,7 @@ import pytest
 
 from di1.modules.ledger.application.services.ledger_service import validate_new_trade
 from di1.modules.ledger.domain import entries
-from di1.modules.ledger.domain.entries import EntryDraft, EntryType
+from di1.modules.ledger.domain.entries import EntryDraft, EntryType, cash_description
 from di1.shared.clock import SAO_PAULO
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
@@ -398,6 +398,75 @@ def test_trade_fields_on_a_cash_movement_are_rejected() -> None:
         (ErrorCode.VALIDATION_ERROR, field)
         for field in ("asset_id", "signed_quantity", "input_kind", "execution_pu", "execution_rate")
     }
+
+
+# --- cash description (OQ-51) -------------------------------------------------------------------
+
+
+def test_a_cash_movement_keeps_its_description_trimmed() -> None:
+    draft = _cash(description="  Aporte inicial \n")
+
+    assert entries.validate_cash_movement(draft, today=TODAY) == ()
+    assert cash_description(draft) == "Aporte inicial"
+
+
+def test_a_description_is_stored_composed() -> None:
+    # The list's SQL search folds precomposed letters (OQ-51): "a" + U+0301 is stored as "á".
+    assert cash_description(_cash(description="Aplicac\u0327a\u0303o")) == "Aplicação"
+
+
+@pytest.mark.parametrize("description", [None, "", "   ", "\t\n"])
+def test_an_absent_or_blank_description_is_none(description: str | None) -> None:
+    assert cash_description(_cash(description=description)) is None
+
+
+def test_a_description_of_200_characters_is_accepted() -> None:
+    draft = _cash(description=f" {'á' * 200} ")
+
+    assert entries.validate_cash_movement(draft, today=TODAY) == ()
+    assert cash_description(draft) == "á" * 200
+
+
+def test_a_description_longer_than_200_characters_is_rejected_not_cut() -> None:
+    with pytest.raises(DomainError) as error:
+        validate_cash_movement(_cash(description="a" * 201), today=TODAY)
+
+    assert _errors(error) == {(ErrorCode.VALIDATION_ERROR, "description")}
+    assert error.value.errors[0].message == "A descrição deve ter no máximo 200 caracteres."
+
+
+def test_a_long_description_is_reported_with_the_other_input_errors() -> None:
+    with pytest.raises(DomainError) as error:
+        validate_cash_movement(_cash(cash_amount=None, description="a" * 201), today=TODAY)
+
+    assert _errors(error) == {
+        (ErrorCode.VALIDATION_ERROR, "cash_amount"),
+        (ErrorCode.VALIDATION_ERROR, "description"),
+    }
+
+
+def test_a_description_with_a_nul_character_is_rejected() -> None:
+    # PostgreSQL text cannot hold NUL (OQ-15): a 422, never a database error.
+    with pytest.raises(DomainError) as error:
+        validate_cash_movement(_cash(description="a\x00b"), today=TODAY)
+
+    assert _errors(error) == {(ErrorCode.VALIDATION_ERROR, "description")}
+    assert error.value.errors[0].message == "O texto não pode conter o caractere nulo."
+
+
+@pytest.mark.parametrize("description", ["Compra", " Compra "])
+def test_a_trade_takes_no_description(description: str) -> None:
+    with pytest.raises(DomainError) as error:
+        validate_trade(_trade(description=description), today=TODAY, instrument=DI1F28)
+
+    assert _errors(error) == {(ErrorCode.VALIDATION_ERROR, "description")}
+    assert error.value.errors[0].message == "Uma operação não tem descrição."
+
+
+@pytest.mark.parametrize("description", [None, "", "   "])
+def test_a_blank_description_on_a_trade_is_no_description(description: str | None) -> None:
+    # Trimmed first, as on a cash entry: blank is absent (OQ-51 item 1).
+    validate_trade(_trade(description=description), today=TODAY, instrument=DI1F28)
 
 
 def test_the_validators_refuse_a_draft_of_the_other_type() -> None:

@@ -33,6 +33,11 @@ describe('Lançamentos rows (§11.3)', () => {
     });
   });
 
+  it('OQ-51 a cash entry carries its description, or null', () => {
+    expect(toRow(deposit)).toMatchObject({ kind: 'cash', description: 'Aporte inicial' });
+    expect(toRow(withdrawal)).toMatchObject({ kind: 'cash', description: null });
+  });
+
   it('§11.3 shows the signed cash effect exactly as the backend sends it', () => {
     expect(toRow(sell).signedAmount).toBe('356408.8906133732');
     expect(toRow(withdrawal).signedAmount).toBe('-50000.00');

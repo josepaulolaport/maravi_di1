@@ -21,6 +21,7 @@ from di1.modules.ledger.domain.entries import (
     LedgerEntryView,
     NewCashMovement,
     NewTrade,
+    cash_description,
     validate_cash_movement,
     validate_deletion,
     validate_trade,
@@ -143,7 +144,9 @@ class LedgerService:
         errors = validate_cash_movement(draft, today=self._clock.today())
         if errors or draft.cash_amount is None:  # a missing amount always comes with errors
             raise DomainError(*errors)
-        movement = NewCashMovement(draft.entry_date, draft.entry_time, draft.cash_amount)
+        movement = NewCashMovement(
+            draft.entry_date, draft.entry_time, draft.cash_amount, cash_description(draft)
+        )
         entry = await self._repository.add_cash_movement(movement)
         await self._uow.commit()
         return LedgerEntryView(entry, asset_code=None, instrument_type_code=None)

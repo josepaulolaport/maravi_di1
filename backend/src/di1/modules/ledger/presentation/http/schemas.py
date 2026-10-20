@@ -44,7 +44,8 @@ WallTime = Annotated[
 
 class CreateLedgerEntryRequest(RequestBody):
     """``POST /ledger/entries``: a TRADE (contract, signed quantity, and the PU or the rate named
-    by ``input_kind``) or a CASH entry (signed ``cash_amount``)."""
+    by ``input_kind``) or a CASH entry (signed ``cash_amount`` and an optional ``description``,
+    OQ-51)."""
 
     type: EntryType
     date: date
@@ -55,6 +56,9 @@ class CreateLedgerEntryRequest(RequestBody):
     execution_pu: DecimalString | None = None
     execution_rate: DecimalString | None = None
     cash_amount: DecimalString | None = None
+    description: str | None = Field(
+        default=None, description="CASH only: trimmed, blank as null, at most 200 characters"
+    )
 
     def to_draft(self) -> EntryDraft:
         return EntryDraft(
@@ -67,6 +71,7 @@ class CreateLedgerEntryRequest(RequestBody):
             execution_pu=self.execution_pu,
             execution_rate=self.execution_rate,
             cash_amount=self.cash_amount,
+            description=self.description,
         )
 
 
@@ -125,6 +130,7 @@ class TradeEntryResponse(_EntryResponse):
 
 class CashEntryResponse(_EntryResponse):
     type: Literal[EntryType.CASH] = EntryType.CASH
+    description: str | None = Field(description="The aporte's or retirada's text, or null (OQ-51)")
 
     @classmethod
     def of(cls, view: LedgerEntryView) -> Self:
@@ -136,6 +142,7 @@ class CashEntryResponse(_EntryResponse):
             seq=entry.seq,
             cash_amount=to_plain(entry.cash_effect),
             created_at=entry.created_at,
+            description=entry.description,
         )
 
 

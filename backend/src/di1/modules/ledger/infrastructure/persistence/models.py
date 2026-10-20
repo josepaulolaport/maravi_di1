@@ -30,4 +30,5 @@ class LedgerEntryRow(Base):
     execution_rate: Mapped[Decimal | None]
     input_kind: Mapped[str | None] = mapped_column(String(8))
     cash_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 2, asdecimal=True))
+    description: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))

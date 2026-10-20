@@ -34,6 +34,8 @@ interface TradeEntry extends BaseEntry {
 
 interface CashEntry extends BaseEntry {
   kind: 'cash';
+  /** The aporte's or retirada's text, `null` when absent (OQ-51). */
+  description: string | null;
 }
 
 export type LedgerEntry = TradeEntry | CashEntry;
@@ -64,5 +66,6 @@ export function toRow(entry: ApiLedgerEntry): LedgerEntry {
     ...base,
     kind: 'cash',
     entryType: entry.cash_amount.startsWith('-') ? 'WITHDRAWAL' : 'DEPOSIT',
+    description: entry.description,
   };
 }

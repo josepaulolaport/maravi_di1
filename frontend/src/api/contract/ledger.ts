@@ -41,9 +41,11 @@ export interface TradeLedgerEntry extends LedgerEntryBase {
   input_kind: InputKind;
 }
 
-/** Aporte (positive `cash_amount`) or retirada (negative). No description (GAP-I-2). */
+/** Aporte (positive `cash_amount`) or retirada (negative). */
 export interface CashLedgerEntry extends LedgerEntryBase {
   type: 'CASH';
+  /** Optional free text, trimmed, at most 200 characters; `null` when absent (OQ-51, §4.2). */
+  description: string | null;
 }
 
 export type LedgerEntry = TradeLedgerEntry | CashLedgerEntry;
@@ -64,12 +66,16 @@ export type CreateTradeEntryRequest = {
   signed_quantity: number;
 } & ({ input_kind: 'PU'; execution_pu: Decimal } | { input_kind: 'RATE'; execution_rate: Decimal });
 
-/** `POST /ledger/entries`, CASH: the signed amount, at most 2 places, never zero (§6.2, OQ-3). */
+/**
+ * `POST /ledger/entries`, CASH: the signed amount, at most 2 places, never zero (§6.2, OQ-3),
+ * and an optional description of at most 200 characters (OQ-51). A trade takes none (422).
+ */
 export interface CreateCashEntryRequest {
   type: 'CASH';
   date: IsoDate;
   time: IsoTime;
   cash_amount: Decimal;
+  description?: string | null;
 }
 
 /** `POST /ledger/entries` returns the created `LedgerEntry` (201). */

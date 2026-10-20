@@ -168,6 +168,54 @@ async def test_keyset_pages_cover_every_entry_once_in_both_orders(
         assert seen == expected
 
 
+async def test_a_cash_description_is_stored_trimmed_and_read_back(
+    service: ServiceOn, session_factory: Sessions
+) -> None:
+    described = await create(service, session_factory, cash(description="  Aporte inicial "))
+    blank = await create(service, session_factory, cash(entry_time=time(10, 0), description="  "))
+
+    rows = await fetch(session_factory, "SELECT id, description FROM ledger.entries ORDER BY seq")
+    async with session_factory() as session:
+        movements = await build_ledger_reader(session).get_cash_movements(date(2026, 10, 14), TODAY)
+
+    assert [tuple(row) for row in rows] == [(described, "Aporte inicial"), (blank, None)]
+    assert [m.description for m in movements] == ["Aporte inicial", None]
+
+
+async def test_the_search_matches_a_description_ignoring_case_and_accents(
+    service: ServiceOn, session_factory: Sessions
+) -> None:
+    opening = await create(service, session_factory, cash(description="Aplicação inicial"))
+    redemption = await create(
+        service, session_factory, cash(amount="-10.00", description="Resgate 10% _cotista_")
+    )
+    shouting = await create(
+        service, session_factory, cash(entry_time=time(9, 30), description="APLICAÇÃO EXTRA")
+    )
+    await create(service, session_factory, cash(entry_time=time(10, 0)))
+    await create(service, session_factory, trade())
+
+    async def search(text: str) -> set[UUID]:
+        async with session_factory() as session:
+            page = await service(_ReadOnly(session)).list_entries(
+                start_date=date(2026, 10, 1),
+                end_date=TODAY,
+                search=text,
+                order=ListOrder.DESC,
+                page=PageParams(),
+            )
+        return {item.entry.id for item in page.items}
+
+    assert await search("APLICACAO") == {opening, shouting}
+    assert await search("aplicação ini") == {opening}
+    assert await search("acao extra") == {shouting}
+    assert await search("a\x00") == set()  # never sent to PostgreSQL, which refuses NUL
+    assert await search("10%") == {redemption}
+    assert await search("_cotista_") == {redemption}
+    assert await search("%") == {redemption}  # a literal percent sign, not a wildcard
+    assert await search("e_1") == set()  # "_" is literal too: no "e?1" wildcard match
+
+
 async def test_the_search_filters_in_the_database(
     service: ServiceOn, session_factory: Sessions
 ) -> None:

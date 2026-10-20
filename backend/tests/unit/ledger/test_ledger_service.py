@@ -154,6 +154,31 @@ async def test_a_cash_movement_is_saved_without_pricing(harness: Harness) -> Non
     assert uow.commits == 1
 
 
+async def test_a_cash_movement_keeps_its_trimmed_description(harness: Harness) -> None:
+    view = await harness.service(FakeUnitOfWork()).create_entry(
+        deposit(description="  Aporte inicial  "),
+    )
+
+    assert view.entry.description == "Aporte inicial"
+    assert harness.repository.rows[0].description == "Aporte inicial"
+
+
+async def test_a_blank_description_is_saved_as_none(harness: Harness) -> None:
+    view = await harness.service(FakeUnitOfWork()).create_entry(deposit(description="   "))
+
+    assert view.entry.description is None
+
+
+async def test_a_trade_with_a_description_writes_nothing(harness: Harness) -> None:
+    uow = FakeUnitOfWork()
+
+    with pytest.raises(DomainError):
+        await harness.service(uow).create_entry(buy_rate(description="Compra"))
+
+    assert harness.repository.rows == []
+    assert uow.commits == 0
+
+
 async def test_trades_and_cash_share_one_seq(harness: Harness) -> None:
     first = await harness.service(FakeUnitOfWork()).create_entry(deposit())
     second = await harness.service(FakeUnitOfWork()).create_entry(buy_rate())
@@ -371,6 +396,26 @@ async def test_the_search_matches_contract_codes_and_cash_labels(harness: Harnes
     assert await search("aporte") == ["1500000.00"]
     assert await search("RETIRADA") == ["-50000.00"]
     assert await search("xyz") == []
+
+
+async def test_the_search_matches_a_cash_description(harness: Harness) -> None:
+    await harness.service(FakeUnitOfWork()).create_entry(
+        deposit(description="Aporte de abertura do fundo"),
+    )
+    await harness.service(FakeUnitOfWork()).create_entry(buy_rate())
+    await harness.service(FakeUnitOfWork()).create_entry(
+        deposit(cash_amount=Decimal("-50000.00"), description="Resgate de cotista"),
+    )
+
+    result = await harness.service(FakeUnitOfWork()).list_entries(
+        start_date=date(2026, 10, 1),
+        end_date=TODAY,
+        search="COTISTA",
+        order=ListOrder.ASC,
+        page=PageParams(),
+    )
+
+    assert [item.entry.description for item in result.items] == ["Resgate de cotista"]
 
 
 async def test_the_list_writes_nothing(harness: Harness) -> None:
