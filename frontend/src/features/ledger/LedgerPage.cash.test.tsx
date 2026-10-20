@@ -2,10 +2,10 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { notifications } from '@mantine/notifications';
 import { http } from 'msw';
 
-import { fieldError, problem, url } from '@/test/msw/handlers';
+import { fieldError, problem, url } from '@/test/helpers';
 import { server } from '@/test/msw/server';
 
-import { openLedger, failCash, openNew, typeDate } from './ledgerPage.support';
+import { openLedger, failCash, openNew, typeDate } from '@/test/screens/ledger';
 
 // The notifications store is module-global: without this, earlier tests fill its limit and
 // a later notification waits in the queue instead of showing.

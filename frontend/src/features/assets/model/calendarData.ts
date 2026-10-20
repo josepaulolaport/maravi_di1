@@ -1,5 +1,5 @@
-import type { Decimal, Instrument, IsoDate, ReferencePriceDay } from '@/api/contract';
-import { addDays, formatDate, isIsoDate, plotCoordinate } from '@/shared/format';
+import type { Decimal, IsoDate, ReferencePriceDay } from '@/api/contract';
+import { addDays, formatDayMonth, isIsoDate, plotCoordinate } from '@/shared/format';
 
 /** Calendar days shown on the contract page, ending on min(today, maturity) (§11.2). */
 export const CALENDAR_DAYS = 30;
@@ -12,7 +12,7 @@ export function calendarWindow(
   today: IsoDate,
   maturity: IsoDate | null,
 ): { start: IsoDate; end: IsoDate } {
-  const end = maturity !== null && maturity < today ? maturity : today;
+  const end = lastDay(maturity, today);
   return { start: addDays(end, -(CALENDAR_DAYS - 1)), end };
 }
 
@@ -89,7 +89,7 @@ export function toPriceChart(
     const text = (mode === 'PU' ? preferred?.pu : preferred?.rate) ?? null;
     points.push({
       date,
-      label: formatDate(date).slice(0, 5),
+      label: formatDayMonth(date),
       value: text === null ? null : plotCoordinate(text),
       text,
     });
@@ -101,7 +101,6 @@ export function toPriceChart(
  * The last date a price may have (OQ-14, OQ-1): today, or the contract's maturity once it has
  * passed.
  */
-export function lastDay(instrument: Instrument | null, today: IsoDate): IsoDate {
-  const maturity = instrument?.maturity_date ?? null;
-  return maturity !== null && maturity < today ? maturity : today;
+export function lastDay(maturity: IsoDate | null | undefined, today: IsoDate): IsoDate {
+  return maturity != null && maturity < today ? maturity : today;
 }

@@ -3,9 +3,9 @@ import { http, HttpResponse } from 'msw';
 
 import type { PortfolioPositions, PortfolioSummary } from '@/api/contract';
 import { positions, summaries, unprocessedSummary } from '@/test/msw/fixtures';
-import { url } from '@/test/msw/handlers';
+import { url } from '@/test/helpers';
 import { server } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
 export const INCOMPLETE_NOTE =
   'Há dias incompletos no período (não processados, com erro, em processamento ou sem P&L diário): eles somam zero ao acumulado.';
@@ -47,13 +47,6 @@ export const KPIS = [
   'P&L posições',
   'P&L operações',
 ];
-
-export function rowOf(assetCode: string) {
-  const cell = screen.getByText(assetCode, { selector: 'td *' });
-  const row = cell.closest('tr');
-  if (!row) throw new Error(`no row for ${assetCode}`);
-  return within(row);
-}
 
 interface SummaryChanges {
   cash?: Partial<PortfolioSummary['cash']>;
@@ -105,7 +98,7 @@ export function recordPnlRanges() {
 }
 
 export async function openCarteira(date: string) {
-  const result = renderApp(`/carteira?date=${date}`);
+  const result = renderRoute(`/carteira?date=${date}`);
   await screen.findByRole('group', { name: 'Saldo em caixa' });
   return result;
 }

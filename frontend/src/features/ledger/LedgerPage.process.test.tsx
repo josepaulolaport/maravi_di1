@@ -3,11 +3,10 @@ import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
 import { preview } from '@/test/msw/fixtures';
-import { fieldError, problem, url } from '@/test/msw/handlers';
+import { fieldError, problem, url, type User } from '@/test/helpers';
 import { captureBodies, server } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
 
-import { openLedger, failCash } from './ledgerPage.support';
+import { openLedger, failCash } from '@/test/screens/ledger';
 
 // The notifications store is module-global: without this, earlier tests fill its limit and
 // a later notification waits in the queue instead of showing.
@@ -17,7 +16,7 @@ afterEach(() => {
 
 describe('Lançamentos (§11.3)', () => {
   describe('Processar (OQ-21, user 2026-10-18)', () => {
-    async function openProcessar(user: ReturnType<typeof renderApp>['user']) {
+    async function openProcessar(user: User) {
       await user.click(screen.getByRole('button', { name: 'Processar' }));
       return within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
     }

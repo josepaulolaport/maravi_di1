@@ -2,21 +2,18 @@ import { Checkbox, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 
-import type { ReferencePrice, ReferencePriceDay } from '@/api/contract';
-import { formatDate, formatPu, formatRate } from '@/shared/format';
+import type { ReferencePriceDay } from '@/api/contract';
+import { formatDate } from '@/shared/format';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 
 import { useRemoveReferencePrices } from '../hooks/usePrices';
-import { SOURCE_LABELS } from './PriceCalendar';
+import { observationLabel } from '../model/prices';
 
 interface RemovePriceModalProps {
   /** The date whose observations may be removed; `null` closes the modal. */
   day: ReferencePriceDay | null;
   onClose: () => void;
 }
-
-const observationLabel = (price: ReferencePrice) =>
-  `${SOURCE_LABELS[price.source]}: PU ${formatPu(price.pu)}, taxa ${formatRate(price.rate)}`;
 
 /**
  * "Remover" (§5): the user selects which prices of the date to remove, of any source (user
@@ -36,22 +33,18 @@ function RemoveForm({ day, onClose }: { day: ReferencePriceDay; onClose: () => v
   const listed = chosen.filter((id) => day.sources.some((price) => price.id === id));
   const selected = listed.length > 0 ? listed : [day.preferred.id];
 
-  // At least one observation stays selected: ConfirmModal's double-click guard reopens only
-  // when an attempt finishes, so an empty "Remover" must never reach `onConfirm`.
-  const confirm = () => {
-    remove.mutate(selected, {
-      onSuccess: () => {
-        notifications.show({
-          color: 'teal',
-          message:
-            selected.length === 1
-              ? 'Preço de referência removido.'
-              : 'Preços de referência removidos.',
-        });
-        onClose();
-      },
+  // At least one observation stays selected, so "Remover" always has something to remove.
+  const confirm = () =>
+    remove.mutateAsync(selected).then(() => {
+      notifications.show({
+        color: 'teal',
+        message:
+          selected.length === 1
+            ? 'Preço de referência removido.'
+            : 'Preços de referência removidos.',
+      });
+      onClose();
     });
-  };
 
   return (
     <ConfirmModal

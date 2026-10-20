@@ -1,12 +1,16 @@
-import { Alert, Button, Modal, Group, Progress, SimpleGrid, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Progress, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 
 import type { ProcessingChain, ProcessingRequest } from '@/api/contract';
 import { addDays, formatDate, formatDateTime } from '@/shared/format';
+import { useLastValue } from '@/shared/hooks/useLastValue';
+import { ActionModal } from '@/shared/ui/ActionModal';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { SCOPE_LABELS } from '@/shared/processing/scope';
 
-import { formatDays, formatPeriod, shortId } from '../format';
+import { formatPeriod, formatQuantity } from '@/shared/format';
+
+import { shortId } from '../model/format';
 import {
   canCancel,
   failedChainOf,
@@ -14,7 +18,7 @@ import {
   nextDate,
   progressOf,
   retryRequests,
-} from '../jobStatus';
+} from '../model/jobStatus';
 import { Field } from '@/shared/ui/Field';
 import type { JobActions } from './HistoryTable';
 
@@ -66,7 +70,14 @@ interface JobDetailsModalProps extends Omit<JobActions, 'onDetails'> {
  * A run's details (§11.1, OQ-23): its range, times, days, progress, what it left published
  * and, if any, its error and the date it failed on.
  */
-export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobDetailsModalProps) {
+export function JobDetailsModal({
+  job: current,
+  onClose,
+  onCancel,
+  onRequestAgain,
+}: JobDetailsModalProps) {
+  // Still shown while the modal closes.
+  const job = useLastValue(current);
   const progress = job ? progressOf(job) : null;
   const chain = job ? failedChainOf(job) : null;
   // Falhou, or a Tudo run that kept a chain's failure when it ended Concluído com pendências or
@@ -74,14 +85,7 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
   const failure = job !== null && (job.status === 'FAILED' || chain !== null);
   const perChain = job ? chainNotices(job) : null;
   return (
-    <Modal
-      opened={job !== null}
-      onClose={onClose}
-      title="Detalhes do processamento"
-      centered
-      size="lg"
-      closeButtonProps={{ 'aria-label': 'Fechar' }}
-    >
+    <ActionModal opened={current !== null} onClose={onClose} title="Detalhes do processamento">
       {job && progress && (
         <Stack gap="md">
           <Group justify="space-between">
@@ -98,13 +102,12 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
             <Field label="Finalização">{formatDateTime(job.finished_at)}</Field>
           </SimpleGrid>
           <SimpleGrid cols={3}>
-            <Field label="Total de dias">{formatDays(progress.total)}</Field>
-            <Field label="Dias concluídos">{formatDays(progress.done)}</Field>
+            <Field label="Total de dias">{formatQuantity(progress.total)}</Field>
+            <Field label="Dias concluídos">{formatQuantity(progress.done)}</Field>
             {/* Counts of calendar days from the range and progress_date, never money. */}
-            <Field label="Dias restantes">{formatDays(progress.total - progress.done)}</Field>
+            <Field label="Dias restantes">{formatQuantity(progress.total - progress.done)}</Field>
           </SimpleGrid>
-          {/* CANCELLING is never sent since OQ-46; kept as a safe default. */}
-          {(job.status === 'RUNNING' || job.status === 'CANCELLING') && (
+          {job.status === 'RUNNING' && (
             <Stack gap="xs">
               <Field label="Data em processamento">{formatDate(nextDate(job))}</Field>
               {/* Bar width only. */}
@@ -174,6 +177,6 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
           </Group>
         </Stack>
       )}
-    </Modal>
+    </ActionModal>
   );
 }
