@@ -62,6 +62,15 @@ describe('job status (§10.3, OQ-20)', () => {
     });
   });
 
+  it('OQ-50 item 6: a run that completed with a cancel on record reads by its end status only', () => {
+    // A cancel that arrived during the last date lets the run end COMPLETED (OQ-23 item 6).
+    expect(runBadge(withCancel('COMPLETED', '2026-10-18T13:05:00Z'))).toEqual({
+      label: 'Concluído',
+      color: 'teal',
+    });
+    expect(canCancel(withCancel('COMPLETED', '2026-10-18T13:05:00Z'))).toBe(false);
+  });
+
   it('OQ-23 there are eight statuses: no SUPERSEDED (Obsoleto)', () => {
     expect(jobStatusBadge('SUPERSEDED' as JobStatus)).toBeUndefined();
   });
