@@ -5,7 +5,7 @@ import type { IsoDate, PriceSource, ReferencePriceDay } from '@/api/contract';
 import { formatDate, formatPu, formatRate, UNAVAILABLE } from '@/shared/format';
 
 import { countLabel } from '@/shared/format';
-import type { CalendarRow } from './calendarData';
+import type { CalendarRow } from '../model/calendarData';
 
 export const SOURCE_LABELS: Record<PriceSource, string> = { MANUAL: 'Manual', B3: 'B3' };
 

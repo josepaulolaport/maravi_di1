@@ -4,9 +4,9 @@ import type { ProcessingRequest } from '@/api/contract';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
-import { formatPeriod, formatProgress, shortId } from '../format';
+import { formatPeriod, formatProgress, shortId } from '../model/format';
 import { useCancel } from '../hooks/useProcessing';
-import { runBadge, progressOf } from '../jobStatus';
+import { runBadge, progressOf } from '../model/jobStatus';
 import { Field } from '@/shared/ui/Field';
 
 interface CancelDialogProps {

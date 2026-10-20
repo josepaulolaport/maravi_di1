@@ -11,10 +11,10 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { SCOPE_LABELS } from '@/shared/processing/scope';
 
-import { formatPeriod, formatProgress, shortId } from '../format';
+import { formatPeriod, formatProgress, shortId } from '../model/format';
 import type { useProcessingRequests } from '../hooks/useProcessing';
-import { canCancel, runBadge, progressOf, retryRequests } from '../jobStatus';
-import type { RetryRequest } from '../jobStatus';
+import { canCancel, runBadge, progressOf, retryRequests } from '../model/jobStatus';
+import type { RetryRequest } from '../model/jobStatus';
 
 /**
  * What the user can do with a job, from its row menu or its details modal (OQ-20). Cancel and

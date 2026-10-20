@@ -5,7 +5,7 @@ import { useState } from 'react';
 import type { IsoDate, ReferencePriceDay } from '@/api/contract';
 import { formatDate, formatPu, formatRate } from '@/shared/format';
 
-import { type ChartMode, type PricePoint, toPriceChart } from './calendarData';
+import { type ChartMode, type PricePoint, toPriceChart } from '../model/calendarData';
 
 interface PriceHistoryCardProps {
   items: ReferencePriceDay[];

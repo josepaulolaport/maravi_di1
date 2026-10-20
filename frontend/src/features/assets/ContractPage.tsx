@@ -13,7 +13,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 import { PageHeader } from './components/PageHeader';
 import { PriceCalendar } from './components/PriceCalendar';
-import { calendarRows, calendarWindow, resolveRange } from './components/calendarData';
+import { calendarRows, calendarWindow, resolveRange } from './model/calendarData';
 import { PriceModal } from './components/PriceModal';
 import { PriceHistoryCard } from './components/PriceHistoryCard';
 import { RemovePriceModal } from './components/RemovePriceModal';

@@ -26,7 +26,7 @@ import { SearchInput } from '@/shared/ui/SearchInput';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
 
 import { usePositionsView } from '../hooks/usePortfolio';
-import { type Sort, type SortKey, sortPositions } from './sortPositions';
+import { type Sort, type SortKey, sortPositions } from '../model/sortPositions';
 
 interface Column {
   key: SortKey;

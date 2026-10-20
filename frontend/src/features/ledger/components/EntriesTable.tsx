@@ -23,7 +23,7 @@ import {
 
 import table from '@/shared/ui/table.module.css';
 
-import { ENTRY_TYPE_LABELS, type LedgerEntry, type SortDirection } from '../entries';
+import { ENTRY_TYPE_LABELS, type LedgerEntry, type SortDirection } from '../model/entries';
 
 /**
  * Names a row for screen readers and the delete dialogs, with enough of its figures to tell

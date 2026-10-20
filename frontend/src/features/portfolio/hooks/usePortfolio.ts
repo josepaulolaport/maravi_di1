@@ -8,7 +8,7 @@ import { queryRoots } from '@/api/queryRoots';
 import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
 import { useFutureDateNotice } from '@/shared/ui/futureDate';
 
-import { DEFAULT_SORT, SORT_KEYS, type Sort, type SortKey } from '../components/sortPositions';
+import { DEFAULT_SORT, SORT_KEYS, type Sort, type SortKey } from '../model/sortPositions';
 
 const portfolioKeys = {
   all: queryRoots.portfolio,

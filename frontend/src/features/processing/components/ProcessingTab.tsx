@@ -14,7 +14,7 @@ import { ConfirmProcessingModal } from './ConfirmProcessingModal';
 import { HistoryTable } from './HistoryTable';
 import { JobDetailsModal } from './JobDetailsModal';
 import { isValidRange } from '@/shared/processing/RangeFields';
-import type { RetryRequest } from '../jobStatus';
+import type { RetryRequest } from '../model/jobStatus';
 import { RequestCard } from './RequestCard';
 
 type Dialog = { kind: 'details' | 'cancel'; jobId: string } | null;

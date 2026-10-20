@@ -13,7 +13,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { ContractsTable } from './components/ContractsTable';
 import { countLabel, todayInSaoPaulo } from '@/shared/format';
 import { NewContractModal } from './components/NewContractModal';
-import { lastDay } from './components/calendarData';
+import { lastDay } from './model/calendarData';
 import { PageHeader } from './components/PageHeader';
 import { PriceModal } from './components/PriceModal';
 import { RemovePriceByDateModal } from './components/RemovePriceByDateModal';

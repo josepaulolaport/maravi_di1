@@ -12,7 +12,7 @@ import { useCreateEntry } from '../hooks/useLedger';
 import { splitProblem } from '@/shared/ui/problemMessages';
 import { PastDateInput } from '@/shared/ui/PastDateInput';
 
-import { nowInSaoPaulo, toIsoTime } from './formSupport';
+import { nowInSaoPaulo, toIsoTime } from '../model/time';
 
 export type CashSide = 'DEPOSIT' | 'WITHDRAWAL';
 

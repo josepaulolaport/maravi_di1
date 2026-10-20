@@ -11,7 +11,7 @@ import type { JobStatus } from '@/api/contract';
 import { processingApi } from '@/api/endpoints';
 import { invalidateAfterJobFinished, queryRoots } from '@/api/queryRoots';
 
-import { isActive, isFinal } from '../jobStatus';
+import { isActive, isFinal } from '../model/jobStatus';
 
 const processingKeys = {
   all: queryRoots.processing,

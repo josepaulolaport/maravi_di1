@@ -8,7 +8,7 @@ import { server } from '@/test/msw/server';
 import { renderApp, renderUi } from '@/test/render';
 
 import { ChartTooltip } from './components/CumulativePnlCard';
-import { toChartData } from './components/chartData';
+import { toChartData } from './model/chartData';
 import { INCOMPLETE_NOTE, recordPnlRanges, openCarteira } from './portfolioPage.support';
 
 // The notifications store is module-global: a notice of one test must not stay for the next.

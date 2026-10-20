@@ -9,7 +9,7 @@ import { todayInSaoPaulo } from '@/shared/format';
 import { PriceInput, typedPrice } from '@/shared/ui/PriceInput';
 
 import { useSetReferencePrice } from '../hooks/usePrices';
-import { lastDay } from './calendarData';
+import { lastDay } from '../model/calendarData';
 import { splitProblem } from '@/shared/ui/problemMessages';
 import { PastDateInput } from '@/shared/ui/PastDateInput';
 

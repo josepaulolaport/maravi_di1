@@ -19,7 +19,7 @@ import { CashStrip } from './components/CashStrip';
 import { type DeleteTarget, DeleteDialog } from './components/DeleteDialog';
 import { EntriesTable } from './components/EntriesTable';
 import { NewEntryModal } from './components/NewEntryModal';
-import { toRow } from './entries';
+import { toRow } from './model/entries';
 import { useEntries, useIsSavingEntry, useLedgerFilters } from './hooks/useLedger';
 import { processCashDraft, processDraft } from './processingDraft';
 

@@ -6,7 +6,7 @@ import { addDays, formatDate, formatDateTime } from '@/shared/format';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { SCOPE_LABELS } from '@/shared/processing/scope';
 
-import { formatDays, formatPeriod, shortId } from '../format';
+import { formatDays, formatPeriod, shortId } from '../model/format';
 import {
   canCancel,
   failedChainOf,
@@ -14,7 +14,7 @@ import {
   nextDate,
   progressOf,
   retryRequests,
-} from '../jobStatus';
+} from '../model/jobStatus';
 import { Field } from '@/shared/ui/Field';
 import type { JobActions } from './HistoryTable';
 

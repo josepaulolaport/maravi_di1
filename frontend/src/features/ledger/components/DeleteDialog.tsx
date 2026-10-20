@@ -7,7 +7,7 @@ import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { problemMessages } from '@/shared/ui/problemMessages';
 
 import { entryLabel } from './EntriesTable';
-import type { LedgerEntry } from '../entries';
+import type { LedgerEntry } from '../model/entries';
 import { useDeleteEntries } from '../hooks/useLedger';
 
 export type DeleteTarget =

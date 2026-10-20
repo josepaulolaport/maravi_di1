@@ -13,7 +13,7 @@ import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
 import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
 import { useFutureDateNotice } from '@/shared/ui/futureDate';
 
-import type { LedgerEntry } from '../entries';
+import type { LedgerEntry } from '../model/entries';
 
 // A key's root is the API area it reads (`@/api/queryRoots`). The cash strip's summary and the
 // form's catalogue come from `@/shared/queries`, shared with Carteira and Ativos.
