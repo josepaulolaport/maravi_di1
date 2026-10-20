@@ -211,6 +211,9 @@ async def test_the_search_matches_a_description_ignoring_case_and_accents(
     redemption = await create(
         service, session_factory, cash(amount="-10.00", description="Resgate 10% _cotista_")
     )
+    shouting = await create(
+        service, session_factory, cash(entry_time=time(9, 30), description="APLICAÇÃO EXTRA")
+    )
     await create(service, session_factory, cash(entry_time=time(10, 0)))
     await create(service, session_factory, trade())
 
@@ -227,8 +230,10 @@ async def test_the_search_matches_a_description_ignoring_case_and_accents(
             )
         return {item.entry.id for item in page.items}
 
-    assert await search("APLICACAO") == {opening}
+    assert await search("APLICACAO") == {opening, shouting}
     assert await search("aplicação ini") == {opening}
+    assert await search("acao extra") == {shouting}
+    assert await search("a\x00") == set()  # never sent to PostgreSQL, which refuses NUL
     assert await search("10%") == {redemption}
     assert await search("_cotista_") == {redemption}
     assert await search("%") == {redemption}  # a literal percent sign, not a wildcard

@@ -290,6 +290,18 @@ def test_a_trade_with_a_description_is_refused(client: TestClient) -> None:
     assert error["message"] == "Uma operação não tem descrição."
 
 
+def test_a_nul_character_is_refused_in_a_description_and_finds_nothing(
+    client: TestClient,
+) -> None:
+    response = client.post("/ledger/entries", json={**A_DEPOSIT, "description": "a\u0000b"})
+
+    [error] = assert_problem(response, 422, ("VALIDATION_ERROR", "description"))
+    assert error["message"] == "O texto não pode conter o caractere nulo."
+    listed = client.get("/ledger/entries", params={**RANGE, "search": "a\u0000"})
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"] == []
+
+
 def test_a_description_must_be_a_string(client: TestClient) -> None:
     response = client.post("/ledger/entries", json={**A_DEPOSIT, "description": 7})
 

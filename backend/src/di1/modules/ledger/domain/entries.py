@@ -185,7 +185,12 @@ def validate_cash_movement(draft: EntryDraft, *, today: date) -> Decimal:
     elif abs(amount) >= _CASH_LIMIT:
         errors.append(ErrorDetail.validation("O valor excede o limite permitido.", "cash_amount"))
     description = cash_description(draft)
-    if description is not None and len(description) > DESCRIPTION_MAX_LENGTH:
+    if description is not None and "\x00" in description:
+        # PostgreSQL text cannot hold NUL (OQ-15): malformed input, as in Asset.
+        errors.append(
+            ErrorDetail.validation("O texto não pode conter o caractere nulo.", "description")
+        )
+    elif description is not None and len(description) > DESCRIPTION_MAX_LENGTH:
         errors.append(
             ErrorDetail.validation(
                 f"A descrição deve ter no máximo {DESCRIPTION_MAX_LENGTH} caracteres.",

@@ -455,6 +455,15 @@ def test_a_long_description_is_reported_with_the_other_input_errors() -> None:
     }
 
 
+def test_a_description_with_a_nul_character_is_rejected() -> None:
+    # PostgreSQL text cannot hold NUL (OQ-15): a 422, never a database error.
+    with pytest.raises(DomainError) as error:
+        validate_cash_movement(_cash(description="a\x00b"), today=TODAY)
+
+    assert _errors(error) == {(ErrorCode.VALIDATION_ERROR, "description")}
+    assert error.value.errors[0].message == "O texto não pode conter o caractere nulo."
+
+
 @pytest.mark.parametrize("description", ["Compra", ""])
 def test_a_trade_takes_no_description(description: str) -> None:
     with pytest.raises(DomainError) as error:
