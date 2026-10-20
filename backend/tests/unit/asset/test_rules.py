@@ -1,9 +1,9 @@
 """Asset registration rules (spec §3; schema.sql ``asset.*``; schema.md "Application invariants";
 plan §4.A).
 
-- Codes: a catalogue code (instrument type, asset class) is upper snake case; a product code uses
-  letters, digits and ``_ . / -``; an instrument code is trimmed and upper-cased (user, 2026-10-19)
-  and never empty; each within its column's length.
+- Codes: a product code uses letters, digits and ``_ . / -``; product and instrument codes are
+  stored trimmed and upper-cased (user, 2026-10-19); an instrument code is never empty; each
+  within its column's length.
 - Hierarchy: the futures specification (``asset.futures``) belongs only to a product whose type is
   FUTURE, and such a product always has one; an instrument of a FUTURE product needs a maturity.
 - Futures: face value and multiplier are positive (the multiplier is stored, not applied: OQ-2);
@@ -19,12 +19,12 @@ import pytest
 
 from di1.modules.asset.domain.model import FuturesTerms
 from di1.modules.asset.domain.rules import (
-    normalize_instrument_code,
-    normalize_product_code,
-    validate_catalogue_code,
+    normalize_code,
     validate_futures_for_type,
+    validate_instrument_code,
     validate_maturity,
     validate_name,
+    validate_product_code,
 )
 from di1.shared.errors import ErrorCode, ErrorDetail
 
@@ -46,47 +46,31 @@ class TestInstrumentCode:
         [("DI1F27", "DI1F27"), ("di1f27", "DI1F27"), ("  Di1F28 \t", "DI1F28")],
     )
     def test_is_trimmed_and_upper_cased(self, typed: str, stored: str) -> None:
-        assert normalize_instrument_code(typed) == (stored, ())
+        assert normalize_code(typed) == stored
+        assert validate_instrument_code(normalize_code(typed)) == ()
 
     @pytest.mark.parametrize("typed", ["", "   "])
     def test_blank_is_rejected(self, typed: str) -> None:
-        code, errors = normalize_instrument_code(typed)
+        code = normalize_code(typed)
 
         assert code == ""
-        assert errors == (
+        assert validate_instrument_code(code) == (
             ErrorDetail(ErrorCode.VALIDATION_ERROR, "Informe o código do contrato.", "code"),
         )
 
     def test_a_nul_character_is_rejected(self) -> None:
         # PostgreSQL text cannot hold NUL: malformed input, never a database error.
-        _, errors = normalize_instrument_code("DI1\x00F27")
+        errors = validate_instrument_code(normalize_code("DI1\x00F27"))
 
         assert _fields(errors) == ["code"]
         assert errors[0].code is ErrorCode.VALIDATION_ERROR
 
     def test_fits_its_column_of_128_characters(self) -> None:
-        assert normalize_instrument_code("A" * 128)[1] == ()
-        _, errors = normalize_instrument_code("A" * 129)
+        assert validate_instrument_code("A" * 128) == ()
+        errors = validate_instrument_code("A" * 129)
 
         assert _fields(errors) == ["code"]
         assert errors[0].code is ErrorCode.VALIDATION_ERROR
-
-
-class TestCatalogueCode:
-    @pytest.mark.parametrize("code", ["FUTURE", "INTEREST_RATE_FUTURE", "A1"])
-    def test_accepts_upper_snake_case(self, code: str) -> None:
-        assert validate_catalogue_code(code, max_length=64) == ()
-
-    @pytest.mark.parametrize("code", ["", "future", "1FUTURE", "_FUTURE", "FUT URE", "FUTURE-X"])
-    def test_rejects_anything_else(self, code: str) -> None:
-        errors = validate_catalogue_code(code, max_length=64)
-
-        assert _fields(errors) == ["code"]
-        assert errors[0].code is ErrorCode.VALIDATION_ERROR
-
-    def test_respects_the_column_length(self) -> None:
-        assert validate_catalogue_code("A" * 32, max_length=32) == ()
-        assert _fields(validate_catalogue_code("A" * 33, max_length=32)) == ["code"]
 
 
 class TestProductCode:
@@ -96,7 +80,8 @@ class TestProductCode:
     )
     def test_is_trimmed_and_upper_cased(self, typed: str, stored: str) -> None:
         # OQ-33 item 1: an instrument or product code is trimmed and upper-cased.
-        assert normalize_product_code(typed) == (stored, ())
+        assert validate_product_code(typed) == ()
+        assert normalize_code(typed) == stored
 
     @pytest.mark.parametrize(
         "typed",
@@ -104,10 +89,11 @@ class TestProductCode:
         ["", "   ", "DI 1", "DI1!", "DI1\x00", "A" * 33, "\ufb01", "d\u0131", "\u017f"],
     )
     def test_rejects_anything_else(self, typed: str) -> None:
-        assert _fields(normalize_product_code(typed)[1]) == ["code"]
+        assert _fields(validate_product_code(typed)) == ["code"]
 
     def test_fits_its_column_once_trimmed(self) -> None:
-        assert normalize_product_code(f" {'A' * 32} ") == ("A" * 32, ())
+        assert validate_product_code(f" {'A' * 32} ") == ()
+        assert normalize_code(f" {'A' * 32} ") == "A" * 32
 
 
 class TestName:

@@ -17,10 +17,9 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.asset.application.services.asset_service import AssetService
-from di1.modules.asset.dependencies import asset_service
+from di1.modules.asset.dependencies import build_asset_service
 from di1.modules.asset.domain.model import FuturesTerms
 from di1.modules.asset.infrastructure.persistence.models import AssetClassRow, InstrumentTypeRow
-from di1.modules.asset.infrastructure.persistence.repositories import SqlAssetRepository
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
@@ -116,16 +115,14 @@ class Writer:
         self, asset_class_id: int, code: str, name: str, futures: FuturesTerms | None
     ) -> UUID:
         async with self.uow() as uow:
-            created = await asset_service(uow).create_product(
-                asset_class_id, code, name, futures, uow=uow
+            created = await build_asset_service(uow).create_product(
+                asset_class_id, code, name, futures
             )
             return created.id
 
     async def instrument(self, product_id: UUID, code: str, maturity: date | None) -> UUID:
         async with self.uow() as uow:
-            created = await asset_service(uow).create_instrument(
-                product_id, code, maturity, uow=uow
-            )
+            created = await build_asset_service(uow).create_instrument(product_id, code, maturity)
             return created.id
 
 
@@ -160,6 +157,9 @@ async def reader_session(
 
 
 @pytest.fixture
-def service(reader_session: AsyncSession) -> AssetService:
-    """A read-only service on its own session."""
-    return AssetService(SqlAssetRepository(reader_session))
+async def service(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AssetService]:
+    """A service on its own Unit of Work, used for reads only."""
+    async with SqlAlchemyUnitOfWork(session_factory) as uow:
+        yield build_asset_service(uow)

@@ -3,9 +3,10 @@
 Frozen in W0.3c. Lane B implements `PricingService` over the domain calculator; Ledger and Prices
 call it when an entry is typed as a PU or as a rate. Changes go through the integrator.
 
-`QuoteValidator` is the one validation of a quote typed as a PU or a rate (code-review finding
+`validate_quote` is the one validation of a quote typed as a PU or a rate (code-review finding
 H3): pure and synchronous, so Ledger and Prices run it with their own field names
 (`QuoteFields`) and report every problem of a request at once; the calculator runs the same rule.
+It is the one function exported here: a rule other modules apply, not a service.
 """
 
 from __future__ import annotations
@@ -14,12 +15,11 @@ from datetime import date
 from typing import Protocol
 from uuid import UUID
 
-from di1.modules.pricing.domain.di1 import QuoteFields, QuoteValidator
-from di1.modules.pricing.domain.model import Price
+from di1.modules.pricing.domain.di1 import QuoteFields, validate_quote
+from di1.modules.pricing.domain.model import Price, Quote
 from di1.shared.input_kind import InputKind
-from di1.shared.quotes import Quote
 
-__all__ = ["InputKind", "Price", "PricingService", "Quote", "QuoteFields", "QuoteValidator"]
+__all__ = ["InputKind", "Price", "PricingService", "Quote", "QuoteFields", "validate_quote"]
 
 
 class PricingService(Protocol):

@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import pytest
 
-from di1.shared.calendar import DAYS_PER_YEAR, calendar_days
+from di1.shared.calendar import DAYS_PER_YEAR, ONE_DAY, calendar_days
 
 
 def test_the_dc365_year_has_365_days() -> None:
@@ -31,3 +31,7 @@ def test_the_dc365_year_has_365_days() -> None:
 )
 def test_calendar_days(start: date, end: date, days: int) -> None:
     assert calendar_days(start, end) == days
+
+
+def test_one_day_is_one_calendar_day() -> None:
+    assert date(2026, 12, 31) + ONE_DAY == date(2027, 1, 1)

@@ -14,8 +14,9 @@ from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from di1.modules.asset.dependencies import asset_reader
+from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.asset.public import Instrument
+from tests.fakes.asset import CREATED_AT
 from tests.integration.asset.conftest import Di1Catalogue, Writer
 
 
@@ -24,10 +25,10 @@ async def test_a_di1_contract_has_its_full_descriptor(
 ) -> None:
     f27 = di1.instrument_ids["DI1F27"]
 
-    descriptor = (await asset_reader(reader_session).get_instruments([f27]))[f27]
+    descriptor = (await build_asset_reader(reader_session).get_instruments([f27]))[f27]
 
     assert descriptor.created_at is not None
-    assert replace(descriptor, created_at=None) == Instrument(
+    assert replace(descriptor, created_at=CREATED_AT) == Instrument(
         id=f27,
         code="DI1F27",
         product_id=di1.di1_id,
@@ -38,26 +39,27 @@ async def test_a_di1_contract_has_its_full_descriptor(
         face_value=Decimal("100000"),
         multiplier=Decimal("1"),
         settlement_method="CASH",
+        created_at=CREATED_AT,
     )
 
 
 async def test_an_unknown_instrument_is_absent(
     di1: Di1Catalogue, reader_session: AsyncSession
 ) -> None:
-    assert await asset_reader(reader_session).get_instruments([uuid4()]) == {}
+    assert await build_asset_reader(reader_session).get_instruments([uuid4()]) == {}
 
 
 async def test_many_leaves_unknown_ids_out(di1: Di1Catalogue, reader_session: AsyncSession) -> None:
     f28, f30 = di1.instrument_ids["DI1F28"], di1.instrument_ids["DI1F30"]
 
-    found = await asset_reader(reader_session).get_instruments([f28, uuid4(), f30])
+    found = await build_asset_reader(reader_session).get_instruments([f28, uuid4(), f30])
 
     assert set(found) == {f28, f30}
     assert (found[f28].code, found[f30].maturity_date) == ("DI1F28", date(2030, 1, 2))
 
 
 async def test_many_with_no_ids_is_empty(reader_session: AsyncSession) -> None:
-    assert await asset_reader(reader_session).get_instruments([]) == {}
+    assert await build_asset_reader(reader_session).get_instruments([]) == {}
 
 
 async def test_a_product_that_is_not_a_future_has_no_futures_fields(
@@ -68,7 +70,7 @@ async def test_a_product_that_is_not_a_future_has_no_futures_fields(
     product_id = await writer.product(equity, "PETR", "Opção de PETR4", None)
     instrument_id = await writer.instrument(product_id, "PETRA10", None)
 
-    descriptor = (await asset_reader(reader_session).get_instruments([instrument_id]))[
+    descriptor = (await build_asset_reader(reader_session).get_instruments([instrument_id]))[
         instrument_id
     ]
 

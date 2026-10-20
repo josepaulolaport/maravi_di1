@@ -16,8 +16,8 @@ from di1.modules.processing.application.services.processing import ProcessingSer
 from di1.modules.processing.domain.predecessor import PredecessorState
 from di1.modules.processing.public import ProcessingRequest, ProcessingScope, ProcessingStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
-from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode
+from tests.fakes.clock import FixedClock
 from tests.integration.processing.support import (
     count,
     make_service,

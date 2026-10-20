@@ -14,14 +14,15 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from di1.composition.errors import install_problem_handlers
 from di1.modules.ledger.application.services.ledger_service import LedgerService
-from di1.modules.ledger.presentation.http.router import create_ledger_router
+from di1.modules.ledger.presentation.http.router import create_router
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
+from tests.integration.ledger.conftest import ServiceOn
 from tests.unit.ledger.fakes import DI1F28, DI1F29, DI1V26
 
 PROBLEM_JSON = "application/problem+json"
@@ -132,17 +133,18 @@ RANGE = {"start_date": "2026-10-01", "end_date": "2026-10-18"}
 
 @pytest.fixture
 def client(
-    service: LedgerService, session_factory: async_sessionmaker[AsyncSession]
+    service: ServiceOn, session_factory: async_sessionmaker[AsyncSession]
 ) -> Iterator[TestClient]:
     async def unit_of_work() -> AsyncIterator[UnitOfWork]:
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
             yield uow
 
+    def ledger_service(uow: UnitOfWork = Depends(unit_of_work)) -> LedgerService:  # noqa: B008
+        return service(uow)
+
     app = FastAPI()
     install_problem_handlers(app)
-    app.include_router(
-        create_ledger_router(get_service=lambda: service, get_unit_of_work=unit_of_work)
-    )
+    app.include_router(create_router(get_service=ledger_service))
     with TestClient(app) as test_client:
         yield test_client
 
@@ -457,6 +459,29 @@ def test_the_time_is_required(client: TestClient) -> None:
         client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "time")
     )
     assert errors[0]["message"] == "Campo obrigatório."
+
+
+@pytest.mark.parametrize("quantity", [2**31, -(2**31) - 1])
+def test_a_quantity_outside_the_integer_column_is_refused(
+    client: TestClient, quantity: int
+) -> None:
+    # signed_quantity is INTEGER: out of its range is the domain's 422, never a database error.
+    body = {**FIXTURE_REQUESTS[2], "signed_quantity": quantity, "date": "2026-10-19"}
+
+    errors = assert_problem(
+        client.post("/ledger/entries", json=body),
+        422,
+        ("FUTURE_DATE", "date"),
+        ("VALIDATION_ERROR", "signed_quantity"),
+    )
+    assert errors[1]["message"] == "A quantidade deve ser um inteiro diferente de zero."
+
+
+@pytest.mark.parametrize("field", ["note", "deleted_at"])
+def test_an_unknown_body_field_is_refused(client: TestClient, field: str) -> None:
+    body = {**FIXTURE_REQUESTS[0], field: "x"}
+
+    assert_problem(client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", field))
 
 
 def test_a_cash_entry_with_trade_fields_is_refused(client: TestClient) -> None:
