@@ -1,8 +1,8 @@
 """`ProcessingService`: the user's processing requests (spec §10, interfaces.md "Processing").
 
-Enqueueing records a QUEUED run for exactly [start, end] of one scope (OQ-11, OQ-21) and rings
-the worker's doorbell in the same transaction (OQ-46); overlapping and repeated requests are
-allowed, and the worker takes them FIFO by ``(created_at, id)`` (OQ-5), one at a time.
+Enqueueing records a QUEUED run for exactly [start, end] of one scope (OQ-11, OQ-21) and writes
+its run message in the same transaction; overlapping and repeated requests are allowed, and the
+worker runs them one at a time, its sweep taking them FIFO by ``(created_at, id)`` (OQ-5).
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from datetime import date, timedelta
 from uuid import UUID
 
 from di1.modules.asset.public import AssetReader
-from di1.modules.processing.application.interfaces.doorbell import Doorbell
 from di1.modules.processing.application.interfaces.repositories import (
     ChainHistory,
     DateStatusRepository,
@@ -26,6 +25,7 @@ from di1.modules.processing.application.interfaces.repositories import (
     RequestRepository,
     status_of,
 )
+from di1.modules.processing.application.interfaces.run_messages import RunMessages
 from di1.modules.processing.application.services.cursor import decode_cursor, encode_cursor
 from di1.modules.processing.application.services.predecessor import read_predecessor
 from di1.modules.processing.domain.predecessor import PredecessorState
@@ -153,10 +153,10 @@ class ProcessingService:
         chain_history: ChainHistory,
         assets: AssetReader,
         clock: Clock,
-        doorbell: Doorbell,
+        run_messages: RunMessages,
     ) -> None:
         self._requests = requests
-        self._doorbell = doorbell
+        self._run_messages = run_messages
         self._date_statuses = date_statuses
         self._issues = issues
         self._chain_history = chain_history
@@ -184,11 +184,11 @@ class ProcessingService:
     async def enqueue_range(
         self, scope: ProcessingScope, start_date: date, end_date: date, *, uow: UnitOfWork
     ) -> ProcessingRequest:
-        """Records a QUEUED run for exactly [start, end], rings the worker's doorbell in the same
-        transaction, and commits (OQ-46; interfaces.md "Transaction boundaries" 2)."""
+        """Records a QUEUED run for exactly [start, end], writes its run message in the same
+        transaction, and commits (interfaces.md "Transaction boundaries" 2)."""
         validate_range(start_date, end_date, self._clock.today())
         request = await self._add(scope, start_date, end_date, uow)
-        await self._doorbell.ring(uow=uow)
+        await self._run_messages.publish(request.id, uow=uow)
         await uow.commit()
         logger.info(
             "processing request %s queued: %s %s..%s", request.id, scope, start_date, end_date

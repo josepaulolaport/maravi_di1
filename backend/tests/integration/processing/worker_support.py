@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
@@ -22,6 +22,7 @@ from di1.modules.portfolio.public import (
     PositionsDay,
     PreviousPositionsDay,
 )
+from di1.modules.processing.application.interfaces.run_messages import RUN_MESSAGE_TYPE
 from di1.modules.processing.application.services.chain_history import ChainHistory
 from di1.modules.processing.application.services.processing import ProcessingPreview
 from di1.modules.processing.application.services.run_chains import DayReaders
@@ -33,8 +34,10 @@ from di1.modules.processing.infrastructure.persistence.repositories import (
     SqlDateStatusRepository,
 )
 from di1.modules.processing.infrastructure.persistence.run_store import SqlRunStore
+from di1.modules.processing.presentation.messaging.run_message import RunMessageHandler
 from di1.modules.processing.public import ProcessingRequest, ProcessingScope
 from di1.platform.database.unit_of_work import UnitOfWork, unit_of_work_factory
+from di1.platform.messaging.envelope import Envelope
 from di1.shared.clock import SAO_PAULO
 from tests.integration.processing.support import make_service
 from tests.unit.processing.run_fakes import World
@@ -162,7 +165,7 @@ class Worker:
             await connection.execute(text("CREATE TABLE public.test_writes (day DATE, chain TEXT)"))
 
     async def enqueue(self, scope: str, start: date, end: date) -> UUID:
-        """Queues a request through `ProcessingService`, which rings the doorbell (OQ-46)."""
+        """Queues a request through `ProcessingService`, which publishes its run message."""
         self.clock.advance(1)
         async with self.uow_factory() as uow:
             request = await self.service.enqueue_range(ProcessingScope(scope), start, end, uow=uow)
@@ -178,17 +181,35 @@ class Worker:
         async with self.uow_factory() as uow:
             await self.service.request_cancel(request_id, uow=uow)
 
-    async def ring(self) -> None:
-        """The worker consumes a doorbell: it drains the queue (OQ-46)."""
-        await self.processor.drain()
+    async def deliver(self, request_id: UUID) -> bool:
+        """The worker handles ``request_id``'s run message through the real handler: it takes
+        the oldest QUEUED request and runs it (OQ-50 item 2); `False` when the message starts
+        nothing (nothing QUEUED, or a run is RUNNING)."""
+        run = await RunMessageHandler(self.processor)(
+            Envelope(
+                message_id=uuid4(),
+                message_type=RUN_MESSAGE_TYPE,
+                schema_version=1,
+                created_at=self.clock.now(),
+                payload={"request_id": str(request_id)},
+            )
+        )
+        if run is None:
+            return False
+        await run()
+        return True
+
+    async def sweep(self) -> None:
+        """The worker's periodic sweep: it runs the QUEUED requests, oldest first."""
+        await self.processor.sweep()
 
     async def take_next(self) -> UUID | None:
         """The worker takes the oldest QUEUED request (RUNNING) without running it yet."""
         return await self.processor.take_next()
 
     async def restart(self) -> None:
-        """The worker starts again: it recovers the interrupted run, then drains the queue
-        (OQ-45, OQ-46)."""
+        """The worker starts again: it recovers the interrupted run, then sweeps the queue
+        (OQ-45)."""
         await self.processor.recover_at_startup()
 
     async def run_row(self, request_id: UUID) -> dict[str, Any]:

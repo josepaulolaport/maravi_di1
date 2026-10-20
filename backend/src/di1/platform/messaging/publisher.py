@@ -16,7 +16,7 @@ from aio_pika.exceptions import AMQPError, ChannelInvalidStateError, DeliveryErr
 
 from di1.platform.config import BrokerSettings
 from di1.platform.messaging.envelope import CONTENT_TYPE, Envelope
-from di1.platform.messaging.topology import Topology, declare_exchanges
+from di1.platform.messaging.topology import Topology, declare_exchange
 
 
 class PublishFailedError(Exception):
@@ -44,7 +44,7 @@ class MessagePublisher:
         settings: BrokerSettings,
     ) -> MessagePublisher:
         channel = await connection.channel(publisher_confirms=True, on_return_raises=True)
-        exchange = await declare_exchanges(channel, topology)
+        exchange = await declare_exchange(channel, topology)
         return cls(channel, exchange, timeout=settings.rabbitmq_publish_timeout_seconds)
 
     async def publish(self, envelope: Envelope) -> None:

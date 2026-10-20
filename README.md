@@ -78,22 +78,31 @@ MSW is used only in the frontend's component tests, as static fixtures.
 
 ### Processing: why RabbitMQ
 
-Processing runs only when the user requests it, in one worker process (OQ-45, OQ-46).
+Processing runs only when the user requests it, in one worker process (OQ-45).
 `POST /processing/requests` saves the request as `QUEUED` in PostgreSQL and, in the same
-transaction, an outbox message that only means "there is work". The outbox relay publishes it to
-RabbitMQ with publisher confirms. The worker wakes up on that message, takes the oldest `QUEUED`
-request from PostgreSQL under a row lock, runs it, and repeats until none is left.
+transaction, one outbox message `processing.run` (`{"request_id": ...}`). The outbox relay
+publishes it to RabbitMQ with publisher confirms. On any run message the worker (prefetch 1)
+takes the **oldest** `QUEUED` request by `(created_at, id)` under a row lock, provided no run is
+`RUNNING`, sets it `RUNNING`, acknowledges the message and runs it; with nothing to take it
+acknowledges and does nothing. The message's `request_id` is for the logs only: the relay does not
+guarantee publication order, so FIFO is decided in PostgreSQL (OQ-50 item 2). After every run, and
+every `WORKER_SWEEP_INTERVAL_SECONDS` (5 s), a sweep takes the oldest `QUEUED` request the same
+way, until none is left.
 
 - **PostgreSQL is the source of truth** for the requests, their order and their status;
   RabbitMQ never records what is pending.
-- **RabbitMQ is the push wake-up**: the API answers at once, and processing runs off the request
-  path, in a separate process, with no polling. This is where messaging adds value (challenge §8).
-- **A lost or duplicated message is harmless**: the next message, or the next worker start, drains
-  the `QUEUED` requests; a message that finds nothing to do does nothing.
-- Rejected alternative: PostgreSQL LISTEN/NOTIFY or polling. It removes one service, but it drops
-  the messaging part of the challenge and would rework tested code.
+- **RabbitMQ is the push trigger**: the API answers at once, and a request starts as soon as its
+  message arrives, in a separate process. This is where messaging adds value (challenge §8).
+- **A lost message only delays its run**: the sweep, or the next worker start (recovery, then
+  one sweep), takes every `QUEUED` request. A duplicate takes the next `QUEUED` request or finds
+  none. So there is no inbox, dead-letter queue, delivery limit or redelivery backoff: the
+  worker acknowledges every delivery, and a bad one is logged and dropped.
+- Rejected alternatives: the sweep alone (polling) or PostgreSQL LISTEN/NOTIFY. Either removes a
+  service, but drops the messaging part of the challenge; the sweep is kept only as the safety
+  net.
 
-**Decided, implemented in later PRs on `simplify` (OQ-50, 2026-10-19):** the user asked "Is it
+**Decided (OQ-50, 2026-10-19); the queue part (item 2) is implemented, the rest lands in later
+PRs on `simplify`:** the user asked "Is it
 really necessary? I want to keep the queue" about the doorbell and chose option 1. Each request
 gets its own message, carrying its `request_id`, published through the outbox; the `request_id` is for tracing and logs only.
 The worker consumes one at a time and, on any message, takes the oldest `QUEUED` request by
@@ -213,10 +222,12 @@ rather than refactor before delivery (OQ-47); none changes a business result.
   unused, with no migration to drop them (OQ-45, OQ-46, OQ-47; [docs/schema.md](docs/schema.md)).
   No backend logic sets them or branches on them; the API still exposes `dispatched_at` as null,
   and the frontend keeps the two status labels as a safe default.
-- **Inbox retention is unbatched (M9):** the retention `DELETE` of old `platform.inbox_messages`
-  rows runs as one statement, and `processed_at` has no index; fine at doorbell volume.
-  Goes with the inbox itself under OQ-50 item 2; `inbox_messages`, `portfolio_metrics.aum` and
-  `date_status.*_previous` then stay in the schema unused, like the columns above.
+- **Unused inbox table (OQ-50 item 2):** `platform.inbox_messages` stays in the schema, unused
+  since the worker needs no deduplication, with no migration (A9 excluded), like the columns above.
+- **Orphaned broker objects on an existing RabbitMQ volume (OQ-50 item 2):** the old
+  `processing.run_request` quorum queue, its `.dead-letter` queue and the `di1.dead-letter`
+  exchange are no longer declared but stay on a volume created before this change. They are
+  harmless (nothing publishes to them or consumes them); `docker compose down -v` removes them.
 - **Outbox retention is unbatched:** the retention `DELETE` of `platform.outbox_messages` rows
   published more than `OUTBOX_RETENTION_DAYS` ago runs as one statement, and `published_at` has
   no index; fine at one row per processing request.

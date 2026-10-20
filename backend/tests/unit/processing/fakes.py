@@ -149,13 +149,13 @@ class FakeAssets:
 
 
 @dataclass
-class FakeDoorbell:
-    """Counts the doorbells rung, and in which Unit of Work."""
+class FakeRunMessages:
+    """Records the run messages published: ``(request_id, uow)``."""
 
-    rung: list[object] = field(default_factory=list)
+    published: list[tuple[UUID, object]] = field(default_factory=list)
 
-    async def ring(self, *, uow: UnitOfWork) -> None:
-        self.rung.append(uow)
+    async def publish(self, request_id: UUID, *, uow: UnitOfWork) -> None:
+        self.published.append((request_id, uow))
 
 
 class Harness:
@@ -166,7 +166,7 @@ class Harness:
         self.history = FakeChainHistory()
         self.assets = FakeAssets()
         self.clock = SteppingClock()
-        self.doorbell = FakeDoorbell()
+        self.run_messages = FakeRunMessages()
         self.service = ProcessingService(
             requests=self.requests,
             date_statuses=self.date_statuses,
@@ -174,7 +174,7 @@ class Harness:
             chain_history=self.history,
             assets=self.assets,
             clock=self.clock,
-            doorbell=self.doorbell,
+            run_messages=self.run_messages,
         )
 
     async def enqueue(
