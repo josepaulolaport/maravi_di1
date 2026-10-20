@@ -19,8 +19,8 @@ from di1.modules.portfolio.application.services.repository import (
 from di1.modules.portfolio.domain.valuation import ValuationStatus
 from di1.modules.prices.public import PriceSource
 from di1.modules.processing.public import ChainStatus, DateStatus
-from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode
+from tests.fakes.clock import FixedClock
 from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28, DI1F29
 from tests.unit.portfolio.fakes import (
     FakeAssetReader,

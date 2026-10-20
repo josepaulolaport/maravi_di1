@@ -42,7 +42,7 @@ from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
-from di1.shared.clock import FixedClock
+from tests.fakes.clock import FixedClock
 from tests.integration.asset.conftest import Di1Catalogue, seed_di1
 from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
 

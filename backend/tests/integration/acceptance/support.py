@@ -30,7 +30,8 @@ from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.worker import WorkerResources
-from di1.shared.clock import SAO_PAULO, FixedClock
+from di1.shared.clock import SAO_PAULO
+from tests.fakes.clock import FixedClock
 from tests.integration.databases import fresh_database_url, psycopg_url
 
 BACKEND = Path(__file__).resolve().parents[3]

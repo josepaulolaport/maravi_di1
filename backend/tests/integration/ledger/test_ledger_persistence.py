@@ -27,9 +27,9 @@ from di1.modules.ledger.domain.entries import EntryType
 from di1.modules.ledger.domain.listing import ListOrder
 from di1.modules.ledger.infrastructure.persistence.repositories import SqlLedgerRepository
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
-from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
+from tests.fakes.clock import FixedClock
 from tests.integration.ledger.support import TODAY, cash, fetch, trade
 from tests.unit.ledger.fakes import DI1F29, FakeAssets, FormulaPricing
 

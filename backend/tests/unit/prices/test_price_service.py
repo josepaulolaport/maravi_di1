@@ -15,9 +15,9 @@ from di1.modules.prices.application.services.price_service import PriceReader, P
 from di1.modules.prices.public import PriceReader as PriceReaderPort
 from di1.modules.prices.public import PriceSource
 from di1.modules.pricing.public import Quote
-from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
+from tests.fakes.clock import FixedClock
 from tests.unit.prices.fakes import (
     CALCULATED_PU,
     CALCULATED_RATE,

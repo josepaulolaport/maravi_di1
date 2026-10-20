@@ -18,7 +18,7 @@ from di1.modules.ledger.dependencies import create_ledger_service
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
-from di1.shared.clock import FixedClock
+from tests.fakes.clock import FixedClock
 from tests.integration.databases import fresh_database_url
 from tests.integration.ledger.support import TODAY, seed_contracts
 from tests.unit.ledger.fakes import FakeAssets, FormulaPricing

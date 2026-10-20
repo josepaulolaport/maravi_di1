@@ -20,9 +20,9 @@ from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.domain.entries import EntryDraft, EntryType
 from di1.modules.ledger.domain.listing import ListOrder
 from di1.modules.pricing.public import Price, Quote
-from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
+from tests.fakes.clock import FixedClock
 from tests.unit.ledger.fakes import (
     DI1F28,
     DI1F29,

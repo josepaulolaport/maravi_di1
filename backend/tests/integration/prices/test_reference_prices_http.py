@@ -22,7 +22,7 @@ from di1.modules.prices.dependencies import price_service
 from di1.modules.prices.presentation.http.router import create_router
 from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import UnitOfWork
-from di1.shared.clock import FixedClock
+from tests.fakes.clock import FixedClock
 from tests.integration.databases import psycopg_url
 from tests.integration.prices.conftest import DI1F28, DI1F29, INSTRUMENTS, MATURED, PRODUCT, TODAY
 from tests.unit.prices.fakes import CALCULATED_PU, CALCULATED_RATE, FakeAssets, FakePricing

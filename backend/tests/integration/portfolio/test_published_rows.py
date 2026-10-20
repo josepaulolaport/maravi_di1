@@ -31,7 +31,7 @@ from di1.modules.portfolio.domain.valuation import (
 from di1.modules.portfolio.infrastructure.persistence.repositories import SqlPortfolioRepository
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
-from di1.shared.clock import FixedClock
+from tests.fakes.clock import FixedClock
 from tests.integration.asset.conftest import Di1Catalogue
 from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
 

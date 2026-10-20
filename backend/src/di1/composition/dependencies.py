@@ -44,7 +44,7 @@ async def get_unit_of_work(request: Request) -> AsyncIterator[UnitOfWork]:
 
 
 def get_clock(request: Request) -> Clock:
-    """The app's clock (OQ-14): `SystemClock` in production, a `FixedClock` in tests."""
+    """The app's clock (OQ-14): `SystemClock` in production, a fixed clock in tests."""
     clock: Clock = request.app.state.clock
     return clock
 

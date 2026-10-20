@@ -24,7 +24,7 @@ from di1.modules.prices.infrastructure.persistence.repositories import (
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
-from di1.shared.clock import FixedClock
+from tests.fakes.clock import FixedClock
 from tests.integration.databases import fresh_database_url
 from tests.unit.prices.fakes import FakeAssets, FakePricing
 

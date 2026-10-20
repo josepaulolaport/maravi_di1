@@ -19,9 +19,9 @@ from di1.modules.prices.dependencies import price_service
 from di1.modules.prices.public import ReferencePriceRecord
 from di1.modules.pricing.dependencies import pricing_service
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
-from di1.shared.clock import FixedClock
 from di1.shared.decimals import to_plain
 from di1.shared.input_kind import InputKind
+from tests.fakes.clock import FixedClock
 from tests.integration.prices.conftest import DI1F28, MATURED, TODAY
 
 DAY = date(2026, 10, 16)

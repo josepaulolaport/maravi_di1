@@ -8,11 +8,13 @@ import pytest
 
 from di1.shared.decimals import (
     DECIMAL_CONTEXT,
+    ZERO,
     financial_context,
     fits_places,
     quantize_pu,
     quantize_rate,
     to_plain,
+    unsigned,
 )
 
 
@@ -80,3 +82,18 @@ def test_to_plain_never_uses_exponent_form(value: str, plain: str) -> None:
 def test_a_float_in_financial_arithmetic_raises() -> None:
     with financial_context(), pytest.raises(FloatOperation):
         Decimal(0.1)  # noqa: RUF032  # the float is the mistake under test
+
+
+def test_zero_is_an_unsigned_decimal_zero() -> None:
+    assert Decimal(0) == ZERO
+    assert ZERO.is_signed() is False
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"), [("-0", "0"), ("-0.00", "0.00"), ("-1.5", "-1.5"), ("2", "2")]
+)
+def test_unsigned_drops_only_the_sign_of_a_zero(value: str, expected: str) -> None:
+    result = unsigned(Decimal(value))
+
+    assert str(result) == expected
+    assert result.is_signed() is (expected.startswith("-"))
