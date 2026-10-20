@@ -224,21 +224,18 @@ processing on request (§10).
 ## Known limitations / technical debt
 
 A staff review of the whole repository before delivery found these. The user chose to record them
-rather than refactor before delivery (OQ-47); none changes a business result.
+rather than refactor before delivery (OQ-47); none changes a business result. The later
+`simplify` work (OQ-49, OQ-50) fixed four of the original items: per-module wiring (M10), the
+duplicate `FuturesTerms` (M12), the migrated database per test (M14, now one template database)
+and the sleep-based race tests (M15).
 
 - **Two repositories for `processing.requests` (M1):** `SqlRequestRepository` (HTTP side) and the
   worker's run store both read and write the table.
-- **Import cycle and a thin processing domain (M8):** portfolio and processing import each
-  other's `public.py`, and processing's run state machine lives in `application/`; only the
-  predecessor rule is in its `domain/`.
-- **Wiring differs per module (M10):** routers and dependency providers are not built the same way
-  in every module.
-- **Two `FuturesTerms` classes (M12):** one in asset's domain, one in pricing's.
-- **Timestamp types (M13):** timestamps are not typed the same way across modules.
-- **A migrated database per test (M14):** integration tests migrate a fresh database each, which
-  makes the backend suite slow.
-- **Sleep-based race tests (M15):** some concurrency tests rely on `sleep` for ordering instead of
-  explicit synchronisation, so they are slower and could flake on a loaded machine.
+- **Import cycle between portfolio and processing (M8):** each imports the other's `public.py`:
+  portfolio takes processing's `ChainStatus`, and processing calls portfolio's reader and
+  results writer.
+- **Timestamp types (M13):** timestamps are not typed the same way across modules: some use
+  `UtcDatetime`, others a plain `datetime`.
 - **Unused schema columns and statuses (H5):** `DISPATCHED`, `CANCELLING`, `claim_token`,
   `lease_expires_at`, `attempt_count`, `dispatched_at` and `calculation_state` stay in the schema,
   unused, with no migration to drop them (OQ-45, OQ-46, OQ-47; [docs/schema.md](schema.md)).
