@@ -103,7 +103,7 @@ describe('Processamentos: cancel (§10.2)', () => {
       }),
       ...processingRequests,
     ];
-    await findJobRow('17/10/2026 a 18/10/2026', 'Cancelado', 3_000);
+    await findJobRow('17/10/2026 a 18/10/2026', 'Cancelado');
   }, 10_000);
 
   it('OQ-46 shows the API message when a cancel was already asked', async () => {

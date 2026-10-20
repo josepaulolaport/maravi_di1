@@ -132,9 +132,12 @@ export function jobRow(period: string, status: string) {
   return within(row);
 }
 
-/** `timeout` covers a poll (every 2 s) when the job must move on first. */
-export async function findJobRow(period: string, status: string, timeout = 1_000) {
-  await waitFor(() => jobRow(period, status), { timeout });
+/**
+ * Waits for the row, within the suite's async budget (src/test/setup.ts): the first test of a
+ * file also loads its lazy route, which can take more than a second on a busy machine.
+ */
+export async function findJobRow(period: string, status: string) {
+  await waitFor(() => jobRow(period, status));
   return jobRow(period, status);
 }
 
