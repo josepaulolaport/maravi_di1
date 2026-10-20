@@ -41,6 +41,16 @@ def select_request(request_id: UUID, *, for_update: bool) -> Select[*tuple[Any, 
     return statement.with_for_update() if for_update else statement
 
 
+def select_running() -> Select[*tuple[Any, ...]]:
+    """The oldest RUNNING run; one worker runs one at a time (OQ-45)."""
+    return (
+        select(*COLUMNS)
+        .where(RequestModel.status == "RUNNING")
+        .order_by(RequestModel.created_at, RequestModel.id)
+        .limit(1)
+    )
+
+
 def update_request(request_id: UUID, values: dict[str, Any]) -> Update:
     return update(RequestModel).where(RequestModel.id == request_id).values(**values)
 

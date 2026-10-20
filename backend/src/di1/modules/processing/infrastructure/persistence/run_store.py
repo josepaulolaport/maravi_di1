@@ -57,8 +57,6 @@ def _to_date_status(row: Row[Any]) -> DateStatusRow:
         day=row.date,
         portfolio=_status(row.portfolio),
         cash=_status(row.cash),
-        portfolio_previous=_status(row.portfolio_previous),
-        cash_previous=_status(row.cash_previous),
         portfolio_processed_at=row.portfolio_processed_at,
         cash_processed_at=row.cash_processed_at,
     )
@@ -129,26 +127,13 @@ class SqlRunStore:
         )
         return {row.date: _to_date_status(row) for row in result}
 
-    async def running_dates(
-        self, start_date: date, end_date: date, *, uow: UnitOfWork
-    ) -> Sequence[DateStatusRow]:
-        result = await uow.session.execute(
-            sql.LOCK_RUNNING_DATES, {"start_date": start_date, "end_date": end_date}
-        )
-        return [_to_date_status(row) for row in result]
-
     async def save_date_status(self, row: DateStatusRow, *, uow: UnitOfWork) -> None:
-        if row.empty:
-            await uow.session.execute(sql.DELETE_DATE_STATUS, {"day": row.day})
-            return
         await uow.session.execute(
             sql.UPSERT_DATE_STATUS,
             {
                 "day": row.day,
                 "portfolio": _value(row.portfolio),
                 "cash": _value(row.cash),
-                "portfolio_previous": _value(row.portfolio_previous),
-                "cash_previous": _value(row.cash_previous),
                 "portfolio_processed_at": row.portfolio_processed_at,
                 "cash_processed_at": row.cash_processed_at,
                 "now": self._clock.now(),

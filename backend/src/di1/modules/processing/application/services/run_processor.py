@@ -13,16 +13,20 @@ Each step is its own Unit of Work under a row lock on the run's ``requests`` row
    only while no run is RUNNING, the oldest QUEUED request is locked and set RUNNING with
    ``started_at``; with nothing QUEUED it is a no-op;
 2. per date D, in calendar order, from ``start_date`` or the day after ``progress_date``:
-   a. a short transaction checks the cancel flag (a cancel ends the run CANCELLED between
-      dates) and sets D's live chains RUNNING, keeping ``*_previous``;
+   a. a short transaction checks the cancel flag: a cancel ends the run CANCELLED between
+      dates;
    b. D's transaction locks the ``date_status`` rows of D−1 and D, and runs each live chain in
       its own SAVEPOINT, positions first: the predecessor rule, the calculators, the writer. A
       chain that fails rolls back to its savepoint and gets FAILED on D; the other chain still
       commits (OQ-36, OQ-40). The date's statuses, issues and ``progress_date`` commit with it;
    c. a failure outside every savepoint (a lock timeout, say) rolls back all of D; a short
       transaction then sets D FAILED for every live chain and ends the run FAILED;
-3. the end: COMPLETED, COMPLETED_WITH_ISSUES or FAILED; any date of the range still RUNNING is
-   restored from ``*_previous`` (OQ-26).
+3. the end: COMPLETED, COMPLETED_WITH_ISSUES or FAILED.
+
+No date is ever written RUNNING (OQ-50 item 4): each date goes from its old status straight to
+its new one in its own transaction (2b or 2c), so a run that stops leaves every date as it was or
+as it committed it, and nothing is restored. A read shows "Processando" for the active run's
+current date (`application.services.date_status_reader`).
 
 **A step that cannot be recorded.** A run left RUNNING blocks the queue: no later run is
 taken while it is. An error in D's transaction outside every chain's savepoint always takes
@@ -38,17 +42,16 @@ step 2c, whatever its kind (a lock timeout there fails D). Any other error of th
   nothing (`RunEndedError`);
 - any other error (a bug, a CHECK violation) would recur on every retry and every restart, a
   crash loop with the queue blocked behind the run. It is not retried: the run ends FAILED
-  with ``PROCESSING_ERROR`` in a fresh short transaction (`_abort`), its RUNNING dates restored
-  and the dates it committed kept, and the worker goes on with the queue. Only if that write
+  with ``PROCESSING_ERROR`` in a fresh short transaction (`_abort`), the dates it committed
+  kept, and the worker goes on with the queue. Only if that write
   fails too does the error escape for a restart.
 
-A known limit: a bug that breaks that FAILED end too (in restoring the dates, say) also breaks
-recovery at the worker start, which nothing catches, so it would still loop on restarts; so
-would a non-transient error classified transient (`is_transient` lists its limits).
+A known limit: a bug that breaks that FAILED end too also breaks recovery at the worker start,
+which nothing catches, so it would still loop on restarts; so would a non-transient error
+classified transient (`is_transient` lists its limits).
 
 **Recovery at worker start** (`recover_at_startup`, before the worker consumes): the run left
-RUNNING was interrupted. Its dates left RUNNING are restored from ``*_previous`` (a row left
-empty is deleted); a run with a cancel request then ends CANCELLED before any date, any other is
+RUNNING was interrupted. A run with a cancel request ends CANCELLED before any date; any other is
 run to its end, after ``progress_date`` (from ``start_date`` when NULL). Then the queue is
 swept. DISPATCHED and CANCELLING are never written (OQ-46), so no row holds them.
 """
@@ -144,15 +147,6 @@ def first_failure(failures: list[ChainFailure]) -> ChainFailure:
     return failures[0]
 
 
-async def restore_running_dates(
-    store: RunStore, request: ProcessingRequest, *, uow: UnitOfWork
-) -> None:
-    """Every date of the run's range still RUNNING goes back to its ``*_previous`` status; a
-    row left with no status is deleted (OQ-26)."""
-    for row in await store.running_dates(request.start_date, request.end_date, uow=uow):
-        await store.save_date_status(row.restored(), uow=uow)
-
-
 async def end_run(
     store: RunStore,
     request: ProcessingRequest,
@@ -161,8 +155,7 @@ async def end_run(
     *,
     uow: UnitOfWork,
 ) -> None:
-    """Ends the run, restoring its dates left RUNNING (OQ-26)."""
-    await restore_running_dates(store, request, uow=uow)
+    """Ends the run; its dates keep what they committed (OQ-50 item 4)."""
     await store.save_run(replace(request, status=status, finished_at=now, updated_at=now), uow=uow)
 
 
@@ -227,10 +220,9 @@ class PortfolioRangeProcessor:
 
     async def recover_at_startup(self) -> None:
         """Called once when the worker starts, before it consumes: the run left RUNNING was
-        interrupted. Its dates left RUNNING are restored; a run with a cancel request ends
-        CANCELLED before any date; any other is run to its end here, after ``progress_date``.
-        Then the queue is swept, so a request whose run message was lost runs too. Idempotent: a
-        second call finds nothing to recover or run."""
+        interrupted. A run with a cancel request ends CANCELLED before any date; any other is run
+        to its end here, after ``progress_date``. Then the queue is swept, so a request whose run
+        message was lost runs too. Idempotent: a second call finds nothing to recover or run."""
         async with self._uow_factory() as uow:
             interrupted = await self._store.lock_running_runs(uow=uow)
             now = self._clock.now()
@@ -240,7 +232,6 @@ class PortfolioRangeProcessor:
                     await end_run(self._store, request, ProcessingStatus.CANCELLED, now, uow=uow)
                     logger.info("processing request %s cancelled at worker start", request.id)
                     continue
-                await restore_running_dates(self._store, request, uow=uow)
                 await self._store.save_run(replace(request, updated_at=now), uow=uow)
                 to_resume.append(request.id)
             await uow.commit()
@@ -272,8 +263,8 @@ class PortfolioRangeProcessor:
             await self._abort(request_id, error)
 
     async def _abort(self, request_id: UUID, error: Exception) -> None:
-        """Ends the run FAILED after a non-transient error, in a fresh short transaction: its
-        dates left RUNNING are restored (OQ-26), the dates it committed keep their statuses, and
+        """Ends the run FAILED after a non-transient error, in a fresh short transaction: the
+        dates it committed keep their statuses, and
         a first failure already recorded (an ALL run's chain, OQ-36) is kept; otherwise the
         run's error is ``PROCESSING_ERROR`` with no ``failed_date``, since no date failed. If
         this write fails too, ``error`` escapes and the worker restarts."""
@@ -305,8 +296,8 @@ class PortfolioRangeProcessor:
             request.start_date if request.progress_date is None else request.progress_date + ONE_DAY
         )
         while day <= request.end_date:
-            if not await self._begin_day(request_id, day, alive):
-                return  # cancelled
+            if await self._cancelled(request_id, day):
+                return
             try:
                 alive = await self._process_day(request_id, day, alive)
             except RunEndedError:
@@ -372,10 +363,8 @@ class PortfolioRangeProcessor:
                 chains = tuple(c for c in chains if c not in failed)
             return request, chains
 
-    async def _begin_day(
-        self, request_id: UUID, day: date, alive: tuple[ProcessingChain, ...]
-    ) -> bool:
-        """Step 2a; ``False`` when a cancel was requested: the run then ends CANCELLED."""
+    async def _cancelled(self, request_id: UUID, day: date) -> bool:
+        """Step 2a: ``True`` when a cancel was requested; the run then ends CANCELLED."""
         async with self._uow_factory() as uow:
             request = await self._lock_run(request_id, uow)
             if request.cancel_requested_at is not None:
@@ -384,14 +373,8 @@ class PortfolioRangeProcessor:
                 )
                 await uow.commit()
                 logger.info("processing request %s cancelled before %s", request_id, day)
-                return False
-            rows = await self._store.lock_date_statuses(day, day, uow=uow)
-            row = rows.get(day, DateStatusRow(day=day))
-            for chain in alive:
-                row = row.running(chain)
-            await self._store.save_date_status(row, uow=uow)
-            await uow.commit()
-            return True
+                return True
+            return False
 
     async def _process_day(
         self, request_id: UUID, day: date, alive: tuple[ProcessingChain, ...]

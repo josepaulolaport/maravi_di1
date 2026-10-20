@@ -24,62 +24,33 @@ from di1.platform.database.unit_of_work import UnitOfWork
 
 @dataclass(frozen=True, slots=True)
 class DateStatusRow:
-    """One ``processing.date_status`` row with the ``*_previous`` columns (OQ-26): a chain's
-    status before it went RUNNING, put back if the run ends without committing the date."""
+    """One ``processing.date_status`` row. A date goes from its old status straight to its new
+    one in its own transaction; no ``RUNNING`` is stored and the ``*_previous`` columns are unused
+    (OQ-50 item 4)."""
 
     day: date
     portfolio: ChainStatus | None = None
     cash: ChainStatus | None = None
-    portfolio_previous: ChainStatus | None = None
-    cash_previous: ChainStatus | None = None
     portfolio_processed_at: datetime | None = None
     cash_processed_at: datetime | None = None
 
     def status(self, chain: ProcessingChain) -> ChainStatus | None:
         return self.cash if chain is ProcessingChain.CASH else self.portfolio
 
-    def running(self, chain: ProcessingChain) -> DateStatusRow:
-        """``chain`` set RUNNING, keeping its status in ``*_previous``; a chain already RUNNING
-        (a recovered date) keeps its ``*_previous`` untouched."""
-        if chain is ProcessingChain.CASH:
-            if self.cash is ChainStatus.RUNNING:
-                return self
-            return replace(self, cash=ChainStatus.RUNNING, cash_previous=self.cash)
-        if self.portfolio is ChainStatus.RUNNING:
-            return self
-        return replace(self, portfolio=ChainStatus.RUNNING, portfolio_previous=self.portfolio)
-
     def settled(
         self, chain: ProcessingChain, status: ChainStatus, processed_at: datetime | None
     ) -> DateStatusRow:
-        """``chain`` set to a final status, ``*_previous`` cleared; ``processed_at`` replaces the
-        chain's processing time when given (a FAILED date keeps the old one)."""
+        """``chain`` set to its new status; ``processed_at`` replaces the chain's processing time
+        when given (a FAILED date keeps the old one)."""
         if chain is ProcessingChain.CASH:
             return replace(
-                self,
-                cash=status,
-                cash_previous=None,
-                cash_processed_at=processed_at or self.cash_processed_at,
+                self, cash=status, cash_processed_at=processed_at or self.cash_processed_at
             )
         return replace(
             self,
             portfolio=status,
-            portfolio_previous=None,
             portfolio_processed_at=processed_at or self.portfolio_processed_at,
         )
-
-    def restored(self) -> DateStatusRow:
-        """Every RUNNING chain put back to its ``*_previous`` status (OQ-26)."""
-        row = self
-        if row.cash is ChainStatus.RUNNING:
-            row = replace(row, cash=row.cash_previous, cash_previous=None)
-        if row.portfolio is ChainStatus.RUNNING:
-            row = replace(row, portfolio=row.portfolio_previous, portfolio_previous=None)
-        return row
-
-    @property
-    def empty(self) -> bool:
-        return self.cash is None and self.portfolio is None
 
 
 class RunStore(Protocol):
@@ -122,14 +93,8 @@ class RunStore(Protocol):
         no row is absent."""
         ...
 
-    async def running_dates(
-        self, start_date: date, end_date: date, *, uow: UnitOfWork
-    ) -> Sequence[DateStatusRow]:
-        """The rows of [start_date, end_date] with a chain RUNNING, row-locked."""
-        ...
-
     async def save_date_status(self, row: DateStatusRow, *, uow: UnitOfWork) -> None:
-        """Upserts the row, or deletes it when both chains are without a status (OQ-26)."""
+        """Upserts the row's statuses and processing times."""
         ...
 
     async def replace_issues(

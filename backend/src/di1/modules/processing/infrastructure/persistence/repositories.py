@@ -91,6 +91,11 @@ class SqlRequestRepository:
         row = result.one_or_none()
         return None if row is None else _to_request(row)
 
+    async def get_running(self, *, uow: UnitOfWork) -> ProcessingRequest | None:
+        result = await uow.session.execute(requests_sql.select_running())
+        row = result.first()
+        return None if row is None else _to_request(row)
+
     async def update(self, request: ProcessingRequest, *, uow: UnitOfWork) -> None:
         await uow.session.execute(requests_sql.update_request(request.id, self._mutable(request)))
 
@@ -118,7 +123,7 @@ class SqlRequestRepository:
 
 
 class SqlDateStatusRepository:
-    """Satisfies `DateStatusRepository` and `public.DateStatusReader`."""
+    """Satisfies `DateStatusRepository`: the statuses as stored."""
 
     async def get_date_statuses(
         self, start_date: date, end_date: date, *, uow: UnitOfWork

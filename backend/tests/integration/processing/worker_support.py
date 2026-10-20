@@ -30,6 +30,7 @@ from di1.modules.processing.application.services.run_processor import (
     FINISHED,
     PortfolioRangeProcessor,
 )
+from di1.modules.processing.dependencies import make_date_status_reader
 from di1.modules.processing.infrastructure.persistence.repositories import (
     SqlDateStatusRepository,
 )
@@ -228,6 +229,19 @@ class Worker:
                 text("SELECT date, portfolio, cash FROM processing.date_status ORDER BY date")
             )
             return {row[0]: (row[1], row[2]) for row in result}
+
+    async def displayed(self, start: date, end: date) -> dict[date, tuple[str | None, str | None]]:
+        """``{date: (portfolio, cash)}`` as a read shows them (`DateStatusReader`), "Processando"
+        derived for the active run's current date (OQ-50 item 4)."""
+        async with self.uow_factory() as uow:
+            statuses = await make_date_status_reader().get_date_statuses(start, end, uow=uow)
+        return {
+            day: (
+                None if s.portfolio is None else s.portfolio.value,
+                None if s.cash is None else s.cash.value,
+            )
+            for day, s in statuses.items()
+        }
 
     async def status_rows(self) -> dict[date, dict[str, Any]]:
         async with self.engine.connect() as connection:

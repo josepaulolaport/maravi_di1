@@ -656,8 +656,10 @@ async def test_a_crash_mid_date_resumes_after_progress_date(worker: Worker) -> N
     with pytest.raises(asyncio.CancelledError):
         await worker.sweep()
 
+    # OQ-50 item 4: D2 keeps its old status in the table; a read shows it Processando.
     rows = await worker.status_rows()
-    assert (rows[D2]["cash"], rows[D2]["cash_previous"]) == ("RUNNING", "PROCESSED")
+    assert (rows[D2]["cash"], rows[D2]["cash_previous"]) == ("PROCESSED", None)
+    assert (await worker.displayed(D1, D3))[D2] == (None, "RUNNING")
     assert (await worker.run_row(request_id))["progress_date"] == D1
 
     # The worker starts again: the run's command is sent again and the claim resumes at D2.
@@ -674,7 +676,7 @@ async def test_a_crash_mid_date_resumes_after_progress_date(worker: Worker) -> N
     assert (await worker.run_row(request_id))["status"] == "COMPLETED"
 
 
-async def test_a_cancel_after_a_crash_restores_the_running_date(worker: Worker) -> None:
+async def test_a_cancel_after_a_crash_leaves_the_date_its_old_status(worker: Worker) -> None:
     await seed_statuses(worker.engine, {D0: (None, "PROCESSED"), D1: (None, "PROCESSED")})
     worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("0"))
     request_id = await worker.enqueue("CASH", D1, D2)
@@ -695,7 +697,7 @@ async def test_a_cancel_after_a_crash_restores_the_running_date(worker: Worker) 
     assert (await worker.run_row(request_id))["status"] == "CANCELLED"
 
 
-async def test_a_crash_on_a_new_date_deletes_its_row_when_the_run_ends(worker: Worker) -> None:
+async def test_a_crash_on_a_new_date_writes_no_row(worker: Worker) -> None:
     request_id = await worker.enqueue("CASH", D1, D1)
 
     async def crash(chain: str, day: date) -> None:
@@ -704,12 +706,14 @@ async def test_a_crash_on_a_new_date_deletes_its_row_when_the_run_ends(worker: W
     worker.writer.hook = crash
     with pytest.raises(asyncio.CancelledError):
         await worker.sweep()
-    assert await worker.statuses() == {D1: (None, "RUNNING")}
+    assert await worker.statuses() == {}  # OQ-50 item 4: RUNNING is never stored
+    assert await worker.displayed(D1, D1) == {D1: (None, "RUNNING")}
     await request_cancel(worker, request_id)  # RUNNING keeps its status (OQ-46)
 
     await worker.restart()
 
     assert await worker.statuses() == {}
+    assert await worker.displayed(D1, D1) == {}
 
 
 async def test_recovery_of_an_all_run_keeps_a_failed_chain_stopped(worker: Worker) -> None:
@@ -932,7 +936,7 @@ async def test_a_running_run_with_a_cancel_request_at_the_worker_start_ends_canc
     run = await worker.run_row(request_id)
     assert (run["status"], run["progress_date"]) == ("CANCELLED", None)
     rows = await worker.status_rows()
-    assert (rows[D1]["cash"], rows[D1]["cash_previous"]) == ("PROCESSED", None)  # restored
+    assert (rows[D1]["cash"], rows[D1]["cash_previous"]) == ("PROCESSED", None)  # never changed
     assert D2 not in rows
     assert await worker.writes() == writes_before  # no date processed
 
@@ -1105,7 +1109,7 @@ async def test_a_bug_recording_the_end_is_not_retried_and_ends_the_run_failed(
     assert (await worker.run_row(queued))["status"] == "COMPLETED"
 
 
-async def test_a_bug_recording_a_failed_date_ends_the_run_failed_and_restores_the_date(
+async def test_a_bug_recording_a_failed_date_ends_the_run_failed_and_writes_no_status(
     worker: Worker,
 ) -> None:
     worker.fail_reading_on_date_transaction = 1  # D1 fails outside the chains
@@ -1120,7 +1124,7 @@ async def test_a_bug_recording_a_failed_date_ends_the_run_failed_and_restores_th
         "PROCESSING_ERROR",
         None,
     )
-    assert await worker.statuses() == {}  # D1's RUNNING is restored: it had no status
+    assert await worker.statuses() == {}  # D1 had no status and was never written
 
 
 async def test_a_bug_that_also_blocks_the_failed_end_escapes_for_a_restart(

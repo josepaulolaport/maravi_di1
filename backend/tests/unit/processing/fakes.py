@@ -74,6 +74,10 @@ class InMemoryRequests:
             self.locked.append(request_id)
         return self.rows.get(request_id)
 
+    async def get_running(self, *, uow: UnitOfWork) -> ProcessingRequest | None:
+        running = [r for r in self.rows.values() if r.status is ProcessingStatus.RUNNING]
+        return min(running, key=lambda r: (r.created_at, r.id), default=None)
+
     async def update(self, request: ProcessingRequest, *, uow: UnitOfWork) -> None:
         self.rows[request.id] = request
 

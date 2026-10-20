@@ -71,6 +71,11 @@ class RequestRepository(Protocol):
         """The run, row-locked when ``for_update``."""
         ...
 
+    async def get_running(self, *, uow: UnitOfWork) -> ProcessingRequest | None:
+        """The run the worker is processing, if any (a plain read, no lock); there is at most one
+        (OQ-45)."""
+        ...
+
     async def update(self, request: ProcessingRequest, *, uow: UnitOfWork) -> None:
         """Stores the run's status, timestamps, progress and error."""
         ...

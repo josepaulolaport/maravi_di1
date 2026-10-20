@@ -18,6 +18,9 @@ from di1.modules.processing.application.interfaces.run_messages import (
     RUN_MESSAGE_TYPE as RUN_MESSAGE_TYPE,  # re-exported for the composition
 )
 from di1.modules.processing.application.services.chain_history import ChainHistory
+from di1.modules.processing.application.services.date_status_reader import (
+    RunAwareDateStatusReader,
+)
 from di1.modules.processing.application.services.processing import ProcessingService
 from di1.modules.processing.application.services.run_chains import DayReaders
 from di1.modules.processing.application.services.run_processor import (
@@ -53,8 +56,9 @@ def make_processing_service(
 
 
 def make_date_status_reader() -> DateStatusReader:
-    """Each date's chain statuses for Portfolio's read models (OQ-23, OQ-31)."""
-    return SqlDateStatusRepository()
+    """Each date's chain statuses for Portfolio's read models (OQ-23, OQ-31), "Processando"
+    derived for the active run (OQ-50 item 4)."""
+    return RunAwareDateStatusReader(SqlDateStatusRepository(), SqlRequestRepository())
 
 
 def make_range_processor(
