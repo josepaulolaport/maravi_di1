@@ -178,8 +178,8 @@ services:
   # interrupted run and sweeps the queued requests; then, on each run message, it takes the oldest
   # queued request, and sweeps after every run and every WORKER_SWEEP_INTERVAL_SECONDS (5 s). It
   # must never be scaled. On SIGTERM it stops consuming, cancels the job in progress and closes the
-# broker and the database, each step bounded at 5 s (di1.workers.lifecycle.CLOSE_TIMEOUT_SECONDS),
-# so a stop can take about 20 s: stop_grace_period gives it 30 s before SIGKILL. It exits 1 on
+  # broker and the database, each step bounded at 5 s (di1.workers.lifecycle.CLOSE_TIMEOUT_SECONDS),
+  # so a stop can take about 20 s: stop_grace_period gives it 30 s before SIGKILL. It exits 1 on
   # a startup failure, and when a run cannot record its end (the run would stay RUNNING and hold
   # the queue): the restart's recovery then finishes the run. Its heartbeat is touched every 5 s
   # by a task of its event loop, the startup recovery included, so a fresh file means the

@@ -34,8 +34,10 @@ def _database_url() -> str:
     try:
         return Settings().database_url.get_secret_value()
     except ValidationError as error:
+        # Every setting is validated together; name the invalid ones (never their values).
+        names = ", ".join(sorted({str(e["loc"][0]).upper() for e in error.errors()}))
         raise RuntimeError(
-            "DATABASE_URL is missing or invalid: set it, in the environment or .env, to"
+            f"invalid settings ({names}), in the environment or .env; DATABASE_URL is"
             " postgresql+psycopg://user:password@host:port/db"
         ) from error
 

@@ -61,7 +61,7 @@ async def _abandon[T](
         running.cancel()
         _, pending = await asyncio.wait({running}, timeout=CLOSE_TIMEOUT_SECONDS)
         if pending:
-            logger.warning("a startup step did not stop in %s s", CLOSE_TIMEOUT_SECONDS)
+            logger.warning("a step did not stop in %s s", CLOSE_TIMEOUT_SECONDS)
             return
     if running.cancelled() or running.exception() is not None:
         return

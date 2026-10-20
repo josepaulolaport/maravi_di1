@@ -890,5 +890,5 @@ async def test_a_startup_hook_that_ignores_its_cancellation_does_not_hold_the_st
     stop.set()
 
     await asyncio.wait_for(running, timeout=3)
-    assert "a startup step did not stop in 0.3 s" in caplog.text
+    assert "a step did not stop in 0.3 s" in caplog.text
     finish.set()
