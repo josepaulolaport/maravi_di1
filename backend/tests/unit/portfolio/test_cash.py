@@ -7,6 +7,7 @@ reference prices: the cash chain receives neither, and runs without the position
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from decimal import Decimal
 
@@ -14,69 +15,75 @@ import pytest
 
 from di1.modules.portfolio.domain.cash import CashBalance, calculate_cash_day
 from di1.modules.portfolio.domain.errors import PortfolioError
+from di1.modules.portfolio.domain.trade import Trade
 from di1.shared.decimals import ZERO
 from tests.support.builders import DAY, portfolio_trade
 
 YESTERDAY = DAY - timedelta(days=1)
 
 
-def test_a_buy_lowers_cash_and_a_sell_raises_it_whatever_the_result() -> None:
-    # −(10 × 95000) − (−10 × 94000) = −950000 + 940000 = −10000: a losing round trip.
-    day = calculate_cash_day(
-        CashBalance.zero(YESTERDAY),
-        [
-            portfolio_trade(10, "95000", at="09:00", seq=1),
-            portfolio_trade(-10, "94000", at="10:00", seq=2),
-        ],
-        ZERO,
-        ZERO,
-        DAY,
-    )
+@pytest.mark.parametrize(
+    ("previous", "trades", "deposits", "withdrawals", "trades_cash_flow", "balance"),
+    [
+        # −(10 × 95000) − (−10 × 94000) = −950000 + 940000 = −10000: a losing round trip.
+        pytest.param(
+            "0",
+            (
+                portfolio_trade(10, "95000", at="09:00", seq=1),
+                portfolio_trade(-10, "94000", at="10:00", seq=2),
+            ),
+            "0",
+            "0",
+            "-10000",
+            "-10000",
+            id="a-buy-lowers-cash-a-sell-raises-it",
+        ),
+        # 1000.00 + 200000.25 − 50000.50 = 150999.75
+        pytest.param(
+            "1000.00",
+            (),
+            "200000.25",
+            "50000.50",
+            "0",
+            "150999.75",
+            id="deposits-and-withdrawals",
+        ),
+        # 500000 − (3 × 95000) − (−1 × 96000) + 1000 − 2000 = 500000 − 189000 − 1000 = 310000.
+        pytest.param(
+            "500000",
+            (
+                portfolio_trade(3, "95000", at="09:00", seq=1),
+                portfolio_trade(-1, "96000", at="10:00", seq=2),
+            ),
+            "1000",
+            "2000",
+            "-189000",
+            "310000",
+            id="trades-and-movements-in-one-day",
+        ),
+        # The schema's only bounds are its CHECKs (OQ-14); cash_balance has none.
+        pytest.param(
+            "0", (portfolio_trade(1, "95000"),), "0", "0", "-95000", "-95000", id="may-go-negative"
+        ),
+    ],
+)
+def test_cash_moves_by_the_trades_and_the_day_totals(
+    previous: str,
+    trades: tuple[Trade, ...],
+    deposits: str,
+    withdrawals: str,
+    trades_cash_flow: str,
+    balance: str,
+) -> None:
+    state = CashBalance(as_of=YESTERDAY, balance=Decimal(previous))
 
-    assert day.trades_cash_flow == Decimal("-10000")
-    assert day.cash_balance == Decimal("-10000")
+    day = calculate_cash_day(state, trades, Decimal(deposits), Decimal(withdrawals), DAY)
 
-
-def test_deposits_and_withdrawals_move_cash_from_the_previous_balance() -> None:
-    # 1000.00 + 200000.25 − 50000.50 = 150999.75
-    state = CashBalance(as_of=YESTERDAY, balance=Decimal("1000.00"))
-
-    day = calculate_cash_day(state, [], Decimal("200000.25"), Decimal("50000.50"), DAY)
-
-    assert day.previous_cash_balance == Decimal("1000.00")
-    assert day.deposits == Decimal("200000.25")
-    assert day.withdrawals == Decimal("50000.50")
-    assert day.trades_cash_flow == Decimal("0")
-    assert not day.trades_cash_flow.is_signed()  # never "-0" in JSON
-    assert day.cash_balance == Decimal("150999.75")
-
-
-def test_trades_and_cash_movements_combine_in_one_day() -> None:
-    # 500000 − (3 × 95000) − (−1 × 96000) + 1000 − 2000 = 500000 − 285000 + 96000 − 1000 = 310000.
-    state = CashBalance(as_of=YESTERDAY, balance=Decimal("500000"))
-
-    day = calculate_cash_day(
-        state,
-        [
-            portfolio_trade(3, "95000", at="09:00", seq=1),
-            portfolio_trade(-1, "96000", at="10:00", seq=2),
-        ],
-        Decimal("1000"),
-        Decimal("2000"),
-        DAY,
-    )
-
-    assert day.trades_cash_flow == Decimal("-189000")
-    assert day.cash_balance == Decimal("310000")
-
-
-def test_cash_may_go_negative() -> None:
-    # The schema's only bounds are its CHECKs (OQ-14); cash_balance has none.
-    day = calculate_cash_day(
-        CashBalance.zero(YESTERDAY), [portfolio_trade(1, "95000")], ZERO, ZERO, DAY
-    )
-
-    assert day.cash_balance == Decimal("-95000")
+    assert day.previous_cash_balance == Decimal(previous)
+    assert (day.deposits, day.withdrawals) == (Decimal(deposits), Decimal(withdrawals))
+    assert day.trades_cash_flow == Decimal(trades_cash_flow)
+    assert day.trades_cash_flow < 0 or not day.trades_cash_flow.is_signed()  # never "-0" in JSON
+    assert day.cash_balance == Decimal(balance)
 
 
 @pytest.mark.parametrize(("deposits", "withdrawals"), [("-0.01", "0"), ("0", "-0.01")])
@@ -94,3 +101,12 @@ def test_a_negative_zero_total_is_stored_unsigned() -> None:
     assert not day.deposits.is_signed()
     assert not day.withdrawals.is_signed()
     assert not day.cash_balance.is_signed()
+
+
+@pytest.mark.parametrize("gap", [2, 0])
+def test_a_day_cannot_be_skipped_or_repeated(gap: int) -> None:
+    # Every calendar day is processed (spec §7.1): a day starts from the day before.
+    # The full message names both dates, so a wrong day in it fails the test too.
+    expected = f"the previous state must be of {YESTERDAY}, not {DAY - timedelta(days=gap)}"
+    with pytest.raises(PortfolioError, match=re.escape(expected)):
+        calculate_cash_day(CashBalance.zero(DAY - timedelta(days=gap)), [], ZERO, ZERO, DAY)

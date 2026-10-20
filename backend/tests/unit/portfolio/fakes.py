@@ -2,7 +2,7 @@
 
 ``InMemoryPortfolioRepository`` follows the contract of ``PortfolioRepository``; the integration
 tests check the SQL implementation against the same rules. The readers of other modules are
-faked through their public protocols only.
+faked in ``tests.support.fakes``.
 """
 
 from __future__ import annotations
@@ -43,10 +43,9 @@ class InMemoryPortfolioRepository:
         self.days: dict[date, PublishedPortfolioDay] = {}
         self.positions: dict[date, tuple[PublishedPosition, ...]] = {}
         self.cash: dict[date, CashDay] = {}
-        self.snapshots = 0
 
     async def start_read_snapshot(self) -> None:
-        self.snapshots += 1
+        pass  # one snapshot per transaction: checked against PostgreSQL in the integration tests
 
     async def replace_positions_day(
         self,
