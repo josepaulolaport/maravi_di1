@@ -22,12 +22,17 @@ from di1.modules.prices.dependencies import build_price_service
 from di1.modules.prices.presentation.http.router import create_router
 from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import UnitOfWork
-from tests.fakes.clock import FixedClock
 from tests.integration.prices.conftest import CONTRACTS
 from tests.integration.prices.support import TODAY
 from tests.support.builders import DI1F28, DI1F29, DI1V26
 from tests.support.db import psycopg_url, seed_catalogue
-from tests.unit.prices.fakes import CALCULATED_PU, CALCULATED_RATE, FakeAssets, FakePricing
+from tests.support.fakes import (
+    CALCULATED_PU,
+    CALCULATED_RATE,
+    FakeAssetReader,
+    FakeClock,
+    FakePricing,
+)
 
 # frontend/src/api/mocks/fixtures.ts `referencePrices`, DI1F28 and DI1F29.
 FIXTURES = [
@@ -128,7 +133,7 @@ class Api:
 
 
 @pytest.fixture
-def api(migrated_database_url: str, assets: FakeAssets) -> Iterator[Api]:
+def api(migrated_database_url: str, assets: FakeAssetReader) -> Iterator[Api]:
     _seed(migrated_database_url)
     app = create_app(Settings(database_url=SecretStr(migrated_database_url)))
 
@@ -136,7 +141,7 @@ def api(migrated_database_url: str, assets: FakeAssets) -> Iterator[Api]:
 
     def service(uow: UnitOfWork = uow_dependency) -> PriceService:
         return build_price_service(
-            uow, assets=assets, pricing=FakePricing(), clock=FixedClock(TODAY)
+            uow, assets=assets, pricing=FakePricing(), clock=FakeClock(TODAY)
         )
 
     app.include_router(create_router(get_service=service))

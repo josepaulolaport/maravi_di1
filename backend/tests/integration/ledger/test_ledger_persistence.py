@@ -25,14 +25,14 @@ from di1.modules.ledger.dependencies import build_ledger_reader
 from di1.modules.ledger.domain.entries import EntryType
 from di1.modules.ledger.domain.listing import ListOrder
 from di1.modules.ledger.infrastructure.persistence.repositories import SqlLedgerRepository
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
 from di1.shared.paging import PageParams
-from tests.fakes.clock import FixedClock
-from tests.integration.ledger.support import TODAY, ServiceOn, fetch
+from tests.integration.ledger.support import CONTRACTS, TODAY, ServiceOn, fetch
 from tests.support.builders import DI1F29, draft_cash, draft_trade
-from tests.unit.ledger.fakes import FakeAssets, FormulaPricing
+from tests.support.fakes import FakeAssetReader, FakeClock
 
 Sessions = async_sessionmaker[AsyncSession]
 
@@ -301,15 +301,15 @@ async def test_an_overlapping_deletion_waits_then_deletes_nothing(
             first_holds_its_locks.set()
             await release_first.wait()
 
-    assets = FakeAssets()
+    assets = FakeAssetReader(*CONTRACTS)
 
     def holding(uow: UnitOfWork) -> LedgerService:
         return LedgerService(
             HoldingRepository(uow.session),
             uow,
-            clock=FixedClock(TODAY),
+            clock=FakeClock(TODAY),
             assets=assets,
-            pricing=FormulaPricing(assets),
+            pricing=build_pricing_service(assets),
         )
 
     first = asyncio.create_task(delete(holding, session_factory, a, b))

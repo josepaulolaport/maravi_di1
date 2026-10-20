@@ -23,7 +23,7 @@ from di1.modules.prices.public import PriceSource, ReferencePriceRecord
 from di1.modules.processing.application.services.run_chains import DayReaders
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.input_kind import InputKind
-from tests.fakes.asset import CREATED_AT
+from tests.support.builders import CREATED_AT
 
 CREATED = datetime(2026, 10, 1, tzinfo=UTC)
 

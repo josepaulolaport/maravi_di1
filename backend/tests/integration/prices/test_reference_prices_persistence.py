@@ -23,7 +23,7 @@ from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
 from tests.integration.prices.support import ServiceOn
 from tests.support.builders import DI1F28, DI1F29, DI1V26
-from tests.unit.prices.fakes import CALCULATED_RATE
+from tests.support.fakes import CALCULATED_RATE
 
 DAY = date(2026, 10, 16)
 _COUNT_ID = text("SELECT count(*) FROM prices.reference_prices WHERE id = :id")

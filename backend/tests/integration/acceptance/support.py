@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Any
 
@@ -27,9 +27,8 @@ from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.worker import WorkerResources
-from di1.shared.clock import SAO_PAULO
-from tests.fakes.clock import FixedClock
 from tests.support.db import migrated_database_url, psycopg_url, seed_catalogue_roots
+from tests.support.fakes import FakeClock
 
 PROBLEM_JSON = "application/problem+json"
 
@@ -48,31 +47,15 @@ def expected_rate(pu: str, calendar_days: int) -> str:
     return str(rate.quantize(Decimal("1E-12"), rounding=ROUND_HALF_UP))
 
 
-class TickingClock:
-    """The API's clock: "today" is fixed (OQ-14), and each ``now`` is one second after the last,
-    from noon of that day, so requests queued one after the other keep their order
-    (``created_at``, the queue's FIFO key, OQ-46) as they would in real time."""
-
-    def __init__(self, today: date) -> None:
-        self._today = today
-        self._ticks = 0
-
-    def today(self) -> date:
-        return self._today
-
-    def now(self) -> datetime:
-        self._ticks += 1
-        return datetime.combine(self._today, time(12, 0), tzinfo=SAO_PAULO) + timedelta(
-            seconds=self._ticks
-        )
-
-
 @contextmanager
 def acceptance_app(today: date) -> Iterator[tuple[TestClient, str]]:
     """A client of the real app whose "today" is ``today``, and its database URL."""
     for url in migrated_database_url():
         seed_catalogue_roots(url)
-        app = create_app(Settings(database_url=SecretStr(url)), clock=TickingClock(today))
+        # "today" is fixed (OQ-14); each ``now`` is one second after the last, so requests
+        # queued one after the other keep their order (``created_at``, the FIFO key, OQ-46).
+        clock = FakeClock(today, step=timedelta(seconds=1))
+        app = create_app(Settings(database_url=SecretStr(url)), clock=clock)
         with TestClient(app) as client:
             yield client, url
 
@@ -90,7 +73,7 @@ async def _run_worker(database_url: str, now: datetime) -> None:
     try:
         resources = WorkerResources(
             uow_factory=unit_of_work_factory(create_session_factory(engine)),
-            clock=FixedClock(now.date(), fixed_now=now),
+            clock=FakeClock(now.date(), now=now),
         )
         await processing_startup(resources)
     finally:

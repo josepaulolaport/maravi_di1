@@ -43,7 +43,6 @@ from di1.platform.messaging.worker import (
 from di1.platform.observability.heartbeat import Heartbeat
 from di1.workers import main as worker
 from di1.workers.main import JobFailedError, run_worker
-from tests.fakes.clock import FixedClock
 from tests.integration.platform.conftest import queue_spec
 from tests.integration.platform.support import (
     EFFECT,
@@ -52,6 +51,7 @@ from tests.integration.platform.support import (
     eventually,
     make_envelope,
 )
+from tests.support.fakes import FakeClock
 
 
 @dataclass
@@ -138,7 +138,7 @@ async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
     spec = queue_spec(topology, "test.command")
     handler = _Run()
     given: list[WorkerResources] = []
-    clock = FixedClock(date(2026, 10, 19))
+    clock = FakeClock(date(2026, 10, 19))
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_worker(

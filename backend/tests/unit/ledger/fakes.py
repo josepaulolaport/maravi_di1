@@ -7,16 +7,13 @@ production code, these doubles reach other modules only through their ``public.p
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from di1.modules.asset.public import Instrument
 from di1.modules.ledger.domain.entries import EntryType, LedgerEntry, NewCashMovement, NewTrade
 from di1.modules.ledger.domain.listing import ListOrder, PageRequest
 from di1.modules.pricing.public import Price, Quote
@@ -26,18 +23,12 @@ from di1.shared.decimals import financial_context, quantize_pu, quantize_rate
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 from tests.support.builders import DI1F27, DI1F28, DI1F29, DI1V26
+from tests.support.fakes import FakeAssetReader
 
 
-@dataclass
-class FakeAssets:
-    """`AssetReader` over a fixed catalogue."""
-
-    instruments: dict[UUID, Instrument] = field(
-        default_factory=lambda: {i.id: i for i in (DI1F27, DI1F28, DI1F29, DI1V26)}
-    )
-
-    async def get_instruments(self, instrument_ids: Collection[UUID]) -> Mapping[UUID, Instrument]:
-        return {i: self.instruments[i] for i in instrument_ids if i in self.instruments}
+def contracts() -> FakeAssetReader:
+    """Asset's reader over the catalogue contracts Ledger's tests trade."""
+    return FakeAssetReader(DI1F27, DI1F28, DI1F29, DI1V26)
 
 
 @dataclass
@@ -47,7 +38,7 @@ class FormulaPricing:
     naming Pricing's own parameters (``reference_date``, ``pu``, ``rate``), which Ledger maps to
     its request fields. Only the cases Ledger can reach after its own validation are modelled."""
 
-    assets: FakeAssets
+    assets: FakeAssetReader
     calls: list[tuple[UUID, date, Quote]] = field(default_factory=list)
 
     async def calculate(self, instrument_id: UUID, reference_date: date, quote: Quote) -> Price:
@@ -84,20 +75,6 @@ class FormulaPricing:
 
 def _refused(message: str, field: str) -> DomainError:
     return DomainError(ErrorDetail(ErrorCode.VALIDATION_ERROR, message, field))
-
-
-class FakeUnitOfWork:
-    """Counts commits; has no session."""
-
-    def __init__(self) -> None:
-        self.commits = 0
-
-    @property
-    def session(self) -> AsyncSession:
-        raise AssertionError("the in-memory repository needs no session")
-
-    async def commit(self) -> None:
-        self.commits += 1
 
 
 @dataclass

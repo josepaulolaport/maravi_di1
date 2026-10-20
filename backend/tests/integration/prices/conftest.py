@@ -14,11 +14,10 @@ from di1.modules.prices.dependencies import build_price_service
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.unit_of_work import UnitOfWork
-from tests.fakes.clock import FixedClock
 from tests.integration.prices.support import TODAY, ServiceOn
 from tests.support.builders import DI1F28, DI1F29, DI1V26
 from tests.support.db import seed_catalogue
-from tests.unit.prices.fakes import FakeAssets, FakePricing
+from tests.support.fakes import FakeAssetReader, FakeClock, FakePricing
 
 CONTRACTS = (DI1F28, DI1F29, DI1V26)
 """The catalogue contracts these tests price and store."""
@@ -35,18 +34,18 @@ async def engine(migrated_database_url: str) -> AsyncIterator[AsyncEngine]:
 
 
 @pytest.fixture
-def assets() -> FakeAssets:
-    fake = FakeAssets()
+def assets() -> FakeAssetReader:
+    fake = FakeAssetReader()
     for contract in CONTRACTS:
         fake.add(contract)
     return fake
 
 
 @pytest.fixture
-def service(assets: FakeAssets) -> ServiceOn:
+def service(assets: FakeAssetReader) -> ServiceOn:
     def on(uow: UnitOfWork) -> PriceService:
         return build_price_service(
-            uow, assets=assets, pricing=FakePricing(), clock=FixedClock(TODAY)
+            uow, assets=assets, pricing=FakePricing(), clock=FakeClock(TODAY)
         )
 
     return on

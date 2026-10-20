@@ -21,9 +21,9 @@ from di1.modules.pricing.dependencies import build_pricing_service
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.decimals import to_plain
 from di1.shared.input_kind import InputKind
-from tests.fakes.clock import FixedClock
 from tests.integration.prices.support import TODAY
 from tests.support.builders import DI1F28, DI1V26
+from tests.support.fakes import FakeClock
 
 DAY = date(2026, 10, 16)
 
@@ -32,7 +32,7 @@ async def _set(factory: async_sessionmaker[AsyncSession], **price: object) -> Re
     async with SqlAlchemyUnitOfWork(factory) as uow:
         assets = build_asset_reader(uow.session)
         service = build_price_service(
-            uow, assets=assets, pricing=build_pricing_service(assets), clock=FixedClock(TODAY)
+            uow, assets=assets, pricing=build_pricing_service(assets), clock=FakeClock(TODAY)
         )
         return await service.set_reference_price(**price)  # type: ignore[arg-type]
 

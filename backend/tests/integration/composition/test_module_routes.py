@@ -5,7 +5,7 @@ registered under ``/api`` and reaches its service with the composition's provide
 One smoke path per router, with no fakes: Asset over its repository; Ledger and Prices over Asset's
 reader, the real Pricing and the app's clock (OQ-14); Portfolio's read models on the request's
 fresh Unit of Work (OQ-23, OQ-35); Processing's queue (OQ-29). Each module that reads "today"
-proves it is the app's `FixedClock` (18/10/2026): the system date, 19/10/2026, is refused.
+proves it is the app's `FakeClock` (18/10/2026): the system date, 19/10/2026, is refused.
 
 The expected PU is spec §4.1's ``PU = 100000 / (1 + taxa)^(dias_corridos/365)`` for DI1F28
 (maturity 03/01/2028) at 10% a.a. on 14/10/2026: 446 calendar days,
@@ -26,8 +26,8 @@ from pydantic import SecretStr
 
 from di1.main import create_app
 from di1.platform.config import Settings
-from tests.fakes.clock import FixedClock
 from tests.support.db import seed_catalogue_roots
+from tests.support.fakes import FakeClock
 
 TODAY = date(2026, 10, 18)
 PROBLEM_JSON = "application/problem+json"
@@ -37,7 +37,7 @@ PROBLEM_JSON = "application/problem+json"
 def client(migrated_database_url: str) -> Iterator[TestClient]:
     seed_catalogue_roots(migrated_database_url)
     app = create_app(
-        Settings(database_url=SecretStr(migrated_database_url)), clock=FixedClock(TODAY)
+        Settings(database_url=SecretStr(migrated_database_url)), clock=FakeClock(TODAY)
     )
     with TestClient(app) as test_client:
         yield test_client

@@ -26,10 +26,10 @@ from di1.modules.portfolio.dependencies import (
 from di1.modules.prices.dependencies import build_price_reader
 from di1.modules.processing.dependencies import make_date_status_reader, make_range_processor
 from di1.platform.database.unit_of_work import unit_of_work_factory
-from tests.fakes.clock import FixedClock
 from tests.integration.processing.worker_support import MutableClock
 from tests.support.builders import DI1F29
 from tests.support.db import seed_catalogue
+from tests.support.fakes import FakeClock
 
 D1, D2, D3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
 
@@ -83,7 +83,7 @@ class RealWorker:
                     assets=build_asset_reader(uow.session),
                     prices=build_price_reader(uow.session),
                     date_statuses=make_date_status_reader(),
-                    clock=FixedClock(D3),
+                    clock=FakeClock(D3),
                 ).get_summary(day)
             found.append(summary.aum)
         return found

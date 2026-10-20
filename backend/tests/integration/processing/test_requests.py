@@ -17,7 +17,6 @@ from di1.modules.processing.domain.predecessor import PredecessorState
 from di1.modules.processing.public import ProcessingRequest, ProcessingScope, ProcessingStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.errors import DomainError, ErrorCode
-from tests.fakes.clock import FixedClock
 from tests.integration.processing.support import (
     count,
     make_service,
@@ -26,6 +25,7 @@ from tests.integration.processing.support import (
 )
 from tests.support.builders import DI1F29
 from tests.support.db import seed_catalogue
+from tests.support.fakes import FakeClock
 from tests.unit.processing.fakes import T0, FakeAssets, FakeChainHistory
 
 A, B = date(2026, 10, 1), date(2026, 10, 5)
@@ -238,7 +238,7 @@ async def test_13_10_two_concurrent_cancels_have_one_winner(
 async def test_12_the_history_pages_by_keyset_even_with_equal_creation_times(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    same_instant = make_service(clock=FixedClock(T0.date(), T0))
+    same_instant = make_service(clock=FakeClock(T0.date(), T0))
     created = [await _enqueue(session_factory, same_instant) for _ in range(5)]
     later = await _enqueue(session_factory, make_service())
     expected = [later.id, *sorted((r.id for r in created), reverse=True)]

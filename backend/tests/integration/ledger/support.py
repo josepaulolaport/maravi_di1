@@ -11,8 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.platform.database.unit_of_work import UnitOfWork
+from tests.support.builders import DI1F27, DI1F28, DI1F29, DI1V26
 
 TODAY = date(2026, 10, 18)
+
+CONTRACTS = (DI1F27, DI1F28, DI1F29, DI1V26)
+"""The catalogue contracts Ledger's tests trade."""
 
 ServiceOn = Callable[[UnitOfWork], LedgerService]
 """Builds the service on a Unit of Work, as the composition does per request."""

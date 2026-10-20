@@ -32,8 +32,8 @@ from di1.modules.portfolio.domain.valuation import (
 from di1.modules.portfolio.infrastructure.persistence.repositories import SqlPortfolioRepository
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
-from tests.fakes.clock import FixedClock
 from tests.support.db import Di1Catalogue
+from tests.support.fakes import FakeClock
 from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
 
 COMPLETE = CalculationCompleteness.COMPLETE
@@ -516,7 +516,7 @@ async def _aum(
             assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=statuses,
-            clock=FixedClock(on),
+            clock=FakeClock(on),
         ).get_summary(on)
     return summary.aum
 
@@ -532,7 +532,7 @@ async def test_a_read_keeps_one_snapshot_while_a_date_is_published(
             assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=FakeDateStatusReader(),
-            clock=FixedClock(D),
+            clock=FakeClock(D),
         )
         before = await queries.get_summary(D)
 
@@ -546,7 +546,7 @@ async def test_a_read_keeps_one_snapshot_while_a_date_is_published(
             assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=FakeDateStatusReader(),
-            clock=FixedClock(D),
+            clock=FakeClock(D),
         ).get_summary(D)
 
     assert before.cash.balance is None
@@ -622,7 +622,7 @@ async def test_case_27_the_range_sum_skips_unprocessed_and_failed_days(
             assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=statuses,
-            clock=FixedClock(days[3]),
+            clock=FakeClock(days[3]),
         ).get_pnl_series(days[0], days[3])
 
     assert [p.range_cumulative_pnl for p in points] == [

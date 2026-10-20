@@ -27,8 +27,8 @@ from di1.modules.prices.public import PriceSource
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
-from tests.integration.asset.latest_prices import FakePriceReader, price
 from tests.support.db import Di1Catalogue, seed_di1
+from tests.support.fakes import FakePriceReader, reference_price
 
 # fixtures.ts: instrumentTypes, products[0] and instruments (DI1F27…DI1F30).
 GOLDEN_INSTRUMENT_TYPES = {
@@ -109,7 +109,7 @@ def seeded(settings: Settings) -> Di1Catalogue:
 @pytest.fixture
 def latest_prices() -> FakePriceReader:
     """No instrument has a price unless a test gives it one."""
-    return FakePriceReader()
+    return FakePriceReader(dated_reads=False)
 
 
 @pytest.fixture
@@ -413,9 +413,9 @@ class TestLastReference:
         self, client: TestClient, seeded: Di1Catalogue, latest_prices: FakePriceReader
     ) -> None:
         f28, f29 = seeded.instrument_ids["DI1F28"], seeded.instrument_ids["DI1F29"]
-        latest_prices.by_asset[f28] = price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995")
-        latest_prices.by_asset[f29] = price(
-            f29, date(2026, 10, 15), "82057.00", None, source=PriceSource.B3
+        latest_prices.add(reference_price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995"))
+        latest_prices.add(
+            reference_price(f29, date(2026, 10, 15), "82057.00", None, source=PriceSource.B3)
         )
 
         items = client.get("/instruments").json()["items"]
@@ -442,7 +442,7 @@ class TestLastReference:
     ) -> None:
         client.get("/instruments", params={"search": "f2"})
 
-        assert latest_prices.calls == [
+        assert latest_prices.latest_calls == [
             frozenset(seeded.instrument_ids[c] for c in ("DI1F27", "DI1F28", "DI1F29"))
         ]
 
@@ -450,13 +450,13 @@ class TestLastReference:
         self, client: TestClient, latest_prices: FakePriceReader
     ) -> None:
         assert client.get("/instruments", params={"search": "x"}).json() == {"items": []}
-        assert latest_prices.calls == []
+        assert latest_prices.latest_calls == []
 
     def test_one_instrument_carries_its_latest_price(
         self, client: TestClient, seeded: Di1Catalogue, latest_prices: FakePriceReader
     ) -> None:
         f28 = seeded.instrument_ids["DI1F28"]
-        latest_prices.by_asset[f28] = price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995")
+        latest_prices.add(reference_price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995"))
 
         body = client.get(f"/instruments/{f28}").json()
 
@@ -466,13 +466,13 @@ class TestLastReference:
             "rate": "0.0995",
             "source": "MANUAL",
         }
-        assert latest_prices.calls == [frozenset({f28})]
+        assert latest_prices.latest_calls == [frozenset({f28})]
 
     def test_an_unknown_instrument_is_404_without_reading_prices(
         self, client: TestClient, latest_prices: FakePriceReader
     ) -> None:
         assert client.get(f"/instruments/{uuid4()}").status_code == 404
-        assert latest_prices.calls == []
+        assert latest_prices.latest_calls == []
 
     def test_a_new_instrument_has_none(self, client: TestClient, seeded: Di1Catalogue) -> None:
         body = {"product_id": str(seeded.di1_id), "code": "DI1N27", "maturity_date": "2027-07-01"}
@@ -483,7 +483,7 @@ class TestLastReference:
         self, client: TestClient, seeded: Di1Catalogue, latest_prices: FakePriceReader
     ) -> None:
         f30 = seeded.instrument_ids["DI1F30"]
-        latest_prices.by_asset[f30] = price(f30, date(2026, 10, 16), "7.5E+4", "1E-1")
+        latest_prices.add(reference_price(f30, date(2026, 10, 16), "7.5E+4", "1E-1"))
 
         reference = client.get(f"/instruments/{f30}").json()["last_reference"]
 
