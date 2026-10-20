@@ -11,6 +11,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from di1.modules.asset.dependencies import asset_reader
@@ -98,8 +99,6 @@ class Publisher:
         rows: list[tuple[PositionDay, AssetValuation, AssetPnLResult]],
         market_value: str | None,
         pnl: PortfolioPnLResult,
-        *,
-        cash_processed: bool = True,
     ) -> None:
         valuation = PortfolioValuation(
             date=on,
@@ -116,18 +115,15 @@ class Publisher:
                 {p.asset_id: r for p, _, r in rows},
                 pnl,
                 uow=uow,
-                other_chain_processed=cash_processed,
             )
             await uow.commit()
 
-    async def cash(self, on: date, balance: str, *, positions_processed: bool = True) -> None:
+    async def cash(self, on: date, balance: str) -> None:
         day = CashDay(
             on, Decimal("0"), Decimal("0"), Decimal(balance), Decimal("0"), Decimal(balance)
         )
         async with SqlAlchemyUnitOfWork(self._session_factory) as uow:
-            await results_writer().write_cash_day(
-                day, uow=uow, other_chain_processed=positions_processed
-            )
+            await results_writer().write_cash_day(day, uow=uow)
             await uow.commit()
 
 
@@ -181,7 +177,6 @@ async def test_a_positions_day_reads_back_exactly(
     assert rows[f29].pnl_status is MISSING
     assert day is not None
     assert day.positions_market_value is None
-    assert day.aum is None
     assert day.valuation_status is MISSING
 
 
@@ -273,27 +268,27 @@ class TestAum:
 
 
 class TestAumNeedsTheOtherChainProcessed:
-    """OQ-38: a chain's write nulls AUM when the other chain of the date is not processed."""
+    """OQ-38, OQ-40: AUM is computed on read and is null unless both chains of the date are
+    processed, whatever rows remain from earlier runs."""
 
-    async def test_positions_written_while_cash_is_not_processed(
+    async def test_positions_published_while_cash_is_not_processed(
         self,
         di1: Di1Catalogue,
         publish: Publisher,
         session_factory: async_sessionmaker[AsyncSession],
     ) -> None:
         f28, _ = _ids(di1)
-        await publish.cash(D, "100", positions_processed=False)
+        await publish.cash(D, "100")
         await publish.positions(
             D,
             [(_position(f28, 10), _valued(f28, "1", ValuationStatus.COMPLETE), _pnl("0", "0"))],
             "1",
             _portfolio_pnl("0", "0"),
-            cash_processed=False,
         )
 
-        assert await _aum(session_factory, D) is None
+        assert await _aum(session_factory, D, cash=ChainStatus.FAILED) is None
 
-    async def test_cash_written_while_positions_are_not_processed(
+    async def test_cash_published_while_positions_are_not_processed(
         self,
         di1: Di1Catalogue,
         publish: Publisher,
@@ -307,11 +302,13 @@ class TestAumNeedsTheOtherChainProcessed:
             "1",
             _portfolio_pnl("0", "0"),
         )
-        await publish.cash(D, "100", positions_processed=False)
+        await publish.cash(D, "100")
 
-        assert await _aum(session_factory, D) is None
+        assert await _aum(session_factory, D, positions=ChainStatus.FAILED) is None
+        assert await _aum(session_factory, D, positions=ChainStatus.RUNNING) is None
+        assert await _aum(session_factory, D, positions=None) is None
 
-    async def test_cash_written_while_positions_are_processed(
+    async def test_both_chains_processed(
         self,
         di1: Di1Catalogue,
         publish: Publisher,
@@ -323,11 +320,35 @@ class TestAumNeedsTheOtherChainProcessed:
             [(_position(f28, 10), _valued(f28, "1", ValuationStatus.COMPLETE), _pnl("0", "0"))],
             "1",
             _portfolio_pnl("0", "0"),
-            cash_processed=False,
         )
-        await publish.cash(D, "100", positions_processed=True)
+        await publish.cash(D, "100")
 
-        assert await _aum(session_factory, D) == Decimal("101")
+        assert await _aum(
+            session_factory, D, positions=ChainStatus.PROCESSED_WITH_ISSUES
+        ) == Decimal("101")
+
+    async def test_the_aum_column_is_no_longer_written(
+        self,
+        di1: Di1Catalogue,
+        publish: Publisher,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
+        # A2: AUM is computed on read; the kept ``aum`` column stays NULL (no migration).
+        f28, _ = _ids(di1)
+        await publish.cash(D, "100")
+        await publish.positions(
+            D,
+            [(_position(f28, 10), _valued(f28, "1", ValuationStatus.COMPLETE), _pnl("0", "0"))],
+            "1",
+            _portfolio_pnl("0", "0"),
+        )
+
+        async with session_factory() as session:
+            stored = await session.scalar(
+                text("SELECT aum FROM portfolio.portfolio_metrics WHERE metric_date = :d"),
+                {"d": D},
+            )
+        assert stored is None
 
 
 async def test_rewriting_a_date_deletes_assets_no_longer_expected(
@@ -463,18 +484,41 @@ async def test_the_writer_never_commits(
         await results_writer().write_cash_day(
             CashDay(D, Decimal("0"), Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1")),
             uow=uow,
-            other_chain_processed=True,
         )
 
     async with session_factory() as session:
         assert await SqlPortfolioRepository(session).get_cash(D) is None
 
 
-async def _aum(session_factory: async_sessionmaker[AsyncSession], on: date) -> Decimal | None:
-    async with session_factory() as session:
-        day = await SqlPortfolioRepository(session).get_portfolio_day(on)
-    assert day is not None
-    return day.aum
+async def _aum(
+    session_factory: async_sessionmaker[AsyncSession],
+    on: date,
+    *,
+    cash: ChainStatus | None = ChainStatus.PROCESSED,
+    positions: ChainStatus | None = ChainStatus.PROCESSED,
+) -> Decimal | None:
+    """The summary's AUM of ``on``, read as the Carteira reads it, with the given statuses."""
+    at = datetime(2026, 10, 15, 21, 0, tzinfo=UTC)
+    statuses = FakeDateStatusReader(
+        {
+            on: DateStatus(
+                date=on,
+                portfolio=positions,
+                cash=cash,
+                portfolio_processed_at=None if positions is None else at,
+                cash_processed_at=None if cash is None else at,
+            )
+        }
+    )
+    async with SqlAlchemyUnitOfWork(session_factory) as uow:
+        summary = await portfolio_query_service(
+            uow,
+            assets=asset_reader(uow.session),
+            prices=FakePriceReader(),
+            date_statuses=statuses,
+            clock=FixedClock(on),
+        ).get_summary(on)
+    return summary.aum
 
 
 async def test_a_read_keeps_one_snapshot_while_a_date_is_published(
@@ -543,7 +587,7 @@ async def test_a_position_closed_on_d_leaves_d_plus_one_with_no_asset(
         assert await repository.get_positions(next_day) == []
     assert day is not None
     assert day.positions_market_value == Decimal("0")
-    assert day.aum == Decimal("250")
+    assert await _aum(session_factory, next_day) == Decimal("250")
     assert (day.position_pnl, day.trades_pnl, day.daily_pnl) == (Decimal("0"),) * 3
     assert day.cumulative_pnl == Decimal("3")
     assert day.valuation_status is COMPLETE

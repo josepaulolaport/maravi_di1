@@ -86,6 +86,13 @@ export interface PositionRow {
   reference_source: PriceSource | null;
   reference_pu: Decimal | null;
   reference_rate: Decimal | null;
+  /**
+   * The current preferred price of the date or of the day before was registered after the date's
+   * positions chain was processed, so the figures beside it come from another price: the date
+   * needs reprocessing (OQ-50 item 3). False with no processing time, or when neither price is
+   * read (both dates after maturity).
+   */
+  reference_price_changed: boolean;
   /** Market value, Q × reference PU (§8.2). */
   financial_total: Decimal | null;
   position_pnl: Decimal | null;

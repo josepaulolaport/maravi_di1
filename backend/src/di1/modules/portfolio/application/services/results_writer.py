@@ -22,9 +22,8 @@ class PortfolioResultsWriter:
     """Public `PortfolioResultsWriter`.
 
     ``repository_for`` builds the repository on the caller's Unit of Work, so the rows land in
-    Processing's transaction for the date. ``other_chain_processed`` is Processing's answer
-    for the other chain of the date (PROCESSED or PROCESSED_WITH_ISSUES); when ``False`` the
-    written AUM is null (OQ-38).
+    Processing's transaction for the date. AUM is not written: the read models compute it
+    (OQ-21, OQ-38).
     """
 
     def __init__(self, repository_for: Callable[[UnitOfWork], PortfolioRepository]) -> None:
@@ -38,7 +37,6 @@ class PortfolioResultsWriter:
         pnl: PortfolioPnLResult,
         *,
         uow: UnitOfWork,
-        other_chain_processed: bool,
     ) -> None:
         if valuation.date != day.date:
             raise ValueError(f"the valuation is of {valuation.date}, the positions of {day.date}")
@@ -74,7 +72,6 @@ class PortfolioResultsWriter:
         portfolio_day = PublishedPortfolioDay(
             date=day.date,
             positions_market_value=valuation.positions_market_value,
-            aum=None,  # recomputed by the repository from the date's published cash
             position_pnl=pnl.position_pnl,
             trades_pnl=pnl.trades_pnl,
             daily_pnl=pnl.daily_pnl,
@@ -86,13 +83,7 @@ class PortfolioResultsWriter:
             ),
             pnl_status=pnl.status,
         )
-        await self._repository_for(uow).replace_positions_day(
-            portfolio_day, positions, cash_processed=other_chain_processed
-        )
+        await self._repository_for(uow).replace_positions_day(portfolio_day, positions)
 
-    async def write_cash_day(
-        self, day: CashDay, *, uow: UnitOfWork, other_chain_processed: bool
-    ) -> None:
-        await self._repository_for(uow).upsert_cash_day(
-            day, positions_processed=other_chain_processed
-        )
+    async def write_cash_day(self, day: CashDay, *, uow: UnitOfWork) -> None:
+        await self._repository_for(uow).upsert_cash_day(day)

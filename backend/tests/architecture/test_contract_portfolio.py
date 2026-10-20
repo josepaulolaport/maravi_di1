@@ -84,6 +84,7 @@ def test_a_position_row_traces_its_price_by_source_not_id() -> None:
         "reference_source",
         "reference_pu",
         "reference_rate",
+        "reference_price_changed",
         "financial_total",
         "position_pnl",
         "trades_pnl",
@@ -97,26 +98,10 @@ def test_the_writer_publishes_one_date_per_chain() -> None:
     positions = inspect.signature(PortfolioResultsWriter.write_positions_day)
     cash = inspect.signature(PortfolioResultsWriter.write_cash_day)
 
-    assert list(positions.parameters) == [
-        "self",
-        "day",
-        "valuation",
-        "asset_pnl",
-        "pnl",
-        "uow",
-        "other_chain_processed",
-    ]
-    assert list(cash.parameters) == ["self", "day", "uow", "other_chain_processed"]
+    assert list(positions.parameters) == ["self", "day", "valuation", "asset_pnl", "pnl", "uow"]
+    assert list(cash.parameters) == ["self", "day", "uow"]
     for signature in (positions, cash):
         assert signature.parameters["uow"].kind is inspect.Parameter.KEYWORD_ONLY
-        # OQ-38: Processing says whether the other chain of the date is processed.
-        assert signature.parameters["other_chain_processed"].kind is inspect.Parameter.KEYWORD_ONLY
-        assert signature.parameters["other_chain_processed"].default is inspect.Parameter.empty
-    for method in (
-        PortfolioResultsWriter.write_positions_day,
-        PortfolioResultsWriter.write_cash_day,
-    ):
-        assert typing.get_type_hints(method)["other_chain_processed"] is bool
     assert not hasattr(PortfolioResultsWriter, "publish_range")
 
 

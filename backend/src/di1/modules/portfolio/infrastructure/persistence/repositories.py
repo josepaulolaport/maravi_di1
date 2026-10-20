@@ -27,7 +27,6 @@ def _portfolio_day(row: PortfolioMetricsRow) -> PublishedPortfolioDay:
     return PublishedPortfolioDay(
         date=row.metric_date,
         positions_market_value=row.positions_market_value,
-        aum=row.aum,
         position_pnl=row.position_pnl,
         trades_pnl=row.trades_pnl,
         daily_pnl=row.daily_pnl,
@@ -76,8 +75,6 @@ class SqlPortfolioRepository:
         self,
         day: PublishedPortfolioDay,
         positions: Sequence[PublishedPosition],
-        *,
-        cash_processed: bool,
     ) -> None:
         await self._session.execute(published.delete_positions(day.date))
         if positions:
@@ -113,7 +110,6 @@ class SqlPortfolioRepository:
                 {
                     "metric_date": day.date,
                     "positions_market_value": day.positions_market_value,
-                    "aum": None,
                     "position_pnl": day.position_pnl,
                     "trades_pnl": day.trades_pnl,
                     "daily_pnl": day.daily_pnl,
@@ -123,11 +119,8 @@ class SqlPortfolioRepository:
                 }
             )
         )
-        await self._session.execute(
-            published.recompute_aum(day.date, other_chain_processed=cash_processed)
-        )
 
-    async def upsert_cash_day(self, cash: CashDay, *, positions_processed: bool) -> None:
+    async def upsert_cash_day(self, cash: CashDay) -> None:
         await self._session.execute(
             published.upsert_cash_balance(
                 {
@@ -138,9 +131,6 @@ class SqlPortfolioRepository:
                     "withdrawals": cash.withdrawals,
                 }
             )
-        )
-        await self._session.execute(
-            published.recompute_aum(cash.date, other_chain_processed=positions_processed)
         )
 
     async def get_cash(self, on: date) -> CashDay | None:
