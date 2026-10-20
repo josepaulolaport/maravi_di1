@@ -5,48 +5,23 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import AsyncIterator, Iterator
-from pathlib import Path
+from collections.abc import AsyncIterator
 
 import pytest
 from aio_pika.abc import AbstractRobustConnection
-from alembic import command
-from alembic.config import Config
 from pydantic import SecretStr
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from di1.platform.config import BrokerSettings, Settings
 from di1.platform.database.engine import create_engine
-from di1.platform.database.session import create_session_factory
 from di1.platform.messaging.connection import connect
 from di1.platform.messaging.topology import QueueSpec, Topology
-from tests.integration.databases import fresh_database_url
 from tests.integration.platform.support import CREATE_EFFECTS
-
-BACKEND = Path(__file__).resolve().parents[3]
-
-
-@pytest.fixture
-def database_url() -> Iterator[str]:
-    yield from fresh_database_url()
-
-
-@pytest.fixture
-def migrated_database_url(database_url: str) -> str:
-    config = Config(str(BACKEND / "alembic.ini"))
-    config.set_main_option("script_location", str(BACKEND / "migrations"))
-    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    command.upgrade(config, "head")
-    return database_url
-
-
-@pytest.fixture
-def settings(migrated_database_url: str) -> Settings:
-    return Settings(database_url=SecretStr(migrated_database_url))
 
 
 @pytest.fixture
 async def engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
+    """The test's database, with the handlers' ``public.test_effects`` table."""
     engine = create_engine(settings)
     async with engine.begin() as connection:
         await connection.execute(CREATE_EFFECTS)
@@ -54,11 +29,6 @@ async def engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
         yield engine
     finally:
         await engine.dispose()
-
-
-@pytest.fixture
-def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return create_session_factory(engine)
 
 
 @pytest.fixture

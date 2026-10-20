@@ -18,31 +18,20 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import date
-from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
-from alembic import command
-from alembic.config import Config
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from di1.main import create_app
 from di1.platform.config import Settings
 from tests.fakes.clock import FixedClock
-from tests.integration.databases import fresh_database_url, psycopg_url
+from tests.support.db import psycopg_url
 
-BACKEND = Path(__file__).resolve().parents[3]
 TODAY = date(2026, 10, 18)
 PROBLEM_JSON = "application/problem+json"
-
-
-def _migrate(database_url: str) -> None:
-    config = Config(str(BACKEND / "alembic.ini"))
-    config.set_main_option("script_location", str(BACKEND / "migrations"))
-    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    command.upgrade(config, "head")
 
 
 def _seed_catalogue_roots(database_url: str) -> None:
@@ -58,13 +47,13 @@ def _seed_catalogue_roots(database_url: str) -> None:
 
 
 @pytest.fixture
-def client() -> Iterator[TestClient]:
-    for url in fresh_database_url():
-        _migrate(url)
-        _seed_catalogue_roots(url)
-        app = create_app(Settings(database_url=SecretStr(url)), clock=FixedClock(TODAY))
-        with TestClient(app) as test_client:
-            yield test_client
+def client(migrated_database_url: str) -> Iterator[TestClient]:
+    _seed_catalogue_roots(migrated_database_url)
+    app = create_app(
+        Settings(database_url=SecretStr(migrated_database_url)), clock=FixedClock(TODAY)
+    )
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def _create_di1f28(client: TestClient) -> str:

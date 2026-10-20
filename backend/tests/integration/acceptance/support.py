@@ -14,12 +14,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal, localcontext
-from pathlib import Path
 from typing import Any
 
 import psycopg
-from alembic import command
-from alembic.config import Config
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
@@ -32,9 +29,8 @@ from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.worker import WorkerResources
 from di1.shared.clock import SAO_PAULO
 from tests.fakes.clock import FixedClock
-from tests.integration.databases import fresh_database_url, psycopg_url
+from tests.support.db import migrated_database_url, psycopg_url
 
-BACKEND = Path(__file__).resolve().parents[3]
 PROBLEM_JSON = "application/problem+json"
 
 
@@ -74,8 +70,7 @@ class TickingClock:
 @contextmanager
 def acceptance_app(today: date) -> Iterator[tuple[TestClient, str]]:
     """A client of the real app whose "today" is ``today``, and its database URL."""
-    for url in fresh_database_url():
-        _migrate(url)
+    for url in migrated_database_url():
         _seed_catalogue_roots(url)
         app = create_app(Settings(database_url=SecretStr(url)), clock=TickingClock(today))
         with TestClient(app) as client:
@@ -214,13 +209,6 @@ def problem(response: Any, status: int) -> list[tuple[str, str | None]]:
     assert body["status"] == status
     assert all(e["message"] for e in body["errors"])  # a pt-BR message for every error
     return [(e["code"], e["field"]) for e in body["errors"]]
-
-
-def _migrate(database_url: str) -> None:
-    config = Config(str(BACKEND / "alembic.ini"))
-    config.set_main_option("script_location", str(BACKEND / "migrations"))
-    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    command.upgrade(config, "head")
 
 
 def _seed_catalogue_roots(database_url: str) -> None:

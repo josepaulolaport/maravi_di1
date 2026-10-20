@@ -7,14 +7,12 @@ The catalogue is lane A's seed (``tests/integration/asset/conftest.py``): DI1 wi
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,18 +23,7 @@ from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.shared.errors import DomainError, ErrorCode
-from tests.integration.asset.conftest import BACKEND, Di1Catalogue, Writer, seed_di1
-from tests.integration.databases import fresh_database_url
-
-
-@pytest.fixture
-def migrated_database_url() -> Iterator[str]:
-    for url in fresh_database_url():
-        config = Config(str(BACKEND / "alembic.ini"))
-        config.set_main_option("script_location", str(BACKEND / "migrations"))
-        config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
-        command.upgrade(config, "head")
-        yield url
+from tests.support.db import Di1Catalogue, Writer, seed_di1
 
 
 @pytest.fixture

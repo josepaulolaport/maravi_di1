@@ -15,10 +15,10 @@ import psycopg
 import pytest
 from alembic import command
 
-from tests.integration.databases import psycopg_url
 from tests.integration.test_initial_migration import _alembic
 from tests.integration.test_migrations_match_schema import database_url, execute, fetch
 from tests.integration.test_no_reference_copy_migration import A_PUBLISHED_ROW, INSTRUMENT
+from tests.support.db import psycopg_url
 
 __all__ = ["database_url"]
 

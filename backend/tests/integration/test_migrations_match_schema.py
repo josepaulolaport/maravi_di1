@@ -19,8 +19,8 @@ import psycopg
 import pytest
 from alembic import command
 
-from tests.integration.databases import fresh_database_url, psycopg_url
 from tests.integration.test_initial_migration import _alembic
+from tests.support.db import fresh_database_url, psycopg_url
 
 BACKEND = Path(__file__).resolve().parents[2]
 SCHEMA_SQL = BACKEND.parent / "docs" / "schema.sql"

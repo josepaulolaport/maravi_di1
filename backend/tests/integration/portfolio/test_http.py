@@ -43,7 +43,7 @@ from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from tests.fakes.clock import FixedClock
-from tests.integration.asset.conftest import Di1Catalogue, seed_di1
+from tests.support.db import Di1Catalogue, seed_di1
 from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
 
 OCT_14, OCT_15, OCT_16 = date(2026, 10, 14), date(2026, 10, 15), date(2026, 10, 16)

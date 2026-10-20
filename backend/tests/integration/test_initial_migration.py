@@ -27,7 +27,7 @@ from alembic.config import Config
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from tests.integration.databases import fresh_database_url, psycopg_url
+from tests.support.db import fresh_database_url, psycopg_url
 
 BACKEND = Path(__file__).resolve().parents[2]
 

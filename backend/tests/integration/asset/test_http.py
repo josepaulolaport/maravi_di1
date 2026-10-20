@@ -27,8 +27,8 @@ from di1.modules.prices.public import PriceSource
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
-from tests.integration.asset.conftest import Di1Catalogue, seed_di1
 from tests.integration.asset.latest_prices import FakePriceReader, price
+from tests.support.db import Di1Catalogue, seed_di1
 
 # fixtures.ts: instrumentTypes, products[0] and instruments (DI1F27…DI1F30).
 GOLDEN_INSTRUMENT_TYPES = {
