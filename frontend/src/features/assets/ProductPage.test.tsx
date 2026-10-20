@@ -4,31 +4,27 @@ import { http, HttpResponse } from 'msw';
 
 import type { Instrument, LastReference } from '@/api/contract';
 import { IDS, instruments, PRICES, products } from '@/test/msw/fixtures';
-import { fieldError, problem, url } from '@/test/msw/handlers';
+import {
+  fieldError,
+  problem,
+  url,
+  type User,
+  cellTexts,
+  rowContaining,
+  rowElement,
+} from '@/test/helpers';
 import { server } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
 // Expected values come from the fixtures (src/test/msw/fixtures.ts). The API returns
 // `last_reference: null` for every contract for now (OQ-33 item 4); the test that shows an
 // observation answers it itself.
 
 async function openProduct() {
-  const result = renderApp(`/ativos/produtos/${IDS.di1}`);
+  const result = renderRoute(`/ativos/produtos/${IDS.di1}`);
   await screen.findByRole('heading', { name: 'DI1' });
   await screen.findByRole('table', { name: 'Contratos' });
   return result;
-}
-
-function contractRow(code: string) {
-  const row = screen.getByText(code, { selector: 'td *' }).closest('tr');
-  if (!row) throw new Error(`no row for ${code}`);
-  return within(row);
-}
-
-function cellTexts(code: string) {
-  return contractRow(code)
-    .getAllByRole('cell')
-    .map((cell) => cell.textContent);
 }
 
 describe('Ativos: produto (§11.2)', () => {
@@ -82,14 +78,14 @@ describe('Ativos: produto (§11.2)', () => {
       .getAllByRole('columnheader')
       .map((th) => th.textContent);
     expect(headers).toEqual(['Contrato', 'Vencimento', 'Último PU', 'Taxa a.a.', 'Data ref.', '']);
-    expect(cellTexts('DI1F28').slice(0, 5)).toEqual([
+    expect(cellTexts(rowElement('DI1F28')).slice(0, 5)).toEqual([
       'DI1F28',
       '03/01/2028',
       '89.250,31',
       '9,8000%',
       '16/10/2026',
     ]);
-    expect(cellTexts('DI1F29').slice(0, 5)).toEqual([
+    expect(cellTexts(rowElement('DI1F29')).slice(0, 5)).toEqual([
       'DI1F29',
       '02/01/2029',
       '80.206,13',
@@ -103,8 +99,20 @@ describe('Ativos: produto (§11.2)', () => {
     await openProduct();
 
     // The API returns `last_reference: null` for every contract for now (OQ-33 item 4).
-    expect(cellTexts('DI1F27').slice(0, 5)).toEqual(['DI1F27', '04/01/2027', '—', '—', '—']);
-    expect(cellTexts('DI1F28').slice(0, 5)).toEqual(['DI1F28', '03/01/2028', '—', '—', '—']);
+    expect(cellTexts(rowElement('DI1F27')).slice(0, 5)).toEqual([
+      'DI1F27',
+      '04/01/2027',
+      '—',
+      '—',
+      '—',
+    ]);
+    expect(cellTexts(rowElement('DI1F28')).slice(0, 5)).toEqual([
+      'DI1F28',
+      '03/01/2028',
+      '—',
+      '—',
+      '—',
+    ]);
   });
 
   it('§11.2 searches contracts by code and links each to its page', async () => {
@@ -194,7 +202,13 @@ describe('Ativos: produto (§11.2)', () => {
     await user.click(modal.getByRole('button', { name: 'Cadastrar contrato' }));
 
     expect(await screen.findByText('DI1F31', { selector: 'td *' })).toBeInTheDocument();
-    expect(cellTexts('DI1F31').slice(0, 5)).toEqual(['DI1F31', '02/01/2031', '—', '—', '—']);
+    expect(cellTexts(rowElement('DI1F31')).slice(0, 5)).toEqual([
+      'DI1F31',
+      '02/01/2031',
+      '—',
+      '—',
+      '—',
+    ]);
     expect(await screen.findByText('5 contratos cadastrados')).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Novo contrato' })).not.toBeInTheDocument();
@@ -207,14 +221,14 @@ describe('Ativos: produto (§11.2)', () => {
   });
 
   it('§12 shows "não encontrado" for an unknown product', async () => {
-    renderApp('/ativos/produtos/desconhecido');
+    renderRoute('/ativos/produtos/desconhecido');
 
     expect(await screen.findByText('Produto não encontrado.')).toBeInTheDocument();
   });
 
   it('§11.2 says so when the product has no contract', async () => {
     server.use(http.get(url('/instruments'), () => HttpResponse.json({ items: [] })));
-    renderApp(`/ativos/produtos/${IDS.di1}`);
+    renderRoute(`/ativos/produtos/${IDS.di1}`);
 
     expect(await screen.findByText('Nenhum contrato encontrado.')).toBeInTheDocument();
   });
@@ -232,8 +246,8 @@ function recordSaves() {
   return bodies;
 }
 
-async function rowMenu(user: ReturnType<typeof renderApp>['user'], code: string, item: string) {
-  await user.click(contractRow(code).getByRole('button', { name: `Ações de ${code}` }));
+async function rowMenu(user: User, code: string, item: string) {
+  await user.click(rowContaining(code).getByRole('button', { name: `Ações de ${code}` }));
   await user.click(await screen.findByRole('menuitem', { name: item }));
 }
 
@@ -309,7 +323,7 @@ describe('Ativos: preços na lista de contratos (§11.2, §5, OQ-48 item 1)', ()
     const saves = recordSaves();
     const { user, router } = await openProduct();
 
-    await user.click(contractRow('DI1F28').getByRole('button', { name: 'Ações de DI1F28' }));
+    await user.click(rowContaining('DI1F28').getByRole('button', { name: 'Ações de DI1F28' }));
     expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
       'Registrar preço',
       'Remover preço',

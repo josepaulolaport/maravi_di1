@@ -2,9 +2,9 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { notifications } from '@mantine/notifications';
 
 import { todayInSaoPaulo } from '@/shared/format';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
-import { openCarteira } from './portfolioPage.support';
+import { openCarteira } from '@/test/screens/portfolio';
 
 // The notifications store is module-global: a notice of one test must not stay for the next.
 afterEach(() => {
@@ -24,7 +24,7 @@ describe('Carteira (§11.4)', () => {
   });
 
   it('§11.4 OQ-14 falls back to today for a future date, in the view and in the URL', async () => {
-    const { router } = renderApp('/carteira?date=2999-01-01');
+    const { router } = renderRoute('/carteira?date=2999-01-01');
 
     const [year, month, day] = todayInSaoPaulo().split('-');
     await waitFor(() => {

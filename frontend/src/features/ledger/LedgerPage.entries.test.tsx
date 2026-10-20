@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 
 import type { LedgerEntry } from '@/api/contract';
 import { IDS, instruments, products, tradeEntries } from '@/test/msw/fixtures';
-import { fieldError, problem, url } from '@/test/msw/handlers';
+import { fieldError, problem, url } from '@/test/helpers';
 import { captureBodies, server } from '@/test/msw/server';
 import { formatDate, todayInSaoPaulo } from '@/shared/format';
 
@@ -15,7 +15,7 @@ import {
   openNew,
   typeDate,
   chooseContract,
-} from './ledgerPage.support';
+} from '@/test/screens/ledger';
 
 // The notifications store is module-global: without this, earlier tests fill its limit and
 // a later notification waits in the queue instead of showing.

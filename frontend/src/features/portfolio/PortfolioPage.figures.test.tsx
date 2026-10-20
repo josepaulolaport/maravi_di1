@@ -4,9 +4,9 @@ import { http, HttpResponse } from 'msw';
 
 import type { PortfolioPositions, PortfolioSummary } from '@/api/contract';
 import { job } from '@/test/msw/fixtures';
-import { url } from '@/test/msw/handlers';
+import { url, rowContaining } from '@/test/helpers';
 import { server, serveJobs } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
 import {
   kpi,
@@ -14,12 +14,11 @@ import {
   expectNoKpiBadge,
   expectNoCard,
   KPIS,
-  rowOf,
   summaryOf,
   POSITIONS_15,
   override15,
   openCarteira,
-} from './portfolioPage.support';
+} from '@/test/screens/portfolio';
 
 // The notifications store is module-global: a notice of one test must not stay for the next.
 afterEach(() => {
@@ -100,7 +99,7 @@ describe('Carteira (§11.4)', () => {
   it('§11.4 shows each position with its averages, reference and market value', async () => {
     await openCarteira('2026-10-15');
 
-    const row = rowOf('DI1F28');
+    const row = rowContaining('DI1F28');
     for (const text of [
       '03/01/2028',
       '10',
@@ -129,7 +128,7 @@ describe('Carteira (§11.4)', () => {
   it('§8.3 marks the asset without a price and keeps its quantity and average', async () => {
     await openCarteira('2026-10-16');
 
-    const row = rowOf('DI1F29');
+    const row = rowContaining('DI1F29');
     expect(row.getByText('Sem preço')).toBeInTheDocument();
     expect(row.getByText('5')).toBeInTheDocument();
     expect(row.getByText('82.057,00')).toBeInTheDocument();
@@ -142,7 +141,7 @@ describe('Carteira (§11.4)', () => {
 
     expectNoCard();
     expect(kpi('Patrimônio total').getByText('—')).toBeInTheDocument();
-    expect(rowOf('DI1F29').getByText('Sem preço')).toBeInTheDocument();
+    expect(rowContaining('DI1F29').getByText('Sem preço')).toBeInTheDocument();
   });
 
   it('OQ-31 a price corrected after processing changes no badge', async () => {
@@ -167,7 +166,7 @@ describe('Carteira (§11.4)', () => {
   it('OQ-30 a position shows the current reference price, even one corrected after processing', async () => {
     await openCarteira('2026-10-16');
 
-    const row = rowOf('DI1F28');
+    const row = rowContaining('DI1F28');
     expect(row.getByText('89.250,31')).toBeInTheDocument();
     expect(row.getByText('9,8000%')).toBeInTheDocument();
     // The market value is the processed one (89.200,90 × 6).
@@ -369,7 +368,7 @@ describe('Carteira (§11.4)', () => {
   });
 
   it('§12 D3 says a date was never processed instead of showing figures', async () => {
-    renderApp('/carteira?date=2026-10-17');
+    renderRoute('/carteira?date=2026-10-17');
 
     expect(await screen.findByText('Data não processada')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Solicitar processamento' })).toHaveAttribute(
@@ -381,7 +380,7 @@ describe('Carteira (§11.4)', () => {
   });
 
   it('§11.4 shows a loading state, then the data', async () => {
-    renderApp('/carteira?date=2026-10-15');
+    renderRoute('/carteira?date=2026-10-15');
 
     expect(await screen.findByLabelText('Carregando carteira')).toBeInTheDocument();
     expect(await screen.findByRole('table')).toBeInTheDocument();
@@ -401,7 +400,7 @@ describe('Carteira (§11.4)', () => {
         ),
       ),
     );
-    const { user } = renderApp('/carteira?date=2026-10-15');
+    const { user } = renderRoute('/carteira?date=2026-10-15');
 
     expect(await screen.findByText('Serviço indisponível no momento.')).toBeInTheDocument();
 

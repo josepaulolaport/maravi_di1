@@ -8,9 +8,8 @@ import type {
   ProcessingScope,
 } from '@/api/contract';
 import { job, processingRequests } from '@/test/msw/fixtures';
-import { url } from '@/test/msw/handlers';
+import { url, type User, fieldError, problem } from '@/test/helpers';
 import { server, serveJobs } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
 
 // The history is the fixtures' five finished runs (src/test/msw/fixtures.ts): FAILED 01–05/10
 // on its first date, CANCELLED 10–12/10 before its first date, COMPLETED 14–15/10, CANCELLED
@@ -19,13 +18,6 @@ import { renderApp } from '@/test/render';
 // answer what the test serves.
 
 export const PAGE = '/central-de-controle?tab=processamentos';
-
-export function problemResponse(status: number, code: string, message: string) {
-  return HttpResponse.json(
-    { type: 'about:blank', title: 'Erro', status, errors: [{ code, message, field: null }] },
-    { status, headers: { 'Content-Type': 'application/problem+json' } },
-  );
-}
 
 /**
  * Serves `preview` as the API's answer to `GET /processing/preview` for its own range and
@@ -40,7 +32,7 @@ export function servePreview(preview: ProcessingPreview) {
       const expected = [preview.start_date, preview.end_date, preview.scope];
       return asked.join() === expected.join()
         ? HttpResponse.json(preview)
-        : problemResponse(500, 'VALIDATION_ERROR', `Prévia inesperada: ${asked.join(' ')}`);
+        : problem(500, [fieldError('VALIDATION_ERROR', `Prévia inesperada: ${asked.join(' ')}`)]);
     }),
   );
 }
@@ -141,18 +133,14 @@ export async function findJobRow(period: string, status: string) {
   return jobRow(period, status);
 }
 
-export async function closeMenu(user: ReturnType<typeof renderApp>['user']) {
+export async function closeMenu(user: User) {
   await user.keyboard('{Escape}');
   await waitFor(() => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 }
 
-export async function openMenu(
-  user: ReturnType<typeof renderApp>['user'],
-  period: string,
-  status: string,
-) {
+export async function openMenu(user: User, period: string, status: string) {
   const row = await findJobRow(period, status);
   await user.click(row.getByRole('button', { name: /Ações do processamento/ }));
   await screen.findAllByRole('menuitem');
@@ -160,7 +148,7 @@ export async function openMenu(
 }
 
 export async function typeRange(
-  user: ReturnType<typeof renderApp>['user'],
+  user: User,
   start: string,
   end: string,
   scope = within(document.body),

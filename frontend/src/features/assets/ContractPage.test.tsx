@@ -3,9 +3,17 @@ import { http, HttpResponse } from 'msw';
 
 import type { ReferencePrice, ReferencePriceDay } from '@/api/contract';
 import { IDS, PRICES, referencePriceDays } from '@/test/msw/fixtures';
-import { fieldError, problem, url } from '@/test/msw/handlers';
+import {
+  fieldError,
+  problem,
+  url,
+  type User,
+  cellTexts,
+  rowContaining,
+  rowElement,
+} from '@/test/helpers';
 import { server } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
 // Expected values come from the fixtures (src/test/msw/fixtures.ts), with today fixed at
 // TEST_TODAY (18/10/2026, São Paulo). DI1F28 matures on 03/01/2028, so its calendar is
@@ -109,28 +117,17 @@ const B3_ONLY_1016: ReferencePriceDay = {
   sources: [PRICES.f28_1016_b3],
 };
 async function openContract(route = F28) {
-  const result = renderApp(route);
+  const result = renderRoute(route);
   await screen.findByRole('heading', { name: 'DI1F28' });
   await screen.findByRole('table', { name: 'Calendário de preços de referência' });
   return result;
 }
 
-function dayRow(date: string) {
-  const cell = screen.getByText(date, { selector: 'td' });
-  const row = cell.closest('tr');
-  if (!row) throw new Error(`no row for ${date}`);
-  return within(row);
-}
+/** The calendar row's date, PU, rate and source. */
+const cells = (date: string) => cellTexts(rowElement(date)).slice(0, 4);
 
-function cells(date: string) {
-  return dayRow(date)
-    .getAllByRole('cell')
-    .slice(0, 4)
-    .map((cell) => cell.textContent);
-}
-
-async function rowAction(user: ReturnType<typeof renderApp>['user'], date: string, item: string) {
-  await user.click(dayRow(date).getByRole('button', { name: `Ações de ${date}` }));
+async function rowAction(user: User, date: string, item: string) {
+  await user.click(rowContaining(date).getByRole('button', { name: `Ações de ${date}` }));
   await user.click(await screen.findByRole('menuitem', { name: item }));
 }
 
@@ -176,7 +173,7 @@ describe('Ativos: contrato (§11.2)', () => {
 
     expect(cells('17/10/2026')).toEqual(['17/10/2026', '—', '—', '—']);
     expect(
-      dayRow('17/10/2026').getByRole('button', { name: 'Registrar preço em 17/10/2026' }),
+      rowContaining('17/10/2026').getByRole('button', { name: 'Registrar preço em 17/10/2026' }),
     ).toBeInTheDocument();
     expect(cells('16/10/2026')).toEqual(['16/10/2026', '89.250,31', '9,8000%', 'Manual']);
     expect(cells('15/10/2026')).toEqual(['15/10/2026', '89.128,48', '9,9000%', 'B3']);
@@ -205,7 +202,9 @@ describe('Ativos: contrato (§11.2)', () => {
   it('§5 the row menu offers Corrigir and Remover; there is no "Ver revisões"', async () => {
     const { user } = await openContract();
 
-    await user.click(dayRow('16/10/2026').getByRole('button', { name: 'Ações de 16/10/2026' }));
+    await user.click(
+      rowContaining('16/10/2026').getByRole('button', { name: 'Ações de 16/10/2026' }),
+    );
 
     expect(await screen.findByRole('menuitem', { name: 'Corrigir' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Remover' })).toBeInTheDocument();
@@ -661,7 +660,7 @@ describe('Ativos: contrato, estados (§12)', () => {
   });
 
   it('§5 a contract without observations: every day "—", an empty history, 0 references', async () => {
-    renderApp(`/ativos/contratos/${IDS.di1f27}`);
+    renderRoute(`/ativos/contratos/${IDS.di1f27}`);
     await screen.findByRole('table', { name: 'Calendário de preços de referência' });
 
     expect(screen.getByText('30 dias · 0 referências registradas')).toBeInTheDocument();
@@ -683,7 +682,7 @@ describe('Ativos: contrato, estados (§12)', () => {
         }),
       ),
     );
-    renderApp(`/ativos/contratos/${IDS.di1f27}`);
+    renderRoute(`/ativos/contratos/${IDS.di1f27}`);
     const table = within(
       await screen.findByRole('table', { name: 'Calendário de preços de referência' }),
     );
@@ -694,7 +693,7 @@ describe('Ativos: contrato, estados (§12)', () => {
   });
 
   it('§12 shows "não encontrado" for an unknown contract', async () => {
-    renderApp('/ativos/contratos/desconhecido');
+    renderRoute('/ativos/contratos/desconhecido');
 
     expect(await screen.findByText('Contrato não encontrado.')).toBeInTheDocument();
   });
@@ -705,7 +704,7 @@ describe('Ativos: contrato, estados (§12)', () => {
         problem(500, [{ code: 'VALIDATION_ERROR', message: 'Serviço indisponível.', field: null }]),
       ),
     );
-    renderApp(F28);
+    renderRoute(F28);
 
     expect(await screen.findAllByText('Serviço indisponível.')).not.toHaveLength(0);
   });

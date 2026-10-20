@@ -3,7 +3,9 @@ import { setupServer } from 'msw/node';
 
 import type { ProcessingRequest } from '@/api/contract';
 
-import { handlers, url } from './handlers';
+import { url } from '../helpers';
+
+import { handlers } from './handlers';
 
 export const server = setupServer(...handlers);
 

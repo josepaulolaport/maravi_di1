@@ -3,13 +3,13 @@ import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
 import { pnlSeries } from '@/test/msw/fixtures';
-import { url } from '@/test/msw/handlers';
+import { url } from '@/test/helpers';
 import { server } from '@/test/msw/server';
-import { renderApp, renderUi } from '@/test/render';
+import { renderRoute, renderUi } from '@/test/render';
 
 import { PnlTooltip } from './components/PnlTooltip';
 import { toChartData } from './model/chartData';
-import { INCOMPLETE_NOTE, recordPnlRanges, openCarteira } from './portfolioPage.support';
+import { INCOMPLETE_NOTE, recordPnlRanges, openCarteira } from '@/test/screens/portfolio';
 
 // The notifications store is module-global: a notice of one test must not stay for the next.
 afterEach(() => {
@@ -42,7 +42,7 @@ describe('Carteira (§11.4)', () => {
     );
     // Registered last, so it sees each request first and passes it on.
     const ranges = recordPnlRanges();
-    const { user, router } = renderApp('/carteira?date=2026-10-16&pnl_start=2026-10-10');
+    const { user, router } = renderRoute('/carteira?date=2026-10-16&pnl_start=2026-10-10');
     await waitFor(() => {
       expect(ranges.at(-1)).toEqual(['2026-10-10', '2026-10-16']);
     });
@@ -64,7 +64,7 @@ describe('Carteira (§11.4)', () => {
   });
 
   it('§11.4 OQ-16 offers chart starts only before the date', async () => {
-    const { user } = renderApp('/carteira?date=2026-10-16&pnl_start=2026-10-10');
+    const { user } = renderRoute('/carteira?date=2026-10-16&pnl_start=2026-10-10');
 
     await user.click(await screen.findByRole('textbox', { name: 'Início do gráfico' }));
 
@@ -77,7 +77,7 @@ describe('Carteira (§11.4)', () => {
     '§11.4 OQ-16 ignores the linked chart start %s, and drops it from the URL',
     async (linked) => {
       const ranges = recordPnlRanges();
-      const { router } = renderApp(`/carteira?date=2026-10-16&pnl_start=${linked}`);
+      const { router } = renderRoute(`/carteira?date=2026-10-16&pnl_start=${linked}`);
 
       await waitFor(() => {
         expect(ranges.at(-1)).toEqual(['2026-09-17', '2026-10-16']);
@@ -90,7 +90,7 @@ describe('Carteira (§11.4)', () => {
 
   it('§11.4 OQ-16 drops a chart start the date has passed, so it never comes back', async () => {
     const ranges = recordPnlRanges();
-    const { user, router } = renderApp('/carteira?date=2026-10-16&pnl_start=2026-10-14');
+    const { user, router } = renderRoute('/carteira?date=2026-10-16&pnl_start=2026-10-14');
     await waitFor(() => {
       expect(ranges.at(-1)).toEqual(['2026-10-14', '2026-10-16']);
     });
@@ -142,7 +142,7 @@ describe('Carteira (§11.4)', () => {
       ),
     );
     const ranges = recordPnlRanges();
-    renderApp('/carteira?date=2026-10-15&pnl_start=2026-10-14');
+    renderRoute('/carteira?date=2026-10-15&pnl_start=2026-10-14');
     const card = within(await screen.findByRole('region', { name: 'P&L acumulado' }));
 
     await waitFor(() => {

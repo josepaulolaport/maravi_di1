@@ -2,9 +2,9 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import { delay, http, HttpResponse } from 'msw';
 
 import { IDS, instrumentTypes, products } from '@/test/msw/fixtures';
-import { problem, url } from '@/test/msw/handlers';
+import { problem, url } from '@/test/helpers';
 import { server } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
 // Expected values come from the fixtures (src/test/msw/fixtures.ts): one instrument type
 // (Futuros), one product (DI1) with four contracts.
@@ -26,7 +26,7 @@ function serveSearch() {
 }
 
 async function openCatalogue(route = '/ativos') {
-  const result = renderApp(route);
+  const result = renderRoute(route);
   await screen.findByRole('table', { name: 'Produtos' });
   return result;
 }
@@ -145,7 +145,7 @@ describe('Ativos: catálogo (§11.2)', () => {
         problem(500, [{ code: 'VALIDATION_ERROR', message: 'Serviço indisponível.', field: null }]),
       ),
     );
-    renderApp('/ativos');
+    renderRoute('/ativos');
 
     expect(await screen.findByText('Serviço indisponível.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();
@@ -153,7 +153,7 @@ describe('Ativos: catálogo (§11.2)', () => {
 
   it('§11.2 says so when the API returns no instrument type', async () => {
     server.use(http.get(url('/instrument-types'), () => HttpResponse.json({ items: [] })));
-    renderApp('/ativos');
+    renderRoute('/ativos');
 
     expect(await screen.findByText('Nenhum tipo de instrumento cadastrado.')).toBeInTheDocument();
   });

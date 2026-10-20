@@ -2,9 +2,9 @@ import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
 import { job, processingRequests } from '@/test/msw/fixtures';
-import { url } from '@/test/msw/handlers';
+import { url } from '@/test/helpers';
 import { server, serveJobs } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
 import {
   PAGE,
@@ -15,11 +15,11 @@ import {
   findJobRow,
   closeMenu,
   openMenu,
-} from './processingTab.support';
+} from '@/test/screens/processing';
 
 describe('Processamentos: history (§11.1, §10.3)', () => {
   it('§10.3 lists every job with its period, progress and pt-BR status', async () => {
-    renderApp(PAGE);
+    renderRoute(PAGE);
 
     await findJobRow('01/10/2026 a 05/10/2026', 'Falhou');
     const headers = history()
@@ -46,7 +46,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
   });
 
   it('§11.1 filters the history', async () => {
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
     await findJobRow('01/10/2026 a 05/10/2026', 'Falhou');
 
     const search = screen.getByRole('textbox', { name: 'Buscar processamento' });
@@ -63,7 +63,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
         HttpResponse.json({ items: [], next_cursor: null }),
       ),
     );
-    renderApp(PAGE);
+    renderRoute(PAGE);
 
     expect(await screen.findByText('Nenhum processamento encontrado.')).toBeInTheDocument();
     expect(screen.getByText('0 processamentos encontrados')).toBeInTheDocument();
@@ -82,7 +82,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
           : HttpResponse.json({ items: jobs.slice(0, 2), next_cursor: 'page-2' });
       }),
     );
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     expect(await screen.findByText('2 processamentos exibidos')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Carregar mais' }));
@@ -101,7 +101,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
         HttpResponse.json({ items: processingRequests.slice(0, 2), next_cursor: 'page-2' }),
       ),
     );
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
     await screen.findByText('2 processamentos exibidos');
 
     await user.type(screen.getByRole('textbox', { name: 'Buscar processamento' }), 'falhou');
@@ -125,7 +125,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
         cancel_requested_at: '2026-10-18T10:05:00-03:00',
       }),
     );
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     let menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Na fila'));
     expect(menu.getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
@@ -150,7 +150,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
   });
 
   it('OQ-23 a new request for a cancelled run starts at the first date it did not reach', async () => {
-    const { user, router } = renderApp(PAGE);
+    const { user, router } = renderRoute(PAGE);
 
     // Cancelled after committing 14/10 and 15/10: what is left is 16/10.
     const menu = within(await openMenu(user, '14/10/2026 a 16/10/2026', 'Cancelado'));
@@ -163,7 +163,7 @@ describe('Processamentos: history (§11.1, §10.3)', () => {
 
   it('OQ-20 OQ-21 OQ-23 prefills a new request from the failed date, with the scope of the run', async () => {
     serveJobs(processingRequests.map((j) => (j.status === 'FAILED' ? { ...j, scope: 'CASH' } : j)));
-    const { user, router } = renderApp(PAGE);
+    const { user, router } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '01/10/2026 a 05/10/2026', 'Falhou'));
     await user.click(menu.getByRole('menuitem', { name: 'Solicitar novo processamento' }));
