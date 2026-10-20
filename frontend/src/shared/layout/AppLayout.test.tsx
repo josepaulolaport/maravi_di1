@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, within, waitFor } from '@testing-library/react';
 
 import { renderApp } from '@/test/render';
 
@@ -33,6 +33,17 @@ describe('AppLayout', () => {
     expect(screen.getByRole('link', { name: 'Ativos' })).not.toHaveAttribute('aria-current');
   });
 
+  it('§11 shows no brand in the navigation, open or collapsed (user, 2026-10-19)', async () => {
+    const { user } = renderApp('/ativos');
+    const navbar = within(screen.getByRole('navigation', { name: 'Navegação principal' }));
+    expect(navbar.queryByText(/maravi|backoffice/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Recolher navegação' }));
+
+    expect(navbar.queryByText(/maravi|backoffice|^M$/i)).not.toBeInTheDocument();
+    expect(navbar.queryByRole('img', { name: /maravi/i })).not.toBeInTheDocument();
+  });
+
   it('§11 collapses the sidebar and keeps every module reachable by name', async () => {
     const { user } = renderApp('/ativos');
 
@@ -42,7 +53,6 @@ describe('AppLayout', () => {
       'aria-expanded',
       'false',
     );
-    expect(screen.queryByText('BACKOFFICE')).not.toBeInTheDocument();
     for (const name of modules) {
       expect(screen.getByRole('link', { name })).toBeInTheDocument();
     }
