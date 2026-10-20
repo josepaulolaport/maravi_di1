@@ -170,19 +170,14 @@ def test_get_settings_reads_the_environment_at_call_time(
 BROKER_URL = "amqp://di1:s3cret-pw@broker:5672/"
 BROKER_ENV_NAMES = (
     "RABBITMQ_URL",
-    "RABBITMQ_PREFETCH_COUNT",
-    "RABBITMQ_DELIVERY_LIMIT",
-    "RABBITMQ_RETRY_BASE_DELAY_SECONDS",
-    "RABBITMQ_RETRY_MAX_DELAY_SECONDS",
     "RABBITMQ_PUBLISH_TIMEOUT_SECONDS",
     "OUTBOX_RELAY_BATCH_SIZE",
     "OUTBOX_RELAY_POLL_INTERVAL_SECONDS",
     "OUTBOX_RELAY_RETRY_BASE_DELAY_SECONDS",
     "OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS",
-    "INBOX_RETENTION_DAYS",
-    "INBOX_RETENTION_INTERVAL_SECONDS",
     "OUTBOX_RETENTION_DAYS",
     "OUTBOX_RETENTION_INTERVAL_SECONDS",
+    "WORKER_SWEEP_INTERVAL_SECONDS",
 )
 
 
@@ -199,51 +194,38 @@ def test_broker_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = BrokerSettings()
 
     assert settings.rabbitmq_url.get_secret_value() == BROKER_URL
-    assert (settings.rabbitmq_prefetch_count, settings.rabbitmq_delivery_limit) == (1, 5)
-    assert settings.rabbitmq_retry_base_delay_seconds == 1.0
-    assert settings.rabbitmq_retry_max_delay_seconds == 30.0
     assert settings.rabbitmq_publish_timeout_seconds == 10.0
     assert settings.outbox_relay_batch_size == 100
     assert settings.outbox_relay_poll_interval_seconds == 1.0
     assert settings.outbox_relay_retry_base_delay_seconds == 1.0
     assert settings.outbox_relay_retry_max_delay_seconds == 60.0
-    assert settings.inbox_retention_days == 7
-    assert settings.inbox_retention_interval_seconds == 3600.0
     assert settings.outbox_retention_days == 7
     assert settings.outbox_retention_interval_seconds == 3600.0
+    assert settings.worker_sweep_interval_seconds == 5.0
 
 
 @pytest.mark.usefixtures("clean_broker_environment")
 def test_broker_values_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RABBITMQ_URL", "amqps://di1:s3cret-pw@broker:5671/di1")
-    monkeypatch.setenv("RABBITMQ_PREFETCH_COUNT", "4")
-    monkeypatch.setenv("RABBITMQ_DELIVERY_LIMIT", "2")
-    monkeypatch.setenv("RABBITMQ_RETRY_BASE_DELAY_SECONDS", "0.5")
-    monkeypatch.setenv("RABBITMQ_RETRY_MAX_DELAY_SECONDS", "4")
     monkeypatch.setenv("RABBITMQ_PUBLISH_TIMEOUT_SECONDS", "2.5")
     monkeypatch.setenv("OUTBOX_RELAY_BATCH_SIZE", "10")
     monkeypatch.setenv("OUTBOX_RELAY_POLL_INTERVAL_SECONDS", "0.2")
     monkeypatch.setenv("OUTBOX_RELAY_RETRY_BASE_DELAY_SECONDS", "2")
     monkeypatch.setenv("OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS", "8")
-    monkeypatch.setenv("INBOX_RETENTION_DAYS", "30")
-    monkeypatch.setenv("INBOX_RETENTION_INTERVAL_SECONDS", "600")
     monkeypatch.setenv("OUTBOX_RETENTION_DAYS", "14")
     monkeypatch.setenv("OUTBOX_RETENTION_INTERVAL_SECONDS", "900")
+    monkeypatch.setenv("WORKER_SWEEP_INTERVAL_SECONDS", "0.5")
 
     settings = get_broker_settings()
 
-    assert (settings.rabbitmq_prefetch_count, settings.rabbitmq_delivery_limit) == (4, 2)
-    assert settings.rabbitmq_retry_base_delay_seconds == 0.5
-    assert settings.rabbitmq_retry_max_delay_seconds == 4.0
     assert settings.rabbitmq_publish_timeout_seconds == 2.5
     assert settings.outbox_relay_batch_size == 10
     assert settings.outbox_relay_poll_interval_seconds == 0.2
     assert settings.outbox_relay_retry_base_delay_seconds == 2.0
     assert settings.outbox_relay_retry_max_delay_seconds == 8.0
-    assert settings.inbox_retention_days == 30
-    assert settings.inbox_retention_interval_seconds == 600.0
     assert settings.outbox_retention_days == 14
     assert settings.outbox_retention_interval_seconds == 900.0
+    assert settings.worker_sweep_interval_seconds == 0.5
 
 
 @pytest.mark.usefixtures("clean_broker_environment")
@@ -271,19 +253,14 @@ def test_only_amqp_urls_are_accepted(monkeypatch: pytest.MonkeyPatch, url: str) 
 @pytest.mark.parametrize(
     ("name", "value"),
     [
-        ("RABBITMQ_PREFETCH_COUNT", "0"),
-        ("RABBITMQ_DELIVERY_LIMIT", "0"),
-        ("RABBITMQ_RETRY_BASE_DELAY_SECONDS", "0"),
-        ("RABBITMQ_RETRY_MAX_DELAY_SECONDS", "0"),
         ("RABBITMQ_PUBLISH_TIMEOUT_SECONDS", "0"),
         ("OUTBOX_RELAY_BATCH_SIZE", "0"),
         ("OUTBOX_RELAY_POLL_INTERVAL_SECONDS", "0"),
         ("OUTBOX_RELAY_RETRY_BASE_DELAY_SECONDS", "0"),
         ("OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS", "0"),
-        ("INBOX_RETENTION_DAYS", "0"),
-        ("INBOX_RETENTION_INTERVAL_SECONDS", "0"),
         ("OUTBOX_RETENTION_DAYS", "0"),
         ("OUTBOX_RETENTION_INTERVAL_SECONDS", "0"),
+        ("WORKER_SWEEP_INTERVAL_SECONDS", "0"),
     ],
 )
 def test_broker_bounds(monkeypatch: pytest.MonkeyPatch, name: str, value: str) -> None:

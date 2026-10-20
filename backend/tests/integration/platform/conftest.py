@@ -19,8 +19,9 @@ from di1.platform.config import BrokerSettings, Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.messaging.connection import connect
-from di1.platform.messaging.topology import QueueSpec, Topology, dead_letter_queue_name
+from di1.platform.messaging.topology import QueueSpec, Topology
 from tests.integration.databases import fresh_database_url
+from tests.integration.platform.support import CREATE_EFFECTS
 
 BACKEND = Path(__file__).resolve().parents[3]
 
@@ -47,6 +48,8 @@ def settings(migrated_database_url: str) -> Settings:
 @pytest.fixture
 async def engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
     engine = create_engine(settings)
+    async with engine.begin() as connection:
+        await connection.execute(CREATE_EFFECTS)
     try:
         yield engine
     finally:
@@ -70,9 +73,6 @@ def broker_settings() -> BrokerSettings:
         pytest.skip("TEST_RABBITMQ_URL is not set: broker tests not run")
     return BrokerSettings(
         rabbitmq_url=SecretStr(url),
-        rabbitmq_delivery_limit=2,
-        rabbitmq_retry_base_delay_seconds=0.2,
-        rabbitmq_retry_max_delay_seconds=1,
         rabbitmq_publish_timeout_seconds=5,
     )
 
@@ -93,7 +93,7 @@ def management_url() -> str:
 def topology() -> Topology:
     """Names of this test's own, so tests never share broker state."""
     prefix = f"test.{uuid.uuid4().hex[:12]}"
-    return Topology(exchange=f"{prefix}.commands", dead_letter_exchange=f"{prefix}.dead-letter")
+    return Topology(exchange=f"{prefix}.commands")
 
 
 @pytest.fixture
@@ -111,10 +111,8 @@ async def broker(
 async def _delete_topology(connection: AbstractRobustConnection, topology: Topology) -> None:
     channel = await connection.channel()
     for queue in TEST_QUEUES:
-        for name in (queue, dead_letter_queue_name(queue)):
-            await channel.queue_delete(f"{topology.exchange}.{name}")
+        await channel.queue_delete(f"{topology.exchange}.{queue}")
     await channel.exchange_delete(topology.exchange)
-    await channel.exchange_delete(topology.dead_letter_exchange)
     await channel.close()
 
 

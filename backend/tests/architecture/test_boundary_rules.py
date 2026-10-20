@@ -66,7 +66,6 @@ def test_clean_tree_has_no_violations(tmp_path: Path) -> None:
             CONSUMER: (
                 "from di1.platform.messaging.consumer import Handler\n"
                 "from di1.platform.messaging.envelope import Envelope\n"
-                "from di1.platform.messaging.inbox import Inbox\n"
                 "from ...application.services.processing import ProcessingService\n"
             ),
             HTTP: "from fastapi import APIRouter\n",
@@ -246,7 +245,7 @@ def test_pydantic_only_in_presentation_and_platform(tmp_path: Path, path: str) -
         "from di1.platform.messaging.topology import declare\n",
     ],
 )
-def test_business_code_uses_only_outbox_and_inbox_messaging(tmp_path: Path, source: str) -> None:
+def test_business_code_uses_only_outbox_and_envelope_messaging(tmp_path: Path, source: str) -> None:
     assert _rules_for(tmp_path, INFRA, source) == {"messaging"}
 
 

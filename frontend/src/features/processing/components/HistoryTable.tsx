@@ -1,5 +1,6 @@
 import { ActionIcon, Menu, Paper, Stack, Table, Text, Title, VisuallyHidden } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
+import type { UseInfiniteQueryResult } from '@tanstack/react-query';
 
 import { SearchInput } from '@/shared/ui/SearchInput';
 import { Loading } from '@/shared/ui/Loading';
@@ -8,13 +9,13 @@ import { countLabel } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { LoadMore } from '@/shared/ui/LoadMore';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { formatPeriod } from '@/shared/format';
 
 import { SCOPE_LABELS } from '@/shared/processing/scope';
 
-import { formatPeriod, formatProgress, shortId } from '../format';
-import type { useProcessingRequests } from '../hooks/useProcessing';
-import { canCancel, runBadge, progressOf, retryRequests } from '../jobStatus';
-import type { RetryRequest } from '../jobStatus';
+import { formatProgress, shortId } from '../model/format';
+import { canCancel, runBadge, progressOf, retryRequests } from '../model/jobStatus';
+import type { RetryRequest } from '../model/jobStatus';
 
 /**
  * What the user can do with a job, from its row menu or its details modal (OQ-20). Cancel and
@@ -45,7 +46,7 @@ const jobsLabel = (n: number, more: boolean) =>
     : countLabel(n, 'processamento encontrado', 'processamentos encontrados');
 
 interface HistoryTableProps extends JobActions {
-  requests: ReturnType<typeof useProcessingRequests>;
+  requests: UseInfiniteQueryResult<{ items: ProcessingRequest[] }>;
   search: string;
   onSearchChange: (text: string) => void;
 }
@@ -72,7 +73,7 @@ export function HistoryTable({ requests, search, onSearchChange, ...actions }: H
 }
 
 interface HistoryBodyProps {
-  requests: ReturnType<typeof useProcessingRequests>;
+  requests: UseInfiniteQueryResult<{ items: ProcessingRequest[] }>;
   search: string;
   actions: JobActions;
 }

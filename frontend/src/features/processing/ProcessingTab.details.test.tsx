@@ -1,14 +1,14 @@
 import { screen, waitFor, within } from '@testing-library/react';
 
 import { job } from '@/test/msw/fixtures';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
-import { PAGE, serveWith, RUNNING, field, openMenu } from './processingTab.support';
+import { PAGE, serveWith, RUNNING, field, openMenu } from '@/test/screens/processing';
 
 describe('Processamentos: details (§11.1, §10.4)', () => {
   it('OQ-46 the details of a running job with a cancel asked show Cancelando and no cancel action', async () => {
     serveWith(job({ ...RUNNING, cancel_requested_at: '2026-10-18T13:05:00Z' }));
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Cancelando'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
@@ -21,7 +21,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
 
   it('§10.2 from the details, "Cancelar processamento" moves the focus into the cancel dialog', async () => {
     serveWith(job(RUNNING));
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
@@ -37,7 +37,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   });
 
   it('§11.1 OQ-23 OQ-44 shows a failed run: times in Brasília, days, the date it failed on, its error', async () => {
-    const { user, router } = renderApp(PAGE);
+    const { user, router } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '01/10/2026 a 05/10/2026', 'Falhou'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
@@ -71,7 +71,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   });
 
   it('OQ-23 says a run cancelled before its first date published nothing', async () => {
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '10/10/2026 a 12/10/2026', 'Cancelado'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
@@ -86,7 +86,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   });
 
   it('OQ-23 says which dates a run cancelled midway kept, and offers a new request', async () => {
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '14/10/2026 a 16/10/2026', 'Cancelado'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
@@ -119,7 +119,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
 
   it('OQ-36 OQ-40 a Concluído com pendências Tudo run where a chain failed shows the error, its date and chain', async () => {
     serveWith(job(PARTIAL));
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(
       await openMenu(user, '16/10/2026 a 18/10/2026', 'Concluído com pendências'),
@@ -155,7 +155,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
         error_message: 'Falha nas posições de 17/10/2026.',
       }),
     );
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '16/10/2026 a 18/10/2026', 'Falhou'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
@@ -176,7 +176,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
 
   it('OQ-40 the failed-chain retry prefills that chain from failed_date to the original end', async () => {
     serveWith(job(PARTIAL));
-    const { user, router } = renderApp(PAGE);
+    const { user, router } = renderRoute(PAGE);
 
     const menu = within(
       await openMenu(user, '16/10/2026 a 18/10/2026', 'Concluído com pendências'),
@@ -208,7 +208,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
         cancel_requested_at: '2026-10-18T10:00:05-03:00',
       }),
     );
-    const { user, router } = renderApp(PAGE);
+    const { user, router } = renderRoute(PAGE);
 
     let menu = within(await openMenu(user, '15/10/2026 a 18/10/2026', 'Cancelado'));
     expect(menu.getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
@@ -245,7 +245,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   });
 
   it('OQ-36 a Concluído com pendências run with only missing prices shows no error and no retry', async () => {
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(
       await openMenu(user, '14/10/2026 a 16/10/2026', 'Concluído com pendências'),
@@ -272,7 +272,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
         finished_at: '2026-10-18T10:00:09-03:00',
       }),
     );
-    const { user, router } = renderApp(PAGE);
+    const { user, router } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '16/10/2026 a 18/10/2026', 'Falhou'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
@@ -295,7 +295,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
         finished_at: '2026-10-18T10:01:00-03:00',
       }),
     );
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Falhou'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
@@ -305,7 +305,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
   });
 
   it('§11.1 shows a completed job without the unpublished notice or actions', async () => {
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '14/10/2026 a 15/10/2026', 'Concluído'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));
@@ -320,7 +320,7 @@ describe('Processamentos: details (§11.1, §10.4)', () => {
 
   it('§10.4 follows a running job: the date being processed, progress and the cancel actions', async () => {
     serveWith(job({ ...RUNNING, created_at: '2026-10-18T09:58:00-03:00' }));
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     const menu = within(await openMenu(user, '17/10/2026 a 18/10/2026', 'Processando'));
     await user.click(menu.getByRole('menuitem', { name: 'Ver detalhes' }));

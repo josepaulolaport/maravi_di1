@@ -34,7 +34,7 @@ backend/
 
 There is no `tests/e2e/`: the end-to-end smoke is `scripts/e2e.sh` + `scripts/e2e_smoke.py`, run by `make e2e` from the repository root.
 
-Create only the files and packages that are used. Initially only Processing has a messaging consumer. Its handlers parse the message and call `application/`, and hold no business logic. Shared RabbitMQ infrastructure (connection, publisher, consumer base, envelope, outbox, inbox, topology) lives in `platform/messaging/`.
+Create only the files and packages that are used. Initially only Processing has a messaging consumer. Its handlers parse the message and call `application/`, and hold no business logic. Shared RabbitMQ infrastructure (connection, publisher, consumer base and job loop, envelope, outbox, topology) lives in `platform/messaging/`.
 
 ## Python rules
 
@@ -64,8 +64,8 @@ Create only the files and packages that are used. Initially only Processing has 
   - Fractional powers use `Decimal ** Decimal`; never `math.pow` or a float exponent.
   - One shared context: 34 digits, `ROUND_HALF_UP` (OQ-3). Quantize only on storage (a calculated PU to 10 dp, a calculated rate to 12 dp). A typed value with more decimals is rejected.
 - **Messaging:**
-  - RabbitMQ delivery is at least once. Handlers are idempotent through `platform.inbox_messages`.
-  - Acknowledge only after the durable state change is committed.
+  - RabbitMQ delivery is at least once, and a message is only a hint: a handler takes the waiting work from PostgreSQL (the oldest `QUEUED` request, OQ-50) or finds none, so a duplicate is harmless, and the worker's periodic sweep takes work whose message was lost. There is no inbox, dead-letter queue or redelivery.
+  - Acknowledge once the start the message asks for is committed or skipped.
   - Publish only through `platform.outbox_messages` and the relay.
 - **Errors** are RFC 9457 problem+json with `errors[{code, message, field}]`; codes from the catalogue in `docs/interfaces.md` "Errors" (OQ-15).
   - Raise a business error as `DomainError(ErrorDetail(code, "<pt-BR message>", "<field>"))` from `di1.shared.errors`, in `domain/` or `application/`. `composition/errors.py` renders it; never build an error response yourself.
@@ -87,7 +87,7 @@ Create only the files and packages that are used. Initially only Processing has 
   - FastAPI only in `presentation/`, the module's `dependencies.py` (its dependency providers), `composition/` and `main.py`;
   - SQL only in `infrastructure/`, `dependencies.py`, `platform/` and `composition/`;
   - Pydantic only in `presentation/` and `platform/`;
-  - modules use only the outbox, inbox and envelope parts of `platform.messaging`, and `presentation/messaging/` may also use its consumer base. aio-pika appears only in `platform/` and `workers/`;
+  - modules use only the outbox and envelope parts of `platform.messaging`, and `presentation/messaging/` may also use its consumer base. aio-pika appears only in `platform/` and `workers/`;
   - no dynamic imports. Every file sits in the plan §1 layout: `infrastructure/` may hold any adapter, and `presentation/` holds `http/` and `messaging/`.
 - API tests use FastAPI's `TestClient`, which needs `httpx2`. Async tests run under pytest-asyncio in `auto` mode; do not use the `anyio` marker.
 - Time-based behaviour (queue order, today's date) uses an injected clock, never the wall clock.

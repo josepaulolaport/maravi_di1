@@ -1,16 +1,16 @@
 import { Button, Group, Paper, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
 import { IconAlertTriangle, IconCalendarX } from '@tabler/icons-react';
+import type { UseQueryResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { SearchInput } from '@/shared/ui/SearchInput';
 import { Loading } from '@/shared/ui/Loading';
-import type { Issue, IssueType } from '@/api/contract';
+import type { Issue, IssueType, ListResponse } from '@/api/contract';
 import { assetLinks, ledgerLinks } from '@/app/paths';
 import { UNAVAILABLE, countLabel, formatDate } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
-
-import type { useIssues } from '../hooks/useProcessing';
+import { Figure } from '@/shared/ui/Figure';
 
 const ISSUE_TEXT: Record<IssueType, { text: string; icon: ReactNode }> = {
   MISSING_REFERENCE_PRICE: {
@@ -51,7 +51,7 @@ function matchesSearch(issue: Issue, search: string): boolean {
 }
 
 interface IssuesTabProps {
-  issues: ReturnType<typeof useIssues>;
+  issues: UseQueryResult<ListResponse<Issue>>;
   search: string;
   onSearchChange: (text: string) => void;
 }
@@ -122,7 +122,9 @@ function IssueRow({ issue }: { issue: Issue }) {
         whose price is needed, which can precede the affected day (its D−1 price).
       */}
       <Table.Td>{formatDate(issue.required_price_date)}</Table.Td>
-      <Table.Td fw={500}>{issue.asset_code ?? UNAVAILABLE}</Table.Td>
+      <Table.Td fw={500}>
+        <Figure text={issue.asset_code ?? UNAVAILABLE} />
+      </Table.Td>
       <Table.Td>
         <Group gap={6} wrap="nowrap">
           <Text span c="yellow.8" display="inline-flex" aria-hidden>

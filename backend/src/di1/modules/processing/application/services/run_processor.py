@@ -3,14 +3,15 @@
 OQ-11, OQ-23, OQ-26, OQ-31, OQ-36, OQ-37, OQ-38, OQ-40, OQ-44, OQ-45).
 
 The system runs exactly one processing worker (OQ-45), which handles one run at a time: there is
-no lease, claim token, fencing, recovery cap, dispatcher or active slot (OQ-46). Queueing a request
-rings a doorbell, a message that names no request. On each doorbell, and at its start after
-recovery, the worker drains the queue: it takes the oldest QUEUED request by
-``(created_at, id)`` and runs it, until none is left. Each step is its own Unit of Work under a
-row lock on the run's ``requests`` row:
+no lease, claim token, fencing, recovery cap, dispatcher or active slot (OQ-46). Queueing a
+request publishes one run message; on any run message the worker takes the oldest QUEUED request
+by ``(created_at, id)`` (`take_next`) and runs it, and a periodic sweep (`sweep`) does the same
+until none is left, so a request whose message was lost still runs, only later (OQ-50 item 2).
+Each step is its own Unit of Work under a row lock on the run's ``requests`` row:
 
-1. **take** (`drain`): only while no run is RUNNING, the oldest QUEUED request is locked and set
-   RUNNING with ``started_at``; a doorbell with nothing QUEUED is a no-op;
+1. **take** (`take_next`, on a run message or in `sweep`): under the queue's advisory lock and
+   only while no run is RUNNING, the oldest QUEUED request is locked and set RUNNING with
+   ``started_at``; with nothing QUEUED it is a no-op;
 2. per date D, in calendar order, from ``start_date`` or the day after ``progress_date``:
    a. a short transaction checks the cancel flag (a cancel ends the run CANCELLED between
       dates) and sets D's live chains RUNNING, keeping ``*_previous``;
@@ -49,7 +50,7 @@ would a non-transient error classified transient (`is_transient` lists its limit
 RUNNING was interrupted. Its dates left RUNNING are restored from ``*_previous`` (a row left
 empty is deleted); a run with a cancel request then ends CANCELLED before any date, any other is
 run to its end, after ``progress_date`` (from ``start_date`` when NULL). Then the queue is
-drained. DISPATCHED and CANCELLING are never written (OQ-46), so no row holds them.
+swept. DISPATCHED and CANCELLING are never written (OQ-46), so no row holds them.
 """
 
 from __future__ import annotations
@@ -185,11 +186,12 @@ class PortfolioRangeProcessor:
         self._clock = clock
         self._end_retry_delays = tuple(end_retry_delays)
 
-    # --- 1. take the queued requests, oldest first (OQ-46) ---------------------------------
+    # --- 1. take a queued request -------------------------------------------------------
 
-    async def drain(self) -> None:
+    async def sweep(self) -> None:
         """Runs the QUEUED requests one after the other, oldest ``(created_at, id)`` first, until
-        none is left. What a doorbell triggers; a doorbell with nothing queued does nothing."""
+        none is left: the worker's periodic sweep, so a request whose run message was lost still
+        runs. With nothing queued, or while a run is RUNNING, it does nothing."""
         while (request_id := await self.take_next()) is not None:
             await self.run(request_id)
 
@@ -227,7 +229,7 @@ class PortfolioRangeProcessor:
         """Called once when the worker starts, before it consumes: the run left RUNNING was
         interrupted. Its dates left RUNNING are restored; a run with a cancel request ends
         CANCELLED before any date; any other is run to its end here, after ``progress_date``.
-        Then the queue is drained, so a request whose doorbell was lost runs too. Idempotent: a
+        Then the queue is swept, so a request whose run message was lost runs too. Idempotent: a
         second call finds nothing to recover or run."""
         async with self._uow_factory() as uow:
             interrupted = await self._store.lock_running_runs(uow=uow)
@@ -245,7 +247,7 @@ class PortfolioRangeProcessor:
         for request_id in to_resume:
             logger.warning("processing request %s resumed at worker start", request_id)
             await self.run(request_id)
-        await self.drain()
+        await self.sweep()
 
     # --- 2. the dates ----------------------------------------------------------------------
 

@@ -14,6 +14,7 @@ The Aura Build designs are the visual base, and the screens implement them; they
 - **Calls are limited.** The user's Figma seat has a small monthly MCP quota. Prefer one `get_metadata` and one high-resolution `get_screenshot` of the page, cropped locally per frame, over many per-node calls. The text layers are named "Text", so labels come from screenshots, not metadata.
 - Read frames, components and variables through the MCP tools, and take spacing, colours and typography from the design, mapped onto Mantine theme tokens.
 - **Design-vs-spec decisions already taken:** OQ-19 and OQ-20 in `docs/open-questions.md`. Follow them; do not re-ask.
+- **No brand in the navbar** (user, 2026-10-19: "also remove the Maravi BackOffice from the navbar in the frontend"): the sidebar header holds only the collapse button; the browser tab title keeps "<Página> · Maravi Backoffice".
 - When a screen has no design in Figma or in the Aura Build HTML, raise a `spec-gap` and do not invent one. Drawers and modals without a design are the exception: they are built in the same visual language (OQ-19 item 8). When the design and the spec disagree (a column, a figure or a state), **the user decides which is right**. Follow neither silently: stop that part, raise a `spec-gap` that quotes both (spec section and Figma frame) with your recommendation, and keep building the parts that do not depend on it.
 
 ## Stack and layout (plan §0–§1)
@@ -35,7 +36,7 @@ The toolchain is locked (user, 2026-10-18). Do not add other libraries without t
 
 Each package is the current stable major published before 2026-10-04, the same cut-off as the backend, pinned to an exact version. One exception: **TypeScript is 6.0.x**, not 7, because typescript-eslint 8.71 supports only `typescript <6.1.0`. Supporting packages of the locked tools are allowed: `@eslint/js`, `globals`, `eslint-config-prettier`, `@testing-library/dom` and `@testing-library/jest-dom`, and `recharts` (peer of `@mantine/charts`).
 
-**API types.** `frontend/src/api/contract/` holds the hand-written request and response types: the adopted HTTP contract (OQ-26 item 8, frozen at 57b4df0), which the backend now serves and its HTTP tests check (whole response bodies in `backend/tests/integration/*/test_http.py` and `test_ledger_http.py`, enum values against `docs/schema.sql` in `backend/tests/architecture/test_enum_check_parity.py`); the real-API QA (`docs/qa/real-api-qa-2026-10-19.md`) found no mismatch. The test fixtures in `src/test/msw/` follow the same types. A new or changed field is a contract change: propose it in the PR and the integrator applies it to the backend. Types generated from OpenAPI (`openapi-typescript`, `npm run gen:api`) were planned for Wave 5 but not adopted; there is no such script.
+**API types: generated from the backend's OpenAPI (user, 2026-10-19: "yes").** `npm run gen:api` dumps the app's schema with no server (`backend/scripts/dump_openapi.py`, `/api` paths) into `src/api/generated/openapi.json` and generates `src/api/generated/schema.ts` with `openapi-typescript` (a devDependency pinned at 7.13.0; its `typescript ^5` peer is pointed at the project's TypeScript 6 through `overrides`). Both files are committed and never edited by hand; `backend/tests/architecture/test_openapi_snapshot.py` and `src/api/generated/schema.test.ts` fail when either is out of date. The app imports the types through `src/api/contract/`, which names each generated schema and narrows (`Narrow`, `Fits`, compile-checked) only what the backend types too loosely; the problem+json errors are the only hand-written shapes. The test fixtures in `src/test/msw/` follow the same types. A new or changed field is a contract change: it lands in the backend, then `npm run gen:api`.
 
 ```text
 frontend/src/
@@ -44,21 +45,23 @@ frontend/src/
   features/<f>/ # one folder per screen: assets, ledger, prices, portfolio, processing
     <F>Page.tsx #   the route component (lazy-loaded)
     components/ #   components used only by this feature
-    hooks/      #   TanStack Query hooks (queries, mutations) and the feature's query keys
-  shared/       # cross-feature code: layout/, ui/ (common components), format/ (pt-BR formatting)
-  test/         # Vitest setup, render helpers, MSW fixtures and handlers (msw/)
+    hooks/      #   TanStack Query hooks (queries, mutations) and the feature's URL state
+    model/      #   pure logic (no React): mapping, sorting, labels
+  shared/       # cross-feature code: layout/, ui/ (common components), format/ (pt-BR formatting),
+                #   url/ (useQueryParams), form/ (useApiForm), hooks/, processing/ (request modal)
+  test/         # Vitest setup, render helpers, helpers.ts, screens/<feature>.ts, MSW (msw/)
 ```
 
 ## Architecture
 
 - **Dependencies point inward.** `app` composes `features` and `shared`; a feature may import `api` and `shared`, never another feature. Something two features need moves to `shared`. Import with the `@/` alias across folders, and with relative paths inside one folder.
-- **Server state lives in TanStack Query**, nowhere else: no copies in `useState`, no global store. Each feature owns its query keys (a `<feature>Keys` factory in `hooks/`), and every key includes its parameters (date, range, id). Mutations invalidate the keys they affect. React state is only for UI state (open drawer, selected rows, form input); URL state (selected date, range, tab, search) lives in the query string, so a screen can be linked and reloaded.
+- **Server state lives in TanStack Query**, nowhere else: no copies in `useState`, no global store. Query keys come from one factory, `api/queryKeys.ts`, always `[area, resource, params]`, the params holding everything the request depends on. A write refreshes every view (`invalidateQueries()`); only the JobWatcher refreshes the portfolio when a run ends. React state is only for UI state (open drawer, selected rows, form input); URL state (selected date, range, tab, search) lives in the query string, so a screen can be linked and reloaded.
 - **Components are thin.** A page composes; data fetching sits in hooks; formatting sits in `shared/format`. Components receive typed props, not raw responses, when that keeps them reusable.
 - **One HTTP client** in `api/` (`fetch`, JSON, problem+json errors turned into a typed error). Components never call `fetch`.
 - **Mantine first.** Use Mantine components and props before writing CSS. When CSS is needed, use a CSS module beside the component and Mantine CSS variables (`var(--mantine-color-navy-9)`, `var(--app-…)`). Colours and tokens live only in `app/theme.ts`; no hex value elsewhere.
 - **Every screen is lazy-loaded** (`app/routes.tsx`), and vendor code is split into cached chunks (`vite.config.ts`). A route error boundary (`RouteErrorPage`) keeps the app usable when a screen throws.
 - **Accessibility:** every control has a pt-BR accessible name; tests query by role and name, as a user would. Colour is never the only signal.
-- **Tests** render through `test/render.tsx` (`renderApp(route)`), which uses the real providers and routes, with MSW answering every request (an unmocked request fails the test). The default answers are static fixtures; a test that needs another answer serves it with `server.use(...)`.
+- **Tests** render through `test/render.tsx`: `renderRoute(path)` by default (the screens with the real providers and the JobWatcher, without the shell), `renderApp(route)` for the shell and smoke tests; MSW answers every request (an unmocked request fails the test). Shared helpers are in `test/helpers.ts`, screen helpers in `test/screens/<feature>.ts`. The default answers are static fixtures; a test that needs another answer serves it with `server.use(...)`.
 
 ## Screens (spec §11)
 
@@ -132,4 +135,5 @@ npm ci                 # once per worktree
 npm run dev            # Vite dev server against the real API (proxy; API_PROXY_TARGET for another port)
 npm test               # Vitest
 npm run lint && npm run typecheck
+npm run gen:api        # after an HTTP schema change: regenerate src/api/generated
 ```

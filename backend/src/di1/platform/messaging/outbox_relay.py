@@ -9,10 +9,10 @@ A batch takes three steps, and no transaction is open while the broker answers:
 Consequences:
 
 - a crash after a publish and before step 3 leaves the row unpublished, so the next batch
-  sends it again: delivery is at least once, and consumers absorb the duplicate through the
-  inbox (interfaces.md "Transaction boundaries" 7). Nothing locks the rows between steps 1 and
-  3: one relay runs (compose.yaml), and a second one would at worst publish a row twice, which
-  the inbox absorbs the same way;
+  sends it again: delivery is at least once, and the consumer skips the duplicate (its work
+  has already started; interfaces.md "Transaction boundaries" 7). Nothing locks the rows
+  between steps 1 and 3: one relay runs (compose.yaml), and a second one would at worst publish
+  a row twice, which is skipped the same way;
 - a failed publish (no confirm, no route, a row that is not a valid envelope) increments
   ``publish_attempts`` and keeps the error in ``last_error``; the batch goes on. The broker
   carries no job order (PostgreSQL does: interfaces.md "Transaction boundaries" 3), so
@@ -203,10 +203,9 @@ class OutboxRelay:
     ) -> None:
         """Relay until ``stop`` is set. A full batch is followed at once by the next one; an
         empty, short or failed batch, or a database error, waits ``poll_interval_seconds``.
-        Each turn also runs each of ``retentions`` (the inbox's, the outbox's) when it is due:
-        this loop is the platform's
-        only periodic one (the worker waits for doorbells and runs one job at a time). Each
-        turn ends with a beat of ``heartbeat``: a fresh file shows the loop is progressing."""
+        Each turn also runs each of ``retentions`` (the outbox's) when it is due: this loop is
+        the relay's only periodic work. Each turn ends with a beat of ``heartbeat``: a fresh file
+        shows the loop is progressing."""
         while not stop.is_set():
             try:
                 published = await self.relay_batch()

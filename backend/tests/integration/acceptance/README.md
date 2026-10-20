@@ -26,7 +26,7 @@ These tests need `TEST_DATABASE_URL`; CI sets it and runs them.
 ## Scenarios with a processing run
 
 Each queues a request through `POST /api/processing/requests`, lets the one worker drain the
-queue in-process with the real composition (`support.run_worker`: recover, then drain, OQ-45,
+queue in-process with the real composition (`support.run_worker`: recover, then sweep, OQ-45,
 OQ-46), then reads `/api/portfolio/*` and `/api/processing/*` through `desk.Desk`. The API's
 clock ticks one second per call within the fixed "today" (`support.TickingClock`), so requests
 keep their FIFO order; each worker start has its own time, so processing times tell runs apart.
@@ -54,4 +54,4 @@ Not reachable through the API, so covered in `tests/integration/processing/` and
 `tests/integration/platform/test_processing_worker.py`: a technical error
 inside one chain or outside every chain (cases 24, 25), a cancel during a run's last date and the
 row-lock race between a queued cancel and the worker's take (case 10), `RUNNING` dates restored
-from `*_previous` (case 11), and the RabbitMQ doorbell path itself.
+from `*_previous` (case 11), and the RabbitMQ run message path itself.

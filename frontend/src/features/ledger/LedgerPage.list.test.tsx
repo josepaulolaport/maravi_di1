@@ -4,20 +4,19 @@ import { http, HttpResponse } from 'msw';
 
 import type { LedgerEntry } from '@/api/contract';
 import { cashEntries, ledgerEntries, tradeEntries } from '@/test/msw/fixtures';
-import { fieldError, problem, url } from '@/test/msw/handlers';
+import { fieldError, problem, url, cellTexts } from '@/test/helpers';
 import { server } from '@/test/msw/server';
 import { addDays, formatDate, todayInSaoPaulo } from '@/shared/format';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
 import {
   FULL_RANGE,
   openLedger,
   table,
   bodyRows,
-  cellTexts,
   serveSearch,
   DI1F28_ENTRIES,
-} from './ledgerPage.support';
+} from '@/test/screens/ledger';
 
 // The notifications store is module-global: without this, earlier tests fill its limit and
 // a later notification waits in the queue instead of showing.
@@ -28,7 +27,7 @@ afterEach(() => {
 describe('Lançamentos (§11.3)', () => {
   describe('list', () => {
     it('§11.3 shows a loading state, then the entries', async () => {
-      renderApp(FULL_RANGE);
+      renderRoute(FULL_RANGE);
 
       expect(await screen.findByLabelText('Carregando lançamentos')).toBeInTheDocument();
       expect(await screen.findByText('5 lançamentos encontrados')).toBeInTheDocument();
@@ -268,7 +267,7 @@ describe('Lançamentos (§11.3)', () => {
             : HttpResponse.json({ items: cashEntries, next_cursor: 'page-2' });
         }),
       );
-      const { user } = renderApp(FULL_RANGE);
+      const { user } = renderRoute(FULL_RANGE);
 
       expect(await screen.findByText('2 lançamentos exibidos')).toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: 'Carregar mais' }));
@@ -291,7 +290,7 @@ describe('Lançamentos (§11.3)', () => {
           problem(422, [fieldError('INVALID_RANGE', 'Período inválido para a consulta.', null)]),
         ),
       );
-      const { user } = renderApp(FULL_RANGE);
+      const { user } = renderRoute(FULL_RANGE);
 
       expect(await screen.findByText('Período inválido para a consulta.')).toBeInTheDocument();
       server.resetHandlers();

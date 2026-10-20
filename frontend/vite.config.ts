@@ -3,7 +3,7 @@ import { loadEnv } from 'vite';
 import { defineConfig } from 'vitest/config';
 
 /** The backend `docker compose up` serves locally. */
-export const DEFAULT_API_TARGET = 'http://127.0.0.1:8000';
+const DEFAULT_API_TARGET = 'http://127.0.0.1:8000';
 
 /**
  * Dev server only: the app calls `/api` on its own origin, and the backend sends no CORS
@@ -11,7 +11,7 @@ export const DEFAULT_API_TARGET = 'http://127.0.0.1:8000';
  * `API_PROXY_TARGET` (env or `.env.local`; not exposed to the browser) points it at another
  * backend.
  */
-export function apiProxy(target?: string): Record<string, string> {
+function apiProxy(target?: string): Record<string, string> {
   const backend = target || DEFAULT_API_TARGET;
   return { '/api': backend, '/health': backend };
 }
@@ -52,9 +52,10 @@ export default defineConfig(({ mode }) => ({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
-    // Screen tests render the whole app with its lazy routes. Under a machine shared with other
-    // parallel jobs, one worker per core starves them and they pass the 5 s default; half the
-    // cores and a 20 s budget per test keep them green without touching any assertion.
+    // Screen tests drive real forms with user-event, typing character by character. Under a
+    // machine shared with other parallel jobs, one worker per core starves them and they pass
+    // the 5 s default (measured 2026-10-19 at load 16); half the cores and a 20 s budget per
+    // test keep them green without touching any assertion.
     maxWorkers: '50%',
     testTimeout: 20_000,
     // A failing query prints the whole page, not the first 7000 characters (Testing Library's
