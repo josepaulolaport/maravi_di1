@@ -19,14 +19,17 @@ from di1.modules.asset.application.services.asset_service import AssetService
 from di1.modules.asset.dependencies import build_asset_reader, build_asset_service
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.dependencies import build_ledger_reader, build_ledger_service
-from di1.modules.portfolio.dependencies import portfolio_query_service
+from di1.modules.portfolio.dependencies import build_portfolio_service
 from di1.modules.portfolio.public import PortfolioService
 from di1.modules.prices.application.services.price_service import PriceService
 from di1.modules.prices.dependencies import build_price_reader, build_price_service
 from di1.modules.prices.public import PriceReader
 from di1.modules.pricing.dependencies import build_pricing_service
 from di1.modules.processing.application.services.processing import ProcessingService
-from di1.modules.processing.dependencies import make_date_status_reader, make_processing_service
+from di1.modules.processing.dependencies import (
+    build_date_status_reader,
+    build_processing_service,
+)
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
 from di1.shared.clock import Clock
 
@@ -78,24 +81,25 @@ def get_price_service(uow: RequestUnitOfWork, clock: AppClock) -> PriceService:
     )
 
 
-async def get_portfolio_query_service(
-    uow: RequestUnitOfWork, clock: AppClock
-) -> AsyncIterator[PortfolioService]:
+def get_portfolio_service(uow: RequestUnitOfWork, clock: AppClock) -> PortfolioService:
     """Portfolio's read models on the request's fresh Unit of Work. Nothing else runs on it
     first: the service's first statement opens the read-only REPEATABLE READ snapshot (OQ-23).
     Building the readers runs no statement."""
-    yield portfolio_query_service(
+    session = uow.session
+    return build_portfolio_service(
         uow,
-        assets=build_asset_reader(uow.session),
-        prices=build_price_reader(uow.session),
-        date_statuses=make_date_status_reader(),
+        assets=build_asset_reader(session),
+        prices=build_price_reader(session),
+        date_statuses=build_date_status_reader(session, clock),
         clock=clock,
     )
 
 
 def get_processing_service(uow: RequestUnitOfWork, clock: AppClock) -> ProcessingService:
-    """Processing over Asset's and Ledger's readers on the request's session; the service holds
-    no state, so building it per request costs only the objects."""
-    return make_processing_service(
-        assets=build_asset_reader(uow.session), ledger=build_ledger_reader(uow.session), clock=clock
+    """Processing over Asset's and Ledger's readers, all on the request's Unit of Work."""
+    return build_processing_service(
+        uow,
+        assets=build_asset_reader(uow.session),
+        ledger=build_ledger_reader(uow.session),
+        clock=clock,
     )

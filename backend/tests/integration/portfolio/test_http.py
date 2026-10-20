@@ -11,21 +11,21 @@ through their public protocols; Asset's reader is the real one.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 import pytest
-from fastapi import Request
+from fastapi import Depends
 from fastapi.testclient import TestClient
 
-from di1.composition.dependencies import get_session_factory
+from di1.composition.dependencies import get_unit_of_work
 from di1.main import create_app
 from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
-from di1.modules.portfolio.dependencies import portfolio_query_service, results_writer
+from di1.modules.portfolio.dependencies import build_portfolio_service, build_results_writer
 from di1.modules.portfolio.domain.cash import CashDay
 from di1.modules.portfolio.domain.positions import PositionDay, PositionsDay
 from di1.modules.portfolio.domain.trade import Trade
@@ -41,14 +41,15 @@ from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
-from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
+from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
 from tests.support.db import Di1Catalogue, seed_di1
 from tests.support.fakes import FakeClock
 from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
 
 OCT_14, OCT_15, OCT_16 = date(2026, 10, 14), date(2026, 10, 15), date(2026, 10, 16)
 PUBLISHED_AT = datetime(2026, 10, 16, 18, 40, tzinfo=timezone(timedelta(hours=-3)))
-PUBLISHED_AT_JSON = "2026-10-16T18:40:00-03:00"
+# fixtures.ts writes the instant in São Paulo time; the API sends every instant in UTC (S4).
+PUBLISHED_AT_JSON = "2026-10-16T21:40:00Z"
 COMPLETE = CalculationCompleteness.COMPLETE
 
 # fixtures.ts summaries[0], with the OQ-31 status names.
@@ -100,11 +101,10 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
     engine = create_engine(settings)
     try:
         factory = create_session_factory(engine)
-        writer = results_writer()
         buy = Trade(di1f28, OCT_14, time(10), 1, 10, Decimal("89006.4625467350"), Decimal("0.10"))
         async with SqlAlchemyUnitOfWork(factory) as uow:
             # OQ-38, OQ-40: an ALL date writes positions first, then cash.
-            await writer.write_positions_day(
+            await build_results_writer(uow.session).write_positions_day(
                 PositionsDay(
                     OCT_14,
                     (
@@ -142,9 +142,8 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                     Decimal("0.0000000000"),
                     COMPLETE,
                 ),
-                uow=uow,
             )
-            await writer.write_cash_day(
+            await build_results_writer(uow.session).write_cash_day(
                 CashDay(
                     OCT_14,
                     Decimal("0"),
@@ -153,7 +152,6 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                     Decimal("0.00"),
                     Decimal("609935.3745326500"),
                 ),
-                uow=uow,
             )
             await uow.commit()
         async with SqlAlchemyUnitOfWork(factory) as uow:
@@ -161,7 +159,7 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
             buy_f29 = Trade(
                 di1f29, OCT_15, time(11), 2, 5, Decimal("82057.00"), Decimal("0.093203413834")
             )
-            await writer.write_positions_day(
+            await build_results_writer(uow.session).write_positions_day(
                 PositionsDay(
                     OCT_15,
                     (
@@ -220,7 +218,6 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                     Decimal("-8034.1345282660"),
                     COMPLETE,
                 ),
-                uow=uow,
             )
             await uow.commit()
     finally:
@@ -241,6 +238,9 @@ def seeded(settings: Settings) -> Di1Catalogue:
         return catalogue
 
     return asyncio.run(seed())
+
+
+REQUEST_UOW = Depends(get_unit_of_work)
 
 
 @pytest.fixture
@@ -269,18 +269,17 @@ def client(
         seeded.instrument_ids["DI1F29"], OCT_15, PriceSource.MANUAL, "80206.1333187932", "0.1045"
     )
 
-    async def provide(request: Request) -> AsyncIterator[PortfolioService]:
-        async with SqlAlchemyUnitOfWork(get_session_factory(request)) as uow:
-            yield portfolio_query_service(
-                uow,
-                assets=build_asset_reader(uow.session),
-                prices=prices,
-                date_statuses=statuses,
-                clock=FakeClock(OCT_16),
-            )
+    def provide(uow: UnitOfWork = REQUEST_UOW) -> PortfolioService:
+        return build_portfolio_service(
+            uow,
+            assets=build_asset_reader(uow.session),
+            prices=prices,
+            date_statuses=statuses,
+            clock=FakeClock(OCT_16),
+        )
 
     app = create_app(settings)
-    app.include_router(create_router(provide))
+    app.include_router(create_router(get_service=provide))
     with TestClient(app) as client:
         yield client
 

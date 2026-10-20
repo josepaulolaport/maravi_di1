@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from di1.modules.processing.application.interfaces.repositories import ChainHistory
+from di1.modules.processing.application.ports import ChainHistory
 from di1.modules.processing.application.services.processing import ProcessingService
 from di1.modules.processing.infrastructure.messaging.outbox_run_messages import (
     OutboxRunMessages,
@@ -19,25 +20,44 @@ from di1.modules.processing.infrastructure.persistence.repositories import (
     SqlIssueRepository,
     SqlRequestRepository,
 )
+from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
 from tests.unit.processing.fakes import FakeAssets, FakeChainHistory, SteppingClock
+
+
+@dataclass
+class ServiceFactory:
+    """`ProcessingService` on PostgreSQL with in-memory Asset and Ledger, built per Unit of Work
+    as the composition does."""
+
+    assets: FakeAssets = field(default_factory=FakeAssets)
+    history: ChainHistory = field(default_factory=FakeChainHistory)
+    clock: Clock = field(default_factory=SteppingClock)
+
+    def on(self, uow: UnitOfWork) -> ProcessingService:
+        session = uow.session
+        return ProcessingService(
+            uow,
+            requests=SqlRequestRepository(session),
+            date_statuses=SqlDateStatusRepository(session, self.clock),
+            issues=SqlIssueRepository(session, self.clock),
+            chain_history=self.history,
+            run_messages=OutboxRunMessages(uow),
+            assets=self.assets,
+            clock=self.clock,
+        )
 
 
 def make_service(
     *,
     assets: FakeAssets | None = None,
     history: ChainHistory | None = None,
-    requests: SqlRequestRepository | None = None,
     clock: Clock | None = None,
-) -> ProcessingService:
-    return ProcessingService(
-        requests=requests or SqlRequestRepository(),
-        date_statuses=SqlDateStatusRepository(),
-        issues=SqlIssueRepository(),
-        chain_history=history or FakeChainHistory(),
+) -> ServiceFactory:
+    return ServiceFactory(
         assets=assets or FakeAssets(),
+        history=history or FakeChainHistory(),
         clock=clock or SteppingClock(),
-        run_messages=OutboxRunMessages(),
     )
 
 

@@ -12,7 +12,7 @@ from datetime import date, time
 from decimal import Decimal
 from uuid import UUID
 
-from di1.modules.portfolio.domain.errors import AccountingError
+from di1.modules.portfolio.domain.errors import PortfolioError
 
 
 @dataclass(frozen=True)
@@ -31,7 +31,7 @@ class Trade:
 
     def __post_init__(self) -> None:
         if self.signed_quantity == 0:
-            raise AccountingError("a trade quantity cannot be zero")
+            raise PortfolioError("a trade quantity cannot be zero")
 
     @property
     def order_key(self) -> tuple[date, time, int]:
@@ -43,5 +43,5 @@ def day_trades(trades: Iterable[Trade], on: date) -> list[Trade]:
     """``on``'s trades in chronological order; a trade dated another day is rejected."""
     ordered = sorted(trades, key=lambda t: t.order_key)
     if any(t.trade_date != on for t in ordered):
-        raise AccountingError(f"every trade must be dated {on}")
+        raise PortfolioError(f"every trade must be dated {on}")
     return ordered

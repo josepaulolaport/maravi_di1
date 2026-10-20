@@ -19,12 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.ledger.dependencies import build_ledger_reader
 from di1.modules.portfolio.dependencies import (
-    portfolio_query_service,
-    portfolio_reader,
-    results_writer,
+    build_portfolio_reader,
+    build_portfolio_service,
+    build_results_writer,
 )
 from di1.modules.prices.dependencies import build_price_reader
-from di1.modules.processing.dependencies import make_date_status_reader, make_range_processor
+from di1.modules.processing.dependencies import build_date_status_reader, build_range_processor
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from tests.integration.processing.worker_support import MutableClock
 from tests.support.builders import DI1F29
@@ -40,14 +40,14 @@ class RealWorker:
         self.clock = MutableClock()
         uow_factory = unit_of_work_factory(factory)
         self.uow_factory = uow_factory
-        self.processor = make_range_processor(  # the worker's wiring
+        self.processor = build_range_processor(  # the worker's wiring
             uow_factory=uow_factory,
             clock=self.clock,
             ledger_reader=build_ledger_reader,
             price_reader=build_price_reader,
             asset_reader=build_asset_reader,
-            portfolio_reader=portfolio_reader,
-            writer=results_writer(),
+            portfolio_reader=build_portfolio_reader,
+            results_writer=build_results_writer,
         )
 
     async def sql(self, statement: str, **params: Any) -> None:
@@ -78,11 +78,11 @@ class RealWorker:
         found = []
         for day in days:
             async with self.uow_factory() as uow:
-                summary = await portfolio_query_service(
+                summary = await build_portfolio_service(
                     uow,
                     assets=build_asset_reader(uow.session),
                     prices=build_price_reader(uow.session),
-                    date_statuses=make_date_status_reader(),
+                    date_statuses=build_date_status_reader(uow.session, self.clock),
                     clock=FakeClock(D3),
                 ).get_summary(day)
             found.append(summary.aum)

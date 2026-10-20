@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from di1.modules.ledger.public import EntryType
 from di1.modules.portfolio.public import CashBalance
 from di1.modules.prices.public import PriceSource
-from di1.modules.processing.domain.predecessor import PredecessorState, allows_run
+from di1.modules.processing.domain.predecessor import PredecessorState
 from tests.integration.processing.support import seed_statuses
 from tests.integration.processing.worker_support import Worker
 from tests.support.builders import DI1F29
@@ -527,7 +527,7 @@ async def test_the_preview_and_the_run_apply_the_same_predecessor_rule(
     assert reported == state
     portfolio, cash = (await worker.statuses())[D1]
     ran = (cash if scope == "CASH" else portfolio) == "PROCESSED"
-    assert ran is allows_run(reported)
+    assert ran is reported.allows_run
     if not ran:
         assert (await worker.run_row(request_id))["error_code"] == f"{scope}_PREDECESSOR_MISSING"
 
@@ -574,7 +574,7 @@ async def test_both_chains_failing_on_different_dates_ends_the_run_failed(worker
 async def test_a_failure_outside_the_chains_fails_the_date_for_every_live_chain(
     worker: Worker,
 ) -> None:
-    worker.fail_reading_on_date_transaction = 2  # D2's transaction
+    worker.faults.fail_on_date_transaction = 2  # D2's transaction
     request_id = await worker.enqueue("CASH", D1, D3)
 
     await worker.sweep()
@@ -659,8 +659,10 @@ async def test_a_crash_mid_date_resumes_after_progress_date(worker: Worker) -> N
     with pytest.raises(asyncio.CancelledError):
         await worker.sweep()
 
+    # OQ-50 item 4: D2 keeps its old status in the table; a read shows it Processando.
     rows = await worker.status_rows()
-    assert (rows[D2]["cash"], rows[D2]["cash_previous"]) == ("RUNNING", "PROCESSED")
+    assert (rows[D2]["cash"], rows[D2]["cash_previous"]) == ("PROCESSED", None)
+    assert (await worker.displayed(D1, D3))[D2] == (None, "RUNNING")
     assert (await worker.run_row(request_id))["progress_date"] == D1
 
     # The worker starts again: the run's command is sent again and the claim resumes at D2.
@@ -677,7 +679,7 @@ async def test_a_crash_mid_date_resumes_after_progress_date(worker: Worker) -> N
     assert (await worker.run_row(request_id))["status"] == "COMPLETED"
 
 
-async def test_a_cancel_after_a_crash_restores_the_running_date(worker: Worker) -> None:
+async def test_a_cancel_after_a_crash_leaves_the_date_its_old_status(worker: Worker) -> None:
     await seed_statuses(worker.engine, {D0: (None, "PROCESSED"), D1: (None, "PROCESSED")})
     worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("0"))
     request_id = await worker.enqueue("CASH", D1, D2)
@@ -698,7 +700,7 @@ async def test_a_cancel_after_a_crash_restores_the_running_date(worker: Worker) 
     assert (await worker.run_row(request_id))["status"] == "CANCELLED"
 
 
-async def test_a_crash_on_a_new_date_deletes_its_row_when_the_run_ends(worker: Worker) -> None:
+async def test_a_crash_on_a_new_date_writes_no_row(worker: Worker) -> None:
     request_id = await worker.enqueue("CASH", D1, D1)
 
     async def crash(chain: str, day: date) -> None:
@@ -707,12 +709,14 @@ async def test_a_crash_on_a_new_date_deletes_its_row_when_the_run_ends(worker: W
     worker.writer.hook = crash
     with pytest.raises(asyncio.CancelledError):
         await worker.sweep()
-    assert await worker.statuses() == {D1: (None, "RUNNING")}
+    assert await worker.statuses() == {}  # OQ-50 item 4: RUNNING is never stored
+    assert await worker.displayed(D1, D1) == {D1: (None, "RUNNING")}
     await request_cancel(worker, request_id)  # RUNNING keeps its status (OQ-46)
 
     await worker.restart()
 
     assert await worker.statuses() == {}
+    assert await worker.displayed(D1, D1) == {}
 
 
 async def test_recovery_of_an_all_run_keeps_a_failed_chain_stopped(worker: Worker) -> None:
@@ -807,7 +811,7 @@ async def test_a_failure_outside_the_chains_after_one_stopped_fails_only_the_liv
     worker: Worker,
 ) -> None:
     worker.writer.fail.add(("CASH", D1))
-    worker.fail_reading_on_date_transaction = 2  # D2's transaction
+    worker.faults.fail_on_date_transaction = 2  # D2's transaction
     request_id = await worker.enqueue("ALL", D1, D3)
 
     await worker.sweep()
@@ -935,7 +939,7 @@ async def test_a_running_run_with_a_cancel_request_at_the_worker_start_ends_canc
     run = await worker.run_row(request_id)
     assert (run["status"], run["progress_date"]) == ("CANCELLED", None)
     rows = await worker.status_rows()
-    assert (rows[D1]["cash"], rows[D1]["cash_previous"]) == ("PROCESSED", None)  # restored
+    assert (rows[D1]["cash"], rows[D1]["cash_previous"]) == ("PROCESSED", None)  # never changed
     assert D2 not in rows
     assert await worker.writes() == writes_before  # no date processed
 
@@ -999,19 +1003,19 @@ async def test_a_crash_mid_run_resumes_at_restart_then_sweeps_the_queue(worker: 
 async def test_a_transient_failure_recording_the_end_is_retried(worker: Worker) -> None:
     request_id = await worker.enqueue("CASH", D1, D2)
     queued = await worker.enqueue("CASH", D3, D3)
-    worker.store.end_failures = 2  # the third attempt succeeds
+    worker.faults.end_failures = 2  # the third attempt succeeds
 
     await worker.sweep()
 
     assert (await worker.run_row(request_id))["status"] == "COMPLETED"
     assert (await worker.run_row(queued))["status"] == "COMPLETED"
-    assert worker.store.end_failures == 0
+    assert worker.faults.end_failures == 0
 
 
 async def test_a_transient_failure_recording_a_failed_date_is_retried(worker: Worker) -> None:
-    worker.fail_reading_on_date_transaction = 1  # D1 fails outside the chains
+    worker.faults.fail_on_date_transaction = 1  # D1 fails outside the chains
     request_id = await worker.enqueue("CASH", D1, D2)
-    worker.store.end_failures = 1
+    worker.faults.end_failures = 1
 
     await worker.sweep()
 
@@ -1032,7 +1036,7 @@ async def test_a_persistent_failure_recording_the_end_escapes_and_the_restart_en
     and sweeps the queue (OQ-45)."""
     request_id = await worker.enqueue("CASH", D1, D2)
     queued = await worker.enqueue("CASH", D3, D3)
-    worker.store.end_failures = 3  # every attempt fails
+    worker.faults.end_failures = 3  # every attempt fails
 
     with pytest.raises(OperationalError, match="database blip"):
         await worker.sweep()
@@ -1072,7 +1076,7 @@ async def test_an_end_that_committed_before_its_error_is_not_written_twice(
     assert calls == [request_id, request_id, queued]  # one retry, then the next run
     run = await worker.run_row(request_id)
     assert (run["status"], run["error_code"]) == ("COMPLETED", None)
-    assert worker.store.end_attempts == 2  # the retry stopped at the lock: no second write
+    assert worker.faults.end_attempts == 2  # the retry stopped at the lock: no second write
     assert (await worker.run_row(queued))["status"] == "COMPLETED"
 
 
@@ -1084,11 +1088,11 @@ async def test_a_bug_recording_the_end_is_not_retried_and_ends_the_run_failed(
     PROCESSING_ERROR in a fresh transaction; the dates it committed keep their statuses."""
     request_id = await worker.enqueue("CASH", D1, D2)
     queued = await worker.enqueue("CASH", D3, D3)
-    worker.store.end_bugs = 1
+    worker.faults.end_bugs = 1
 
     await worker.sweep()
 
-    assert worker.store.end_attempts == 3  # the end once, the FAILED end, then the next run
+    assert worker.faults.end_attempts == 3  # the end once, the FAILED end, then the next run
     run = await worker.run_row(request_id)
     assert (run["status"], run["error_code"], run["error_message"]) == (
         "FAILED",
@@ -1108,12 +1112,12 @@ async def test_a_bug_recording_the_end_is_not_retried_and_ends_the_run_failed(
     assert (await worker.run_row(queued))["status"] == "COMPLETED"
 
 
-async def test_a_bug_recording_a_failed_date_ends_the_run_failed_and_restores_the_date(
+async def test_a_bug_recording_a_failed_date_ends_the_run_failed_and_writes_no_status(
     worker: Worker,
 ) -> None:
-    worker.fail_reading_on_date_transaction = 1  # D1 fails outside the chains
+    worker.faults.fail_on_date_transaction = 1  # D1 fails outside the chains
     request_id = await worker.enqueue("CASH", D1, D2)
-    worker.store.end_bugs = 1  # recording D1's failure fails, not retried
+    worker.faults.end_bugs = 1  # recording D1's failure fails, not retried
 
     await worker.sweep()
 
@@ -1123,14 +1127,14 @@ async def test_a_bug_recording_a_failed_date_ends_the_run_failed_and_restores_th
         "PROCESSING_ERROR",
         None,
     )
-    assert await worker.statuses() == {}  # D1's RUNNING is restored: it had no status
+    assert await worker.statuses() == {}  # D1 had no status and was never written
 
 
 async def test_a_bug_that_also_blocks_the_failed_end_escapes_for_a_restart(
     worker: Worker,
 ) -> None:
     request_id = await worker.enqueue("CASH", D1, D1)
-    worker.store.end_bugs = 2  # the end and the FAILED end both fail
+    worker.faults.end_bugs = 2  # the end and the FAILED end both fail
 
     with pytest.raises(ValueError, match="bug while ending the run"):
         await worker.sweep()
@@ -1167,3 +1171,23 @@ async def test_a_cancel_committing_on_the_oldest_row_during_a_take_still_takes_t
     async with asyncio.timeout(5):
         assert await take == second
     assert (await worker.run_row(second))["status"] == "RUNNING"
+
+
+async def test_a_date_left_running_by_the_old_worker_is_processed_again(worker: Worker) -> None:
+    """Before OQ-50 item 4 a crash could leave a date stored RUNNING with ``*_previous`` set; the
+    run that reprocesses it writes the new status and clears ``*_previous`` (the schema's CHECK
+    allows ``*_previous`` only beside RUNNING)."""
+    await seed_statuses(worker.engine, {D0: (None, "PROCESSED")})
+    worker.world.portfolio.cash[D0] = CashBalance(as_of=D0, balance=Decimal("0"))
+    await worker.execute(
+        "INSERT INTO processing.date_status (date, cash, cash_previous, updated_at)"
+        " VALUES (:d, 'RUNNING', 'PROCESSED', now())",
+        d=D1,
+    )
+    request_id = await worker.enqueue("CASH", D1, D1)
+
+    await worker.sweep()
+
+    rows = await worker.status_rows()
+    assert (rows[D1]["cash"], rows[D1]["cash_previous"]) == ("PROCESSED", None)
+    assert (await worker.run_row(request_id))["status"] == "COMPLETED"

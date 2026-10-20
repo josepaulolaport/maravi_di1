@@ -21,23 +21,22 @@ from di1.modules.portfolio.public import (
     PositionsDay,
     PreviousPositionsDay,
 )
-from di1.modules.processing.application.interfaces.run_messages import RUN_MESSAGE_TYPE
-from di1.modules.processing.application.services.chain_history import ChainHistory
+from di1.modules.processing.application.ports import RUN_MESSAGE_TYPE, ChainPorts, RunPorts
+from di1.modules.processing.application.services.chain_history import LedgerChainHistory
 from di1.modules.processing.application.services.processing import ProcessingPreview
-from di1.modules.processing.application.services.run_chains import DayReaders
-from di1.modules.processing.application.services.run_processor import (
-    FINISHED,
-    PortfolioRangeProcessor,
-)
+from di1.modules.processing.application.services.run_processor import PortfolioRangeProcessor
+from di1.modules.processing.dependencies import build_date_status_reader
 from di1.modules.processing.infrastructure.persistence.repositories import (
     SqlDateStatusRepository,
+    SqlIssueRepository,
+    SqlRequestRepository,
+    savepoint,
 )
-from di1.modules.processing.infrastructure.persistence.run_store import SqlRunStore
 from di1.modules.processing.presentation.messaging.run_message import RunMessageHandler
-from di1.modules.processing.public import ProcessingRequest, ProcessingScope
+from di1.modules.processing.public import DateStatus, ProcessingRequest, ProcessingScope
 from di1.platform.database.unit_of_work import UnitOfWork, unit_of_work_factory
 from di1.platform.messaging.envelope import Envelope
-from di1.shared.clock import SAO_PAULO
+from di1.shared.clock import SAO_PAULO, Clock
 from tests.integration.processing.support import make_service
 from tests.support.waits import wait_for_a_lock_waiter
 from tests.unit.processing.run_fakes import World
@@ -64,12 +63,23 @@ Hook = Callable[[str, date], Awaitable[None]]
 
 @dataclass
 class TableWriter:
-    """Writes ``(day, chain)`` into ``public.test_writes`` on the
-    caller's Unit of Work, then runs ``hook`` (which may raise to simulate a failure)."""
+    """Writes ``(day, chain)`` into ``public.test_writes`` on the date's session (`on`), then runs
+    ``hook`` (which may raise to simulate a failure)."""
 
     world: World
     hook: Hook | None = None
     fail: set[tuple[str, date]] = field(default_factory=set)
+
+    def on(self, session: AsyncSession) -> SessionWriter:
+        return SessionWriter(self, session)
+
+
+@dataclass
+class SessionWriter:
+    """`PortfolioResultsWriter` on one session, as ``build_results_writer`` builds it."""
+
+    table: TableWriter
+    session: AsyncSession
 
     async def write_positions_day(
         self,
@@ -77,48 +87,71 @@ class TableWriter:
         valuation: PortfolioValuation,
         asset_pnl: Mapping[UUID, AssetPnLResult],
         pnl: PortfolioPnLResult,
-        *,
-        uow: UnitOfWork,
     ) -> None:
-        await self._write("POSITIONS", day.date, uow)
-        self.world.portfolio.positions[day.date] = PreviousPositionsDay(
+        await self._write("POSITIONS", day.date)
+        self.table.world.portfolio.positions[day.date] = PreviousPositionsDay(
             day.closing_state(), pnl.cumulative_pnl
         )
 
-    async def write_cash_day(self, day: CashDay, *, uow: UnitOfWork) -> None:
-        await self._write("CASH", day.date, uow)
-        self.world.portfolio.cash[day.date] = day.closing_balance()
+    async def write_cash_day(self, day: CashDay) -> None:
+        await self._write("CASH", day.date)
+        self.table.world.portfolio.cash[day.date] = day.closing_balance()
 
-    async def _write(self, chain: str, day: date, uow: UnitOfWork) -> None:
-        await uow.session.execute(
+    async def _write(self, chain: str, day: date) -> None:
+        await self.session.execute(
             text("INSERT INTO public.test_writes (day, chain) VALUES (:d, :c)"),
             {"d": day, "c": chain},
         )
-        if self.hook is not None:
-            await self.hook(chain, day)
-        if (chain, day) in self.fail:
+        if self.table.hook is not None:
+            await self.table.hook(chain, day)
+        if (chain, day) in self.table.fail:
             raise RuntimeError(f"{chain} writer failed on {day}")
 
 
-class FlakyRunStore(SqlRunStore):
-    """`SqlRunStore` whose writes of a finished run fail: the next ``end_failures`` as a
-    database blip would (transient), then the next ``end_bugs`` as a bug would (the same on
-    every try). The step's transaction then rolls back. ``end_attempts`` counts the writes."""
+@dataclass
+class Faults:
+    """Faults injected into the run's persistence: the next ``end_failures`` writes of a finished
+    run fail as a database blip would (transient), then the next ``end_bugs`` as a bug would (the
+    same on every try); the step's transaction then rolls back. ``end_attempts`` counts those
+    writes. The date transaction numbered ``fail_on_date_transaction`` fails outside the chains."""
 
-    end_failures = 0
-    end_bugs = 0
-    end_attempts = 0
+    end_failures: int = 0
+    end_bugs: int = 0
+    end_attempts: int = 0
+    fail_on_date_transaction: int | None = None
+    date_transactions: int = 0
 
-    async def save_run(self, request: ProcessingRequest, *, uow: UnitOfWork) -> None:
-        if request.status in FINISHED:
-            self.end_attempts += 1
-            if self.end_failures > 0:
-                self.end_failures -= 1
+
+class FlakyRequests(SqlRequestRepository):
+    def __init__(self, session: AsyncSession, faults: Faults) -> None:
+        super().__init__(session)
+        self._faults = faults
+
+    async def save(self, request: ProcessingRequest) -> None:
+        faults = self._faults
+        if request.status.is_finished:
+            faults.end_attempts += 1
+            if faults.end_failures > 0:
+                faults.end_failures -= 1
                 raise OperationalError("UPDATE processing.requests", {}, Exception("database blip"))
-            if self.end_bugs > 0:
-                self.end_bugs -= 1
+            if faults.end_bugs > 0:
+                faults.end_bugs -= 1
                 raise ValueError("bug while ending the run")
-        await super().save_run(request, uow=uow)
+        await super().save(request)
+
+
+class FlakyDateStatuses(SqlDateStatusRepository):
+    def __init__(self, session: AsyncSession, clock: Clock, faults: Faults) -> None:
+        super().__init__(session, clock)
+        self._faults = faults
+
+    async def lock_range(self, start_date: date, end_date: date) -> Mapping[date, DateStatus]:
+        """D's transaction locks D−1 and D first, outside every chain's savepoint."""
+        if start_date < end_date:
+            self._faults.date_transactions += 1
+            if self._faults.date_transactions == self._faults.fail_on_date_transaction:
+                raise RuntimeError("failure outside the chains")
+        return await super().lock_range(start_date, end_date)
 
 
 END_RETRY_DELAYS = (0.0, 0.0)
@@ -137,28 +170,34 @@ class Worker:
         self.clock = MutableClock()
         self.world = world or World()
         self.writer = TableWriter(self.world)
-        self.fail_reading_on_date_transaction: int | None = None
-        self._date_transactions = 0
+        self.faults = Faults()
         self.uow_factory = unit_of_work_factory(session_factory)
-        self.store = FlakyRunStore(self.clock)
         # The preview reads the same Ledger as the run, so the two can be compared.
-        self.service = make_service(clock=self.clock, history=ChainHistory(self.world.ledger))
+        self.service = make_service(clock=self.clock, history=LedgerChainHistory(self.world.ledger))
         self.processor = PortfolioRangeProcessor(
             uow_factory=self.uow_factory,
-            store=self.store,
-            date_statuses=SqlDateStatusRepository(),
-            readers_for=self._readers,
-            writer=self.writer,
+            ports_for=self._ports,
             clock=self.clock,
             end_retry_delays=END_RETRY_DELAYS,
         )
 
-    def _readers(self, uow: UnitOfWork) -> DayReaders:
-        """Built once per date transaction, outside every chain's savepoint."""
-        self._date_transactions += 1
-        if self._date_transactions == self.fail_reading_on_date_transaction:
-            raise RuntimeError("failure outside the chains")
-        return self.world.readers(uow)
+    def _ports(self, uow: UnitOfWork) -> RunPorts:
+        """Processing's real persistence, the in-memory world for the other modules."""
+        session = uow.session
+        return RunPorts(
+            requests=FlakyRequests(session, self.faults),
+            date_statuses=FlakyDateStatuses(session, self.clock, self.faults),
+            issues=SqlIssueRepository(session, self.clock),
+            history=LedgerChainHistory(self.world.ledger),
+            chains=ChainPorts(
+                ledger=self.world.ledger,
+                prices=self.world.prices,
+                assets=self.world.instruments,
+                portfolio=self.world.portfolio,
+                writer=self.writer.on(session),
+            ),
+            savepoint=lambda: savepoint(session),
+        )
 
     async def setup(self) -> None:
         async with self.engine.begin() as connection:
@@ -168,18 +207,18 @@ class Worker:
         """Queues a request through `ProcessingService`, which publishes its run message."""
         self.clock.advance(1)
         async with self.uow_factory() as uow:
-            request = await self.service.enqueue_range(ProcessingScope(scope), start, end, uow=uow)
+            request = await self.service.on(uow).enqueue_range(ProcessingScope(scope), start, end)
         return request.id
 
     async def preview(self, scope: str, start: date, end: date) -> ProcessingPreview:
         """`ProcessingService.preview_range`, in its own transaction."""
         async with self.uow_factory() as uow:
-            return await self.service.preview_range(ProcessingScope(scope), start, end, uow=uow)
+            return await self.service.on(uow).preview_range(ProcessingScope(scope), start, end)
 
     async def cancel(self, request_id: UUID) -> None:
         """`ProcessingService.request_cancel`, in its own transaction."""
         async with self.uow_factory() as uow:
-            await self.service.request_cancel(request_id, uow=uow)
+            await self.service.on(uow).request_cancel(request_id)
 
     async def deliver(self, request_id: UUID) -> bool:
         """The worker handles ``request_id``'s run message through the real handler: it takes
@@ -228,6 +267,21 @@ class Worker:
                 text("SELECT date, portfolio, cash FROM processing.date_status ORDER BY date")
             )
             return {row[0]: (row[1], row[2]) for row in result}
+
+    async def displayed(self, start: date, end: date) -> dict[date, tuple[str | None, str | None]]:
+        """``{date: (portfolio, cash)}`` as a read shows them (`DateStatusReader`), "Processando"
+        derived for the active run's current date (OQ-50 item 4)."""
+        async with self.uow_factory() as uow:
+            statuses = await build_date_status_reader(uow.session, self.clock).get_date_statuses(
+                start, end
+            )
+        return {
+            day: (
+                None if s.portfolio is None else s.portfolio.value,
+                None if s.cash is None else s.cash.value,
+            )
+            for day, s in statuses.items()
+        }
 
     async def status_rows(self) -> dict[date, dict[str, Any]]:
         async with self.engine.connect() as connection:

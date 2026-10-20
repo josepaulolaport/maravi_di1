@@ -18,15 +18,14 @@ from di1.modules.portfolio.public import (
     PreviousPositionsDay,
     ValuationStatus,
 )
-from di1.modules.processing.application.interfaces.repositories import IssueRecord, IssueType
 from di1.modules.processing.application.services.run_chains import (
-    ChainDataError,
     cash_totals,
     process_cash_day,
     process_positions_day,
     trade_of,
 )
-from tests.unit.processing.fakes import FakeUnitOfWork
+from di1.modules.processing.domain.errors import ProcessingError
+from di1.modules.processing.domain.issues import IssueRecord, IssueType
 from tests.unit.processing.run_fakes import RecordingWriter, World, cash_movement, trade
 
 D0 = date(2026, 10, 5)
@@ -49,9 +48,7 @@ async def positions(
     issues = await process_positions_day(
         day,
         zero_state=zero_state,
-        readers=w.readers(),
-        writer=writer,
-        uow=FakeUnitOfWork(),
+        ports=w.ports(writer),
     )
     return issues, writer
 
@@ -78,9 +75,7 @@ async def test_cash_from_the_zero_state_adds_trades_deposits_and_withdrawals() -
     await process_cash_day(
         D1,
         zero_state=True,
-        readers=w.readers(),
-        writer=writer,
-        uow=FakeUnitOfWork(),
+        ports=w.ports(writer),
     )
 
     [written] = writer.cash
@@ -100,22 +95,18 @@ async def test_cash_continues_from_the_published_balance_of_the_day_before() -> 
     await process_cash_day(
         D1,
         zero_state=False,
-        readers=w.readers(),
-        writer=writer,
-        uow=FakeUnitOfWork(),
+        ports=w.ports(writer),
     )
 
     assert writer.cash[0].day.cash_balance == Decimal("400.00")
 
 
 async def test_cash_with_a_processed_day_before_but_no_published_balance_is_a_data_error() -> None:
-    with pytest.raises(ChainDataError):
+    with pytest.raises(ProcessingError):
         await process_cash_day(
             D1,
             zero_state=False,
-            readers=world().readers(),
-            writer=RecordingWriter(),
-            uow=FakeUnitOfWork(),
+            ports=world().ports(RecordingWriter()),
         )
 
 
@@ -217,14 +208,14 @@ async def test_an_open_position_after_maturity_is_worth_zero_and_raises_an_issue
 async def test_positions_with_a_processed_day_before_but_nothing_published_is_a_data_error() -> (
     None
 ):
-    with pytest.raises(ChainDataError):
+    with pytest.raises(ProcessingError):
         await positions(world(), D2, zero_state=False)
 
 
 async def test_a_traded_asset_without_an_instrument_is_a_data_error() -> None:
     w = World()
     w.ledger.trades.append(trade(F29, D1, 1, "95000.0000000000"))
-    with pytest.raises(ChainDataError):
+    with pytest.raises(ProcessingError):
         await positions(w, D1, zero_state=True)
 
 
@@ -237,12 +228,12 @@ async def test_a_traded_asset_without_an_instrument_is_a_data_error() -> None:
 def test_a_trade_missing_a_trade_field_is_a_data_error(missing: str) -> None:
     broken = replace(trade(F29, D1, 1, "95000.0000000000"), **{missing: None})  # type: ignore[arg-type]
 
-    with pytest.raises(ChainDataError):
+    with pytest.raises(ProcessingError):
         trade_of(broken)
 
 
 def test_a_cash_movement_without_an_amount_is_a_data_error() -> None:
     broken = replace(cash_movement(D1, "100.00"), cash_amount=None)
 
-    with pytest.raises(ChainDataError):
+    with pytest.raises(ProcessingError):
         cash_totals([broken])

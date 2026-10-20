@@ -11,13 +11,19 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from di1.modules.processing.application.interfaces.repositories import IssueType
-from di1.modules.processing.application.services.processing import ProcessingService
+from di1.modules.processing.domain.issues import IssueType
 from di1.modules.processing.domain.predecessor import PredecessorState
-from di1.modules.processing.public import ProcessingRequest, ProcessingScope, ProcessingStatus
+from di1.modules.processing.public import (
+    Chain,
+    ProcessingRequest,
+    ProcessingScope,
+    ProcessingStatus,
+)
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.errors import DomainError, ErrorCode
+from di1.shared.paging import PageParams
 from tests.integration.processing.support import (
+    ServiceFactory,
     count,
     make_service,
     request_statuses,
@@ -34,12 +40,12 @@ ALL = ProcessingScope.ALL
 
 async def _enqueue(
     session_factory: async_sessionmaker[AsyncSession],
-    service: ProcessingService,
+    service: ServiceFactory,
     start: date = A,
     end: date = B,
 ) -> ProcessingRequest:
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        return await service.enqueue_range(ALL, start, end, uow=uow)
+        return await service.on(uow).enqueue_range(ALL, start, end)
 
 
 async def _set_status(engine: AsyncEngine, request_id: UUID, status: str) -> None:
@@ -71,13 +77,13 @@ async def test_oq40_a_runs_first_failure_reads_back_in_the_run_and_the_history(
     await _set_failure(engine, run.id, "COMPLETED_WITH_ISSUES", date(2026, 10, 3), "CASH")
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        stored = await service.get_request(run.id, uow=uow)
-        page = await service.list_requests(10, None, uow=uow)
+        stored = await service.on(uow).get_request(run.id)
+        page = await service.on(uow).list_requests(PageParams(10, None))
 
-    assert (stored.failed_date, stored.failed_chain) == (date(2026, 10, 3), ProcessingScope.CASH)
+    assert (stored.failed_date, stored.failed_chain) == (date(2026, 10, 3), Chain.CASH)
     assert (page.items[0].failed_date, page.items[0].failed_chain) == (
         date(2026, 10, 3),
-        ProcessingScope.CASH,
+        Chain.CASH,
     )
 
 
@@ -89,11 +95,11 @@ async def test_oq40_a_positions_failure_reads_back(
     await _set_failure(engine, run.id, "COMPLETED_WITH_ISSUES", date(2026, 10, 4), "POSITIONS")
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        stored = await service.get_request(run.id, uow=uow)
+        stored = await service.on(uow).get_request(run.id)
 
     assert (stored.failed_date, stored.failed_chain) == (
         date(2026, 10, 4),
-        ProcessingScope.POSITIONS,
+        Chain.POSITIONS,
     )
 
 
@@ -105,7 +111,7 @@ async def test_oq40_a_failure_of_no_chain_reads_back_without_a_chain(
     await _set_failure(engine, run.id, "FAILED", date(2026, 10, 2), None)
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        stored = await service.get_request(run.id, uow=uow)
+        stored = await service.on(uow).get_request(run.id)
 
     assert (stored.failed_date, stored.failed_chain) == (date(2026, 10, 2), None)
 
@@ -120,7 +126,7 @@ async def test_oq40_cancelling_a_running_run_keeps_its_first_failure(
     await _set_failure(engine, run.id, "RUNNING", date(2026, 10, 2), "CASH")
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        flagged = await service.request_cancel(run.id, uow=uow)
+        flagged = await service.on(uow).request_cancel(run.id)
     async with engine.connect() as connection:
         row = (
             await connection.execute(
@@ -139,7 +145,7 @@ async def test_an_enqueued_run_reads_back_as_stored(
     queued = await _enqueue(session_factory, service)
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        stored = await service.get_request(queued.id, uow=uow)
+        stored = await service.on(uow).get_request(queued.id)
 
     assert stored == queued
 
@@ -172,9 +178,9 @@ async def test_13_10_cancelling_a_queued_run_is_immediate(
     queued = await _enqueue(session_factory, service)
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        cancelled = await service.request_cancel(queued.id, uow=uow)
+        cancelled = await service.on(uow).request_cancel(queued.id)
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        stored = await service.get_request(queued.id, uow=uow)
+        stored = await service.on(uow).get_request(queued.id)
 
     assert cancelled.status is ProcessingStatus.CANCELLED
     assert stored == cancelled
@@ -188,7 +194,7 @@ async def test_13_10_cancelling_a_running_run_flags_it(
     await _set_status(engine, run.id, "RUNNING")
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        flagged = await service.request_cancel(run.id, uow=uow)
+        flagged = await service.on(uow).request_cancel(run.id)
 
     assert flagged.status is ProcessingStatus.RUNNING  # no CANCELLING (OQ-46)
     assert flagged.cancel_requested_at is not None
@@ -196,10 +202,10 @@ async def test_13_10_cancelling_a_running_run_flags_it(
 
 
 async def _cancel(
-    session_factory: async_sessionmaker[AsyncSession], service: ProcessingService, active: UUID
+    session_factory: async_sessionmaker[AsyncSession], service: ServiceFactory, active: UUID
 ) -> ProcessingRequest:
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        return await service.request_cancel(active, uow=uow)
+        return await service.on(uow).request_cancel(active)
 
 
 @pytest.mark.parametrize(
@@ -247,7 +253,7 @@ async def test_12_the_history_pages_by_keyset_even_with_equal_creation_times(
     cursor: str | None = None
     while True:
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
-            page = await same_instant.list_requests(2, cursor, uow=uow)
+            page = await same_instant.on(uow).list_requests(PageParams(2, cursor))
         seen += [r.id for r in page.items]
         if page.next_cursor is None:
             break
@@ -263,7 +269,7 @@ async def test_oq31_the_preview_reads_the_day_before_from_date_status(
     service = make_service(history=FakeChainHistory(first_trade=date(2026, 9, 1)))
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        preview = await service.preview_range(ALL, A, B, uow=uow)
+        preview = await service.on(uow).preview_range(ALL, A, B)
 
     assert (preview.cash, preview.positions, preview.total_days) == (
         PredecessorState.NOT_PROCESSED,
@@ -291,7 +297,7 @@ async def test_oq37_the_preview_follows_the_runs_predecessor_rule(
 
     async def preview(start: date) -> tuple[PredecessorState, PredecessorState]:
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
-            result = await service.preview_range(ALL, start, start, uow=uow)
+            result = await service.on(uow).preview_range(ALL, start, start)
         return result.cash, result.positions
 
     assert await preview(date(2026, 10, 10)) == (
@@ -327,7 +333,7 @@ async def test_10_3_issues_are_listed_newest_first_with_asset_codes(
     service = make_service(assets=FakeAssets({asset_id: "DI1F29"}))
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        issues = await service.get_issues(uow=uow)
+        issues = await service.on(uow).get_issues()
 
     assert [
         (i.issue_type, i.asset_code, i.affected_date, i.required_price_date) for i in issues
@@ -344,8 +350,30 @@ async def test_timestamps_round_trip_with_their_offset(
     queued = await _enqueue(session_factory, make_service())
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
-        stored = await make_service().get_request(queued.id, uow=uow)
+        stored = await make_service().on(uow).get_request(queued.id)
 
     assert isinstance(stored.created_at, datetime)
     assert stored.created_at.utcoffset() is not None
     assert stored.created_at == queued.created_at
+
+
+@pytest.mark.parametrize("code", ["SUPERSEDED", "RECOVERY_EXHAUSTED"])
+async def test_a_run_ended_with_a_retired_error_code_still_reads_back(
+    engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession], code: str
+) -> None:
+    """Migration 0003 wrote SUPERSEDED and the OQ-43 code wrote RECOVERY_EXHAUSTED; the history
+    must still read those runs."""
+    service = make_service()
+    run = await _enqueue(session_factory, service)
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE processing.requests SET status = 'FAILED', error_code = :c WHERE id = :id"
+            ),
+            {"c": code, "id": run.id},
+        )
+
+    async with SqlAlchemyUnitOfWork(session_factory) as uow:
+        page = await service.on(uow).list_requests(PageParams(10, None))
+
+    assert page.items[0].error_code == code
