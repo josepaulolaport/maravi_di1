@@ -22,7 +22,8 @@ from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.decimals import to_plain
 from di1.shared.input_kind import InputKind
 from tests.fakes.clock import FixedClock
-from tests.integration.prices.conftest import DI1F28, MATURED, TODAY
+from tests.integration.prices.support import TODAY
+from tests.support.builders import DI1F28, DI1V26
 
 DAY = date(2026, 10, 16)
 
@@ -37,7 +38,7 @@ async def _set(factory: async_sessionmaker[AsyncSession], **price: object) -> Re
 
 
 def _request(
-    asset_id: UUID = DI1F28,
+    asset_id: UUID = DI1F28.id,
     *,
     day: date = DAY,
     pu: str | None = None,
@@ -81,7 +82,7 @@ async def test_on_the_maturity_date_the_typed_pu_stores_rate_zero(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     # MATURED matures on 01/10/2026: on that date d = 0, the PU is typed, the rate is 0 (OQ-1).
-    record = await _set(session_factory, **_request(MATURED, day=date(2026, 10, 1), pu="99987.5"))
+    record = await _set(session_factory, **_request(DI1V26.id, day=date(2026, 10, 1), pu="99987.5"))
 
     assert record.rate is not None
     assert (record.input_kind, to_plain(record.pu), to_plain(record.rate)) == (

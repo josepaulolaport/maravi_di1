@@ -22,8 +22,8 @@ from di1.composition.errors import install_problem_handlers
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.presentation.http.router import create_router
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
-from tests.integration.ledger.conftest import ServiceOn
-from tests.unit.ledger.fakes import DI1F28, DI1F29, DI1V26
+from tests.integration.ledger.support import ServiceOn
+from tests.support.builders import DI1F28, DI1F29, DI1V26
 
 PROBLEM_JSON = "application/problem+json"
 

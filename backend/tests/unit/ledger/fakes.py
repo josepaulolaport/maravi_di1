@@ -25,34 +25,7 @@ from di1.shared.clock import SAO_PAULO
 from di1.shared.decimals import financial_context, quantize_pu, quantize_rate
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
-from tests.fakes.asset import CREATED_AT
-
-PRODUCT_ID = UUID("6f1c2a10-0000-4000-8000-000000000001")
-
-
-def di1_future(code: str, instrument_id: UUID, maturity: date) -> Instrument:
-    return Instrument(
-        id=instrument_id,
-        code=code,
-        product_id=PRODUCT_ID,
-        product_code="DI1",
-        instrument_type="FUTURE",
-        asset_class="INTEREST_RATE_FUTURE",
-        maturity_date=maturity,
-        face_value=Decimal("100000"),
-        multiplier=Decimal("1"),
-        settlement_method="CASH",
-        created_at=CREATED_AT,
-    )
-
-
-# The contracts of the frontend's test fixtures (frontend/src/test/msw/fixtures.ts; before #114,
-# frontend/src/api/mocks/fixtures.ts at 57b4df0).
-DI1F27 = di1_future("DI1F27", UUID("6f1c2a10-0000-4000-8000-0000000000f7"), date(2027, 1, 4))
-DI1F28 = di1_future("DI1F28", UUID("6f1c2a10-0000-4000-8000-0000000000f8"), date(2028, 1, 3))
-DI1F29 = di1_future("DI1F29", UUID("6f1c2a10-0000-4000-8000-0000000000f9"), date(2029, 1, 2))
-# Not in the fixtures: a contract that matured before today (OQ-1).
-DI1V26 = di1_future("DI1V26", UUID("6f1c2a10-0000-4000-8000-0000000000a1"), date(2026, 10, 1))
+from tests.support.builders import DI1F27, DI1F28, DI1F29, DI1V26
 
 
 @dataclass

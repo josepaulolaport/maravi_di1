@@ -27,7 +27,8 @@ from di1.modules.asset.domain.model import AssetClass, FuturesTerms, InstrumentT
 from di1.modules.asset.infrastructure.persistence.repositories import SqlAssetRepository
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
-from tests.support.db import DI1_FUTURES, DI1_NAME, Di1Catalogue, Writer
+from tests.support.builders import DI1_NAME
+from tests.support.db import DI1_FUTURES, Di1Catalogue, Writer
 
 
 def _problems(error: pytest.ExceptionInfo[DomainError]) -> list[tuple[ErrorCode, str | None]]:

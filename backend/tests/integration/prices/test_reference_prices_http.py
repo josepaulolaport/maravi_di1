@@ -23,22 +23,64 @@ from di1.modules.prices.presentation.http.router import create_router
 from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import UnitOfWork
 from tests.fakes.clock import FixedClock
-from tests.integration.prices.conftest import DI1F28, DI1F29, INSTRUMENTS, MATURED, PRODUCT, TODAY
-from tests.support.db import psycopg_url
+from tests.integration.prices.conftest import CONTRACTS
+from tests.integration.prices.support import TODAY
+from tests.support.builders import DI1F28, DI1F29, DI1V26
+from tests.support.db import psycopg_url, seed_catalogue
 from tests.unit.prices.fakes import CALCULATED_PU, CALCULATED_RATE, FakeAssets, FakePricing
 
 # frontend/src/api/mocks/fixtures.ts `referencePrices`, DI1F28 and DI1F29.
 FIXTURES = [
-    (1, DI1F28, "2026-09-24", "B3", "88215.0712246655", "0.1032", "2026-09-24T18:00:00-03:00"),
-    (2, DI1F28, "2026-09-30", "MANUAL", "88509.2489449811", "0.1017", "2026-09-30T18:00:00-03:00"),
-    (3, DI1F28, "2026-10-05", "MANUAL", "88777.4109547747", "0.1002", "2026-10-05T18:00:00-03:00"),
-    (4, DI1F28, "2026-10-08", "B3", "88817.1246020680", "0.1005", "2026-10-08T18:00:00-03:00"),
-    (5, DI1F28, "2026-10-09", "MANUAL", "88910.3037976557", "0.0998", "2026-10-09T18:00:00-03:00"),
-    (6, DI1F28, "2026-10-14", "MANUAL", "89006.4625467350", "0.10", "2026-10-14T18:00:00-03:00"),
-    (7, DI1F28, "2026-10-15", "B3", "89128.4824345118", "0.0990", "2026-10-15T18:00:00-03:00"),
-    (8, DI1F28, "2026-10-16", "MANUAL", "89250.3147019396", "0.0980", "2026-10-17T10:00:00-03:00"),
-    (10, DI1F28, "2026-10-16", "B3", "89240.4279488087", "0.0981", "2026-10-16T19:00:00-03:00"),
-    (11, DI1F29, "2026-10-15", "MANUAL", "80206.1333187932", "0.1045", "2026-10-15T18:00:00-03:00"),
+    (1, DI1F28.id, "2026-09-24", "B3", "88215.0712246655", "0.1032", "2026-09-24T18:00:00-03:00"),
+    (
+        2,
+        DI1F28.id,
+        "2026-09-30",
+        "MANUAL",
+        "88509.2489449811",
+        "0.1017",
+        "2026-09-30T18:00:00-03:00",
+    ),
+    (
+        3,
+        DI1F28.id,
+        "2026-10-05",
+        "MANUAL",
+        "88777.4109547747",
+        "0.1002",
+        "2026-10-05T18:00:00-03:00",
+    ),
+    (4, DI1F28.id, "2026-10-08", "B3", "88817.1246020680", "0.1005", "2026-10-08T18:00:00-03:00"),
+    (
+        5,
+        DI1F28.id,
+        "2026-10-09",
+        "MANUAL",
+        "88910.3037976557",
+        "0.0998",
+        "2026-10-09T18:00:00-03:00",
+    ),
+    (6, DI1F28.id, "2026-10-14", "MANUAL", "89006.4625467350", "0.10", "2026-10-14T18:00:00-03:00"),
+    (7, DI1F28.id, "2026-10-15", "B3", "89128.4824345118", "0.0990", "2026-10-15T18:00:00-03:00"),
+    (
+        8,
+        DI1F28.id,
+        "2026-10-16",
+        "MANUAL",
+        "89250.3147019396",
+        "0.0980",
+        "2026-10-17T10:00:00-03:00",
+    ),
+    (10, DI1F28.id, "2026-10-16", "B3", "89240.4279488087", "0.0981", "2026-10-16T19:00:00-03:00"),
+    (
+        11,
+        DI1F29.id,
+        "2026-10-15",
+        "MANUAL",
+        "80206.1333187932",
+        "0.1045",
+        "2026-10-15T18:00:00-03:00",
+    ),
 ]
 REFERENCE_PRICE_KEYS = {
     "id",
@@ -103,25 +145,8 @@ def api(migrated_database_url: str, assets: FakeAssets) -> Iterator[Api]:
 
 
 def _seed(url: str) -> None:
+    seed_catalogue(url, CONTRACTS)
     with psycopg.connect(psycopg_url(url)) as connection:
-        connection.execute(
-            "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuros')"
-        )
-        connection.execute(
-            "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
-            " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuros de juros')"
-        )
-        connection.execute(
-            "INSERT INTO asset.products (id, asset_class_id, code, name)"
-            " VALUES (%s, 1, 'DI1', 'DI1')",
-            (PRODUCT,),
-        )
-        for instrument_id, (code, maturity) in INSTRUMENTS.items():
-            connection.execute(
-                "INSERT INTO asset.instruments (id, product_id, code, maturity_date)"
-                " VALUES (%s, %s, %s, %s)",
-                (instrument_id, PRODUCT, code, maturity),
-            )
         for n, asset, day, source, pu, rate, created in FIXTURES:
             connection.execute(
                 "INSERT INTO prices.reference_prices (id, asset_id, reference_date, source,"
@@ -146,7 +171,11 @@ class TestList:
     def test_one_day_per_date_with_a_price_newest_first_manual_preferred(self, api: Api) -> None:
         response = api.client.get(
             "/reference-prices",
-            params={"asset_id": str(DI1F28), "start_date": "2026-09-01", "end_date": "2026-10-19"},
+            params={
+                "asset_id": str(DI1F28.id),
+                "start_date": "2026-09-01",
+                "end_date": "2026-10-19",
+            },
         )
 
         assert response.status_code == 200
@@ -173,7 +202,11 @@ class TestList:
     def test_decimals_keep_their_typed_scale_as_strings(self, api: Api) -> None:
         response = api.client.get(
             "/reference-prices",
-            params={"asset_id": str(DI1F28), "start_date": "2026-10-14", "end_date": "2026-10-14"},
+            params={
+                "asset_id": str(DI1F28.id),
+                "start_date": "2026-10-14",
+                "end_date": "2026-10-14",
+            },
         )
 
         price = response.json()["items"][0]["preferred"]
@@ -182,7 +215,11 @@ class TestList:
     def test_a_range_without_prices_is_empty_no_carry_forward(self, api: Api) -> None:
         response = api.client.get(
             "/reference-prices",
-            params={"asset_id": str(DI1F28), "start_date": "2026-10-17", "end_date": "2026-10-19"},
+            params={
+                "asset_id": str(DI1F28.id),
+                "start_date": "2026-10-17",
+                "end_date": "2026-10-19",
+            },
         )
 
         assert (response.status_code, response.json()) == (200, {"items": []})
@@ -194,7 +231,11 @@ class TestList:
         # day for them; only writes are refused after today.
         response = api.client.get(
             "/reference-prices",
-            params={"asset_id": str(DI1F28), "start_date": "2026-10-15", "end_date": "2026-11-30"},
+            params={
+                "asset_id": str(DI1F28.id),
+                "start_date": "2026-10-15",
+                "end_date": "2026-11-30",
+            },
         )
 
         assert response.status_code == 200
@@ -206,7 +247,11 @@ class TestList:
     def test_a_range_entirely_after_today_is_empty(self, api: Api) -> None:
         response = api.client.get(
             "/reference-prices",
-            params={"asset_id": str(DI1F28), "start_date": "2026-10-20", "end_date": "2026-12-31"},
+            params={
+                "asset_id": str(DI1F28.id),
+                "start_date": "2026-10-20",
+                "end_date": "2026-12-31",
+            },
         )
 
         assert (response.status_code, response.json()) == (200, {"items": []})
@@ -233,7 +278,7 @@ class TestList:
         ]
 
     def test_missing_query_parameters_are_422(self, api: Api) -> None:
-        response = api.client.get("/reference-prices", params={"asset_id": str(DI1F28)})
+        response = api.client.get("/reference-prices", params={"asset_id": str(DI1F28.id)})
 
         assert response.status_code == 422
         assert {e["field"] for e in response.json()["errors"]} == {"start_date", "end_date"}
@@ -244,7 +289,7 @@ class TestSet:
         response = api.client.post(
             "/reference-prices",
             json={
-                "asset_id": str(DI1F28),
+                "asset_id": str(DI1F28.id),
                 "reference_date": "2026-10-19",
                 "input_kind": "PU",
                 "pu": "89300.1234567890",
@@ -255,7 +300,7 @@ class TestSet:
         body = response.json()
         assert set(body) == REFERENCE_PRICE_KEYS
         assert {k: body[k] for k in ("asset_id", "reference_date", "source", "input_kind")} == {
-            "asset_id": str(DI1F28),
+            "asset_id": str(DI1F28.id),
             "reference_date": "2026-10-19",
             "source": "MANUAL",
             "input_kind": "PU",
@@ -266,7 +311,7 @@ class TestSet:
         response = api.client.post(
             "/reference-prices",
             json={
-                "asset_id": str(DI1F29),
+                "asset_id": str(DI1F29.id),
                 "reference_date": "2026-10-16",
                 "input_kind": "RATE",
                 "rate": "0.1040",
@@ -280,7 +325,7 @@ class TestSet:
         response = api.client.post(
             "/reference-prices",
             json={
-                "asset_id": str(DI1F28),
+                "asset_id": str(DI1F28.id),
                 "reference_date": "2026-10-16",
                 "input_kind": "PU",
                 "pu": "89255",
@@ -311,7 +356,7 @@ class TestSet:
                 ],
             ),
             (
-                {"asset_id": str(MATURED), "input_kind": "PU", "pu": "100000"},
+                {"asset_id": str(DI1V26.id), "input_kind": "PU", "pu": "100000"},
                 422,
                 [
                     {
@@ -413,7 +458,7 @@ class TestSet:
         self, api: Api, body: dict[str, Any], status: int, errors: list[dict[str, Any]]
     ) -> None:
         before = api.rows()
-        payload = {"asset_id": str(DI1F28), "reference_date": "2026-10-16", **body}
+        payload = {"asset_id": str(DI1F28.id), "reference_date": "2026-10-16", **body}
 
         response = api.client.post("/reference-prices", json=payload)
 
@@ -430,7 +475,11 @@ class TestDelete:
         assert (response.status_code, response.content) == (204, b"")
         day = api.client.get(
             "/reference-prices",
-            params={"asset_id": str(DI1F28), "start_date": "2026-10-16", "end_date": "2026-10-16"},
+            params={
+                "asset_id": str(DI1F28.id),
+                "start_date": "2026-10-16",
+                "end_date": "2026-10-16",
+            },
         ).json()["items"][0]
         _same(day["preferred"], _fixture(10))
         assert [s["id"] for s in day["sources"]] == [_fixture_id(10)]

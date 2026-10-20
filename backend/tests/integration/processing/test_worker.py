@@ -20,8 +20,10 @@ from di1.modules.ledger.public import EntryType
 from di1.modules.portfolio.public import CashBalance
 from di1.modules.prices.public import PriceSource
 from di1.modules.processing.domain.predecessor import PredecessorState, allows_run
-from tests.integration.processing.support import seed_instrument, seed_statuses
+from tests.integration.processing.support import seed_statuses
 from tests.integration.processing.worker_support import Worker
+from tests.support.builders import DI1F29
+from tests.support.db import seed_catalogue
 from tests.unit.processing.run_fakes import cash_movement, trade
 
 D1, D2, D3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
@@ -38,7 +40,8 @@ async def worker(
 
 
 async def priced_asset(w: Worker, *days: date, pu: str = "95000.0000000000") -> UUID:
-    asset_id = await seed_instrument(w.engine, "DI1F29")
+    seed_catalogue(w.engine, (DI1F29,))
+    asset_id = DI1F29.id
     w.world.instruments.maturities[asset_id] = date(2029, 1, 2)
     for day in days:
         w.world.prices.set(asset_id, day, pu, PriceSource.B3)

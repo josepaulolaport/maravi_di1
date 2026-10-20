@@ -29,7 +29,7 @@ from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.worker import WorkerResources
 from di1.shared.clock import SAO_PAULO
 from tests.fakes.clock import FixedClock
-from tests.support.db import migrated_database_url, psycopg_url
+from tests.support.db import migrated_database_url, psycopg_url, seed_catalogue_roots
 
 PROBLEM_JSON = "application/problem+json"
 
@@ -71,7 +71,7 @@ class TickingClock:
 def acceptance_app(today: date) -> Iterator[tuple[TestClient, str]]:
     """A client of the real app whose "today" is ``today``, and its database URL."""
     for url in migrated_database_url():
-        _seed_catalogue_roots(url)
+        seed_catalogue_roots(url)
         app = create_app(Settings(database_url=SecretStr(url)), clock=TickingClock(today))
         with TestClient(app) as client:
             yield client, url
@@ -209,15 +209,3 @@ def problem(response: Any, status: int) -> list[tuple[str, str | None]]:
     assert body["status"] == status
     assert all(e["message"] for e in body["errors"])  # a pt-BR message for every error
     return [(e["code"], e["field"]) for e in body["errors"]]
-
-
-def _seed_catalogue_roots(database_url: str) -> None:
-    sql(
-        database_url,
-        "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuros')",
-    )
-    sql(
-        database_url,
-        "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
-        " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuros de Taxa de Juros')",
-    )

@@ -27,8 +27,9 @@ from di1.modules.prices.dependencies import build_price_reader
 from di1.modules.processing.dependencies import make_date_status_reader, make_range_processor
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from tests.fakes.clock import FixedClock
-from tests.integration.processing.support import seed_instrument
 from tests.integration.processing.worker_support import MutableClock
+from tests.support.builders import DI1F29
+from tests.support.db import seed_catalogue
 
 D1, D2, D3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
 
@@ -101,7 +102,8 @@ async def real(
 
 async def seed_day_one(real: RealWorker, *, price_d2: bool = True) -> UUID:
     """Deposit 1 000 000 and buy 10 DI1F29 at 95 000 on D1; B3 prices 95 100 (D1), 95 200 (D2)."""
-    asset = await seed_instrument(real.engine, "DI1F29")
+    seed_catalogue(real.engine, (DI1F29,))
+    asset = DI1F29.id
     await real.sql(
         "INSERT INTO ledger.entries (type, entry_date, entry_time, cash_amount)"
         " VALUES ('CASH', :d, '09:00', 1000000.00)",

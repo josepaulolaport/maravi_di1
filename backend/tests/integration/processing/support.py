@@ -75,36 +75,3 @@ async def request_statuses(engine: AsyncEngine) -> dict[uuid.UUID, str]:
     async with engine.connect() as connection:
         result = await connection.execute(text("SELECT id, status FROM processing.requests"))
         return {row[0]: row[1] for row in result}
-
-
-async def seed_instrument(engine: AsyncEngine, code: str) -> uuid.UUID:
-    async with engine.begin() as connection:
-        type_id = await connection.scalar(
-            text(
-                "INSERT INTO asset.instrument_types (code, name) VALUES ('FUTURE', 'Futuro')"
-                " RETURNING id"
-            )
-        )
-        class_id = await connection.scalar(
-            text(
-                "INSERT INTO asset.asset_classes (instrument_type_id, code, name)"
-                " VALUES (:t, 'INTEREST_RATE_FUTURE', 'Juros') RETURNING id"
-            ),
-            {"t": type_id},
-        )
-        product_id = await connection.scalar(
-            text(
-                "INSERT INTO asset.products (asset_class_id, code, name)"
-                " VALUES (:c, 'DI1', 'DI1') RETURNING id"
-            ),
-            {"c": class_id},
-        )
-        instrument_id = await connection.scalar(
-            text(
-                "INSERT INTO asset.instruments (product_id, code, maturity_date)"
-                " VALUES (:p, :code, '2029-01-02') RETURNING id"
-            ),
-            {"p": product_id, "code": code},
-        )
-    assert isinstance(instrument_id, uuid.UUID)
-    return instrument_id

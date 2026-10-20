@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import psycopg
@@ -30,12 +31,22 @@ from alembic import command
 from alembic.config import Config
 from psycopg import sql
 from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.asset.dependencies import build_asset_service
 from di1.modules.asset.domain.model import FuturesTerms
 from di1.modules.asset.infrastructure.persistence.models import AssetClassRow, InstrumentTypeRow
+from di1.modules.asset.public import Instrument
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
+from tests.support.builders import (
+    CATALOGUE,
+    DI1_NAME,
+    DI1F27,
+    DI1F28,
+    DI1F29,
+    DI1F30,
+    PRODUCT_ID,
+)
 
 BACKEND = Path(__file__).resolve().parents[2]
 
@@ -129,21 +140,57 @@ def drop_template() -> None:
         _template = None
 
 
-# Seeding: the DI1 catalogue of the frontend fixtures (``frontend/src/test/msw/fixtures.ts``).
+# Seeding: the DI1 catalogue of `tests.support.builders`.
 
-DI1_NAME = "Futuro de Taxa Média de Depósitos Interfinanceiros de Um Dia"
 DI1_FUTURES = FuturesTerms(
     face_value=Decimal("100000"),
     contract_multiplier=Decimal("1"),
     settlement_method="CASH",
     settlement_description="Liquidação financeira",
 )
-DI1_CONTRACTS = (
-    ("DI1F27", date(2027, 1, 4)),
-    ("DI1F28", date(2028, 1, 3)),
-    ("DI1F29", date(2029, 1, 2)),
-    ("DI1F30", date(2030, 1, 2)),
-)
+
+
+def _connect(database: str | AsyncEngine) -> psycopg.Connection[tuple[Any, ...]]:
+    """An autocommit libpq connection to a test database, given by URL or by its engine."""
+    url = database if isinstance(database, str) else database.url.render_as_string(False)
+    return psycopg.connect(psycopg_url(url), autocommit=True)
+
+
+def seed_catalogue_roots(database: str | AsyncEngine) -> None:
+    """The instrument type FUTURE (id 1) and the asset class INTEREST_RATE_FUTURE (id 1), which have
+    no HTTP route (seeded data)."""
+    with _connect(database) as connection:
+        connection.execute(
+            "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuros')"
+        )
+        connection.execute(
+            "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
+            " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuros de Taxa de Juros')"
+        )
+
+
+def seed_catalogue(
+    database: str | AsyncEngine, contracts: Sequence[Instrument] = CATALOGUE
+) -> None:
+    """The catalogue roots, the DI1 product and ``contracts``, with their builder ids, in plain SQL:
+    the foreign-key targets of trades, prices and published rows."""
+    seed_catalogue_roots(database)
+    with _connect(database) as connection:
+        connection.execute(
+            "INSERT INTO asset.products (id, asset_class_id, code, name) VALUES (%s, 1, 'DI1', %s)",
+            (PRODUCT_ID, DI1_NAME),
+        )
+        connection.execute(
+            "INSERT INTO asset.futures (product_id, face_value, settlement_method)"
+            " VALUES (%s, 100000, 'CASH')",
+            (PRODUCT_ID,),
+        )
+        for contract in contracts:
+            connection.execute(
+                "INSERT INTO asset.instruments (id, product_id, code, maturity_date)"
+                " VALUES (%s, %s, %s, %s)",
+                (contract.id, PRODUCT_ID, contract.code, contract.maturity_date),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,12 +244,16 @@ class Writer:
 
 
 async def seed_di1(session_factory: async_sessionmaker[AsyncSession]) -> Di1Catalogue:
-    """FUTURE → INTEREST_RATE_FUTURE → DI1 → DI1F27…DI1F30, as in the frontend fixtures."""
+    """FUTURE → INTEREST_RATE_FUTURE → DI1 → DI1F27…DI1F30 of the catalogue, created through
+    Asset's service (so their ids are generated)."""
     write = Writer(session_factory)
     future = await write.instrument_type("FUTURE", "Futuros")
     interest_rate = await write.asset_class(
         future, "INTEREST_RATE_FUTURE", "Futuros de Taxa de Juros"
     )
     di1 = await write.product(interest_rate, "DI1", DI1_NAME, DI1_FUTURES)
-    contracts = {code: await write.instrument(di1, code, m) for code, m in DI1_CONTRACTS}
+    contracts = {
+        c.code: await write.instrument(di1, c.code, c.maturity_date)
+        for c in (DI1F27, DI1F28, DI1F29, DI1F30)
+    }
     return Di1Catalogue(future, interest_rate, di1, contracts)

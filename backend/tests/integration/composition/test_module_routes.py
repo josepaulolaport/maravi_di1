@@ -20,7 +20,6 @@ from collections.abc import Iterator
 from datetime import date
 from typing import Any
 
-import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
@@ -28,27 +27,15 @@ from pydantic import SecretStr
 from di1.main import create_app
 from di1.platform.config import Settings
 from tests.fakes.clock import FixedClock
-from tests.support.db import psycopg_url
+from tests.support.db import seed_catalogue_roots
 
 TODAY = date(2026, 10, 18)
 PROBLEM_JSON = "application/problem+json"
 
 
-def _seed_catalogue_roots(database_url: str) -> None:
-    """The instrument type and asset class, which have no HTTP route (seeded data)."""
-    with psycopg.connect(psycopg_url(database_url), autocommit=True) as connection:
-        connection.execute(
-            "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuros')"
-        )
-        connection.execute(
-            "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
-            " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuros de Taxa de Juros')"
-        )
-
-
 @pytest.fixture
 def client(migrated_database_url: str) -> Iterator[TestClient]:
-    _seed_catalogue_roots(migrated_database_url)
+    seed_catalogue_roots(migrated_database_url)
     app = create_app(
         Settings(database_url=SecretStr(migrated_database_url)), clock=FixedClock(TODAY)
     )

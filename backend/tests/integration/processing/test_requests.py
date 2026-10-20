@@ -22,9 +22,10 @@ from tests.integration.processing.support import (
     count,
     make_service,
     request_statuses,
-    seed_instrument,
     seed_statuses,
 )
+from tests.support.builders import DI1F29
+from tests.support.db import seed_catalogue
 from tests.unit.processing.fakes import T0, FakeAssets, FakeChainHistory
 
 A, B = date(2026, 10, 1), date(2026, 10, 5)
@@ -310,7 +311,8 @@ async def test_oq37_the_preview_follows_the_runs_predecessor_rule(
 async def test_10_3_issues_are_listed_newest_first_with_asset_codes(
     engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    asset_id = await seed_instrument(engine, "DI1F29")
+    seed_catalogue(engine, (DI1F29,))
+    asset_id = DI1F29.id
     run = await _enqueue(session_factory, make_service())
     async with engine.begin() as connection:
         await connection.execute(
