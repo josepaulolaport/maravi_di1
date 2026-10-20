@@ -163,14 +163,20 @@ def demo(api: str) -> None:
             ids[contract.code] = created["id"]
         say(f"  contract {contract.code}, maturity {contract.maturity}")
 
-    def cash(offset: int, time: str, amount: str, label: str) -> None:
+    def cash(offset: int, time: str, amount: str, label: str, description: str) -> None:
         call(
             api,
             "POST",
             "/api/ledger/entries",
-            {"type": "CASH", "date": day(offset).isoformat(), "time": time, "cash_amount": amount},
+            {
+                "type": "CASH",
+                "date": day(offset).isoformat(),
+                "time": time,
+                "cash_amount": amount,
+                "description": description,  # shown in Lançamentos (OQ-51)
+            },
         )
-        say(f"  {day(offset)} {time} {label} {amount}")
+        say(f"  {day(offset)} {time} {label} {amount} ({description})")
 
     def trade(
         offset: int,
@@ -203,19 +209,19 @@ def demo(api: str) -> None:
         )
 
     say("Ledger:")
-    cash(14, "09:00", "1000000", "opening deposit")
+    cash(14, "09:00", "1000000", "opening deposit", "Aporte inicial")
     s, m, lg = short.code, middle.code, long.code
     trade(14, "10:00", s, 4, "buy, typed as a rate", rate="0.1450")
     trade(14, "11:00", lg, 3, "buy, typed as a PU", pu_near="0.1350")
     trade(12, "10:30", s, 2, "buy more, typed as a PU (new average)", pu_near="0.1460")
-    cash(10, "09:00", "200000", "deposit, as in the challenge example")
+    cash(10, "09:00", "200000", "deposit, as in the challenge example", "Aporte do exemplo")
     trade(10, "10:00", m, 1, "buy 1 at 10%, as in the challenge example", rate="0.10")
     trade(8, "10:15", s, -3, "partial sale (average kept)", rate="0.1445")
     trade(8, "11:00", lg, 2, "buy: 3 → 5, new average", rate="0.1352")
     trade(8, "14:30", lg, -1, "same contract, same day, later time: 5 → 4", rate="0.1355")
-    cash(6, "09:00", "300000", "second deposit")
+    cash(6, "09:00", "300000", "second deposit", "Segundo aporte")
     trade(4, "11:00", lg, -7, "sale crossing zero: 4 → −3 (short)", pu_near="0.1348")
-    cash(2, "16:00", "-150000", "withdrawal")
+    cash(2, "16:00", "-150000", "withdrawal", "Retirada parcial")
 
     first_trade = {s: 14, m: 10, lg: 14}
     say("Reference prices (MANUAL, typed as a rate, every calendar day):")

@@ -96,12 +96,22 @@ def smoke(api: str, timeout: float) -> None:
         {"product_id": product["id"], "code": "DI1E2E", "maturity_date": maturity.isoformat()},
     )
 
-    call(
+    deposit = call(
         api,
         "POST",
         "/api/ledger/entries",
-        {"type": "CASH", "date": day, "time": "09:00", "cash_amount": "200000"},
+        {
+            "type": "CASH",
+            "date": day,
+            "time": "09:00",
+            "cash_amount": "200000",
+            "description": " Aporte do exemplo ",
+        },
     )
+    # The optional cash description (OQ-51): stored trimmed, listed, and found by the search.
+    check("deposit description", deposit["description"], "Aporte do exemplo")
+    found = call(api, "GET", f"/api/ledger/entries?start_date={day}&end_date={day}&search=EXEMPLO")
+    check("ledger search by description", [e["id"] for e in found["items"]], [deposit["id"]])
     trade = call(
         api,
         "POST",
