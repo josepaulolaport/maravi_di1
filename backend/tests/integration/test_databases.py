@@ -32,11 +32,12 @@ def test_missing_server_fails_when_database_tests_are_required(
         next(fresh_database_url())
 
 
-def test_a_template_left_by_a_dead_session_is_dropped_and_a_live_one_kept() -> None:
+def test_only_a_template_left_by_a_dead_session_is_dropped() -> None:
     # A killed run never reaches pytest_sessionfinish; the next session drops its template.
     admin_url = db._admin_url()
     dead, live = "di1_template_999999999_deadbeef0000", f"di1_template_{os.getpid()}_live00000000"
-    for name in (dead, live):
+    legacy = "di1_template_0123456789ab"  # an older branch's naming, without a pid
+    for name in (dead, live, legacy):
         db._execute(admin_url, sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     try:
         db._drop_stale_templates(admin_url)
@@ -45,10 +46,11 @@ def test_a_template_left_by_a_dead_session_is_dropped_and_a_live_one_kept() -> N
             left = {
                 row[0]
                 for row in admin.execute(
-                    "SELECT datname FROM pg_database WHERE datname = ANY(%s)", ([dead, live],)
+                    "SELECT datname FROM pg_database WHERE datname = ANY(%s)",
+                    ([dead, live, legacy],),
                 )
             }
-        assert left == {live}
+        assert left == {live, legacy}
     finally:
-        for name in (dead, live):
+        for name in (dead, live, legacy):
             db._drop(admin_url, name)

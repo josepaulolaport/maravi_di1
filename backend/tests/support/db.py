@@ -145,8 +145,10 @@ def _alive(pid: int) -> bool:
 
 def _drop_stale_templates(admin_url: str) -> None:
     """Drop the templates a killed test session left behind: their name carries the pid of the
-    session that made them, and that process is gone. A template without a pid in its name is from
-    before this naming and is dropped too. A live session's template is kept."""
+    session that made them, and that process is gone. A live session's template is kept, and so
+    is a template without a pid in its name (an older branch's naming: its owner cannot be told).
+    The pid check is host-local: sessions on other hosts or in other PID namespaces must not share
+    the test server, or their templates may be judged stale."""
     with psycopg.connect(psycopg_url(admin_url), autocommit=True) as admin:
         names = [
             row[0]
@@ -156,9 +158,8 @@ def _drop_stale_templates(admin_url: str) -> None:
         ]
     for name in names:
         parts = name.removeprefix("di1_template_").split("_")
-        if len(parts) == 2 and parts[0].isdigit() and _alive(int(parts[0])):
-            continue
-        _drop(admin_url, name)
+        if len(parts) == 2 and parts[0].isdigit() and not _alive(int(parts[0])):
+            _drop(admin_url, name)
 
 
 def _migrated_template(admin_url: str) -> str:
