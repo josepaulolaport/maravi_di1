@@ -11,21 +11,10 @@ import psycopg
 import pytest
 from alembic import command
 
-from tests.integration.test_initial_migration import _alembic
-from tests.integration.test_migrations_match_schema import database_url, execute, fetch
+from tests.support.builders import DI1F27
+from tests.support.db import alembic_config, catalogue_sql, execute, fetch
 
-__all__ = ["database_url"]
-
-AN_INSTRUMENT = (
-    "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuro');"
-    "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
-    " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuro de juros');"
-    "INSERT INTO asset.products (id, asset_class_id, code, name)"
-    " VALUES ('00000000-0000-0000-0000-0000000000a1', 1, 'DI1', 'DI1');"
-    "INSERT INTO asset.instruments (id, product_id, code, maturity_date)"
-    " VALUES ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000a1',"
-    " 'DI1F28', '2028-01-03');"
-)
+AN_INSTRUMENT = catalogue_sql((DI1F27,))
 A_DEPOSIT = (
     "INSERT INTO ledger.entries (type, entry_date, entry_time, cash_amount{columns})"
     " VALUES ('CASH', '2026-10-01', '10:00', 1000{values})"
@@ -33,7 +22,7 @@ A_DEPOSIT = (
 A_TRADE = (
     "INSERT INTO ledger.entries (type, entry_date, entry_time, asset_id, signed_quantity,"
     " execution_pu, execution_rate, input_kind{columns}) VALUES ('TRADE', '2026-10-01', '10:00',"
-    " '00000000-0000-0000-0000-0000000000b1', 1, 90000, 0.1, 'PU'{values})"
+    f" '{DI1F27.id}', 1, 90000, 0.1, 'PU'{{values}})"
 )
 COLUMN = (
     "SELECT column_name FROM information_schema.columns WHERE table_schema = 'ledger'"
@@ -44,7 +33,7 @@ COLUMN = (
 def test_a_cash_entry_takes_a_description_of_up_to_200_characters_or_none(
     database_url: str,
 ) -> None:
-    command.upgrade(_alembic(database_url), "0007")
+    command.upgrade(alembic_config(database_url), "0007")
     execute(database_url, A_DEPOSIT.format(columns=", description", values=", 'Aporte inicial'"))
     execute(database_url, A_DEPOSIT.format(columns=", description", values=f", '{'a' * 200}'"))
     execute(database_url, A_DEPOSIT.format(columns="", values=""))
@@ -57,14 +46,14 @@ def test_a_cash_entry_takes_a_description_of_up_to_200_characters_or_none(
 
 
 def test_a_description_longer_than_200_characters_is_refused(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0007")
+    command.upgrade(alembic_config(database_url), "0007")
 
     with pytest.raises(psycopg.errors.StringDataRightTruncation):
         execute(database_url, A_DEPOSIT.format(columns=", description", values=f", '{'a' * 201}'"))
 
 
 def test_a_trade_takes_no_description(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0007")
+    command.upgrade(alembic_config(database_url), "0007")
     execute(database_url, AN_INSTRUMENT)
     execute(database_url, A_TRADE.format(columns="", values=""))
 
@@ -73,19 +62,19 @@ def test_a_trade_takes_no_description(database_url: str) -> None:
 
 
 def test_existing_entries_get_no_description(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0006")
+    command.upgrade(alembic_config(database_url), "0006")
     execute(database_url, A_DEPOSIT.format(columns="", values=""))
 
-    command.upgrade(_alembic(database_url), "0007")
+    command.upgrade(alembic_config(database_url), "0007")
 
     assert fetch(database_url, "SELECT description FROM ledger.entries") == [(None,)]
 
 
 def test_downgrade_drops_the_column(database_url: str) -> None:
-    command.upgrade(_alembic(database_url), "0007")
+    command.upgrade(alembic_config(database_url), "0007")
     execute(database_url, A_DEPOSIT.format(columns=", description", values=", 'Aporte inicial'"))
 
-    command.downgrade(_alembic(database_url), "0006")
+    command.downgrade(alembic_config(database_url), "0006")
 
     assert fetch(database_url, COLUMN) == []
     assert fetch(database_url, "SELECT cash_amount::text FROM ledger.entries") == [("1000.00",)]

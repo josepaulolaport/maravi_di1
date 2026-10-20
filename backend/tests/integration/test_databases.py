@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.integration.databases import fresh_database_url
+from tests.support.db import fresh_database_url
 
 
 def test_missing_server_is_a_skip_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -15,7 +15,7 @@ import pytest
 from di1.modules.portfolio.domain.cash import CashBalance, calculate_cash_day
 from di1.modules.portfolio.domain.errors import PortfolioError
 from di1.shared.decimals import ZERO
-from tests.unit.portfolio.factories import DAY, trade
+from tests.support.builders import DAY, portfolio_trade
 
 YESTERDAY = DAY - timedelta(days=1)
 
@@ -24,7 +24,10 @@ def test_a_buy_lowers_cash_and_a_sell_raises_it_whatever_the_result() -> None:
     # −(10 × 95000) − (−10 × 94000) = −950000 + 940000 = −10000: a losing round trip.
     day = calculate_cash_day(
         CashBalance.zero(YESTERDAY),
-        [trade(10, "95000", at="09:00", seq=1), trade(-10, "94000", at="10:00", seq=2)],
+        [
+            portfolio_trade(10, "95000", at="09:00", seq=1),
+            portfolio_trade(-10, "94000", at="10:00", seq=2),
+        ],
         ZERO,
         ZERO,
         DAY,
@@ -54,7 +57,10 @@ def test_trades_and_cash_movements_combine_in_one_day() -> None:
 
     day = calculate_cash_day(
         state,
-        [trade(3, "95000", at="09:00", seq=1), trade(-1, "96000", at="10:00", seq=2)],
+        [
+            portfolio_trade(3, "95000", at="09:00", seq=1),
+            portfolio_trade(-1, "96000", at="10:00", seq=2),
+        ],
         Decimal("1000"),
         Decimal("2000"),
         DAY,
@@ -66,7 +72,9 @@ def test_trades_and_cash_movements_combine_in_one_day() -> None:
 
 def test_cash_may_go_negative() -> None:
     # The schema's only bounds are its CHECKs (OQ-14); cash_balance has none.
-    day = calculate_cash_day(CashBalance.zero(YESTERDAY), [trade(1, "95000")], ZERO, ZERO, DAY)
+    day = calculate_cash_day(
+        CashBalance.zero(YESTERDAY), [portfolio_trade(1, "95000")], ZERO, ZERO, DAY
+    )
 
     assert day.cash_balance == Decimal("-95000")
 

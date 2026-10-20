@@ -24,14 +24,14 @@ from di1.modules.portfolio.domain.valuation import (
     PortfolioValuation,
     ValuationStatus,
 )
-from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28
+from tests.support.builders import DAY, DI1F27, DI1F28
 from tests.unit.portfolio.fakes import InMemoryPortfolioRepository
 
 COMPLETE = CalculationCompleteness.COMPLETE
 MISSING = CalculationCompleteness.MISSING
 
 
-def _buy(asset_id: UUID = DI1F27) -> Trade:
+def _buy(asset_id: UUID = DI1F27.id) -> Trade:
     return Trade(asset_id, DAY, time(10), 1, 10, Decimal("95000"), Decimal("0.105"))
 
 
@@ -91,15 +91,15 @@ async def test_a_positions_day_maps_onto_the_published_rows(
     writer: DefaultResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     await writer.write_positions_day(
-        _positions(DI1F27),
-        _valuation(DI1F27),
-        _asset_pnl(DI1F27),
+        _positions(DI1F27.id),
+        _valuation(DI1F27.id),
+        _asset_pnl(DI1F27.id),
         PNL,
     )
 
     assert repository.positions[DAY] == (
         PublishedPosition(
-            asset_id=DI1F27,
+            asset_id=DI1F27.id,
             quantity=10,
             average_entry_pu=Decimal("95000"),
             average_entry_rate=Decimal("0.105"),
@@ -127,9 +127,9 @@ async def test_a_missing_market_value_is_stored_missing(
     writer: DefaultResultsWriter, repository: InMemoryPortfolioRepository
 ) -> None:
     await writer.write_positions_day(
-        _positions(DI1F27),
-        _valuation(DI1F27, market_value=None),
-        _asset_pnl(DI1F27),
+        _positions(DI1F27.id),
+        _valuation(DI1F27.id, market_value=None),
+        _asset_pnl(DI1F27.id),
         PNL,
     )
 
@@ -175,9 +175,9 @@ async def test_a_day_with_no_expected_asset_writes_only_the_portfolio_row(
 @pytest.mark.parametrize(
     ("positions", "valued", "with_pnl"),
     [
-        ((DI1F27,), (DI1F27, DI1F28), (DI1F27,)),
-        ((DI1F27, DI1F28), (DI1F27, DI1F28), (DI1F27,)),
-        ((DI1F27,), (DI1F27,), (DI1F27, DI1F28)),
+        ((DI1F27.id,), (DI1F27.id, DI1F28.id), (DI1F27.id,)),
+        ((DI1F27.id, DI1F28.id), (DI1F27.id, DI1F28.id), (DI1F27.id,)),
+        ((DI1F27.id,), (DI1F27.id,), (DI1F27.id, DI1F28.id)),
     ],
 )
 async def test_the_three_inputs_must_cover_the_same_assets(
@@ -196,12 +196,12 @@ async def test_the_three_inputs_must_cover_the_same_assets(
 
 
 async def test_the_valuation_must_be_of_the_same_date(writer: DefaultResultsWriter) -> None:
-    other_day = replace(_valuation(DI1F27), date=DAY.replace(day=5))
+    other_day = replace(_valuation(DI1F27.id), date=DAY.replace(day=5))
     with pytest.raises(ValueError):
         await writer.write_positions_day(
-            _positions(DI1F27),
+            _positions(DI1F27.id),
             other_day,
-            _asset_pnl(DI1F27),
+            _asset_pnl(DI1F27.id),
             PNL,
         )
 
@@ -215,15 +215,15 @@ async def test_a_market_value_must_match_its_status(
 ) -> None:
     # Unavailable data is never stored as complete, nor a figure as missing (spec §8.3).
     inconsistent = replace(
-        _valuation(DI1F27),
+        _valuation(DI1F27.id),
         positions_market_value=None if market_value is None else Decimal(market_value),
         status=status,
     )
     with pytest.raises(ValueError):
         await writer.write_positions_day(
-            _positions(DI1F27),
+            _positions(DI1F27.id),
             inconsistent,
-            _asset_pnl(DI1F27),
+            _asset_pnl(DI1F27.id),
             PNL,
         )
 

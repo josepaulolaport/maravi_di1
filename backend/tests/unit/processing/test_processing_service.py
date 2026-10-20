@@ -20,7 +20,9 @@ from di1.modules.processing.public import (
 )
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.paging import PageParams
-from tests.unit.processing.fakes import T0, FakeUnitOfWork, Harness, date_status
+from tests.support.builders import T0, di1_contract
+from tests.support.fakes import FakeUnitOfWork
+from tests.unit.processing.fakes import Harness, date_status
 
 ALL = ProcessingScope.ALL
 CASH = ProcessingScope.CASH
@@ -469,8 +471,8 @@ async def test_get_request_returns_the_run_or_not_found(harness: Harness) -> Non
 
 async def test_oq31_issues_carry_their_asset_code(harness: Harness) -> None:
     di1f29, di1f27, request_id = uuid4(), uuid4(), uuid4()
-    harness.assets.codes[di1f29] = "DI1F29"
-    harness.assets.codes[di1f27] = "DI1F27"
+    harness.assets.add(di1_contract("DI1F29", di1f29, date(2029, 1, 2)))
+    harness.assets.add(di1_contract("DI1F27", di1f27, date(2029, 1, 2)))
     missing_price = IssueRecord(
         id=uuid4(),
         request_id=request_id,
@@ -503,7 +505,8 @@ async def test_10_3_one_row_per_obligation_with_its_earliest_affected_date(
     """Spec §10.3, "deduplicar problemas repetidos para a mesma obrigação": a missing price is
     one obligation per (asset, needed date); an expired open position, one per asset."""
     di1f29, di1f27, request_id = uuid4(), uuid4(), uuid4()
-    harness.assets.codes |= {di1f29: "DI1F29", di1f27: "DI1F27"}
+    harness.assets.add(di1_contract("DI1F29", di1f29, date(2029, 1, 2)))
+    harness.assets.add(di1_contract("DI1F27", di1f27, date(2029, 1, 2)))
 
     def issue(kind: IssueType, asset: UUID, affected: int, needed: int | None) -> IssueRecord:
         return IssueRecord(

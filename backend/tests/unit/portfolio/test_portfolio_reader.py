@@ -15,7 +15,7 @@ from di1.modules.portfolio.application.services.portfolio_reader import DefaultP
 from di1.modules.portfolio.domain.cash import CashBalance
 from di1.modules.portfolio.domain.positions import PositionState
 from di1.modules.portfolio.domain.valuation import ValuationStatus
-from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28, position
+from tests.support.builders import DAY, DI1F27, DI1F28, open_position
 from tests.unit.portfolio.fakes import InMemoryPortfolioRepository, stored_cash
 
 YESTERDAY = DAY - timedelta(days=1)
@@ -64,15 +64,15 @@ async def test_the_positions_start_from_the_open_positions_and_cumulative_pnl() 
     repository = InMemoryPortfolioRepository()
     repository.days[YESTERDAY] = _portfolio_day("-8034.1345282660")
     repository.positions[YESTERDAY] = (
-        _published(DI1F27, 10, "95000.0000000000", "0.105000000000"),
-        _published(DI1F28, 0, None, None),
+        _published(DI1F27.id, 10, "95000.0000000000", "0.105000000000"),
+        _published(DI1F28.id, 0, None, None),
     )
 
     previous = await DefaultPortfolioReader(repository).get_previous_positions(DAY)
 
     assert previous is not None
     assert previous.state == PositionState(
-        as_of=YESTERDAY, positions=(position(10, "95000", "0.105"),)
+        as_of=YESTERDAY, positions=(open_position(10, "95000", "0.105"),)
     )
     assert previous.cumulative_pnl == Decimal("-8034.1345282660")
 

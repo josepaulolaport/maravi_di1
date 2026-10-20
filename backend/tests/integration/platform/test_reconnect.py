@@ -19,16 +19,15 @@ from di1.platform.messaging.connection import connect
 from di1.platform.messaging.consumer import open_consumer_channel
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import Topology, declare_queue
-from tests.integration.platform.conftest import queue_spec
 from tests.integration.platform.support import (
     PUBLISH_TIMEOUT_SECONDS,
     RecordingHandler,
-    close_connections,
     consuming,
     effects,
-    eventually,
     make_envelope,
 )
+from tests.support.broker import close_connections, queue_spec
+from tests.support.waits import eventually
 
 
 @pytest.fixture
@@ -64,12 +63,12 @@ async def test_consuming_and_publishing_resume_after_a_reconnect(
         )
         before, after = make_envelope(), make_envelope()
         await publisher.publish(before)
-        await eventually(lambda: len(handler.calls) == 1)
+        await eventually(lambda: len(handler.calls) == 1, every=0.05)
 
         assert await close_connections(management_url, name) >= 1
         await asyncio.wait_for(reconnected.wait(), timeout=30)
         await publisher.publish(after)
 
-        await eventually(lambda: len(handler.calls) == 2, within=30)
+        await eventually(lambda: len(handler.calls) == 2, within=30, every=0.05)
     assert handler.calls == [before.message_id, after.message_id]
     assert sorted(await effects(engine)) == sorted([before.message_id, after.message_id])

@@ -18,21 +18,22 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.dependencies import build_ledger_reader
 from di1.modules.ledger.domain.entries import EntryType
 from di1.modules.ledger.domain.listing import ListOrder
 from di1.modules.ledger.infrastructure.persistence.repositories import SqlLedgerRepository
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.input_kind import InputKind
 from di1.shared.paging import PageParams
-from tests.fakes.clock import FixedClock
-from tests.integration.ledger.conftest import ServiceOn
-from tests.integration.ledger.support import TODAY, cash, fetch, trade
-from tests.unit.ledger.fakes import DI1F29, FakeAssets, FormulaPricing
+from tests.integration.ledger.support import CONTRACTS, TODAY, ServiceOn, fetch
+from tests.support.builders import DI1F29, draft_cash, draft_trade
+from tests.support.fakes import FakeAssetReader, FakeClock
+from tests.support.waits import wait_for_a_lock_waiter
 
 Sessions = async_sessionmaker[AsyncSession]
 
@@ -51,8 +52,8 @@ async def delete(service: ServiceOn, sessions: Sessions, *ids: UUID) -> None:
 async def test_entries_are_stored_with_their_typed_values_as_typed(
     service: ServiceOn, session_factory: Sessions
 ) -> None:
-    trade_id = await create(service, session_factory, trade())
-    cash_id = await create(service, session_factory, cash(amount="-50000.00"))
+    trade_id = await create(service, session_factory, draft_trade())
+    cash_id = await create(service, session_factory, draft_cash(amount="-50000.00"))
 
     rows = await fetch(
         session_factory,
@@ -70,14 +71,14 @@ async def test_the_reader_returns_active_entries_of_each_type_in_order(
     service: ServiceOn, session_factory: Sessions
 ) -> None:
     day = date(2026, 10, 15)
-    late = await create(service, session_factory, trade(day, time(11, 0)))
-    early = await create(service, session_factory, trade(day, time(10, 0), quantity=-3))
-    same_time = await create(service, session_factory, trade(day, time(11, 0), quantity=2))
-    other_day = await create(service, session_factory, trade(date(2026, 10, 14), time(16, 0)))
-    gone = await create(service, session_factory, trade(day, time(9, 0)))
-    outside = await create(service, session_factory, trade(date(2026, 10, 17)))
-    deposit = await create(service, session_factory, cash(day, time(12, 0)))
-    withdrawal = await create(service, session_factory, cash(day, time(8, 0), amount="-1.00"))
+    late = await create(service, session_factory, draft_trade(day, time(11, 0)))
+    early = await create(service, session_factory, draft_trade(day, time(10, 0), quantity=-3))
+    same_time = await create(service, session_factory, draft_trade(day, time(11, 0), quantity=2))
+    other_day = await create(service, session_factory, draft_trade(date(2026, 10, 14), time(16, 0)))
+    gone = await create(service, session_factory, draft_trade(day, time(9, 0)))
+    outside = await create(service, session_factory, draft_trade(date(2026, 10, 17)))
+    deposit = await create(service, session_factory, draft_cash(day, time(12, 0)))
+    withdrawal = await create(service, session_factory, draft_cash(day, time(8, 0), amount="-1.00"))
     await delete(service, session_factory, gone)
 
     async with session_factory() as session:
@@ -106,9 +107,9 @@ async def test_has_entries_on_or_before_checks_dates_and_type(
             )
 
     assert not await has(TODAY)
-    await create(service, session_factory, cash(date(2026, 10, 14)))
-    await create(service, session_factory, trade(date(2026, 10, 16)))
-    deleted = await create(service, session_factory, trade(date(2026, 10, 13)))
+    await create(service, session_factory, draft_cash(date(2026, 10, 14)))
+    await create(service, session_factory, draft_trade(date(2026, 10, 16)))
+    deleted = await create(service, session_factory, draft_trade(date(2026, 10, 13)))
     await delete(service, session_factory, deleted)
 
     assert not await has(date(2026, 10, 13))  # a deleted entry no longer exists (OQ-32)
@@ -123,10 +124,14 @@ async def test_trades_and_cash_of_one_date_follow_time_then_seq(
     service: ServiceOn, session_factory: Sessions
 ) -> None:
     day = date(2026, 10, 16)
-    sell = await create(service, session_factory, trade(day, time(15, 0), quantity=-4))
-    withdrawal = await create(service, session_factory, cash(day, time(17, 30), amount="-50.00"))
-    deposit = await create(service, session_factory, cash(day, time(15, 0)))  # same time, later seq
-    buy = await create(service, session_factory, trade(day, time(9, 0)))
+    sell = await create(service, session_factory, draft_trade(day, time(15, 0), quantity=-4))
+    withdrawal = await create(
+        service, session_factory, draft_cash(day, time(17, 30), amount="-50.00")
+    )
+    deposit = await create(
+        service, session_factory, draft_cash(day, time(15, 0))
+    )  # same time, later seq
+    buy = await create(service, session_factory, draft_trade(day, time(9, 0)))
 
     async with session_factory() as session:
         uow = _ReadOnly(session)
@@ -144,9 +149,12 @@ async def test_trades_and_cash_of_one_date_follow_time_then_seq(
 async def test_keyset_pages_cover_every_entry_once_in_both_orders(
     service: ServiceOn, session_factory: Sessions
 ) -> None:
-    ids = [await create(service, session_factory, trade(entry_time=time(10, 0))) for _ in range(3)]
-    ids += [await create(service, session_factory, cash(date(2026, 10, 15), time(10, 0)))]
-    ids += [await create(service, session_factory, cash(date(2026, 10, 13), time(23, 59)))]
+    ids = [
+        await create(service, session_factory, draft_trade(entry_time=time(10, 0)))
+        for _ in range(3)
+    ]
+    ids += [await create(service, session_factory, draft_cash(date(2026, 10, 15), time(10, 0)))]
+    ids += [await create(service, session_factory, draft_cash(date(2026, 10, 13), time(23, 59)))]
     expected_asc = [ids[4], *ids[:3], ids[3]]
 
     for order, expected in ((ListOrder.ASC, expected_asc), (ListOrder.DESC, expected_asc[::-1])):
@@ -171,8 +179,10 @@ async def test_keyset_pages_cover_every_entry_once_in_both_orders(
 async def test_a_cash_description_is_stored_trimmed_and_read_back(
     service: ServiceOn, session_factory: Sessions
 ) -> None:
-    described = await create(service, session_factory, cash(description="  Aporte inicial "))
-    blank = await create(service, session_factory, cash(entry_time=time(10, 0), description="  "))
+    described = await create(service, session_factory, draft_cash(description="  Aporte inicial "))
+    blank = await create(
+        service, session_factory, draft_cash(entry_time=time(10, 0), description="  ")
+    )
 
     rows = await fetch(session_factory, "SELECT id, description FROM ledger.entries ORDER BY seq")
     async with session_factory() as session:
@@ -185,15 +195,15 @@ async def test_a_cash_description_is_stored_trimmed_and_read_back(
 async def test_the_search_matches_a_description_ignoring_case_and_accents(
     service: ServiceOn, session_factory: Sessions
 ) -> None:
-    opening = await create(service, session_factory, cash(description="Aplicação inicial"))
+    opening = await create(service, session_factory, draft_cash(description="Aplicação inicial"))
     redemption = await create(
-        service, session_factory, cash(amount="-10.00", description="Resgate 10% _cotista_")
+        service, session_factory, draft_cash(amount="-10.00", description="Resgate 10% _cotista_")
     )
     shouting = await create(
-        service, session_factory, cash(entry_time=time(9, 30), description="APLICAÇÃO EXTRA")
+        service, session_factory, draft_cash(entry_time=time(9, 30), description="APLICAÇÃO EXTRA")
     )
-    await create(service, session_factory, cash(entry_time=time(10, 0)))
-    await create(service, session_factory, trade())
+    await create(service, session_factory, draft_cash(entry_time=time(10, 0)))
+    await create(service, session_factory, draft_trade())
 
     async def search(text: str) -> set[UUID]:
         async with session_factory() as session:
@@ -219,14 +229,14 @@ async def test_the_search_matches_a_description_ignoring_case_and_accents(
 async def test_the_search_filters_in_the_database(
     service: ServiceOn, session_factory: Sessions
 ) -> None:
-    f28 = await create(service, session_factory, trade())
+    f28 = await create(service, session_factory, draft_trade())
     f29 = await create(
         service,
         session_factory,
-        trade(date(2026, 10, 15), rate="0.093203413834", contract_id=DI1F29.id),
+        draft_trade(date(2026, 10, 15), rate="0.093203413834", contract_id=DI1F29.id),
     )
-    deposit = await create(service, session_factory, cash())
-    withdrawal = await create(service, session_factory, cash(amount="-10.00"))
+    deposit = await create(service, session_factory, draft_cash())
+    withdrawal = await create(service, session_factory, draft_cash(amount="-10.00"))
 
     async def search(text: str) -> set[UUID]:
         async with session_factory() as session:
@@ -250,9 +260,9 @@ async def test_the_search_filters_in_the_database(
 async def test_a_mixed_batch_is_all_or_nothing(
     service: ServiceOn, session_factory: Sessions
 ) -> None:
-    deposit = await create(service, session_factory, cash(date(2026, 10, 14)))
-    sell = await create(service, session_factory, trade(date(2026, 10, 16), quantity=-4))
-    buy = await create(service, session_factory, trade(date(2026, 10, 17)))
+    deposit = await create(service, session_factory, draft_cash(date(2026, 10, 14)))
+    sell = await create(service, session_factory, draft_trade(date(2026, 10, 16), quantity=-4))
+    buy = await create(service, session_factory, draft_trade(date(2026, 10, 17)))
 
     with pytest.raises(DomainError) as error:
         await delete(service, session_factory, deposit, sell, uuid4())
@@ -268,7 +278,7 @@ async def test_a_mixed_batch_is_all_or_nothing(
 async def test_a_deleted_entry_is_gone_for_good(
     service: ServiceOn, session_factory: Sessions
 ) -> None:
-    entry = await create(service, session_factory, cash())
+    entry = await create(service, session_factory, draft_cash())
     await delete(service, session_factory, entry)
 
     with pytest.raises(DomainError) as error:
@@ -279,9 +289,11 @@ async def test_a_deleted_entry_is_gone_for_good(
 
 
 async def test_an_overlapping_deletion_waits_then_deletes_nothing(
-    service: ServiceOn, session_factory: Sessions
+    service: ServiceOn, session_factory: Sessions, engine: AsyncEngine
 ) -> None:
-    a, b, c = [await create(service, session_factory, cash(amount=f"{n}.00")) for n in (1, 2, 3)]
+    a, b, c = [
+        await create(service, session_factory, draft_cash(amount=f"{n}.00")) for n in (1, 2, 3)
+    ]
     first_holds_its_locks, release_first = asyncio.Event(), asyncio.Event()
 
     class HoldingRepository(SqlLedgerRepository):
@@ -290,22 +302,22 @@ async def test_an_overlapping_deletion_waits_then_deletes_nothing(
             first_holds_its_locks.set()
             await release_first.wait()
 
-    assets = FakeAssets()
+    assets = FakeAssetReader(*CONTRACTS)
 
     def holding(uow: UnitOfWork) -> LedgerService:
         return LedgerService(
             HoldingRepository(uow.session),
             uow,
-            clock=FixedClock(TODAY),
+            clock=FakeClock(TODAY),
             assets=assets,
-            pricing=FormulaPricing(assets),
+            pricing=build_pricing_service(assets),
         )
 
     first = asyncio.create_task(delete(holding, session_factory, a, b))
     await asyncio.wait_for(first_holds_its_locks.wait(), timeout=5)
     second = asyncio.create_task(delete(service, session_factory, b, c))
-    await asyncio.sleep(0.3)
-    assert not second.done()  # waiting on b, locked by the first batch
+    await wait_for_a_lock_waiter(engine)  # the second batch waits on b, locked by the first
+    assert not second.done()
 
     release_first.set()
     await asyncio.wait_for(first, timeout=10)
@@ -334,8 +346,8 @@ async def test_a_write_only_saves_the_fact(service: ServiceOn, session_factory: 
     before = await fetch(session_factory, statuses)
     assert len(before) == 1 and before[0].cash_processed_at is not None
 
-    deposit = await create(service, session_factory, cash(date(2026, 10, 14)))
-    sell = await create(service, session_factory, trade(date(2026, 10, 16), quantity=-4))
+    deposit = await create(service, session_factory, draft_cash(date(2026, 10, 14)))
+    sell = await create(service, session_factory, draft_trade(date(2026, 10, 16), quantity=-4))
     await delete(service, session_factory, deposit, sell)
 
     assert await fetch(session_factory, statuses) == before
@@ -345,11 +357,11 @@ async def test_a_write_only_saves_the_fact(service: ServiceOn, session_factory: 
 async def test_an_execution_price_never_becomes_a_reference_price(
     service: ServiceOn, session_factory: Sessions
 ) -> None:
-    await create(service, session_factory, trade())
+    await create(service, session_factory, draft_trade())
     await create(
         service,
         session_factory,
-        trade(date(2026, 10, 15), rate="0.093203413834", contract_id=DI1F29.id),
+        draft_trade(date(2026, 10, 15), rate="0.093203413834", contract_id=DI1F29.id),
     )
 
     assert await fetch(session_factory, "SELECT id FROM prices.reference_prices") == []
@@ -359,7 +371,7 @@ async def test_a_rejected_entry_writes_nothing(
     service: ServiceOn, session_factory: Sessions
 ) -> None:
     with pytest.raises(DomainError):
-        await create(service, session_factory, trade(date(2026, 10, 19)))
+        await create(service, session_factory, draft_trade(date(2026, 10, 19)))
 
     assert await fetch(session_factory, "SELECT id FROM ledger.entries") == []
 

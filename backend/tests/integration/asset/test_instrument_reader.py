@@ -16,8 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.asset.public import Instrument
-from tests.fakes.asset import CREATED_AT
-from tests.integration.asset.conftest import Di1Catalogue, Writer
+from tests.support.builders import CREATED_AT
+from tests.support.db import Di1Catalogue, Writer
 
 
 async def test_a_di1_contract_has_its_full_descriptor(

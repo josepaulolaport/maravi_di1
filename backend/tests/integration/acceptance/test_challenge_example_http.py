@@ -29,9 +29,9 @@ from tests.integration.acceptance.support import (
     create_instrument,
     expected_pu,
     price_body,
-    problem,
     trade_body,
 )
+from tests.support.http import problem_errors
 
 TODAY = date(2027, 1, 1)
 PU_AT_10_PERCENT = "90909.0909090909"
@@ -143,7 +143,7 @@ def test_carteira_reads_after_today_are_refused(
 ) -> None:
     response = client.get(path, params=params)
 
-    assert problem(response, 422) == [("FUTURE_DATE", field)]  # OQ-35, spec §13 case 23
+    assert problem_errors(response, 422) == [("FUTURE_DATE", field)]  # OQ-35, spec §13 case 23
 
 
 def test_the_challenge_example_end_to_end() -> None:

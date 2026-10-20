@@ -21,15 +21,9 @@ from di1.modules.portfolio.public import PortfolioService
 from di1.modules.prices.public import PriceSource
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.shared.errors import DomainError, ErrorCode
-from tests.fakes.clock import FixedClock
-from tests.unit.portfolio.factories import DAY, DI1F27, DI1F28, DI1F29
-from tests.unit.portfolio.fakes import (
-    FakeAssetReader,
-    FakeDateStatusReader,
-    FakePriceReader,
-    InMemoryPortfolioRepository,
-    stored_cash,
-)
+from tests.support.builders import DAY, DI1F27, DI1F28, DI1F29, di1_contract
+from tests.support.fakes import FakeAssetReader, FakeClock, FakeDateStatusReader, FakePriceReader
+from tests.unit.portfolio.fakes import InMemoryPortfolioRepository, stored_cash
 
 TODAY = DAY + timedelta(days=10)
 COMPLETE = CalculationCompleteness.COMPLETE
@@ -100,16 +94,16 @@ def queries(
     prices: FakePriceReader,
 ) -> PortfolioService:
     assets = FakeAssetReader(
-        (DI1F27, "DI1F27", DAY - timedelta(days=1)),  # matured yesterday
-        (DI1F28, "DI1F28", date(2028, 1, 3)),
-        (DI1F29, "DI1F29", date(2029, 1, 2)),
+        di1_contract("DI1F27", DI1F27.id, DAY - timedelta(days=1)),
+        di1_contract("DI1F28", DI1F28.id, date(2028, 1, 3)),
+        di1_contract("DI1F29", DI1F29.id, date(2029, 1, 2)),
     )
     return DefaultPortfolioService(
         repository,
         assets=assets,
         prices=prices,
         date_statuses=statuses,
-        clock=FixedClock(TODAY),
+        clock=FakeClock(TODAY),
     )
 
 
@@ -278,11 +272,11 @@ class TestPositionTable:
         prices: FakePriceReader,
     ) -> None:
         repository.positions[DAY] = (
-            _position(DI1F29, -2, None),
-            _position(DI1F28, 10, "951000"),
+            _position(DI1F29.id, -2, None),
+            _position(DI1F28.id, 10, "951000"),
         )
-        prices.add(DI1F28, DAY, PriceSource.B3, "95100", "0.0990")
-        prices.add(DI1F28, DAY - timedelta(days=1), PriceSource.MANUAL, "1", "0.5")  # other date
+        prices.set(DI1F28.id, DAY, "95100", PriceSource.B3, "0.0990")
+        prices.set(DI1F28.id, DAY - timedelta(days=1), "1", PriceSource.MANUAL, "0.5")  # other date
         statuses.statuses[DAY] = _status(DAY, ChainStatus.PROCESSED, None)
 
         table = await queries.get_position_table(DAY)
@@ -311,8 +305,8 @@ class TestPositionTable:
     ) -> None:
         # OQ-30: the row shows the current preferred price; the stored financial_total stays that
         # of the last processing (10 × 95100) until the date is processed again.
-        repository.positions[DAY] = (_position(DI1F28, 10, "951000"),)
-        prices.add(DI1F28, DAY, PriceSource.MANUAL, "95300", "0.0970")
+        repository.positions[DAY] = (_position(DI1F28.id, 10, "951000"),)
+        prices.set(DI1F28.id, DAY, "95300", PriceSource.MANUAL, "0.0970")
 
         (row,) = (await queries.get_position_table(DAY)).items
 
@@ -324,7 +318,7 @@ class TestPositionTable:
         self, queries: PortfolioService, repository: InMemoryPortfolioRepository
     ) -> None:
         # OQ-1, OQ-30: the PU is 0 by definition after maturity.
-        repository.positions[DAY] = (_position(DI1F27, 3, "0"),)
+        repository.positions[DAY] = (_position(DI1F27.id, 3, "0"),)
 
         (row,) = (await queries.get_position_table(DAY)).items
 
@@ -350,17 +344,17 @@ class TestReferencePriceChanged:
     def published(
         self, repository: InMemoryPortfolioRepository, statuses: FakeDateStatusReader
     ) -> None:
-        repository.positions[DAY] = (_position(DI1F28, 10, "951000"),)
+        repository.positions[DAY] = (_position(DI1F28.id, 10, "951000"),)
         statuses.statuses[DAY] = _status(DAY, ChainStatus.PROCESSED, None)
 
     async def test_a_price_set_after_the_processing_marks_the_row(
         self, queries: PortfolioService, prices: FakePriceReader
     ) -> None:
-        prices.add(
-            DI1F28,
+        prices.set(
+            DI1F28.id,
             DAY,
-            PriceSource.MANUAL,
             "95300",
+            PriceSource.MANUAL,
             "0.0970",
             created_at=POSITIONS_AT + timedelta(seconds=1),
         )
@@ -373,7 +367,9 @@ class TestReferencePriceChanged:
     async def test_a_price_set_before_or_at_the_processing_does_not(
         self, queries: PortfolioService, prices: FakePriceReader, before: timedelta
     ) -> None:
-        prices.add(DI1F28, DAY, PriceSource.B3, "95100", "0.0990", created_at=POSITIONS_AT + before)
+        prices.set(
+            DI1F28.id, DAY, "95100", PriceSource.B3, "0.0990", created_at=POSITIONS_AT + before
+        )
 
         (row,) = (await queries.get_position_table(DAY)).items
 
@@ -386,13 +382,13 @@ class TestReferencePriceChanged:
         prices: FakePriceReader,
     ) -> None:
         # OQ-50 item 3: position P&L uses the D−1 price too while Q[D−1] ≠ 0 (OQ-4).
-        repository.positions[DAY - timedelta(days=1)] = (_position(DI1F28, 10, "950000"),)
-        prices.add(DI1F28, DAY, PriceSource.B3, "95100", "0.0990", created_at=POSITIONS_AT)
-        prices.add(
-            DI1F28,
+        repository.positions[DAY - timedelta(days=1)] = (_position(DI1F28.id, 10, "950000"),)
+        prices.set(DI1F28.id, DAY, "95100", PriceSource.B3, "0.0990", created_at=POSITIONS_AT)
+        prices.set(
+            DI1F28.id,
             DAY - timedelta(days=1),
-            PriceSource.MANUAL,
             "95000",
+            PriceSource.MANUAL,
             "0.1000",
             created_at=POSITIONS_AT + timedelta(minutes=1),
         )
@@ -412,13 +408,13 @@ class TestReferencePriceChanged:
     ) -> None:
         # OQ-4: with Q[D−1] = 0 position P&L is exactly 0 and the D−1 price is never used.
         if previous is not None:
-            repository.positions[DAY - timedelta(days=1)] = (_position(DI1F28, previous, "0"),)
-        prices.add(DI1F28, DAY, PriceSource.B3, "95100", "0.0990", created_at=POSITIONS_AT)
-        prices.add(
-            DI1F28,
+            repository.positions[DAY - timedelta(days=1)] = (_position(DI1F28.id, previous, "0"),)
+        prices.set(DI1F28.id, DAY, "95100", PriceSource.B3, "0.0990", created_at=POSITIONS_AT)
+        prices.set(
+            DI1F28.id,
             DAY - timedelta(days=1),
-            PriceSource.MANUAL,
             "95000",
+            PriceSource.MANUAL,
             "0.1000",
             created_at=POSITIONS_AT + timedelta(minutes=1),
         )
@@ -431,8 +427,8 @@ class TestReferencePriceChanged:
         self, queries: PortfolioService, prices: FakePriceReader
     ) -> None:
         later = POSITIONS_AT + timedelta(days=1)
-        prices.add(DI1F28, DAY + timedelta(days=1), PriceSource.B3, "1", None, created_at=later)
-        prices.add(DI1F28, DAY - timedelta(days=2), PriceSource.B3, "1", None, created_at=later)
+        prices.set(DI1F28.id, DAY + timedelta(days=1), "1", PriceSource.B3, None, created_at=later)
+        prices.set(DI1F28.id, DAY - timedelta(days=2), "1", PriceSource.B3, None, created_at=later)
 
         (row,) = (await queries.get_position_table(DAY)).items
 
@@ -450,11 +446,11 @@ class TestReferencePriceChanged:
         statuses: FakeDateStatusReader,
     ) -> None:
         statuses.statuses.pop(DAY)
-        prices.add(
-            DI1F28,
+        prices.set(
+            DI1F28.id,
             DAY,
-            PriceSource.MANUAL,
             "95300",
+            PriceSource.MANUAL,
             "0.0970",
             created_at=POSITIONS_AT + timedelta(days=1),
         )
@@ -470,9 +466,14 @@ class TestReferencePriceChanged:
         prices: FakePriceReader,
     ) -> None:
         # OQ-1: the PU is 0 by definition after maturity, whatever the price table holds.
-        repository.positions[DAY] = (_position(DI1F27, 3, "0"),)
-        prices.add(
-            DI1F27, DAY, PriceSource.MANUAL, "1", None, created_at=POSITIONS_AT + timedelta(days=1)
+        repository.positions[DAY] = (_position(DI1F27.id, 3, "0"),)
+        prices.set(
+            DI1F27.id,
+            DAY,
+            "1",
+            PriceSource.MANUAL,
+            None,
+            created_at=POSITIONS_AT + timedelta(days=1),
         )
 
         (row,) = (await queries.get_position_table(DAY)).items

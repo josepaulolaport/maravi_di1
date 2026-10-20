@@ -22,8 +22,8 @@ from di1.platform.messaging.publisher import (
     PublishFailedError,
 )
 from di1.platform.messaging.topology import Topology, declare_queue
-from tests.integration.platform.conftest import queue_spec
 from tests.integration.platform.support import PUBLISH_TIMEOUT_SECONDS
+from tests.support.broker import queue_spec
 
 
 def _envelope(message_type: str = "test.command") -> Envelope:

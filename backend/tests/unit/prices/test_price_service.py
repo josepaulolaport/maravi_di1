@@ -16,17 +16,17 @@ from di1.modules.prices.public import PriceReader, PriceSource
 from di1.modules.pricing.public import Quote
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
-from tests.fakes.clock import FixedClock
-from tests.unit.prices.fakes import (
+from tests.support.builders import di1_contract
+from tests.support.fakes import (
     CALCULATED_PU,
     CALCULATED_RATE,
     CalculationCall,
-    FakeAssets,
+    FakeAssetReader,
+    FakeClock,
     FakePricing,
     FakeUnitOfWork,
-    InMemoryRepository,
-    instrument,
 )
+from tests.unit.prices.fakes import InMemoryRepository
 
 TODAY = date(2026, 10, 19)
 DAY = date(2026, 10, 16)
@@ -43,8 +43,8 @@ class _SetArgs(TypedDict):
 
 class World:
     def __init__(self) -> None:
-        self.assets = FakeAssets()
-        self.asset = self.assets.add(instrument())
+        self.assets = FakeAssetReader()
+        self.asset = self.assets.add(di1_contract("DI1F28"))
         self.pricing = FakePricing()
         self.repository = InMemoryRepository()
         self.reader = DefaultPriceReader(self.repository)
@@ -56,7 +56,7 @@ class World:
             uow,
             assets=self.assets,
             pricing=self.pricing,
-            clock=FixedClock(TODAY),
+            clock=FakeClock(TODAY),
         )
 
     def request(
@@ -184,7 +184,7 @@ class TestSet:
         self._assert_nothing_written(world, uow)
 
     async def test_a_date_after_maturity_is_refused(self, world: World) -> None:
-        matured = world.assets.add(instrument(maturity_date=date(2026, 10, 15)))
+        matured = world.assets.add(di1_contract("DI1F28", maturity=date(2026, 10, 15)))
         uow = FakeUnitOfWork()
         request = world.request(asset_id=matured.id, pu="100000")
 
@@ -318,7 +318,7 @@ class TestPriceReader:
         ) is None
 
     async def test_many_pairs_in_one_read_with_absent_pairs_left_out(self, world: World) -> None:
-        other = world.assets.add(instrument(maturity_date=date(2029, 1, 2)))
+        other = world.assets.add(di1_contract("DI1F28", maturity=date(2029, 1, 2)))
         b3 = await world.service(FakeUnitOfWork()).set_reference_price(
             **world.request(source=PriceSource.B3),
         )
@@ -369,7 +369,7 @@ class TestLatest:
         assert await world.reader.latest([world.asset.id]) == {world.asset.id: manual}
 
     async def test_assets_without_a_price_are_absent(self, world: World) -> None:
-        other = world.assets.add(instrument(maturity_date=date(2029, 1, 2)))
+        other = world.assets.add(di1_contract("DI1F28", maturity=date(2029, 1, 2)))
         price = await world.service(FakeUnitOfWork()).set_reference_price(**world.request())
 
         found = await world.reader.latest([world.asset.id, other.id, uuid4()])

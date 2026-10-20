@@ -22,16 +22,16 @@ from di1.modules.processing.public import (
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.shared.errors import DomainError, ErrorCode
 from di1.shared.paging import PageParams
-from tests.fakes.clock import FixedClock
 from tests.integration.processing.support import (
     ServiceFactory,
     count,
     make_service,
     request_statuses,
-    seed_instrument,
     seed_statuses,
 )
-from tests.unit.processing.fakes import T0, FakeAssets, FakeChainHistory
+from tests.support.builders import DI1F29, T0
+from tests.support.db import seed_catalogue
+from tests.support.fakes import FakeAssetReader, FakeChainHistory, FakeClock
 
 A, B = date(2026, 10, 1), date(2026, 10, 5)
 ALL = ProcessingScope.ALL
@@ -243,7 +243,7 @@ async def test_13_10_two_concurrent_cancels_have_one_winner(
 async def test_12_the_history_pages_by_keyset_even_with_equal_creation_times(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    same_instant = make_service(clock=FixedClock(T0.date(), T0))
+    same_instant = make_service(clock=FakeClock(T0.date(), T0))
     created = [await _enqueue(session_factory, same_instant) for _ in range(5)]
     later = await _enqueue(session_factory, make_service())
     expected = [later.id, *sorted((r.id for r in created), reverse=True)]
@@ -316,7 +316,8 @@ async def test_oq37_the_preview_follows_the_runs_predecessor_rule(
 async def test_10_3_issues_are_listed_newest_first_with_asset_codes(
     engine: AsyncEngine, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    asset_id = await seed_instrument(engine, "DI1F29")
+    seed_catalogue(engine, (DI1F29,))
+    asset_id = DI1F29.id
     run = await _enqueue(session_factory, make_service())
     async with engine.begin() as connection:
         await connection.execute(
@@ -328,7 +329,7 @@ async def test_10_3_issues_are_listed_newest_first_with_asset_codes(
             ),
             {"r": run.id, "a": asset_id},
         )
-    service = make_service(assets=FakeAssets({asset_id: "DI1F29"}))
+    service = make_service(assets=FakeAssetReader(DI1F29))
 
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
         issues = await service.on(uow).get_issues()

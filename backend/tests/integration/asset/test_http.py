@@ -27,8 +27,9 @@ from di1.modules.prices.public import PriceSource
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
-from tests.integration.asset.conftest import Di1Catalogue, seed_di1
-from tests.integration.asset.latest_prices import FakePriceReader, price
+from tests.support.db import Di1Catalogue, seed_di1
+from tests.support.fakes import FakePriceReader, reference_price
+from tests.support.http import problem, problem_errors, problem_messages
 
 # fixtures.ts: instrumentTypes, products[0] and instruments (DI1F27…DI1F30).
 GOLDEN_INSTRUMENT_TYPES = {
@@ -109,7 +110,7 @@ def seeded(settings: Settings) -> Di1Catalogue:
 @pytest.fixture
 def latest_prices() -> FakePriceReader:
     """No instrument has a price unless a test gives it one."""
-    return FakePriceReader()
+    return FakePriceReader(dated_reads=False)
 
 
 @pytest.fixture
@@ -122,16 +123,6 @@ def client(
     )
     with TestClient(app) as client:
         yield client
-
-
-def _problem(response: Any) -> tuple[int, str, list[tuple[str, str, str | None]]]:
-    body = response.json()
-    assert body["type"] == "about:blank"
-    errors = [(e["code"], e["message"], e["field"]) for e in body["errors"]]
-    return response.status_code, response.headers["content-type"], errors
-
-
-PROBLEM = "application/problem+json"
 
 
 class TestShapes:
@@ -220,27 +211,23 @@ class TestErrors:
             (f"/products/{uuid4()}", "Produto não encontrado."),
             (f"/instruments/{uuid4()}", "Contrato não encontrado."),
         ]:
-            assert _problem(client.get(path)) == (404, PROBLEM, [("NOT_FOUND", message, None)])
+            assert problem_messages(client.get(path), 404) == [("NOT_FOUND", message, None)]
 
     def test_a_duplicate_code_is_422_on_code(
         self, client: TestClient, seeded: Di1Catalogue
     ) -> None:
         body = {"product_id": str(seeded.di1_id), "code": "di1f27", "maturity_date": "2027-01-04"}
 
-        assert _problem(client.post("/instruments", json=body)) == (
-            422,
-            PROBLEM,
-            [("VALIDATION_ERROR", "Já existe um contrato com este código.", "code")],
-        )
+        assert problem_messages(client.post("/instruments", json=body), 422) == [
+            ("VALIDATION_ERROR", "Já existe um contrato com este código.", "code")
+        ]
 
     def test_an_unknown_product_is_422_on_product_id(self, client: TestClient) -> None:
         body = {"product_id": str(uuid4()), "code": "DI1N27", "maturity_date": "2027-07-01"}
 
-        assert _problem(client.post("/instruments", json=body)) == (
-            422,
-            PROBLEM,
-            [("VALIDATION_ERROR", "Produto não encontrado.", "product_id")],
-        )
+        assert problem_messages(client.post("/instruments", json=body), 422) == [
+            ("VALIDATION_ERROR", "Produto não encontrado.", "product_id")
+        ]
 
     def test_a_future_without_maturity_is_422_on_maturity_date(
         self, client: TestClient, seeded: Di1Catalogue
@@ -250,16 +237,12 @@ class TestErrors:
         absent = {"product_id": str(seeded.di1_id), "code": "DI1N27"}
         null = absent | {"maturity_date": None}
 
-        assert _problem(client.post("/instruments", json=absent)) == (
-            422,
-            PROBLEM,
-            [("VALIDATION_ERROR", "Campo obrigatório.", "maturity_date")],
-        )
-        assert _problem(client.post("/instruments", json=null)) == (
-            422,
-            PROBLEM,
-            [("VALIDATION_ERROR", "Informe o vencimento.", "maturity_date")],
-        )
+        assert problem_messages(client.post("/instruments", json=absent), 422) == [
+            ("VALIDATION_ERROR", "Campo obrigatório.", "maturity_date")
+        ]
+        assert problem_messages(client.post("/instruments", json=null), 422) == [
+            ("VALIDATION_ERROR", "Informe o vencimento.", "maturity_date")
+        ]
 
     def test_a_nul_in_the_code_is_422_on_code(
         self, client: TestClient, seeded: Di1Catalogue
@@ -270,16 +253,16 @@ class TestErrors:
             "maturity_date": "2027-07-01",
         }
 
-        status, _, errors = _problem(client.post("/instruments", json=body))
+        errors = problem_errors(client.post("/instruments", json=body), 422)
 
-        assert (status, [e[2] for e in errors]) == (422, ["code"])
+        assert [field for _, field in errors] == ["code"]
 
     def test_malformed_input_is_422_on_its_field(self, client: TestClient) -> None:
-        status, content_type, errors = _problem(
-            client.post("/instruments", json={"product_id": "x", "maturity_date": "2027-13-01"})
+        errors = problem_messages(
+            client.post("/instruments", json={"product_id": "x", "maturity_date": "2027-13-01"}),
+            422,
         )
 
-        assert (status, content_type) == (422, PROBLEM)
         assert sorted(errors, key=lambda e: e[2] or "") == [
             ("VALIDATION_ERROR", "Campo obrigatório.", "code"),
             ("VALIDATION_ERROR", "Valor inválido.", "maturity_date"),
@@ -287,7 +270,7 @@ class TestErrors:
         ]
 
     def test_a_malformed_path_id_is_422(self, client: TestClient) -> None:
-        assert _problem(client.get("/instruments/not-a-uuid"))[0] == 422
+        problem(client.get("/instruments/not-a-uuid"), 422)
 
 
 DAP = {
@@ -352,7 +335,7 @@ class TestCreateProduct:
     ) -> None:
         body = {"asset_class_id": seeded.interest_rate_class_id, "code": "DAP", "name": "Cupom"}
 
-        assert _problem(client.post("/products", json=body))[2] == [
+        assert problem_messages(client.post("/products", json=body), 422) == [
             ("VALIDATION_ERROR", "Informe a especificação do contrato futuro.", "futures")
         ]
 
@@ -362,11 +345,9 @@ class TestCreateProduct:
     ) -> None:
         body = DAP | {"asset_class_id": asset_class_id}
 
-        assert _problem(client.post("/products", json=body)) == (
-            422,
-            PROBLEM,
-            [("VALIDATION_ERROR", "Classe de ativo não encontrada.", "asset_class_id")],
-        )
+        assert problem_messages(client.post("/products", json=body), 422) == [
+            ("VALIDATION_ERROR", "Classe de ativo não encontrada.", "asset_class_id")
+        ]
 
     @pytest.mark.parametrize(
         ("path", "field"), [("/products", "unknown"), ("/instruments", "unknown")]
@@ -380,9 +361,9 @@ class TestCreateProduct:
             else {"product_id": str(seeded.di1_id), "code": "DI1N27", "maturity_date": None}
         )
 
-        status, _, errors = _problem(client.post(path, json=body | {field: 1}))
+        errors = problem_messages(client.post(path, json=body | {field: 1}), 422)
 
-        assert (status, errors) == (422, [("VALIDATION_ERROR", "Valor inválido.", field)])
+        assert errors == [("VALIDATION_ERROR", "Valor inválido.", field)]
 
     @pytest.mark.parametrize("face_value", [100000, 1.5, "1e5", "Infinity", "NaN", "", "1,5"])
     def test_decimals_are_plain_decimal_strings(
@@ -391,16 +372,16 @@ class TestCreateProduct:
         futures = dict(DAP["futures"]) | {"face_value": face_value}  # type: ignore[arg-type]
         body = DAP | {"asset_class_id": seeded.interest_rate_class_id, "futures": futures}
 
-        status, _, errors = _problem(client.post("/products", json=body))
+        errors = problem_errors(client.post("/products", json=body), 422)
 
-        assert (status, [e[2] for e in errors]) == (422, ["futures.face_value"])
+        assert [field for _, field in errors] == ["futures.face_value"]
 
     def test_a_duplicate_code_is_422_on_code(
         self, client: TestClient, seeded: Di1Catalogue
     ) -> None:
         body = DAP | {"asset_class_id": seeded.interest_rate_class_id, "code": "di1"}
 
-        assert _problem(client.post("/products", json=body))[2] == [
+        assert problem_messages(client.post("/products", json=body), 422) == [
             ("VALIDATION_ERROR", "Já existe um produto com este código.", "code")
         ]
 
@@ -413,9 +394,9 @@ class TestLastReference:
         self, client: TestClient, seeded: Di1Catalogue, latest_prices: FakePriceReader
     ) -> None:
         f28, f29 = seeded.instrument_ids["DI1F28"], seeded.instrument_ids["DI1F29"]
-        latest_prices.by_asset[f28] = price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995")
-        latest_prices.by_asset[f29] = price(
-            f29, date(2026, 10, 15), "82057.00", None, source=PriceSource.B3
+        latest_prices.add(reference_price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995"))
+        latest_prices.add(
+            reference_price(f29, date(2026, 10, 15), "82057.00", None, source=PriceSource.B3)
         )
 
         items = client.get("/instruments").json()["items"]
@@ -442,7 +423,7 @@ class TestLastReference:
     ) -> None:
         client.get("/instruments", params={"search": "f2"})
 
-        assert latest_prices.calls == [
+        assert latest_prices.latest_calls == [
             frozenset(seeded.instrument_ids[c] for c in ("DI1F27", "DI1F28", "DI1F29"))
         ]
 
@@ -450,13 +431,13 @@ class TestLastReference:
         self, client: TestClient, latest_prices: FakePriceReader
     ) -> None:
         assert client.get("/instruments", params={"search": "x"}).json() == {"items": []}
-        assert latest_prices.calls == []
+        assert latest_prices.latest_calls == []
 
     def test_one_instrument_carries_its_latest_price(
         self, client: TestClient, seeded: Di1Catalogue, latest_prices: FakePriceReader
     ) -> None:
         f28 = seeded.instrument_ids["DI1F28"]
-        latest_prices.by_asset[f28] = price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995")
+        latest_prices.add(reference_price(f28, date(2026, 10, 16), "89102.2226533433", "0.0995"))
 
         body = client.get(f"/instruments/{f28}").json()
 
@@ -466,13 +447,13 @@ class TestLastReference:
             "rate": "0.0995",
             "source": "MANUAL",
         }
-        assert latest_prices.calls == [frozenset({f28})]
+        assert latest_prices.latest_calls == [frozenset({f28})]
 
     def test_an_unknown_instrument_is_404_without_reading_prices(
         self, client: TestClient, latest_prices: FakePriceReader
     ) -> None:
         assert client.get(f"/instruments/{uuid4()}").status_code == 404
-        assert latest_prices.calls == []
+        assert latest_prices.latest_calls == []
 
     def test_a_new_instrument_has_none(self, client: TestClient, seeded: Di1Catalogue) -> None:
         body = {"product_id": str(seeded.di1_id), "code": "DI1N27", "maturity_date": "2027-07-01"}
@@ -483,7 +464,7 @@ class TestLastReference:
         self, client: TestClient, seeded: Di1Catalogue, latest_prices: FakePriceReader
     ) -> None:
         f30 = seeded.instrument_ids["DI1F30"]
-        latest_prices.by_asset[f30] = price(f30, date(2026, 10, 16), "7.5E+4", "1E-1")
+        latest_prices.add(reference_price(f30, date(2026, 10, 16), "7.5E+4", "1E-1"))
 
         reference = client.get(f"/instruments/{f30}").json()["last_reference"]
 
