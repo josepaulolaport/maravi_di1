@@ -12,6 +12,9 @@ RUN_COLUMNS = (
     " failed_date, failed_chain"
 )
 
+QUEUE_LOCK_KEY = 0x44_49_31_51  # "DI1Q": the one advisory lock key of the processing queue
+LOCK_THE_QUEUE = text("SELECT pg_advisory_xact_lock(:key)")
+
 LOCK_OLDEST_QUEUED = text(
     f"SELECT {RUN_COLUMNS} FROM processing.requests WHERE status = 'QUEUED'"
     " ORDER BY created_at, id LIMIT 1 FOR UPDATE"

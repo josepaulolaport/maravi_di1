@@ -115,6 +115,29 @@ async def test_nothing_is_taken_while_a_run_is_running(worker: Worker) -> None:
     assert (await worker.run_row(second))["status"] == "QUEUED"
 
 
+async def test_two_concurrent_takes_start_only_one_run(worker: Worker) -> None:
+    """ "Nothing RUNNING" and "lock the oldest QUEUED" are one atomic step: two takes that both
+    start while nothing runs must not start two runs (a second worker, or a second drain)."""
+    oldest = await worker.enqueue("CASH", D1, D1)
+    second = await worker.enqueue("CASH", D2, D2)
+
+    async with worker.engine.connect() as connection:
+        transaction = await connection.begin()
+        await connection.execute(  # hold the oldest row so both takes are in flight together
+            text("SELECT id FROM processing.requests WHERE id = :id FOR UPDATE"),
+            {"id": oldest},
+        )
+        takes = [asyncio.create_task(worker.take_next()) for _ in range(2)]
+        await worker.wait_for_a_lock_waiter(count=2)
+        await transaction.commit()
+
+    async with asyncio.timeout(5):
+        taken = await asyncio.gather(*takes)
+
+    assert sorted(taken, key=str) == sorted([oldest, None], key=str)
+    assert (await worker.run_row(second))["status"] == "QUEUED"
+
+
 async def test_a_queued_request_cancelled_before_pickup_never_runs(worker: Worker) -> None:
     request_id = await worker.enqueue("CASH", D1, D1)
     await worker.cancel(request_id)
