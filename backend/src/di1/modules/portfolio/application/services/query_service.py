@@ -33,7 +33,7 @@ from di1.modules.processing.public import ChainStatus, DateStatus, DateStatusRea
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
 from di1.shared.decimals import financial_context
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
+from di1.shared.errors import DomainError, ErrorCode, ErrorDetail, range_too_long
 
 ZERO = Decimal("0")
 PROCESSED = frozenset({ChainStatus.PROCESSED, ChainStatus.PROCESSED_WITH_ISSUES})
@@ -127,6 +127,8 @@ class PortfolioService:
                     "start_date",
                 )
             )
+        elif (too_long := range_too_long(start_date, end_date)) is not None:
+            errors.append(too_long)
         if end_date > self._clock.today():
             errors.append(_future_date("end_date"))
         if errors:

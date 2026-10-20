@@ -15,10 +15,11 @@ from decimal import Decimal
 import pytest
 from pydantic import SecretStr
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.platform.config import Settings
-from di1.platform.database.engine import check_connection, create_engine
+from di1.platform.database.engine import check_connection, create_engine, create_worker_engine
 
 
 async def test_engine_connects_to_postgresql_16(engine: AsyncEngine) -> None:
@@ -51,6 +52,47 @@ async def test_session_factory_keeps_loaded_values_after_commit(
 ) -> None:
     assert session_factory.kw["expire_on_commit"] is False
     assert session_factory.kw["autoflush"] is True
+
+
+async def test_the_api_engine_keeps_the_server_default_timeouts(engine: AsyncEngine) -> None:
+    async with engine.connect() as connection:
+        statement = await connection.scalar(text("SHOW statement_timeout"))
+        lock = await connection.scalar(text("SHOW lock_timeout"))
+
+    assert (statement, lock) == ("0", "0")
+
+
+async def test_the_worker_engine_sets_statement_and_lock_timeouts(settings: Settings) -> None:
+    engine = create_worker_engine(settings)
+    try:
+        async with engine.connect() as connection:
+            statement = await connection.scalar(text("SHOW statement_timeout"))
+            lock = await connection.scalar(text("SHOW lock_timeout"))
+    finally:
+        await engine.dispose()
+
+    assert (statement, lock) == ("1min", "10s")
+
+
+async def test_a_worker_lock_wait_ends_with_an_operational_error(
+    settings: Settings, engine: AsyncEngine
+) -> None:
+    """A lock held elsewhere no longer hangs the worker: its wait ends after the lock timeout
+    with an operational error, which the processor treats as transient."""
+    worker_engine = create_worker_engine(
+        settings.model_copy(update={"worker_lock_timeout_seconds": 0.2})
+    )
+    try:
+        async with engine.connect() as holder:
+            await holder.execute(text("SELECT pg_advisory_lock(42)"))
+            async with worker_engine.connect() as waiter:
+                with pytest.raises(OperationalError, match="lock timeout"):
+                    await asyncio.wait_for(
+                        waiter.execute(text("SELECT pg_advisory_lock(42)")), timeout=5
+                    )
+            await holder.execute(text("SELECT pg_advisory_unlock(42)"))
+    finally:
+        await worker_engine.dispose()
 
 
 @pytest.fixture

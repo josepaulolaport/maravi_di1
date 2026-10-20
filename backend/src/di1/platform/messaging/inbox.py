@@ -13,7 +13,6 @@ would be handled again; the only message today is the doorbell, which is harmles
 
 from __future__ import annotations
 
-import logging
 import time
 import uuid
 from collections.abc import Callable
@@ -22,8 +21,7 @@ from datetime import timedelta
 from sqlalchemy import text
 
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
-
-logger = logging.getLogger(__name__)
+from di1.platform.messaging.retention import Retention
 
 CONSUMER_NAME_MAX_LENGTH = 128
 """``platform.inbox_messages.consumer_name`` is ``VARCHAR(128)``."""
@@ -54,9 +52,9 @@ async def delete_processed_before(uow: UnitOfWork, *, older_than: timedelta) -> 
     return int(result.rowcount)  # type: ignore[attr-defined]
 
 
-class InboxRetention:
-    """Deletes the old inbox records at most once per ``interval_seconds``, the first time at
-    once. A process's periodic loop calls `run_if_due` on each turn."""
+class InboxRetention(Retention):
+    """Deletes the inbox records processed more than ``older_than`` ago, at most once per
+    ``interval_seconds``."""
 
     def __init__(
         self,
@@ -66,26 +64,9 @@ class InboxRetention:
         interval_seconds: float,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._uow_factory = uow_factory
-        self._older_than = older_than
-        self._interval = interval_seconds
-        self._clock = clock
-        self._next_run: float | None = None
+        async def delete(uow: UnitOfWork) -> int:
+            return await delete_processed_before(uow, older_than=older_than)
 
-    async def run_if_due(self) -> int | None:
-        """Delete the old records if the interval has passed; return how many, or `None` when
-        it was not due or failed (logged: the next interval tries again)."""
-        now = self._clock()
-        if self._next_run is not None and now < self._next_run:
-            return None
-        self._next_run = now + self._interval
-        try:
-            async with self._uow_factory() as uow:
-                deleted = await delete_processed_before(uow, older_than=self._older_than)
-                await uow.commit()
-        except Exception:
-            logger.exception("inbox retention failed")
-            return None
-        if deleted:
-            logger.info("inbox retention deleted %d records", deleted)
-        return deleted
+        super().__init__(
+            uow_factory, name="inbox", delete=delete, interval_seconds=interval_seconds, clock=clock
+        )

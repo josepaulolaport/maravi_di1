@@ -246,3 +246,19 @@ def test_processing_reads_today_from_the_app_clock(client: TestClient) -> None:
     assert response.status_code == 422
     errors = [(e["code"], e["field"]) for e in response.json()["errors"]]
     assert errors == [("FUTURE_DATE", "end_date")]
+
+
+def test_processing_refuses_a_range_longer_than_3660_dates(client: TestClient) -> None:
+    # 2016-10-10 .. 2026-10-18 is 3,661 dates, ends included.
+    body = {"start_date": "2016-10-10", "end_date": "2026-10-18", "scope": "ALL"}
+
+    response = client.post("/api/processing/requests", json=body)
+
+    assert response.status_code == 422
+    assert response.json()["errors"] == [
+        {
+            "code": "INVALID_RANGE",
+            "message": "O período deve ter no máximo 3.660 dias.",
+            "field": "end_date",
+        }
+    ]

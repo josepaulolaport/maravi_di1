@@ -132,9 +132,10 @@ services:
     restart: unless-stopped
 
   # Demo data (scripts/seed_demo.py): two weeks of DI1 contracts, ledger entries and reference
-  # prices, dated relative to the first `up`, written through the API once it is healthy. On a
-  # non-empty ledger it adds nothing and exits 0, so later `up`s are no-ops; it queues no
-  # processing. DI1_DEMO=0 turns it off (make e2e does, to keep its ledger empty).
+  # prices, dated relative to the first `up`, written through the API once it is healthy. Once
+  # its last price is there it adds nothing, so later `up`s are no-ops; a run that stopped
+  # part-way is reported and asks for `down -v`. It always exits 0, printing "DEMO DATA NOT
+  # LOADED: <reason>" on a failure. It queues no processing. DI1_DEMO=0 turns it off (make e2e does, to keep its ledger empty).
   demo:
     <<: *backend
     command: ["python", "/demo/seed_demo.py", "--api", "http://api:8000"]
@@ -150,7 +151,8 @@ services:
     restart: "no"
 
   # Publishes the outbox to RabbitMQ and, once an hour, deletes the inbox records older than
-  # INBOX_RETENTION_DAYS (default 7). Its heartbeat is touched after each poll (every second when
+  # INBOX_RETENTION_DAYS and the outbox rows published more than OUTBOX_RETENTION_DAYS ago
+  # (default 7 each). Its heartbeat is touched after each poll (every second when
   # idle), so a fresh file means the loop is progressing.
   outbox-relay:
     <<: *backend
@@ -197,7 +199,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
-      # Also waits for the one-shot demo step, so `up --wait` treats its exit 0 as done.
+      # Also waits for the one-shot demo step, so `up --wait` treats its exit 0 as done. The demo
+      # always exits 0 (a failure prints "DEMO DATA NOT LOADED"), so it never blocks the UI.
       demo:
         condition: service_completed_successfully
     healthcheck:
