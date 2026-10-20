@@ -348,6 +348,114 @@ class TestPositionTable:
         assert table.items == ()
 
 
+class TestReferencePriceChanged:
+    """A10: a row is marked when its current preferred price of the date was registered after
+    the date's positions chain was processed, since its figures come from the price the run read
+    (OQ-30, OQ-31). Prices are re-registered with a new row, so ``created_at`` is the time of the
+    last set (OQ-25)."""
+
+    @pytest.fixture(autouse=True)
+    def published(
+        self, repository: InMemoryPortfolioRepository, statuses: FakeDateStatusReader
+    ) -> None:
+        repository.positions[DAY] = (_position(DI1F28, 10, "951000"),)
+        statuses.statuses[DAY] = _status(DAY, ChainStatus.PROCESSED, None)
+
+    async def test_a_price_set_after_the_processing_marks_the_row(
+        self, queries: PortfolioService, prices: FakePriceReader
+    ) -> None:
+        prices.add(
+            DI1F28,
+            DAY,
+            PriceSource.MANUAL,
+            "95300",
+            "0.0970",
+            created_at=POSITIONS_AT + timedelta(seconds=1),
+        )
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is True
+
+    @pytest.mark.parametrize("before", [timedelta(0), timedelta(minutes=-5)])
+    async def test_a_price_set_before_or_at_the_processing_does_not(
+        self, queries: PortfolioService, prices: FakePriceReader, before: timedelta
+    ) -> None:
+        prices.add(DI1F28, DAY, PriceSource.B3, "95100", "0.0990", created_at=POSITIONS_AT + before)
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is False
+
+    async def test_a_d_minus_1_price_set_after_the_processing_marks_the_row(
+        self, queries: PortfolioService, prices: FakePriceReader
+    ) -> None:
+        # OQ-50 item 3: position P&L uses the D−1 price too (integrator reading).
+        prices.add(DI1F28, DAY, PriceSource.B3, "95100", "0.0990", created_at=POSITIONS_AT)
+        prices.add(
+            DI1F28,
+            DAY - timedelta(days=1),
+            PriceSource.MANUAL,
+            "95000",
+            "0.1000",
+            created_at=POSITIONS_AT + timedelta(minutes=1),
+        )
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is True
+        assert row.reference_pu == Decimal("95100")  # the row still shows D's price
+
+    async def test_a_price_of_another_date_set_later_does_not_mark_the_row(
+        self, queries: PortfolioService, prices: FakePriceReader
+    ) -> None:
+        later = POSITIONS_AT + timedelta(days=1)
+        prices.add(DI1F28, DAY + timedelta(days=1), PriceSource.B3, "1", None, created_at=later)
+        prices.add(DI1F28, DAY - timedelta(days=2), PriceSource.B3, "1", None, created_at=later)
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is False
+
+    async def test_no_price_does_not_mark_the_row(self, queries: PortfolioService) -> None:
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is False
+
+    async def test_a_date_without_a_processing_time_does_not_mark_the_row(
+        self, queries: PortfolioService, prices: FakePriceReader, statuses: FakeDateStatusReader
+    ) -> None:
+        statuses.statuses.pop(DAY)
+        prices.add(
+            DI1F28,
+            DAY,
+            PriceSource.MANUAL,
+            "95300",
+            "0.0970",
+            created_at=POSITIONS_AT + timedelta(days=1),
+        )
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is False
+
+    async def test_after_maturity_no_price_is_read_so_no_mark(
+        self,
+        queries: PortfolioService,
+        repository: InMemoryPortfolioRepository,
+        prices: FakePriceReader,
+    ) -> None:
+        # OQ-1: the PU is 0 by definition after maturity, whatever the price table holds.
+        repository.positions[DAY] = (_position(DI1F27, 3, "0"),)
+        prices.add(
+            DI1F27, DAY, PriceSource.MANUAL, "1", None, created_at=POSITIONS_AT + timedelta(days=1)
+        )
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is False
+
+
 class TestPnLSeries:
     """OQ-41: one point per calendar date of the range; the range sum never goes null, a date not
     processed or with a null daily P&L adding 0."""

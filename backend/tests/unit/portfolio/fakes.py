@@ -109,8 +109,17 @@ class FakePriceReader:
     def __init__(self) -> None:
         self.prices: dict[tuple[UUID, date], ReferencePriceRecord] = {}
 
-    def add(self, asset_id: UUID, on: date, source: PriceSource, pu: str, rate: str | None) -> None:
-        stamp = datetime(2026, 10, 16, 21, 0, tzinfo=UTC)
+    def add(
+        self,
+        asset_id: UUID,
+        on: date,
+        source: PriceSource,
+        pu: str,
+        rate: str | None,
+        *,
+        created_at: datetime | None = None,
+    ) -> None:
+        stamp = created_at or datetime(2026, 10, 16, 21, 0, tzinfo=UTC)
         self.prices[(asset_id, on)] = ReferencePriceRecord(
             id=UUID(int=len(self.prices) + 1),
             asset_id=asset_id,

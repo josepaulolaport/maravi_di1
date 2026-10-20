@@ -109,6 +109,7 @@ class PositionRowOut(BaseModel):
     reference_source: str | None
     reference_pu: str | None
     reference_rate: str | None
+    reference_price_changed: bool
     financial_total: str | None
     position_pnl: str | None
     trades_pnl: str | None
@@ -128,6 +129,7 @@ class PositionRowOut(BaseModel):
             reference_source=_code(row.reference_source),
             reference_pu=_decimal(row.reference_pu),
             reference_rate=_decimal(row.reference_rate),
+            reference_price_changed=row.reference_price_changed,
             financial_total=_decimal(row.financial_total),
             position_pnl=_decimal(row.position_pnl),
             trades_pnl=_decimal(row.trades_pnl),

@@ -84,6 +84,7 @@ def test_a_position_row_traces_its_price_by_source_not_id() -> None:
         "reference_source",
         "reference_pu",
         "reference_rate",
+        "reference_price_changed",
         "financial_total",
         "position_pnl",
         "trades_pnl",

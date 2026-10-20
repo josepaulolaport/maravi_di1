@@ -181,7 +181,12 @@ class PositionRowView:
     """``reference_source``, ``reference_pu`` and ``reference_rate`` are the current preferred
     price of the date (MANUAL, else B3, exact date; PU 0 after maturity), read from the price
     table; the stored figures are those of the last processing, so after a price correction the
-    two may differ until the user processes the date again (OQ-30, OQ-31)."""
+    two may differ until the user processes the date again (OQ-30, OQ-31).
+    ``reference_price_changed`` marks that case (OQ-50 item 3): the current preferred price of the
+    date or of the day before (position P&L uses both) was registered (``created_at``; a set always
+    inserts a new row, OQ-25) after the date's positions chain was processed
+    (``portfolio_processed_at``). It is ``False`` with no processing time, and when neither D's
+    nor D−1's price is read (both after maturity, OQ-1)."""
 
     asset_id: UUID
     asset_code: str
@@ -192,6 +197,7 @@ class PositionRowView:
     reference_source: PriceSource | None
     reference_pu: Decimal | None
     reference_rate: Decimal | None
+    reference_price_changed: bool
     financial_total: Decimal | None
     position_pnl: Decimal | None
     trades_pnl: Decimal | None
