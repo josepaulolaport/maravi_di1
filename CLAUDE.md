@@ -131,7 +131,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - X is the integrator.
 
   Edit only your lane's paths. To change anything else, raise a contract-change request to the integrator (X).
-- **Commit freely; review happens at PR time** (user, 2026-10-19: "Yes: all lanes may commit, push their own branch and open or update PRs without asking me per commit; review happens at PR time via the reviewer session. Safety rules unchanged."). Commit, push your branch and open or update your PR without asking for approval of each commit; the reviewer session reviews the PR. Still binding: every commit green (the hook runs ruff, mypy, unit, architecture and phase-1 acceptance tests; never `--no-verify`), tests first, one logical change per commit, Conventional Commits with a why and `Refs:`, no force-push, an honest PR description with real result lines. Spec gaps, decisions and new dependencies still go to the user or lane X.
+- **Commit freely; review happens at PR time** (user, 2026-10-19: "Yes: all lanes may commit, push their own branch and open or update PRs without asking me per commit; review happens at PR time via the reviewer session. Safety rules unchanged."). Commit, push your branch and open or update your PR without asking for approval of each commit; the reviewer session reviews the PR. Still binding: every commit green (the hook runs ruff, mypy, unit and architecture tests; never `--no-verify`), tests first, one logical change per commit, Conventional Commits with a why and `Refs:`, no force-push, an honest PR description with real result lines. Spec gaps, decisions and new dependencies still go to the user or lane X.
 - **Nobody merges.** Not you, not the integrator.
   - When a branch is ready, push it and open a GitHub pull request with `gh pr create` (skill `pr-ready`). Bringing `origin/main` into your own branch is allowed (integrator choice): before the first push you may rebase your own unpushed commits; after it, merge `origin/main` in and add fixes as new commits, since a rewrite would need a force-push.
   - A human reviews and merges it on GitHub.
@@ -142,7 +142,7 @@ If the docs are ambiguous, contradictory or silent on something you need, **stop
   - One logical change per commit. Every commit is green: it builds, passes lint and types, and every test passes.
   - Test and code go in the same commit.
 - **Tests first** for every rule, using the cases in spec §13 (skill `tdd`). Expected values come from the docs, never from running the code. Never delete, weaken or skip a test to make a change pass.
-- **A new worktree needs its dependencies once** before its first commit: `cd backend && uv sync --frozen`, and `cd frontend && npm ci` once the frontend exists. The pre-commit hook runs the backend checks (ruff, mypy, unit, architecture and phase-1 acceptance tests) and, once `frontend/package.json` exists, the frontend checks (eslint, tsc, vitest), and it fails if those dependencies are missing.
+- **A new worktree needs its dependencies once** before its first commit: `cd backend && uv sync --frozen`, and `cd frontend && npm ci` once the frontend exists. The pre-commit hook runs the backend checks (ruff, mypy, unit and architecture tests) and, once `frontend/package.json` exists, the frontend checks (eslint, tsc, vitest), and it fails if those dependencies are missing.
 - **Integration tests use PostgreSQL**, never SQLite. Each worktree has its own database or schema namespace; never share one mutable dev database.
 
 ## 5. Definition of done (skill `pr-ready`)

@@ -62,7 +62,6 @@ backend/
     unit/
     integration/
     architecture/
-    acceptance/      # spec §13 phase 1: pure Portfolio + PnL compositions, no I/O
 frontend/
   src/
     features/
@@ -96,9 +95,9 @@ Recommended agents (a reviewer can be a second agent applied after each module P
 | G — Processing | `modules/processing/**`, `tests/unit/processing/**` | Wave 2 queue API; Wave 4 worker integration | All module public interfaces + platform messaging |
 | H — Platform | `platform/**`, `workers/**` shared bootstrap | Wave 0 | Schema and doorbell/take contract (OQ-46) |
 | I — Frontend | `frontend/**`, including the frontend build: `frontend/Dockerfile`, `frontend/nginx.conf`, `frontend/.dockerignore` (its `web` service in `compose.yaml` is lane X's) | Wave 1 mock API | Drafts the HTTP response types and MSW fixtures from the spec and the Figma, as a contract proposal the integrator reconciles with the backend; backend not required |
-| X — Integrator | `composition/**`, `main.py`, migrations, global tests (not `tests/acceptance/**` or `tests/integration/acceptance/**`, owned by the acceptance-tests session), shared contracts, CI, compose (`compose.yaml`, including the `web` and `seed` services), the end-to-end smoke (`scripts/e2e.sh`, `scripts/e2e_smoke.py`) and the catalogue seed (`scripts/seed_catalogue.sql`) | Throughout | Owns all cross-module wiring |
+| X — Integrator | `composition/**`, `main.py`, migrations, global tests (not `tests/integration/acceptance/**`, owned by the acceptance-tests session), shared contracts, CI, compose (`compose.yaml`, including the `web` and `seed` services), the end-to-end smoke (`scripts/e2e.sh`, `scripts/e2e_smoke.py`) and the catalogue seed (`scripts/seed_catalogue.sql`) | Throughout | Owns all cross-module wiring |
 
-`tests/acceptance/**` (spec §13 acceptance tests, phase 1: pure Portfolio and PnL compositions, no I/O) and `tests/integration/acceptance/**` (phase 2: the same scenarios over HTTP and PostgreSQL) belong to the acceptance-tests session (user, 2026-10-19); it touches nothing else. Only phase 1 runs in the pre-commit hook; CI runs both, and so does `make test-backend` (the only run of phase 2 while GitHub Actions is down, CLAUDE.md §4).
+`tests/integration/acceptance/**` (spec §13 acceptance tests over HTTP and PostgreSQL, each scenario once) belongs to the acceptance-tests session (user, 2026-10-19); it touches nothing else. The former phase 1 (pure engines, `tests/acceptance/`) repeated those scenarios and was removed; its rules stay covered by the unit tests. CI and `make test-backend` run the acceptance tests (the only run of them while GitHub Actions is down, CLAUDE.md §4).
 
 If fewer agents: combine A+B, C+D, E+F; **do not** combine G with platform+integration until there are stable endpoints. A coding agent should not modify another lane's folder to make its tests pass: raise a contract change request to X. A lane's integration tests may import another lane's test seed read-only (lane B imports lane A's catalogue seed from `tests/integration/asset/conftest.py`; user, 2026-10-19); the owner changes that seed, and a change that breaks an importer goes through X.
 

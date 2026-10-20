@@ -28,8 +28,7 @@ backend/
       presentation/messaging/            # this module's RabbitMQ consumers and handlers
     workers/{main.py, outbox_relay.py}   # lane H; no dispatcher (OQ-46)
   tests/{unit/<module>/, integration/, architecture/, fakes/}
-  tests/acceptance/                  # spec §13 phase 1, pure; acceptance-tests session
-  tests/integration/acceptance/      # spec §13 phase 2; acceptance-tests session
+  tests/integration/acceptance/      # spec §13 scenarios, once, over HTTP; acceptance-tests session
 ```
 
 There is no `tests/e2e/`: the end-to-end smoke is `scripts/e2e.sh` + `scripts/e2e_smoke.py`, run by `make e2e` from the repository root.

@@ -177,9 +177,9 @@ def test_the_challenge_example_end_to_end() -> None:
         )
         assert row["financial_total"] == Decimal(PU_AT_10_PERCENT)
         totals = desk.portfolio_pnl(TODAY)
-        assert (totals["market_value"], totals["daily_pnl"], totals["cumulative_pnl"]) == (
-            Decimal(PU_AT_10_PERCENT),
-            Decimal(0),
-            Decimal(0),
-        )
+        assert tuple(
+            totals[k]
+            for k in ("market_value", "position_pnl", "trades_pnl", "daily_pnl", "cumulative_pnl")
+        ) == (Decimal(PU_AT_10_PERCENT), Decimal(0), Decimal(0), Decimal(0), Decimal(0))
+        assert totals["pnl_status"] == "COMPLETE"
         assert desk.aum(TODAY) == Decimal(200000)

@@ -1,6 +1,7 @@
-# Acceptance tests, phase 2 (spec §13, over HTTP and PostgreSQL)
+# Acceptance tests (spec §13, over HTTP and PostgreSQL)
 
-The same proof as `tests/acceptance/` (phase 1, pure engines), now through the real app:
+The one home of each spec §13 scenario (the former phase 1 over the pure engines repeated them;
+the engines' rules are in `tests/unit/`). The proof runs through the real app:
 `create_app` on a fresh PostgreSQL 16 database migrated to head, with an injected clock
 (OQ-14; spec §15 D4), driven only through `/api`. Only the catalogue roots (instrument type,
 asset class) and B3 prices, which have no route, are inserted directly. Expected values come
