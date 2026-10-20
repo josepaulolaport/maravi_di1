@@ -4,89 +4,60 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router';
 
 import type { CreateLedgerEntryRequest, IsoDate, LedgerOrder } from '@/api/contract';
 import { ledgerApi } from '@/api/endpoints';
-import { invalidateAfterWrite, queryRoots } from '@/api/queryRoots';
-import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
-import { useFutureDateNotice } from '@/shared/ui/futureDate';
+import { mutationKeys, paramsOf, queryKeys } from '@/api/queryKeys';
+import { addDays } from '@/shared/format';
+import {
+  dateParam,
+  enumParam,
+  textParam,
+  useQueryParams,
+  withFallback,
+} from '@/shared/url/useQueryParams';
+import { useToday } from '@/shared/hooks/useToday';
 
-import type { LedgerEntry } from '../entries';
+import type { LedgerEntry } from '../model/entries';
 
-// A key's root is the API area it reads (`@/api/queryRoots`). The cash strip's summary and the
-// form's catalogue come from `@/shared/queries`, shared with Carteira and Ativos.
-const ledgerKeys = {
-  all: queryRoots.ledger,
-  entries: (start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) =>
-    [...queryRoots.ledger, 'entries', start, end, search, order] as const,
-  /** Mutation key of the new-entry saves, so the page knows a save is running. */
-  create: () => [...queryRoots.ledger, 'create'] as const,
-};
-
-/** Days in the default range, ending today (São Paulo). */
+/** Days in the default range, ending on its end date. */
 const DEFAULT_RANGE_DAYS = 30;
 
-interface LedgerFilters {
-  start: IsoDate;
-  end: IsoDate;
-  search: string;
-  today: IsoDate;
-  /** Newest first by default; `?ordem=asc` for the oldest first. */
-  order: LedgerOrder;
-  setRange: (start: IsoDate, end: IsoDate) => void;
-  setSearch: (search: string) => void;
-  setOrder: (order: LedgerOrder) => void;
-}
+const ORDERS: Record<LedgerOrder, string> = { asc: 'asc', desc: 'desc' };
 
 /**
  * The inclusive range, the search and the order live in the URL (`?inicio=&fim=&busca=&ordem=`,
- * `ledgerLinks`), so a filtered view can be linked. A missing, invalid or future end is today (a
- * future one is reported, OQ-14); a missing or
- * invalid start, or one after the end, is the end's 30-day window.
+ * `ledgerLinks`), so a filtered view can be linked. A missing end is today; an invalid or future
+ * one is corrected to today (a future one is reported, OQ-14). A missing start, or one after the
+ * end, gives the end's 30-day window. Newest first unless `?ordem=asc`.
  */
-export function useLedgerFilters(): LedgerFilters {
-  const [params, setParams] = useSearchParams();
-  const today = todayInSaoPaulo();
-  const requestedEnd = params.get('fim');
-  const requestedStart = params.get('inicio');
-  useFutureDateNotice([requestedStart, requestedEnd], today);
-  const end = isIsoDate(requestedEnd) && requestedEnd <= today ? requestedEnd : today;
-  const start =
-    isIsoDate(requestedStart) && requestedStart <= end
-      ? requestedStart
-      : addDays(end, -(DEFAULT_RANGE_DAYS - 1));
-  const search = params.get('busca') ?? '';
-  const order: LedgerOrder = params.get('ordem') === 'asc' ? 'asc' : 'desc';
-
-  const update = (changes: Record<string, string>, replace: boolean) => {
-    setParams(
-      (current) => {
-        for (const [key, value] of Object.entries(changes)) {
-          if (value) current.set(key, value);
-          else current.delete(key);
-        }
-        return current;
-      },
-      { replace },
-    );
-  };
-
+export function useLedgerFilters() {
+  const today = useToday();
+  const { values, set } = useQueryParams(
+    {
+      inicio: dateParam({ max: today }),
+      fim: withFallback(dateParam({ max: today }), today),
+      busca: textParam,
+      ordem: withFallback(enumParam(ORDERS), 'desc'),
+    },
+    (v) => ({ inicio: v.inicio !== null && v.inicio <= v.fim ? v.inicio : null }),
+  );
+  const end = values.fim;
   return {
-    start,
+    start: values.inicio ?? addDays(end, -(DEFAULT_RANGE_DAYS - 1)),
     end,
-    search,
+    search: values.busca,
+    order: values.ordem,
     today,
-    setRange: (nextStart, nextEnd) => {
-      update({ inicio: nextStart, fim: nextEnd }, false);
+    setRange: (start: IsoDate, nextEnd: IsoDate) => {
+      set({ inicio: start, fim: nextEnd }, { push: true });
     },
-    setSearch: (next) => {
-      // Typing is debounced into the URL; each pause is not a history entry.
-      update({ busca: next.trim() }, true);
+    /** Typing is debounced into the URL; each pause is not a history entry. */
+    setSearch: (search: string) => {
+      set({ busca: search.trim() });
     },
-    order,
-    setOrder: (next) => {
-      update({ ordem: next === 'asc' ? 'asc' : '' }, true);
+    setOrder: (order: LedgerOrder) => {
+      set({ ordem: order === 'desc' ? null : order });
     },
   };
 }
@@ -100,7 +71,7 @@ const LEDGER_PAGE_SIZE = 50;
  */
 export function useEntries(start: IsoDate, end: IsoDate, search: string, order: LedgerOrder) {
   return useInfiniteQuery({
-    queryKey: ledgerKeys.entries(start, end, search, order),
+    queryKey: queryKeys.ledger.entries({ start, end, search, order }),
     queryFn: ({ pageParam }) =>
       ledgerApi.listEntries({
         start_date: start,
@@ -116,15 +87,17 @@ export function useEntries(start: IsoDate, end: IsoDate, search: string, order: 
     // Only a new order keeps the rows on screen while it loads; a new range or search shows
     // the loading state, so rows of another filter are never listed (or selected).
     placeholderData: (previous, previousQuery) => {
-      const key = previousQuery?.queryKey;
-      const sameFilter =
-        key !== undefined && key[2] === start && key[3] === end && key[4] === search;
+      const before = paramsOf(previousQuery);
+      const sameFilter = before?.start === start && before.end === end && before.search === search;
       return sameFilter ? previous : undefined;
     },
   });
 }
 
-/** Every write changes the facts behind later results (§10.4): refresh what depends on them. */
+/**
+ * A write changes the facts behind the pendências, the previews, the positions' reference
+ * prices and the contracts' latest reference (§10.1, §10.4): every view is read again.
+ */
 function useLedgerWrite<TVariables, TResult>(
   write: (variables: TVariables) => Promise<TResult>,
   mutationKey?: readonly unknown[],
@@ -133,7 +106,7 @@ function useLedgerWrite<TVariables, TResult>(
   return useMutation({
     ...(mutationKey ? { mutationKey } : {}),
     mutationFn: write,
-    onSuccess: () => invalidateAfterWrite(queryClient),
+    onSuccess: () => queryClient.invalidateQueries(),
   });
 }
 
@@ -141,11 +114,11 @@ function useLedgerWrite<TVariables, TResult>(
 export const useCreateEntry = () =>
   useLedgerWrite(
     (body: CreateLedgerEntryRequest) => ledgerApi.createEntry(body),
-    ledgerKeys.create(),
+    mutationKeys.createEntry,
   );
 
 /** A new entry's save is running: the modal must stay open until its result is shown. */
-export const useIsSavingEntry = () => useIsMutating({ mutationKey: ledgerKeys.create() }) > 0;
+export const useIsSavingEntry = () => useIsMutating({ mutationKey: mutationKeys.createEntry }) > 0;
 
 /** One or several entries, of either type, all or nothing (§6.1): `POST /ledger/entries/deletions`. */
 export const useDeleteEntries = () =>

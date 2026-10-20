@@ -3,30 +3,37 @@
 OQ-11, OQ-23, OQ-26, OQ-31, OQ-36, OQ-37, OQ-38, OQ-40, OQ-44, OQ-45).
 
 The system runs exactly one processing worker (OQ-45), which handles one run at a time: there is
-no lease, claim token, fencing, recovery cap, dispatcher or active slot (OQ-46). Queueing a request
-rings a doorbell, a message that names no request. On each doorbell, and at its start after
-recovery, the worker drains the queue: it takes the oldest QUEUED request by
-``(created_at, id)`` and runs it, until none is left. Each step is its own Unit of Work under a
-row lock on the run's ``requests`` row:
+no lease, claim token, fencing, recovery cap, dispatcher or active slot (OQ-46). Queueing a
+request publishes one run message; on any run message the worker takes the oldest QUEUED request
+by ``(created_at, id)`` (`take_next`) and runs it, and a periodic sweep (`sweep`) does the same
+until none is left, so a request whose message was lost still runs, only later (OQ-50 item 2).
+Each step is its own Unit of Work under a row lock on the run's ``requests`` row, with its
+ports built on that Unit of Work (`RunPorts`):
 
-1. **take** (`drain`): only while no run is RUNNING, the oldest QUEUED request is locked and set
-   RUNNING with ``started_at``; a doorbell with nothing QUEUED is a no-op;
+1. **take** (`take_next`, on a run message or in `sweep`): under the queue's advisory lock and
+   only while no run is RUNNING, the oldest QUEUED request is locked and set RUNNING with
+   ``started_at``; with nothing QUEUED it is a no-op;
 2. per date D, in calendar order, from ``start_date`` or the day after ``progress_date``:
-   a. a short transaction checks the cancel flag (a cancel ends the run CANCELLED between
-      dates) and sets D's live chains RUNNING, keeping ``*_previous``;
+   a. a short transaction checks the cancel flag: a cancel ends the run CANCELLED between
+      dates;
    b. D's transaction locks the ``date_status`` rows of D−1 and D, and runs each live chain in
       its own SAVEPOINT, positions first: the predecessor rule, the calculators, the writer. A
       chain that fails rolls back to its savepoint and gets FAILED on D; the other chain still
       commits (OQ-36, OQ-40). The date's statuses, issues and ``progress_date`` commit with it;
    c. a failure outside every savepoint (a lock timeout, say) rolls back all of D; a short
       transaction then sets D FAILED for every live chain and ends the run FAILED;
-3. the end: COMPLETED, COMPLETED_WITH_ISSUES or FAILED; any date of the range still RUNNING is
-   restored from ``*_previous`` (OQ-26).
+3. the end: COMPLETED, COMPLETED_WITH_ISSUES or FAILED.
+
+No date is ever written RUNNING (OQ-50 item 4): each date goes from its old status straight to
+its new one in its own transaction (2b or 2c), so a run that stops leaves every date as it was or
+as it committed it, and nothing is restored. A read shows "Processando" for the active run's
+current date (`application.services.date_status_reader`).
 
 **A step that cannot be recorded.** A run left RUNNING blocks the queue: no later run is
 taken while it is. An error in D's transaction outside every chain's savepoint always takes
 step 2c, whatever its kind (a lock timeout there fails D). Any other error of the run's steps
-(2a, 2c, 3, and the run's start) is handled by its kind (`RunStore.is_transient`):
+(2a, 2c, 3, and the run's start) is handled by its kind
+(`di1.platform.database.errors.is_transient`):
 
 - a transient database error (a dropped connection, a timeout) may clear. The end of a run
   (step 3) and the failure of a date (step 2c) are retried after short pauses
@@ -37,85 +44,59 @@ step 2c, whatever its kind (a lock timeout there fails D). Any other error of th
   nothing (`RunEndedError`);
 - any other error (a bug, a CHECK violation) would recur on every retry and every restart, a
   crash loop with the queue blocked behind the run. It is not retried: the run ends FAILED
-  with ``PROCESSING_ERROR`` in a fresh short transaction (`_abort`), its RUNNING dates restored
-  and the dates it committed kept, and the worker goes on with the queue. Only if that write
+  with ``PROCESSING_ERROR`` in a fresh short transaction (`_abort`), the dates it committed
+  kept, and the worker goes on with the queue. Only if that write
   fails too does the error escape for a restart.
 
-A known limit: a bug that breaks that FAILED end too (in restoring the dates, say) also breaks
-recovery at the worker start, which nothing catches, so it would still loop on restarts; so
-would a non-transient error classified transient (`is_transient` lists its limits).
+A known limit: a bug that breaks that FAILED end too also breaks recovery at the worker start,
+which nothing catches, so it would still loop on restarts; so would a non-transient error
+classified transient (`is_transient` lists its limits).
 
 **Recovery at worker start** (`recover_at_startup`, before the worker consumes): the run left
-RUNNING was interrupted. Its dates left RUNNING are restored from ``*_previous`` (a row left
-empty is deleted); a run with a cancel request then ends CANCELLED before any date, any other is
+RUNNING was interrupted. A run with a cancel request ends CANCELLED before any date; any other is
 run to its end, after ``progress_date`` (from ``start_date`` when NULL). Then the queue is
-drained. DISPATCHED and CANCELLING are never written (OQ-46), so no row holds them.
+swept.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from functools import partial
 from uuid import UUID
 
-from di1.modules.portfolio.public import PortfolioResultsWriter
-from di1.modules.processing.application.interfaces.repositories import (
-    DateStatusRepository,
-    ProcessingChain,
-)
-from di1.modules.processing.application.interfaces.run_store import (
-    DateStatusRow,
-    NewIssue,
-    RunStore,
-)
-from di1.modules.processing.application.services.chain_history import LedgerChainHistory
+from di1.modules.processing.application.ports import RunPorts
 from di1.modules.processing.application.services.predecessor import read_predecessor
 from di1.modules.processing.application.services.run_chains import (
-    DayReaders,
-    ReadersFactory,
     process_cash_day,
     process_positions_day,
 )
-from di1.modules.processing.domain.predecessor import PredecessorState, allows_run
-from di1.modules.processing.public import (
-    ChainStatus,
+from di1.modules.processing.domain.date_status import Chain, ChainStatus, DateStatus
+from di1.modules.processing.domain.issues import IssueRecord
+from di1.modules.processing.domain.predecessor import PredecessorState
+from di1.modules.processing.domain.runs import (
+    PREDECESSOR_MESSAGE,
+    TECHNICAL_ERROR_MESSAGE,
+    ProcessingErrorCode,
     ProcessingRequest,
-    ProcessingScope,
     ProcessingStatus,
 )
-from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
+from di1.platform.database.errors import is_transient
+from di1.platform.database.unit_of_work import UnitOfWork
+from di1.shared.calendar import ONE_DAY
 from di1.shared.clock import Clock
 
 logger = logging.getLogger(__name__)
 
-ONE_DAY = timedelta(days=1)
-
-PROCESSED_STATUSES = frozenset({ChainStatus.PROCESSED, ChainStatus.PROCESSED_WITH_ISSUES})
-FINISHED = frozenset(
-    {
-        ProcessingStatus.COMPLETED,
-        ProcessingStatus.COMPLETED_WITH_ISSUES,
-        ProcessingStatus.CANCELLED,
-        ProcessingStatus.FAILED,
-    }
-)
-CHAIN_ORDER = (ProcessingChain.POSITIONS, ProcessingChain.CASH)
-"""On ALL, positions first, then cash (integrator choice, portfolio/public.py)."""
-
-PREDECESSOR_MESSAGE = "Dia anterior não processado"
-PREDECESSOR_CODES = {
-    ProcessingChain.CASH: "CASH_PREDECESSOR_MISSING",
-    ProcessingChain.POSITIONS: "POSITIONS_PREDECESSOR_MISSING",
-}
-TECHNICAL_ERROR_CODE = "PROCESSING_ERROR"
-"""The run's error for a technical failure on a date (OQ-44)."""
-TECHNICAL_ERROR_MESSAGE = "Erro técnico ao processar a data."
 END_RETRY_DELAYS = (0.5, 2.0, 5.0)
 """Pauses, in seconds, before each retry of a run's end or of a date's failure."""
+
+UnitOfWorkFactory = Callable[[], AbstractAsyncContextManager[UnitOfWork]]
+PortsFactory = Callable[[UnitOfWork], RunPorts]
 
 
 class RunEndedError(Exception):
@@ -124,73 +105,45 @@ class RunEndedError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ChainFailure:
-    chain: ProcessingChain
-    code: str
+    chain: Chain
+    code: ProcessingErrorCode
     message: str
-
-
-def scope_chains(scope: ProcessingScope) -> tuple[ProcessingChain, ...]:
-    if scope is ProcessingScope.ALL:
-        return CHAIN_ORDER
-    return (ProcessingChain(scope.value),)
 
 
 def first_failure(failures: list[ChainFailure]) -> ChainFailure:
     """The failure the run keeps: positions when both chains fail on the same date (OQ-36 item
     5: POSITIONS_PREDECESSOR_MISSING, or the positions chain's error)."""
     for failure in failures:
-        if failure.chain is ProcessingChain.POSITIONS:
+        if failure.chain is Chain.POSITIONS:
             return failure
     return failures[0]
 
 
-async def restore_running_dates(
-    store: RunStore, request: ProcessingRequest, *, uow: UnitOfWork
-) -> None:
-    """Every date of the run's range still RUNNING goes back to its ``*_previous`` status; a
-    row left with no status is deleted (OQ-26)."""
-    for row in await store.running_dates(request.start_date, request.end_date, uow=uow):
-        await store.save_date_status(row.restored(), uow=uow)
-
-
-async def end_run(
-    store: RunStore,
-    request: ProcessingRequest,
-    status: ProcessingStatus,
-    now: datetime,
-    *,
-    uow: UnitOfWork,
-) -> None:
-    """Ends the run, restoring its dates left RUNNING (OQ-26)."""
-    await restore_running_dates(store, request, uow=uow)
-    await store.save_run(replace(request, status=status, finished_at=now, updated_at=now), uow=uow)
+def ended(request: ProcessingRequest, status: ProcessingStatus, now: datetime) -> ProcessingRequest:
+    """The run ended with ``status``; its dates keep what they committed (OQ-50 item 4)."""
+    return replace(request, status=status, finished_at=now, updated_at=now)
 
 
 class PortfolioRangeProcessor:
     def __init__(
         self,
         *,
-        uow_factory: Callable[[], SqlAlchemyUnitOfWork],
-        store: RunStore,
-        date_statuses: DateStatusRepository,
-        readers_for: ReadersFactory,
-        writer: PortfolioResultsWriter,
+        uow_factory: UnitOfWorkFactory,
+        ports_for: PortsFactory,
         clock: Clock,
         end_retry_delays: Sequence[float] = END_RETRY_DELAYS,
     ) -> None:
         self._uow_factory = uow_factory
-        self._store = store
-        self._date_statuses = date_statuses
-        self._readers_for = readers_for
-        self._writer = writer
+        self._ports_for = ports_for
         self._clock = clock
         self._end_retry_delays = tuple(end_retry_delays)
 
-    # --- 1. take the queued requests, oldest first (OQ-46) ---------------------------------
+    # --- 1. take a queued request -------------------------------------------------------
 
-    async def drain(self) -> None:
+    async def sweep(self) -> None:
         """Runs the QUEUED requests one after the other, oldest ``(created_at, id)`` first, until
-        none is left. What a doorbell triggers; a doorbell with nothing queued does nothing."""
+        none is left: the worker's periodic sweep, so a request whose run message was lost still
+        runs. With nothing queued, or while a run is RUNNING, it does nothing."""
         while (request_id := await self.take_next()) is not None:
             await self.run(request_id)
 
@@ -198,23 +151,25 @@ class PortfolioRangeProcessor:
         """Locks the oldest QUEUED request and sets it RUNNING, in one transaction. ``None`` only
         when none is queued (a cancel and a take on the same row: whichever commits first wins),
         or while a run is still RUNNING: one stopped by an error it could not record waits for
-        the worker's next start, so two runs never overlap."""
+        the worker's next start, so two runs never overlap. The queue lock makes the check and
+        the take one atomic step, even for two concurrent takes."""
         async with self._uow_factory() as uow:
-            if await self._store.lock_running_runs(uow=uow):
+            requests = self._ports_for(uow).requests
+            await requests.lock_queue()
+            if await requests.lock_running():
                 await uow.commit()
                 return None
-            while (queued := await self._store.lock_oldest_queued(uow=uow)) is None:
+            while (queued := await requests.lock_oldest_queued()) is None:
                 # Defensive: a cancel may commit on the oldest row while we wait on its lock.
                 # With this query's plan PostgreSQL then moves on to the next row; should a plan
                 # ever return no row instead, select again until a row is locked or none is
                 # queued at all. No test can force that case on this query.
-                if not await self._store.has_queued(uow=uow):
+                if not await requests.has_queued():
                     await uow.commit()
                     return None
             now = self._clock.now()
-            await self._store.save_run(
-                replace(queued, status=ProcessingStatus.RUNNING, started_at=now, updated_at=now),
-                uow=uow,
+            await requests.save(
+                replace(queued, status=ProcessingStatus.RUNNING, started_at=now, updated_at=now)
             )
             await uow.commit()
             logger.info("processing request %s started", queued.id)
@@ -224,27 +179,25 @@ class PortfolioRangeProcessor:
 
     async def recover_at_startup(self) -> None:
         """Called once when the worker starts, before it consumes: the run left RUNNING was
-        interrupted. Its dates left RUNNING are restored; a run with a cancel request ends
-        CANCELLED before any date; any other is run to its end here, after ``progress_date``.
-        Then the queue is drained, so a request whose doorbell was lost runs too. Idempotent: a
-        second call finds nothing to recover or run."""
+        interrupted. A run with a cancel request ends CANCELLED before any date; any other is run
+        to its end here, after ``progress_date``. Then the queue is swept, so a request whose run
+        message was lost runs too. Idempotent: a second call finds nothing to recover or run."""
         async with self._uow_factory() as uow:
-            interrupted = await self._store.lock_running_runs(uow=uow)
+            requests = self._ports_for(uow).requests
             now = self._clock.now()
             to_resume: list[UUID] = []
-            for request in interrupted:
+            for request in await requests.lock_running():
                 if request.cancel_requested_at is not None:
-                    await end_run(self._store, request, ProcessingStatus.CANCELLED, now, uow=uow)
+                    await requests.save(ended(request, ProcessingStatus.CANCELLED, now))
                     logger.info("processing request %s cancelled at worker start", request.id)
                     continue
-                await restore_running_dates(self._store, request, uow=uow)
-                await self._store.save_run(replace(request, updated_at=now), uow=uow)
+                await requests.save(replace(request, updated_at=now))
                 to_resume.append(request.id)
             await uow.commit()
         for request_id in to_resume:
             logger.warning("processing request %s resumed at worker start", request_id)
             await self.run(request_id)
-        await self.drain()
+        await self.sweep()
 
     # --- 2. the dates ----------------------------------------------------------------------
 
@@ -257,7 +210,7 @@ class PortfolioRangeProcessor:
         except RunEndedError:
             logger.info("processing request %s has already ended", request_id)
         except Exception as error:
-            if self._store.is_transient(error):
+            if is_transient(error):
                 logger.exception(
                     "processing request %s left RUNNING: the worker must restart to resume it",
                     request_id,
@@ -269,22 +222,23 @@ class PortfolioRangeProcessor:
             await self._abort(request_id, error)
 
     async def _abort(self, request_id: UUID, error: Exception) -> None:
-        """Ends the run FAILED after a non-transient error, in a fresh short transaction: its
-        dates left RUNNING are restored (OQ-26), the dates it committed keep their statuses, and
-        a first failure already recorded (an ALL run's chain, OQ-36) is kept; otherwise the
-        run's error is ``PROCESSING_ERROR`` with no ``failed_date``, since no date failed. If
-        this write fails too, ``error`` escapes and the worker restarts."""
+        """Ends the run FAILED after a non-transient error, in a fresh short transaction: the
+        dates it committed keep their statuses, and a first failure already recorded (an ALL
+        run's chain, OQ-36) is kept; otherwise the run's error is ``PROCESSING_ERROR`` with no
+        ``failed_date``, since no date failed. If this write fails too, ``error`` escapes and the
+        worker restarts."""
         try:
             async with self._uow_factory() as uow:
-                request = await self._lock_run(request_id, uow)
+                ports = self._ports_for(uow)
+                request = await self._lock_run(ports, request_id)
                 if request.error_code is None:
                     request = replace(
                         request,
-                        error_code=TECHNICAL_ERROR_CODE,
+                        error_code=ProcessingErrorCode.PROCESSING_ERROR,
                         error_message=TECHNICAL_ERROR_MESSAGE,
                     )
-                await end_run(
-                    self._store, request, ProcessingStatus.FAILED, self._clock.now(), uow=uow
+                await ports.requests.save(
+                    ended(request, ProcessingStatus.FAILED, self._clock.now())
                 )
                 await uow.commit()
         except RunEndedError:
@@ -294,16 +248,15 @@ class PortfolioRangeProcessor:
                 "processing request %s left RUNNING: ending it FAILED failed too", request_id
             )
             raise error from None
-        logger.warning("processing request %s ended FAILED (%s)", request_id, TECHNICAL_ERROR_CODE)
+        logger.warning("processing request %s ended FAILED (PROCESSING_ERROR)", request_id)
 
     async def _run(self, request_id: UUID) -> None:
-        request, alive = await self._start(request_id)
-        day = (
-            request.start_date if request.progress_date is None else request.progress_date + ONE_DAY
-        )
+        request = await self._start(request_id)
+        alive = request.live_chains
+        day = request.next_date
         while day <= request.end_date:
-            if not await self._begin_day(request_id, day, alive):
-                return  # cancelled
+            if await self._cancelled(request_id, day):
+                return
             try:
                 alive = await self._process_day(request_id, day, alive)
             except RunEndedError:
@@ -335,7 +288,7 @@ class PortfolioRangeProcessor:
             except RunEndedError:
                 raise
             except Exception as error:
-                if not self._store.is_transient(error):
+                if not is_transient(error):
                     raise
                 logger.warning(
                     "processing request %s: recording %s failed; retrying in %s s",
@@ -347,91 +300,63 @@ class PortfolioRangeProcessor:
             await asyncio.sleep(delay)
         await step()
 
-    async def _start(
-        self, request_id: UUID
-    ) -> tuple[ProcessingRequest, tuple[ProcessingChain, ...]]:
-        """The run and its live chains: when an ALL run resumes, a chain with a FAILED date in
-        [start_date, progress_date] stays stopped (OQ-36 item 9)."""
+    async def _start(self, request_id: UUID) -> ProcessingRequest:
+        """The run as stored. When an ALL run resumes, the chain that failed first stays
+        stopped (`ProcessingRequest.live_chains`, OQ-36 item 9)."""
         async with self._uow_factory() as uow:
-            request = await self._lock_run(request_id, uow)
-            chains = scope_chains(request.scope)
-            if request.progress_date is not None and len(chains) > 1:
-                rows = await self._date_statuses.get_date_statuses(
-                    request.start_date, request.progress_date, uow=uow
-                )
-                failed = {
-                    chain
-                    for row in rows.values()
-                    for chain in chains
-                    if (row.cash if chain is ProcessingChain.CASH else row.portfolio)
-                    is ChainStatus.FAILED
-                }
-                chains = tuple(c for c in chains if c not in failed)
-            return request, chains
+            return await self._lock_run(self._ports_for(uow), request_id)
 
-    async def _begin_day(
-        self, request_id: UUID, day: date, alive: tuple[ProcessingChain, ...]
-    ) -> bool:
-        """Step 2a; ``False`` when a cancel was requested: the run then ends CANCELLED."""
+    async def _cancelled(self, request_id: UUID, day: date) -> bool:
+        """Step 2a: ``True`` when a cancel was requested; the run then ends CANCELLED."""
         async with self._uow_factory() as uow:
-            request = await self._lock_run(request_id, uow)
-            if request.cancel_requested_at is not None:
-                await end_run(
-                    self._store, request, ProcessingStatus.CANCELLED, self._clock.now(), uow=uow
-                )
-                await uow.commit()
-                logger.info("processing request %s cancelled before %s", request_id, day)
+            ports = self._ports_for(uow)
+            request = await self._lock_run(ports, request_id)
+            if request.cancel_requested_at is None:
                 return False
-            rows = await self._store.lock_date_statuses(day, day, uow=uow)
-            row = rows.get(day, DateStatusRow(day=day))
-            for chain in alive:
-                row = row.running(chain)
-            await self._store.save_date_status(row, uow=uow)
+            await ports.requests.save(ended(request, ProcessingStatus.CANCELLED, self._clock.now()))
             await uow.commit()
+            logger.info("processing request %s cancelled before %s", request_id, day)
             return True
 
     async def _process_day(
-        self, request_id: UUID, day: date, alive: tuple[ProcessingChain, ...]
-    ) -> tuple[ProcessingChain, ...]:
+        self, request_id: UUID, day: date, alive: tuple[Chain, ...]
+    ) -> tuple[Chain, ...]:
         """Step 2b; returns the chains still alive after D."""
         async with self._uow_factory() as uow:
-            request = await self._lock_run(request_id, uow)
-            rows = await self._store.lock_date_statuses(day - ONE_DAY, day, uow=uow)
-            previous = rows.get(day - ONE_DAY, DateStatusRow(day=day - ONE_DAY))
-            current = rows.get(day, DateStatusRow(day=day))
-            readers = self._readers_for(uow)
+            ports = self._ports_for(uow)
+            request = await self._lock_run(ports, request_id)
+            rows = await ports.date_statuses.lock_range(day - ONE_DAY, day)
+            previous = rows.get(day - ONE_DAY, DateStatus(day - ONE_DAY))
 
-            outcomes: dict[ProcessingChain, ChainStatus] = {}
+            outcomes: dict[Chain, ChainStatus] = {}
             failures: list[ChainFailure] = []
-            issues: list[NewIssue] = []
+            issues: list[IssueRecord] = []
             for chain in alive:
-                other_processed = self._other_chain_processed(chain, alive, outcomes, current)
                 try:
-                    async with self._store.savepoint(uow=uow):
-                        zero_state = await self._predecessor(chain, previous, readers, uow)
-                        if zero_state is None:
+                    async with ports.savepoint():
+                        state = await read_predecessor(
+                            chain,
+                            previous.date,
+                            previous.status(chain),
+                            date_statuses=ports.date_statuses,
+                            history=ports.history,
+                        )
+                        if not state.allows_run:
                             failures.append(
-                                ChainFailure(chain, PREDECESSOR_CODES[chain], PREDECESSOR_MESSAGE)
+                                ChainFailure(
+                                    chain,
+                                    ProcessingErrorCode.predecessor_missing(chain),
+                                    PREDECESSOR_MESSAGE,
+                                )
                             )
                             continue
-                        if chain is ProcessingChain.CASH:
-                            await process_cash_day(
-                                day,
-                                zero_state=zero_state,
-                                readers=readers,
-                                writer=self._writer,
-                                uow=uow,
-                                other_chain_processed=other_processed,
-                            )
+                        zero_state = state is PredecessorState.ZERO_STATE
+                        if chain is Chain.CASH:
+                            await process_cash_day(day, zero_state=zero_state, ports=ports.chains)
                             outcomes[chain] = ChainStatus.PROCESSED
                         else:
                             issues = await process_positions_day(
-                                day,
-                                zero_state=zero_state,
-                                readers=readers,
-                                writer=self._writer,
-                                uow=uow,
-                                other_chain_processed=other_processed,
+                                day, zero_state=zero_state, ports=ports.chains
                             )
                             outcomes[chain] = (
                                 ChainStatus.PROCESSED_WITH_ISSUES
@@ -443,18 +368,20 @@ class PortfolioRangeProcessor:
                         "processing request %s: chain %s failed on %s", request_id, chain, day
                     )
                     failures.append(
-                        ChainFailure(chain, TECHNICAL_ERROR_CODE, TECHNICAL_ERROR_MESSAGE)
+                        ChainFailure(
+                            chain, ProcessingErrorCode.PROCESSING_ERROR, TECHNICAL_ERROR_MESSAGE
+                        )
                     )
 
             now = self._clock.now()
-            row = current
-            for chain, status in outcomes.items():
-                row = row.settled(chain, status, now)
+            status = rows.get(day, DateStatus(day))
+            for chain, outcome in outcomes.items():
+                status = status.settled(chain, outcome, now)
             for failure in failures:
-                row = row.settled(failure.chain, ChainStatus.FAILED, None)
-            await self._store.save_date_status(row, uow=uow)
-            if ProcessingChain.POSITIONS in outcomes:
-                await self._store.replace_issues(request_id, day, issues, uow=uow)
+                status = status.settled(failure.chain, ChainStatus.FAILED, None)
+            await ports.date_statuses.save(status)
+            if Chain.POSITIONS in outcomes:
+                await ports.issues.replace_for_date(request_id, day, issues)
 
             if outcomes:
                 request = replace(request, progress_date=day)
@@ -465,14 +392,13 @@ class PortfolioRangeProcessor:
                     error_code=kept.code,
                     error_message=kept.message,
                     failed_date=day,
-                    failed_chain=ProcessingScope(kept.chain.value),
+                    failed_chain=kept.chain,
                 )
             request = replace(request, updated_at=now)
             survivors = tuple(c for c in alive if c in outcomes)
-            if survivors:
-                await self._store.save_run(request, uow=uow)
-            else:
-                await end_run(self._store, request, ProcessingStatus.FAILED, now, uow=uow)
+            await ports.requests.save(
+                request if survivors else ended(request, ProcessingStatus.FAILED, now)
+            )
             await uow.commit()
             if failures:
                 logger.warning(
@@ -483,38 +409,37 @@ class PortfolioRangeProcessor:
                 )
             return survivors
 
-    async def _fail_day(
-        self, request_id: UUID, day: date, alive: tuple[ProcessingChain, ...]
-    ) -> None:
+    async def _fail_day(self, request_id: UUID, day: date, alive: tuple[Chain, ...]) -> None:
         """Step 2c: D FAILED for every live chain, and the run FAILED (OQ-40 item 1)."""
         async with self._uow_factory() as uow:
-            request = await self._lock_run(request_id, uow)
-            rows = await self._store.lock_date_statuses(day, day, uow=uow)
-            row = rows.get(day, DateStatusRow(day=day))
+            ports = self._ports_for(uow)
+            request = await self._lock_run(ports, request_id)
+            status = (await ports.date_statuses.lock_range(day, day)).get(day, DateStatus(day))
             for chain in alive:
-                row = row.settled(chain, ChainStatus.FAILED, None)
-            await self._store.save_date_status(row, uow=uow)
+                status = status.settled(chain, ChainStatus.FAILED, None)
+            await ports.date_statuses.save(status)
             if request.failed_date is None:
                 request = replace(
                     request,
-                    error_code=TECHNICAL_ERROR_CODE,
+                    error_code=ProcessingErrorCode.PROCESSING_ERROR,
                     error_message=TECHNICAL_ERROR_MESSAGE,
                     failed_date=day,
                     failed_chain=None,
                 )
-            await end_run(self._store, request, ProcessingStatus.FAILED, self._clock.now(), uow=uow)
+            await ports.requests.save(ended(request, ProcessingStatus.FAILED, self._clock.now()))
             await uow.commit()
 
     async def _complete(self, request_id: UUID) -> None:
         """The run reached its end date: COMPLETED_WITH_ISSUES when a date it wrote has issues
-        or, on ALL, a chain failed; COMPLETED otherwise (OQ-36)."""
+        or, on ALL, a chain failed; COMPLETED otherwise (OQ-36). A cancel that arrived during the
+        last date does not change that: there was nothing left to skip (OQ-23 item 6, OQ-50
+        item 6)."""
         async with self._uow_factory() as uow:
-            request = await self._lock_run(request_id, uow)
+            ports = self._ports_for(uow)
+            request = await self._lock_run(ports, request_id)
             with_issues = request.failed_date is not None
-            if not with_issues and ProcessingChain.POSITIONS in scope_chains(request.scope):
-                rows = await self._date_statuses.get_date_statuses(
-                    request.start_date, request.end_date, uow=uow
-                )
+            if not with_issues and Chain.POSITIONS in request.scope.chains:
+                rows = await ports.date_statuses.get_range(request.start_date, request.end_date)
                 with_issues = any(
                     row.portfolio is ChainStatus.PROCESSED_WITH_ISSUES for row in rows.values()
                 )
@@ -523,50 +448,16 @@ class PortfolioRangeProcessor:
                 if with_issues
                 else ProcessingStatus.COMPLETED
             )
-            await end_run(self._store, request, status, self._clock.now(), uow=uow)
+            await ports.requests.save(ended(request, status, self._clock.now()))
             await uow.commit()
             logger.info("processing request %s ended %s", request_id, status)
 
     # --- helpers ---------------------------------------------------------------------------
 
-    async def _lock_run(self, request_id: UUID, uow: UnitOfWork) -> ProcessingRequest:
+    @staticmethod
+    async def _lock_run(ports: RunPorts, request_id: UUID) -> ProcessingRequest:
         """The run, row-locked for the step; `RunEndedError` once it has ended."""
-        request = await self._store.get_run(request_id, uow=uow, for_update=True)
-        if request is None or request.status in FINISHED:
+        request = await ports.requests.get(request_id, for_update=True)
+        if request is None or request.status.is_finished:
             raise RunEndedError(str(request_id))
         return request
-
-    @staticmethod
-    def _other_chain_processed(
-        chain: ProcessingChain,
-        alive: tuple[ProcessingChain, ...],
-        outcomes: Mapping[ProcessingChain, ChainStatus],
-        current: DateStatusRow,
-    ) -> bool:
-        """OQ-38, OQ-40 item 2: on ALL the positions call passes ``False`` and the cash call the
-        positions outcome; otherwise the other chain's status on D, whichever run wrote it."""
-        other = ProcessingChain.POSITIONS if chain is ProcessingChain.CASH else ProcessingChain.CASH
-        if other in alive:
-            return other in outcomes
-        return current.status(other) in PROCESSED_STATUSES
-
-    async def _predecessor(
-        self,
-        chain: ProcessingChain,
-        previous: DateStatusRow,
-        readers: DayReaders,
-        uow: UnitOfWork,
-    ) -> bool | None:
-        """The predecessor rule (`domain.predecessor`, the preview's too): ``False`` to start
-        from the published D−1, ``True`` from the zero state, ``None`` when D must fail."""
-        state = await read_predecessor(
-            chain,
-            previous.day,
-            previous.status(chain),
-            date_statuses=self._date_statuses,
-            history=LedgerChainHistory(readers.ledger),
-            uow=uow,
-        )
-        if not allows_run(state):
-            return None
-        return state is PredecessorState.ZERO_STATE

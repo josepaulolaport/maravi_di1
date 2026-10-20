@@ -4,25 +4,21 @@ instants, problem+json errors (spec §12, OQ-15, OQ-26 item 8)."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from di1.composition.errors import install_problem_handlers
-from di1.modules.processing.application.interfaces.repositories import (
-    IssueRecord,
-    IssueType,
-)
+from di1.modules.processing.domain.issues import IssueRecord, IssueType
 from di1.modules.processing.presentation.http.router import create_router
-from di1.modules.processing.public import ChainStatus, ProcessingScope, ProcessingStatus
-from di1.platform.database.unit_of_work import UnitOfWork
-from tests.unit.processing.fakes import FakeUnitOfWork, Harness, date_status
+from di1.modules.processing.public import Chain, ChainStatus, ProcessingStatus
+from tests.support.builders import di1_contract
+from tests.support.http import app_client, problem
+from tests.unit.processing.fakes import Harness, date_status
 
 # The keys of the fixtures' objects (fixtures.ts `job(...)`, `issues`; processing.ts), with
 # OQ-31 applied: an issue has no `chain`; OQ-40: a run carries `failed_date` and `failed_chain`.
@@ -61,7 +57,6 @@ ISSUE_KEYS = {
     "required_price_date",
     "request_id",
 }
-PROBLEM_KEYS = {"type", "title", "status", "detail", "errors"}
 BODY = {"start_date": "2026-10-14", "end_date": "2026-10-16", "scope": "ALL"}
 
 
@@ -72,13 +67,7 @@ def harness() -> Harness:
 
 @pytest.fixture
 def client(harness: Harness) -> Iterator[TestClient]:
-    async def unit_of_work() -> AsyncIterator[UnitOfWork]:
-        yield FakeUnitOfWork()
-
-    app = FastAPI()
-    install_problem_handlers(app)
-    app.include_router(create_router(lambda: harness.service, unit_of_work))
-    with TestClient(app) as client:
+    with app_client(create_router(get_service=lambda: harness.service)) as client:
         yield client
 
 
@@ -89,15 +78,6 @@ def _assert_request_shape(body: dict[str, Any]) -> None:
     date.fromisoformat(body["end_date"])
     assert datetime.fromisoformat(body["created_at"]).tzinfo is not None
     assert datetime.fromisoformat(body["updated_at"]).tzinfo is not None
-
-
-def _problem(response: Any, status: int) -> list[dict[str, Any]]:
-    assert response.status_code == status
-    assert response.headers["content-type"] == "application/problem+json"
-    body = response.json()
-    assert set(body) == PROBLEM_KEYS
-    errors: list[dict[str, Any]] = body["errors"]
-    return errors
 
 
 def test_post_request_answers_201_with_the_queued_run(client: TestClient) -> None:
@@ -120,44 +100,73 @@ def test_post_request_answers_201_with_the_queued_run(client: TestClient) -> Non
 @pytest.mark.parametrize(
     ("body", "field", "code"),
     [
-        ({**BODY, "scope": "EVERYTHING"}, "scope", "VALIDATION_ERROR"),
-        ({"start_date": "2026-10-14", "end_date": "2026-10-16"}, "scope", "VALIDATION_ERROR"),
-        ({**BODY, "start_date": "14/10/2026"}, "start_date", "VALIDATION_ERROR"),
-        ({**BODY, "start_date": "2026-10-17"}, "start_date", "INVALID_RANGE"),
-        ({**BODY, "end_date": "2026-10-20"}, "end_date", "FUTURE_DATE"),
-        ({**BODY, "start_date": "0001-01-01"}, "start_date", "INVALID_RANGE"),
+        pytest.param(
+            {**BODY, "scope": "EVERYTHING"}, "scope", "VALIDATION_ERROR", id="unknown scope"
+        ),
+        pytest.param(
+            {"start_date": "2026-10-14", "end_date": "2026-10-16"},
+            "scope",
+            "VALIDATION_ERROR",
+            id="no scope",
+        ),
+        pytest.param(
+            {**BODY, "start_date": "14/10/2026"},
+            "start_date",
+            "VALIDATION_ERROR",
+            id="not an ISO date",
+        ),
+        # One of the service's own refusals, to show it answers as a problem too; the range
+        # rules themselves are tested on the service (test_processing_service.py).
+        pytest.param(
+            {**BODY, "start_date": "2026-10-17"},
+            "start_date",
+            "INVALID_RANGE",
+            id="start after end",
+        ),
     ],
 )
 def test_post_request_refuses_a_malformed_range(
     client: TestClient, harness: Harness, body: dict[str, str], field: str, code: str
 ) -> None:
-    errors = _problem(client.post("/processing/requests", json=body), 422)
+    errors = problem(client.post("/processing/requests", json=body), 422)["errors"]
 
     assert [(e["code"], e["field"]) for e in errors] == [(code, field)]
     assert harness.requests.rows == {}
 
 
-def test_get_requests_is_a_page_newest_first(client: TestClient) -> None:
-    ids = [client.post("/processing/requests", json=BODY).json()["id"] for _ in range(3)]
+def test_get_requests_answers_a_page_of_runs_and_a_cursor(client: TestClient) -> None:
+    """The shape only: the keyset order is tested on PostgreSQL (test_requests.py)."""
+    for _ in range(3):
+        client.post("/processing/requests", json=BODY)
 
-    first = client.get("/processing/requests", params={"limit": 2}).json()
-    second = client.get(
-        "/processing/requests", params={"limit": 2, "cursor": first["next_cursor"]}
-    ).json()
+    page = client.get("/processing/requests", params={"limit": 2}).json()
 
-    assert set(first) == {"items", "next_cursor"}
-    for item in first["items"]:
+    assert set(page) == {"items", "next_cursor"}
+    assert len(page["items"]) == 2
+    for item in page["items"]:
         _assert_request_shape(item)
-    assert [r["id"] for r in first["items"] + second["items"]] == ids[::-1]
-    assert second["next_cursor"] is None
+    assert isinstance(page["next_cursor"], str)
 
 
-def test_get_requests_refuses_a_bad_limit_or_cursor(client: TestClient) -> None:
-    bad_limit = _problem(client.get("/processing/requests", params={"limit": 500}), 422)
-    bad_cursor = _problem(client.get("/processing/requests", params={"cursor": "x"}), 422)
+@pytest.mark.parametrize(
+    ("path", "params", "field"),
+    [
+        pytest.param("/processing/requests", {"limit": 500}, "limit", id="limit over 200"),
+        pytest.param("/processing/requests", {"cursor": "x"}, "cursor", id="invalid cursor"),
+        pytest.param(
+            "/processing/preview",
+            {"start_date": "2026-10-14", "end_date": "2026-10-16"},
+            "scope",
+            id="preview without a scope",
+        ),
+    ],
+)
+def test_a_bad_query_is_a_422_problem(
+    client: TestClient, path: str, params: dict[str, Any], field: str
+) -> None:
+    errors = problem(client.get(path, params=params), 422)["errors"]
 
-    assert [(e["code"], e["field"]) for e in bad_limit] == [("VALIDATION_ERROR", "limit")]
-    assert [(e["code"], e["field"]) for e in bad_cursor] == [("VALIDATION_ERROR", "cursor")]
+    assert [(e["code"], e["field"]) for e in errors] == [("VALIDATION_ERROR", field)]
 
 
 def test_get_request_by_id_or_404(client: TestClient) -> None:
@@ -167,7 +176,7 @@ def test_get_request_by_id_or_404(client: TestClient) -> None:
     missing = client.get(f"/processing/requests/{uuid4()}")
 
     assert (found.status_code, found.json()) == (200, created)
-    assert [e["code"] for e in _problem(missing, 404)] == ["NOT_FOUND"]
+    assert [e["code"] for e in problem(missing, 404)["errors"]] == ["NOT_FOUND"]
 
 
 def test_cancel_answers_200_then_409(client: TestClient) -> None:
@@ -179,7 +188,7 @@ def test_cancel_answers_200_then_409(client: TestClient) -> None:
     assert cancelled.status_code == 200
     _assert_request_shape(cancelled.json())
     assert cancelled.json()["status"] == "CANCELLED"
-    assert [e["code"] for e in _problem(again, 409)] == ["JOB_NOT_CANCELLABLE"]
+    assert [e["code"] for e in problem(again, 409)["errors"]] == ["JOB_NOT_CANCELLABLE"]
 
 
 def test_get_preview_reports_both_chains(client: TestClient, harness: Harness) -> None:
@@ -205,23 +214,12 @@ def test_get_preview_reports_both_chains(client: TestClient, harness: Harness) -
     assert set(response.json()) == PREVIEW_KEYS
 
 
-def test_get_preview_requires_the_scope(client: TestClient) -> None:
-    errors = _problem(
-        client.get(
-            "/processing/preview", params={"start_date": "2026-10-14", "end_date": "2026-10-16"}
-        ),
-        422,
-    )
-
-    assert [(e["code"], e["field"]) for e in errors] == [("VALIDATION_ERROR", "scope")]
-
-
 def test_get_issues_matches_the_fixture(client: TestClient, harness: Harness) -> None:
     # fixtures.ts `issues[0]`.
     asset_id = UUID("7e000000-0000-4000-8000-000000000029")
     request_id = UUID("7f3c9a02-0000-4000-8000-000000000002")
     issue_id = UUID("7d000000-0000-4000-8000-000000000001")
-    harness.assets.codes[asset_id] = "DI1F29"
+    harness.assets.add(di1_contract("DI1F29", asset_id, date(2029, 1, 2)))
     harness.issues.rows = [
         IssueRecord(
             id=issue_id,
@@ -252,40 +250,49 @@ def test_get_issues_matches_the_fixture(client: TestClient, harness: Harness) ->
     assert set(response.json()["items"][0]) == ISSUE_KEYS
 
 
-def test_oq40_a_run_exposes_its_first_failure(client: TestClient, harness: Harness) -> None:
-    created = client.post("/processing/requests", json=BODY).json()
-    run = harness.requests.rows[UUID(created["id"])]
-    harness.requests.rows[run.id] = replace(
-        run,
-        status=ProcessingStatus.COMPLETED_WITH_ISSUES,
-        failed_date=date(2026, 10, 15),
-        failed_chain=ProcessingScope.CASH,
-    )
-
-    body = client.get(f"/processing/requests/{created['id']}").json()
-
-    assert (body["failed_date"], body["failed_chain"]) == ("2026-10-15", "CASH")
-
-
-def test_oq40_a_failure_of_no_chain_has_a_date_and_no_chain(
-    client: TestClient, harness: Harness
+@pytest.mark.parametrize(
+    ("status", "failed_date", "failed_chain", "expected"),
+    [
+        pytest.param(
+            ProcessingStatus.COMPLETED_WITH_ISSUES,
+            date(2026, 10, 15),
+            Chain.CASH,
+            ("2026-10-15", "CASH"),
+            id="a chain failed",
+        ),
+        pytest.param(
+            ProcessingStatus.FAILED,
+            date(2026, 10, 14),
+            None,
+            ("2026-10-14", None),
+            id="a failure of no chain has a date and no chain",
+        ),
+    ],
+)
+def test_oq40_a_run_exposes_its_first_failure(
+    client: TestClient,
+    harness: Harness,
+    status: ProcessingStatus,
+    failed_date: date,
+    failed_chain: Chain | None,
+    expected: tuple[str, str | None],
 ) -> None:
     created = client.post("/processing/requests", json=BODY).json()
     run = harness.requests.rows[UUID(created["id"])]
     harness.requests.rows[run.id] = replace(
-        run, status=ProcessingStatus.FAILED, failed_date=date(2026, 10, 14), failed_chain=None
+        run, status=status, failed_date=failed_date, failed_chain=failed_chain
     )
 
     body = client.get(f"/processing/requests/{created['id']}").json()
 
-    assert (body["failed_date"], body["failed_chain"]) == ("2026-10-14", None)
+    assert (body["failed_date"], body["failed_chain"]) == expected
 
 
 def test_oq40_the_api_never_advertises_all_as_a_failed_chain(client: TestClient) -> None:
     """interfaces.md "Processing": ``failed_chain`` is CASH or POSITIONS, never ALL; the
     frontend generates its types from this schema."""
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
-    field = schemas["ProcessingRequestOut"]["properties"]["failed_chain"]
+    field = schemas["ProcessingRequestResponse"]["properties"]["failed_chain"]
     refs = [option.get("$ref") for option in field["anyOf"] if "$ref" in option]
     enums = [schemas[ref.rsplit("/", 1)[1]]["enum"] for ref in refs] or [
         option["enum"] for option in field["anyOf"] if "enum" in option

@@ -12,7 +12,7 @@ You are the Architect/Integrator (lane X): a principal engineer who is fluent in
 - `backend/src/di1/composition/**`, `backend/src/di1/main.py`;
 - `backend/migrations/**`, the only Alembic revisions;
 - `backend/src/di1/shared/**`, and the freeze of every module's `public.py` DTOs;
-- `backend/pyproject.toml`, `uv.lock`, `compose.yaml`, CI, and the global tests (`tests/architecture/`, and the end-to-end smoke `scripts/e2e.sh` + `scripts/e2e_smoke.py`, run by `make e2e`; not `tests/acceptance/**` or `tests/integration/acceptance/**`, which belong to the acceptance-tests session);
+- `backend/pyproject.toml`, `uv.lock`, `compose.yaml`, CI, and the global tests (`tests/architecture/`, and the end-to-end smoke `scripts/e2e.sh` + `scripts/e2e_smoke.py`, run by `make e2e`; not `tests/integration/acceptance/**`, which belongs to the acceptance-tests session);
 - `docs/**`. Only you edit the docs, and only with the user's words.
 
 ## Wave 0 (plan §3)

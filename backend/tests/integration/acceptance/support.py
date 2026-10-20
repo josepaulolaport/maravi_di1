@@ -12,29 +12,23 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, localcontext
-from pathlib import Path
 from typing import Any
 
 import psycopg
-from alembic import command
-from alembic.config import Config
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from di1.composition.consumers import processing_startup
+from di1.composition.consumers import build_processing_worker
 from di1.main import create_app
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.worker import WorkerResources
-from di1.shared.clock import SAO_PAULO, FixedClock
-from tests.integration.databases import fresh_database_url, psycopg_url
-
-BACKEND = Path(__file__).resolve().parents[3]
-PROBLEM_JSON = "application/problem+json"
+from tests.support.db import migrated_database_url, psycopg_url, seed_catalogue_roots
+from tests.support.fakes import FakeClock
 
 
 def expected_pu(rate: str, calendar_days: int) -> str:
@@ -51,41 +45,24 @@ def expected_rate(pu: str, calendar_days: int) -> str:
     return str(rate.quantize(Decimal("1E-12"), rounding=ROUND_HALF_UP))
 
 
-class TickingClock:
-    """The API's clock: "today" is fixed (OQ-14), and each ``now`` is one second after the last,
-    from noon of that day, so requests queued one after the other keep their order
-    (``created_at``, the queue's FIFO key, OQ-46) as they would in real time."""
-
-    def __init__(self, today: date) -> None:
-        self._today = today
-        self._ticks = 0
-
-    def today(self) -> date:
-        return self._today
-
-    def now(self) -> datetime:
-        self._ticks += 1
-        return datetime.combine(self._today, time(12, 0), tzinfo=SAO_PAULO) + timedelta(
-            seconds=self._ticks
-        )
-
-
 @contextmanager
 def acceptance_app(today: date) -> Iterator[tuple[TestClient, str]]:
     """A client of the real app whose "today" is ``today``, and its database URL."""
-    for url in fresh_database_url():
-        _migrate(url)
-        _seed_catalogue_roots(url)
-        app = create_app(Settings(database_url=SecretStr(url)), clock=TickingClock(today))
+    for url in migrated_database_url():
+        seed_catalogue_roots(url)
+        # "today" is fixed (OQ-14); each ``now`` is one second after the last, so requests
+        # queued one after the other keep their order (``created_at``, the FIFO key, OQ-46).
+        clock = FakeClock(today, step=timedelta(seconds=1))
+        app = create_app(Settings(database_url=SecretStr(url)), clock=clock)
         with TestClient(app) as client:
             yield client, url
 
 
 def run_worker(database_url: str, now: datetime) -> None:
     """The processing worker starting at ``now``, in-process on the same database, with the real
-    composition (``processing_startup``): it recovers, then drains every QUEUED request oldest
-    first (OQ-45, OQ-46). The doorbell left in the outbox is not relayed; RabbitMQ delivery is the
-    worker's end-to-end test, not these."""
+    composition (``build_processing_worker``'s startup): it recovers, then sweeps every QUEUED
+    request oldest first (OQ-45). The run messages left in the outbox are not relayed; RabbitMQ
+    delivery is the worker's end-to-end test, not these."""
     asyncio.run(_run_worker(database_url, now))
 
 
@@ -94,9 +71,9 @@ async def _run_worker(database_url: str, now: datetime) -> None:
     try:
         resources = WorkerResources(
             uow_factory=unit_of_work_factory(create_session_factory(engine)),
-            clock=FixedClock(now.date(), fixed_now=now),
+            clock=FakeClock(now.date(), now=now),
         )
-        await processing_startup(resources)
+        await build_processing_worker(resources).startup()
     finally:
         await engine.dispose()
 
@@ -203,32 +180,3 @@ def derived_rows(database_url: str) -> dict[str, int]:
     return {
         table: sql(database_url, f"SELECT count(*) FROM {table}")[0][0] for table in DERIVED_TABLES
     }
-
-
-def problem(response: Any, status: int) -> list[tuple[str, str | None]]:
-    """The ``(code, field)`` pairs of an RFC 9457 problem response (OQ-15)."""
-    assert response.status_code == status, response.text
-    assert response.headers["content-type"] == PROBLEM_JSON
-    body = response.json()
-    assert body["status"] == status
-    assert all(e["message"] for e in body["errors"])  # a pt-BR message for every error
-    return [(e["code"], e["field"]) for e in body["errors"]]
-
-
-def _migrate(database_url: str) -> None:
-    config = Config(str(BACKEND / "alembic.ini"))
-    config.set_main_option("script_location", str(BACKEND / "migrations"))
-    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    command.upgrade(config, "head")
-
-
-def _seed_catalogue_roots(database_url: str) -> None:
-    sql(
-        database_url,
-        "INSERT INTO asset.instrument_types (id, code, name) VALUES (1, 'FUTURE', 'Futuros')",
-    )
-    sql(
-        database_url,
-        "INSERT INTO asset.asset_classes (id, instrument_type_id, code, name)"
-        " VALUES (1, 1, 'INTEREST_RATE_FUTURE', 'Futuros de Taxa de Juros')",
-    )

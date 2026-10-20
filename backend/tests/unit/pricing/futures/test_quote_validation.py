@@ -17,7 +17,7 @@ from decimal import Decimal
 
 import pytest
 
-from di1.modules.pricing.public import QuoteFields, QuoteValidator
+from di1.modules.pricing.public import QuoteFields, validate_quote
 from di1.shared.errors import ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
 
@@ -26,7 +26,7 @@ BEFORE = date(2026, 10, 16)
 PU = Decimal("89250.3147019396")
 RATE = Decimal("0.1")
 
-validate = QuoteValidator()
+PRICING_NAMES = QuoteFields()
 """Pricing's own field names: ``reference_date``, ``pu``, ``rate``."""
 
 
@@ -41,11 +41,19 @@ def check(
     rate: Decimal | None = None,
     reference_date: date = BEFORE,
     maturity_date: date | None = MATURITY,
-    validator: QuoteValidator = validate,
+    fields: QuoteFields = PRICING_NAMES,
 ) -> tuple[Decimal | None, tuple[ErrorDetail, ...]]:
-    return validator(
-        kind, pu=pu, rate=rate, reference_date=reference_date, maturity_date=maturity_date
+    """The typed value when the quote is valid (``None`` otherwise), and its problems."""
+    errors = validate_quote(
+        kind,
+        pu=pu,
+        rate=rate,
+        reference_date=reference_date,
+        maturity_date=maturity_date,
+        fields=fields,
     )
+    typed = pu if kind is InputKind.PU else rate
+    return (None if errors else typed), errors
 
 
 # --- accepted ----------------------------------------------------------------------------------
@@ -112,22 +120,24 @@ def test_the_other_value_is_never_typed_too(kind: InputKind, expected: ErrorDeta
 # --- typed precision (OQ-3) and bounds (OQ-14) ---------------------------------------------------
 
 
-def test_a_pu_with_more_than_10_places_is_rejected_not_rounded() -> None:
+@pytest.mark.parametrize("pu", ["89250.31470193960", "90909.09090909091"])
+def test_a_pu_with_more_than_10_places_is_rejected_not_rounded(pu: str) -> None:
     # Trailing zeros were typed, so they count.
-    assert check(InputKind.PU, pu=Decimal("89250.31470193960")) == (
+    assert check(InputKind.PU, pu=Decimal(pu)) == (
         None,
         (invalid("Use no máximo 10 casas decimais.", "pu"),),
     )
 
 
-def test_a_rate_with_more_than_12_places_is_rejected_not_rounded() -> None:
-    assert check(InputKind.RATE, rate=Decimal("0.1000000000000")) == (
+@pytest.mark.parametrize("rate", ["0.1000000000000", "0.1000000000001", "0.0000000000005"])
+def test_a_rate_with_more_than_12_places_is_rejected_not_rounded(rate: str) -> None:
+    assert check(InputKind.RATE, rate=Decimal(rate)) == (
         None,
         (invalid("Use no máximo 12 casas decimais.", "rate"),),
     )
 
 
-@pytest.mark.parametrize("pu", ["0", "0.0000000000", "-1"])
+@pytest.mark.parametrize("pu", ["0", "0.0000000000", "-1", "-90909.09"])
 def test_a_pu_must_be_positive(pu: str) -> None:
     assert check(InputKind.PU, pu=Decimal(pu)) == (
         None,
@@ -214,15 +224,13 @@ LEDGER_NAMES = QuoteFields(reference_date="date", pu="execution_pu", rate="execu
 
 
 def test_errors_are_reported_on_the_callers_fields() -> None:
-    ledger = QuoteValidator(LEDGER_NAMES)
-
-    assert {e.field for e in check(InputKind.PU, pu=PU, rate=RATE, validator=ledger)[1]} == {
+    assert {e.field for e in check(InputKind.PU, pu=PU, rate=RATE, fields=LEDGER_NAMES)[1]} == {
         "execution_rate"
     }
-    assert check(InputKind.RATE, rate=RATE, reference_date=MATURITY, validator=ledger)[1] == (
+    assert check(InputKind.RATE, rate=RATE, reference_date=MATURITY, fields=LEDGER_NAMES)[1] == (
         invalid("Na data de vencimento informe o PU.", "execution_rate"),
     )
-    assert check(InputKind.PU, pu=PU, reference_date=date(2028, 1, 4), validator=ledger)[1] == (
+    assert check(InputKind.PU, pu=PU, reference_date=date(2028, 1, 4), fields=LEDGER_NAMES)[1] == (
         ErrorDetail(ErrorCode.CONTRACT_MATURED, "O contrato já venceu nesta data.", "date"),
     )
 

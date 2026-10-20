@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from di1.platform.observability.heartbeat import Heartbeat, beat_until_stopped, is_fresh
+from tests.support.waits import eventually
 
 
 def test_a_beat_creates_the_file_then_refreshes_it(tmp_path: Path) -> None:
@@ -63,16 +63,8 @@ async def test_the_beat_task_beats_until_stopped(tmp_path: Path) -> None:
     stop = asyncio.Event()
     beating = asyncio.create_task(beat_until_stopped(Heartbeat(path), stop, interval_seconds=0.01))
 
-    await _until(path.exists)
+    await eventually(path.exists)
     os.utime(path, (1000.0, 1000.0))
-    await _until(lambda: path.stat().st_mtime > 1000.0)
+    await eventually(lambda: path.stat().st_mtime > 1000.0)
     stop.set()
     await asyncio.wait_for(beating, timeout=5)
-
-
-async def _until(condition: Callable[[], bool]) -> None:
-    for _ in range(500):
-        if condition():
-            return
-        await asyncio.sleep(0.01)
-    raise AssertionError("the condition never held")

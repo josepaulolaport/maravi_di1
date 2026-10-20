@@ -15,17 +15,21 @@ from typing import Annotated
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from di1.modules.asset.dependencies import asset_reader
+from di1.modules.asset.application.services.asset_service import AssetService
+from di1.modules.asset.dependencies import build_asset_reader, build_asset_service
 from di1.modules.ledger.application.services.ledger_service import LedgerService
-from di1.modules.ledger.dependencies import create_ledger_service, ledger_reader
-from di1.modules.portfolio.dependencies import portfolio_query_service
-from di1.modules.portfolio.public import PortfolioQueryService
+from di1.modules.ledger.dependencies import build_ledger_reader, build_ledger_service
+from di1.modules.portfolio.dependencies import build_portfolio_service
+from di1.modules.portfolio.public import PortfolioService
 from di1.modules.prices.application.services.price_service import PriceService
-from di1.modules.prices.dependencies import latest_price_reader, price_reader, price_service
-from di1.modules.prices.public import LatestPriceReader
-from di1.modules.pricing.dependencies import pricing_service
+from di1.modules.prices.dependencies import build_price_reader, build_price_service
+from di1.modules.prices.public import PriceReader
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.modules.processing.application.services.processing import ProcessingService
-from di1.modules.processing.dependencies import make_date_status_reader, make_processing_service
+from di1.modules.processing.dependencies import (
+    build_date_status_reader,
+    build_processing_service,
+)
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
 from di1.shared.clock import Clock
 
@@ -43,7 +47,7 @@ async def get_unit_of_work(request: Request) -> AsyncIterator[UnitOfWork]:
 
 
 def get_clock(request: Request) -> Clock:
-    """The app's clock (OQ-14): `SystemClock` in production, a `FixedClock` in tests."""
+    """The app's clock (OQ-14): `SystemClock` in production, a fixed clock in tests."""
     clock: Clock = request.app.state.clock
     return clock
 
@@ -52,44 +56,50 @@ RequestUnitOfWork = Annotated[UnitOfWork, Depends(get_unit_of_work)]
 AppClock = Annotated[Clock, Depends(get_clock)]
 
 
+def get_asset_service(uow: RequestUnitOfWork) -> AssetService:
+    return build_asset_service(uow)
+
+
 def get_ledger_service(uow: RequestUnitOfWork, clock: AppClock) -> LedgerService:
     """Ledger over Asset's reader and Pricing, both on the request's session."""
-    assets = asset_reader(uow.session)
-    return create_ledger_service(clock=clock, assets=assets, pricing=pricing_service(assets))
+    assets = build_asset_reader(uow.session)
+    return build_ledger_service(
+        uow, clock=clock, assets=assets, pricing=build_pricing_service(assets)
+    )
 
 
-def get_latest_prices(uow: UnitOfWork) -> LatestPriceReader:
-    """Prices' latest preferred price per asset on ``uow``'s session, for Asset's
-    ``Instrument.last_reference`` (OQ-48). Asset's router takes a plain factory of the Unit of
-    Work."""
-    return latest_price_reader(uow.session)
+def get_price_reader(uow: RequestUnitOfWork) -> PriceReader:
+    """Prices on ``uow``'s session, including ``latest`` for Asset HTTP ``last_reference``
+    (OQ-48)."""
+    return build_price_reader(uow.session)
 
 
-def build_price_service(uow: UnitOfWork, clock: Clock) -> PriceService:
-    """Prices over Asset's reader and Pricing on ``uow``'s session. Prices' router takes a plain
-    factory of the Unit of Work, so the composition binds the app's clock into it."""
-    assets = asset_reader(uow.session)
-    return price_service(uow, assets=assets, pricing=pricing_service(assets), clock=clock)
+def get_price_service(uow: RequestUnitOfWork, clock: AppClock) -> PriceService:
+    assets = build_asset_reader(uow.session)
+    return build_price_service(
+        uow, assets=assets, pricing=build_pricing_service(assets), clock=clock
+    )
 
 
-async def get_portfolio_query_service(
-    uow: RequestUnitOfWork, clock: AppClock
-) -> AsyncIterator[PortfolioQueryService]:
+def get_portfolio_service(uow: RequestUnitOfWork, clock: AppClock) -> PortfolioService:
     """Portfolio's read models on the request's fresh Unit of Work. Nothing else runs on it
     first: the service's first statement opens the read-only REPEATABLE READ snapshot (OQ-23).
     Building the readers runs no statement."""
-    yield portfolio_query_service(
+    session = uow.session
+    return build_portfolio_service(
         uow,
-        assets=asset_reader(uow.session),
-        prices=price_reader(uow.session),
-        date_statuses=make_date_status_reader(),
+        assets=build_asset_reader(session),
+        prices=build_price_reader(session),
+        date_statuses=build_date_status_reader(session, clock),
         clock=clock,
     )
 
 
 def get_processing_service(uow: RequestUnitOfWork, clock: AppClock) -> ProcessingService:
-    """Processing over Asset's and Ledger's readers on the request's session; the service holds
-    no state, so building it per request costs only the objects."""
-    return make_processing_service(
-        assets=asset_reader(uow.session), ledger=ledger_reader(uow.session), clock=clock
+    """Processing over Asset's and Ledger's readers, all on the request's Unit of Work."""
+    return build_processing_service(
+        uow,
+        assets=build_asset_reader(uow.session),
+        ledger=build_ledger_reader(uow.session),
+        clock=clock,
     )

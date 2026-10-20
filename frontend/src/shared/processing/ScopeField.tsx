@@ -1,5 +1,5 @@
 import { SegmentedControl, Stack, Text } from '@mantine/core';
-import { useId } from 'react';
+import { type ReactNode, useId } from 'react';
 
 import type { ProcessingScope } from '@/api/contract';
 
@@ -10,7 +10,7 @@ interface ScopeFieldProps {
   onChange: (scope: ProcessingScope) => void;
   disabled?: boolean;
   /** The API's message for `scope` (problem+json `errors[].field`, OQ-15). */
-  error?: string | undefined;
+  error?: ReactNode;
 }
 
 /**

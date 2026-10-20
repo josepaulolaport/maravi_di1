@@ -1,38 +1,26 @@
-import { Button, Group, List, Paper, Stack, Text } from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
-import { notifications } from '@mantine/notifications';
-import { IconCalendar, IconPlayerPlay, IconPlus, IconTrash } from '@tabler/icons-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Group, Paper, Stack, Text } from '@mantine/core';
+import { IconPlayerPlay, IconPlus, IconTrash } from '@tabler/icons-react';
+import { useMemo, useState } from 'react';
 
 import { PageTitle } from '@/shared/ui/PageTitle';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { SearchInput } from '@/shared/ui/SearchInput';
 import { useInstrumentTypes } from '@/shared/queries';
 import { Loading } from '@/shared/ui/Loading';
-import type { IsoDate } from '@/api/contract';
 import {
   type ProcessingDraft,
   ProcessingRequestModal,
 } from '@/shared/processing/ProcessingRequestModal';
 import { countLabel } from '@/shared/format';
-import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { ErrorState } from '@/shared/ui/ErrorState';
-import { ApiError } from '@/api/http';
-import { problemMessages } from '@/shared/ui/problemMessages';
 import { LoadMore } from '@/shared/ui/LoadMore';
 
 import { CashStrip } from './components/CashStrip';
-import { EntriesTable, entryLabel } from './components/EntriesTable';
+import { type DeleteTarget, DeleteDialog } from './components/DeleteDialog';
+import { EntriesTable } from './components/EntriesTable';
 import { NewEntryModal } from './components/NewEntryModal';
-import { type LedgerEntry, toRow } from './entries';
-import {
-  useDeleteEntries,
-  useEntries,
-  useIsSavingEntry,
-  useLedgerFilters,
-} from './hooks/useLedger';
-import { processCashDraft, processDraft } from './processingDraft';
-
-type DeleteTarget = { mode: 'one'; entry: LedgerEntry } | { mode: 'many'; entries: LedgerEntry[] };
+import { toRow } from './model/entries';
+import { useEntries, useIsSavingEntry, useLedgerFilters } from './hooks/useLedger';
 
 const NO_SELECTION: ReadonlySet<string> = new Set();
 
@@ -98,12 +86,13 @@ export function LedgerPage() {
       <PageTitle>Lançamentos</PageTitle>
       <Group justify="space-between" align="flex-end" wrap="wrap">
         <Group align="flex-end" gap="sm" wrap="wrap">
-          <RangePicker
-            key={`${start}:${end}`}
+          <PeriodPicker
             start={start}
             end={end}
-            today={today}
-            onChange={(nextStart, nextEnd) => {
+            maxDate={today}
+            allowSingleDateInRange
+            w={260}
+            onChange={({ start: nextStart, end: nextEnd }) => {
               filters.setRange(nextStart, nextEnd);
             }}
           />
@@ -112,9 +101,7 @@ export function LedgerPage() {
             placeholder="Buscar ativo ou lançamento..."
             w={300}
             value={search}
-            onChange={(next) => {
-              filters.setSearch(next);
-            }}
+            onChange={filters.setSearch}
           />
         </Group>
         <Group gap="sm">
@@ -137,7 +124,8 @@ export function LedgerPage() {
             variant="default"
             leftSection={<IconPlayerPlay size={16} stroke={1.5} />}
             onClick={() => {
-              setProcessing(processDraft(start, end));
+              // The whole period, Tudo; the user narrows it before confirming (OQ-21).
+              setProcessing({ start, end, scope: 'ALL' });
             }}
           >
             Processar
@@ -156,7 +144,8 @@ export function LedgerPage() {
       <CashStrip
         end={end}
         onProcessCash={(from) => {
-          setProcessing(processCashDraft(from, end));
+          // The cash chain from the first of D−1 / D0 that is behind.
+          setProcessing({ start: from, end, scope: 'CASH' });
         }}
       />
 
@@ -220,6 +209,7 @@ export function LedgerPage() {
           setProcessing(null);
         }}
         today={today}
+        queuedMessage="Processamento colocado na fila. Acompanhe em Central de Controle."
       />
 
       <DeleteDialog
@@ -234,168 +224,5 @@ export function LedgerPage() {
         }}
       />
     </Stack>
-  );
-}
-
-function RangePicker({
-  start,
-  end,
-  today,
-  onChange,
-}: {
-  start: IsoDate;
-  end: IsoDate;
-  today: IsoDate;
-  onChange: (start: IsoDate, end: IsoDate) => void;
-}) {
-  // A range being picked (only its first date chosen) stays local until it is complete. The
-  // parent remounts this picker (`key`) whenever the URL range changes.
-  const [draft, setDraft] = useState<[IsoDate | null, IsoDate | null]>([start, end]);
-  return (
-    <DatePickerInput
-      type="range"
-      label="Período"
-      value={draft}
-      onChange={(value) => {
-        setDraft(value);
-        const [nextStart, nextEnd] = value;
-        if (nextStart && nextEnd) onChange(nextStart, nextEnd);
-      }}
-      allowSingleDateInRange
-      maxDate={today}
-      valueFormat="DD/MM/YYYY"
-      leftSection={<IconCalendar size={16} stroke={1.5} />}
-      w={260}
-    />
-  );
-}
-
-/** Ids of the entries the list shows once it is read again. */
-type RefreshListed = () => Promise<ReadonlySet<string>>;
-
-/**
- * Deletes one entry or the selected ones, after confirmation (§6.1). A 404 means an entry is
- * already gone (deleted elsewhere) and nothing was deleted (OQ-32): the list is read again and
- * the dialog keeps only the entries still listed, so "Excluir" can be retried; when none is
- * left, it closes and says so.
- */
-function DeleteDialog({
-  target,
-  onClose,
-  onRetarget,
-  refreshListed,
-}: {
-  target: DeleteTarget | null;
-  onClose: () => void;
-  onRetarget: (target: DeleteTarget) => void;
-  refreshListed: RefreshListed;
-}) {
-  // One request for one entry or many, of either type (`POST /ledger/entries/deletions`).
-  const mutation = useDeleteEntries();
-  // The last target stays on screen while the dialog closes, so its text does not flicker.
-  const [shown, setShown] = useState(target);
-  if (target !== null && target !== shown) setShown(target);
-
-  const close = () => {
-    mutation.reset();
-    onClose();
-  };
-
-  // A 404 is followed by a new read of the list; meanwhile "Excluir" waits, and a dialog closed
-  // or changed in that time is left alone.
-  const [refreshing, setRefreshing] = useState(false);
-  const current = useRef(target);
-  useEffect(() => {
-    current.current = target;
-  }, [target]);
-
-  const confirm = () => {
-    if (!target || refreshing) return;
-    const entries = target.mode === 'one' ? [target.entry] : target.entries;
-    mutation.mutate(entries, {
-      onSuccess: () => {
-        const n = entries.length;
-        notifications.show({
-          color: 'teal',
-          message: n === 1 ? 'Lançamento excluído.' : `${String(n)} lançamentos excluídos.`,
-        });
-        close();
-      },
-      onError: (error) => {
-        if (error instanceof ApiError && error.status === 404) {
-          void dropVanished(target, problemMessages(error).join(' '));
-        }
-      },
-    });
-  };
-
-  const dropVanished = async (stale: DeleteTarget, message: string) => {
-    setRefreshing(true);
-    const listed = await refreshListed().finally(() => {
-      setRefreshing(false);
-    });
-    if (current.current !== stale) return;
-    const entries = stale.mode === 'one' ? [stale.entry] : stale.entries;
-    const left = entries.filter((e) => listed.has(e.id));
-    if (left.length === entries.length) return;
-    if (left.length === 0) {
-      notifications.show({
-        color: 'red',
-        message:
-          entries.length === 1
-            ? `${message} Ele já havia sido excluído; a lista foi atualizada.`
-            : `${message} Eles já haviam sido excluídos; a lista foi atualizada.`,
-      });
-      close();
-      return;
-    }
-    // The 404 does not name the missing entry: the ones no longer listed are named here.
-    const gone = entries.filter((e) => !listed.has(e.id)).map(entryLabel);
-    notifications.show({
-      color: 'yellow',
-      message:
-        gone.length === 1
-          ? `Retirado da exclusão por já não existir: ${gone.join('')}.`
-          : `Retirados da exclusão por já não existirem: ${gone.join('; ')}.`,
-    });
-    onRetarget({ mode: 'many', entries: left });
-  };
-
-  const many = shown?.mode === 'many' ? shown.entries : [];
-
-  return (
-    <ConfirmModal
-      opened={target !== null}
-      onClose={close}
-      onConfirm={confirm}
-      title={shown?.mode === 'many' ? 'Excluir lançamentos' : 'Excluir lançamento'}
-      confirmLabel="Excluir"
-      loading={mutation.isPending || refreshing}
-      error={mutation.error}
-    >
-      <Stack gap="xs">
-        {shown?.mode === 'one' && (
-          <Text inherit>O lançamento {entryLabel(shown.entry)} será excluído.</Text>
-        )}
-        {shown?.mode === 'many' && (
-          <>
-            <Text inherit>
-              {many.length === 1
-                ? '1 lançamento selecionado será excluído:'
-                : `${String(many.length)} lançamentos selecionados serão excluídos, todos ou nenhum:`}
-            </Text>
-            <List size="sm" spacing={2}>
-              {many.map((entry) => (
-                <List.Item key={entry.id}>{entryLabel(entry)}</List.Item>
-              ))}
-            </List>
-          </>
-        )}
-        <Text inherit c="dimmed">
-          Lançamentos não são editados nem restaurados por esta tela. Os resultados já processados
-          não mudam até um novo processamento a partir da data afetada.
-        </Text>
-      </Stack>
-    </ConfirmModal>
   );
 }

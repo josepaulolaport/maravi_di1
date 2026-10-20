@@ -1,6 +1,7 @@
-# Acceptance tests, phase 2 (spec §13, over HTTP and PostgreSQL)
+# Acceptance tests (spec §13, over HTTP and PostgreSQL)
 
-The same proof as `tests/acceptance/` (phase 1, pure engines), now through the real app:
+The one home of each spec §13 scenario (the former phase 1 over the pure engines repeated them;
+the engines' rules are in `tests/unit/`). The proof runs through the real app:
 `create_app` on a fresh PostgreSQL 16 database migrated to head, with an injected clock
 (OQ-14; spec §15 D4), driven only through `/api`. Only the catalogue roots (instrument type,
 asset class) and B3 prices, which have no route, are inserted directly. Expected values come
@@ -16,19 +17,18 @@ These tests need `TEST_DATABASE_URL`; CI sets it and runs them.
 | 1 PU ↔ rate, precision (12/10 places accepted, more refused), 1 day before maturity, maturity date (PU typed, rate 0), after maturity refused | `test_ledger_http.py`, `test_reference_prices_http.py` |
 | 9 a write saves only the fact: no job, date status, issue, outbox message or published row (after a run: below) | `test_ledger_http.py`, `test_reference_prices_http.py` |
 | 16 one ledger order `(date, time, seq)` across trades and cash; mixed batch hard delete, all or nothing, 404 | `test_ledger_http.py` |
-| 17 MANUAL over B3, removing MANUAL lets B3 prevail, correction in place, exact date, no carry-forward | `test_reference_prices_http.py` |
+| 17 MANUAL over B3, removing MANUAL lets B3 prevail, a later set replaces with a new id, exact date, no carry-forward | `test_reference_prices_http.py` |
 | 17 (second half) a used price corrected then removed after a run: allowed, marks nothing, no job or pendência; the Carteira shows the current price beside the old figures, the date keeps its status, time and figures until the user reprocesses (worker run in-process, `run_worker`) | `test_price_change_after_a_run_http.py` |
 | 22 page `limit` 0 and 201 refused, ledger entries and processing history | `test_ledger_http.py` |
 | 23 Carteira summary, positions and P&L series after today refused | `test_challenge_example_http.py` |
-| OQ-42 price reads after today accepted and empty | `test_reference_prices_http.py` |
 | OQ-33 catalogue: codes upper-cased, accent-insensitive search, unknown `product_id` / `asset_class_id` → 422 | `test_catalogue_http.py` |
 
 ## Scenarios with a processing run
 
 Each queues a request through `POST /api/processing/requests`, lets the one worker drain the
-queue in-process with the real composition (`support.run_worker`: recover, then drain, OQ-45,
+queue in-process with the real composition (`support.run_worker`: recover, then sweep, OQ-45,
 OQ-46), then reads `/api/portfolio/*` and `/api/processing/*` through `desk.Desk`. The API's
-clock ticks one second per call within the fixed "today" (`support.TickingClock`), so requests
+clock ticks one second per call within the fixed "today" (`tests.support.fakes.FakeClock` with a one-second step), so requests
 keep their FIFO order; each worker start has its own time, so processing times tell runs apart.
 Every scenario asserts the run's status and `processing.date_status` before its figures.
 
@@ -54,4 +54,4 @@ Not reachable through the API, so covered in `tests/integration/processing/` and
 `tests/integration/platform/test_processing_worker.py`: a technical error
 inside one chain or outside every chain (cases 24, 25), a cancel during a run's last date and the
 row-lock race between a queued cancel and the worker's take (case 10), `RUNNING` dates restored
-from `*_previous` (case 11), and the RabbitMQ doorbell path itself.
+from `*_previous` (case 11), and the RabbitMQ run message path itself.

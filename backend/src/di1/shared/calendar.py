@@ -6,11 +6,14 @@ Standard library only: domain code imports this module.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 DAYS_PER_YEAR = Decimal(365)
 """Days in the DC/365 year (spec §4.1)."""
+
+ONE_DAY = timedelta(days=1)
+"""The step from a date to the next; every calendar day counts (OQ-7)."""
 
 
 def calendar_days(start: date, end: date) -> int:

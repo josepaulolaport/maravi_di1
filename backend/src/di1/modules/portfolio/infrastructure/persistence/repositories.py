@@ -8,11 +8,11 @@ from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.pnl.public import CalculationCompleteness
-from di1.modules.portfolio.application.interfaces.repository import (
-    PublishedCash,
+from di1.modules.portfolio.application.ports import (
     PublishedPortfolioDay,
     PublishedPosition,
 )
+from di1.modules.portfolio.domain.cash import CashDay
 from di1.modules.portfolio.domain.valuation import ValuationStatus
 from di1.modules.portfolio.infrastructure.persistence.models import (
     CashBalanceRow,
@@ -27,7 +27,6 @@ def _portfolio_day(row: PortfolioMetricsRow) -> PublishedPortfolioDay:
     return PublishedPortfolioDay(
         date=row.metric_date,
         positions_market_value=row.positions_market_value,
-        aum=row.aum,
         position_pnl=row.position_pnl,
         trades_pnl=row.trades_pnl,
         daily_pnl=row.daily_pnl,
@@ -52,9 +51,10 @@ def _position(position: PositionRow, metrics: PositionMetricsRow) -> PublishedPo
     )
 
 
-def _cash(row: CashBalanceRow) -> PublishedCash:
-    return PublishedCash(
+def _cash(row: CashBalanceRow) -> CashDay:
+    return CashDay(
         date=row.balance_date,
+        previous_cash_balance=None,
         cash_balance=row.cash_balance,
         trades_cash_flow=row.trades_cash_flow,
         deposits=row.deposits,
@@ -62,7 +62,7 @@ def _cash(row: CashBalanceRow) -> PublishedCash:
     )
 
 
-class SqlAlchemyPortfolioRepository:
+class SqlPortfolioRepository:
     """Implements `PortfolioRepository` on the caller's session; it never commits."""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -75,8 +75,6 @@ class SqlAlchemyPortfolioRepository:
         self,
         day: PublishedPortfolioDay,
         positions: Sequence[PublishedPosition],
-        *,
-        cash_processed: bool,
     ) -> None:
         await self._session.execute(published.delete_positions(day.date))
         if positions:
@@ -112,7 +110,6 @@ class SqlAlchemyPortfolioRepository:
                 {
                     "metric_date": day.date,
                     "positions_market_value": day.positions_market_value,
-                    "aum": None,
                     "position_pnl": day.position_pnl,
                     "trades_pnl": day.trades_pnl,
                     "daily_pnl": day.daily_pnl,
@@ -122,11 +119,8 @@ class SqlAlchemyPortfolioRepository:
                 }
             )
         )
-        await self._session.execute(
-            published.recompute_aum(day.date, other_chain_processed=cash_processed)
-        )
 
-    async def upsert_cash_day(self, cash: PublishedCash, *, positions_processed: bool) -> None:
+    async def upsert_cash_day(self, cash: CashDay) -> None:
         await self._session.execute(
             published.upsert_cash_balance(
                 {
@@ -138,11 +132,8 @@ class SqlAlchemyPortfolioRepository:
                 }
             )
         )
-        await self._session.execute(
-            published.recompute_aum(cash.date, other_chain_processed=positions_processed)
-        )
 
-    async def get_cash(self, on: date) -> PublishedCash | None:
+    async def get_cash(self, on: date) -> CashDay | None:
         row = await self._session.scalar(published.cash_balance(on))
         return None if row is None else _cash(row)
 

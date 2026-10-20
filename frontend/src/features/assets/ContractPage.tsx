@@ -1,19 +1,21 @@
 import { Button, Group, Stack } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import { useState } from 'react';
-import { useParams, useSearchParams } from 'react-router';
+import { useParams } from 'react-router';
 
 import { Loading } from '@/shared/ui/Loading';
 import type { Instrument, IsoDate, ReferencePriceDay } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
-import { formatDate, isIsoDate, todayInSaoPaulo } from '@/shared/format';
+import { formatDate } from '@/shared/format';
+import { useToday } from '@/shared/hooks/useToday';
 import { ErrorState } from '@/shared/ui/ErrorState';
+import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { dateParam, useQueryParams } from '@/shared/url/useQueryParams';
 
 import { PageHeader } from './components/PageHeader';
-import { PeriodPicker } from './components/PeriodPicker';
 import { PriceCalendar } from './components/PriceCalendar';
-import { calendarRows, calendarWindow, resolveRange } from './components/calendarData';
+import { calendarRows, calendarWindow, lastDay, resolveRange } from './model/calendarData';
 import { PriceModal } from './components/PriceModal';
 import { PriceHistoryCard } from './components/PriceHistoryCard';
 import { RemovePriceModal } from './components/RemovePriceModal';
@@ -42,59 +44,39 @@ export function ContractPage() {
 
 function ContractBody({ instrument }: { instrument: Instrument }) {
   const product = useProduct(instrument.product_id);
-  const [params, setParams] = useSearchParams();
-  const requested = params.get('registrar');
-  // The period lives in the URL (`?inicio=&fim=`), like Lançamentos' range (§11.2).
+  // The period (`?inicio=&fim=`), like Lançamentos' range (§11.2), and `?registrar=`.
+  const { values, set } = useQueryParams({
+    inicio: dateParam(),
+    fim: dateParam(),
+    registrar: dateParam(),
+  });
+  const requested = values.registrar;
+  const today = useToday();
   const { start, end } = resolveRange(
-    { start: params.get('inicio'), end: params.get('fim'), register: requested },
-    todayInSaoPaulo(),
+    { start: values.inicio, end: values.fim, register: requested },
+    today,
     instrument.maturity_date,
   );
-  const lastDay = resolveRange({}, todayInSaoPaulo(), instrument.maturity_date).end;
-  const days = useReferencePriceDays(instrument.id, start, end);
+  const maxDate = lastDay(instrument.maturity_date, today);
+  const days = useReferencePriceDays({ assetId: instrument.id, start, end });
   const setRange = (next: { start: IsoDate; end: IsoDate }) => {
-    setParams(
-      (current) => {
-        current.set('inicio', next.start);
-        current.set('fim', next.end);
-        return current;
-      },
-      { replace: true },
-    );
+    set({ inicio: next.start, fim: next.end }, { push: true });
   };
   // The modal's date: the URL's `?registrar=` while it is there, otherwise UI state.
-  const [modal, setModal] = useState<{ date: IsoDate | null; session: number }>({
-    date: null,
-    session: 0,
-  });
-  const modalDate = isIsoDate(requested) ? requested : modal.date;
+  const [modalDate, setModalDate] = useState<IsoDate | null>(null);
   const openModal = (date: IsoDate) => {
-    setModal((current) => ({ date, session: current.session + 1 }));
+    setModalDate(date);
   };
   // One URL update: drop `?registrar=` and, when the saved date is outside the period, move
-  // the period to end on it, so the new observation is always in view.
+  // the period to end on it, so the new observation is always in view. Without an explicit
+  // period, `?registrar=` chose the window; it is kept in the URL, so closing the modal never
+  // moves the calendar away from that date.
   const closeModal = (saved?: IsoDate) => {
-    setModal((current) => ({ date: null, session: current.session + 1 }));
+    setModalDate(null);
     const outside = saved !== undefined && (saved < start || saved > end);
     if (requested === null && !outside) return;
-    setParams(
-      (current) => {
-        current.delete('registrar');
-        // Without an explicit period, `?registrar=` chose the window; keep it in the URL so
-        // closing the modal never moves the calendar away from that date.
-        if (!current.has('inicio') || !current.has('fim')) {
-          current.set('inicio', start);
-          current.set('fim', end);
-        }
-        if (outside) {
-          const moved = calendarWindow(saved, instrument.maturity_date);
-          current.set('inicio', moved.start);
-          current.set('fim', moved.end);
-        }
-        return current;
-      },
-      { replace: true },
-    );
+    const period = outside ? calendarWindow(saved, instrument.maturity_date) : { start, end };
+    set({ registrar: null, inicio: period.start, fim: period.end });
   };
 
   // Only the date is UI state; its observations are read from the query, so the modal always
@@ -127,7 +109,7 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
         }
       />
       <Group>
-        <PeriodPicker start={start} end={end} maxDate={lastDay} onChange={setRange} />
+        <PeriodPicker start={start} end={end} maxDate={maxDate} onChange={setRange} />
       </Group>
       {days.isError ? (
         <ErrorState error={days.error} onRetry={() => void days.refetch()} />
@@ -146,12 +128,7 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
           />
         </>
       )}
-      <PriceModal
-        instrument={instrument}
-        date={modalDate}
-        session={modal.session}
-        onClose={closeModal}
-      />
+      <PriceModal instrument={instrument} date={requested ?? modalDate} onClose={closeModal} />
       <RemovePriceModal
         day={removing}
         onClose={() => {

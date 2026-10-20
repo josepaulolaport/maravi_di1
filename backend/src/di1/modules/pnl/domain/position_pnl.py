@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from di1.modules.pnl.domain.results import unsigned_zero
-from di1.shared.decimals import financial_context
+from di1.shared.decimals import ZERO, financial_context, unsigned
 
 
 def calculate_position_pnl(
@@ -21,8 +20,8 @@ def calculate_position_pnl(
     current_reference_pu: Decimal | None,
 ) -> Decimal | None:
     if previous_quantity == 0:
-        return Decimal(0)
+        return ZERO
     if previous_reference_pu is None or current_reference_pu is None:
         return None
     with financial_context():
-        return unsigned_zero(previous_quantity * (current_reference_pu - previous_reference_pu))
+        return unsigned(previous_quantity * (current_reference_pu - previous_reference_pu))

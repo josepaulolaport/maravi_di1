@@ -79,8 +79,6 @@ export const processingApi = {
     http.get<Page<ProcessingRequest>>('/processing/requests', {
       query: { ...query },
     }),
-  getRequest: (requestId: string) =>
-    http.get<ProcessingRequest>(`/processing/requests/${id(requestId)}`),
   preview: (query: ProcessingRangeRequest) =>
     http.get<ProcessingPreview>('/processing/preview', {
       query: { ...query },

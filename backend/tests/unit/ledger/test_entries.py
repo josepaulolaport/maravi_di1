@@ -9,64 +9,15 @@ Expected cash effects are the MSW golden fixtures (frontend/src/api/mocks/fixtur
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, time
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
-from di1.modules.ledger.domain.entries import EntryType, LedgerEntry, entries_to_delete
-from di1.shared.clock import SAO_PAULO
-from di1.shared.errors import DomainError, ErrorCode
-from di1.shared.input_kind import InputKind
-
-CREATED = datetime(2026, 10, 14, 14, 11, 2, tzinfo=SAO_PAULO)
-
-
-def trade(
-    entry_date: date = date(2026, 10, 14),
-    *,
-    quantity: int = 10,
-    pu: str = "89006.4625467350",
-    entry_id: UUID | None = None,
-) -> LedgerEntry:
-    return LedgerEntry(
-        id=entry_id or uuid4(),
-        type=EntryType.TRADE,
-        entry_date=entry_date,
-        entry_time=time(14, 10),
-        seq=2,
-        created_at=CREATED,
-        asset_id=uuid4(),
-        signed_quantity=quantity,
-        execution_pu=Decimal(pu),
-        execution_rate=Decimal("0.10"),
-        input_kind=InputKind.RATE,
-        cash_amount=None,
-    )
-
-
-def cash(
-    entry_date: date = date(2026, 10, 14),
-    *,
-    amount: str = "1500000.00",
-    entry_id: UUID | None = None,
-) -> LedgerEntry:
-    return LedgerEntry(
-        id=entry_id or uuid4(),
-        type=EntryType.CASH,
-        entry_date=entry_date,
-        entry_time=time(9, 0),
-        seq=1,
-        created_at=CREATED,
-        asset_id=None,
-        signed_quantity=None,
-        execution_pu=None,
-        execution_rate=None,
-        input_kind=None,
-        cash_amount=Decimal(amount),
-    )
-
+from di1.modules.ledger.domain.entries import validate_deletion
+from di1.shared.errors import ErrorCode, ErrorDetail
+from tests.support.builders import DI1F28, ledger_cash, ledger_trade
 
 # --- cash effect --------------------------------------------------------------------------------
 
@@ -82,7 +33,7 @@ def cash(
 def test_a_trades_cash_effect_is_minus_quantity_times_pu(
     quantity: int, pu: str, expected: str
 ) -> None:
-    effect = trade(quantity=quantity, pu=pu).cash_effect
+    effect = ledger_trade(DI1F28.id, date(2026, 10, 14), quantity, pu).cash_effect
 
     assert effect == Decimal(expected)
     assert str(effect) == expected  # exact: no rounding, scale of the PU kept
@@ -90,17 +41,17 @@ def test_a_trades_cash_effect_is_minus_quantity_times_pu(
 
 def test_the_cash_effect_is_exact_for_the_largest_quantity() -> None:
     # 2147483647 × (100000 − 10⁻¹⁰) = 214748364700000 − 0.2147483647
-    effect = trade(quantity=2**31 - 1, pu="99999.9999999999").cash_effect
+    effect = ledger_trade(DI1F28.id, date(2026, 10, 14), 2**31 - 1, "99999.9999999999").cash_effect
     assert effect == Decimal("-214748364699999.7852516353")
 
 
 def test_a_cash_entrys_effect_is_its_signed_amount() -> None:
-    assert cash(amount="1500000.00").cash_effect == Decimal("1500000.00")
-    assert cash(amount="-50000.00").cash_effect == Decimal("-50000.00")
+    assert ledger_cash(date(2026, 10, 14), "1500000.00").cash_effect == Decimal("1500000.00")
+    assert ledger_cash(date(2026, 10, 14), "-50000.00").cash_effect == Decimal("-50000.00")
 
 
 def test_the_order_key_is_date_time_seq() -> None:
-    entry = cash()
+    entry = ledger_cash(date(2026, 10, 14), "1500000.00")
     assert entry.order_key == (date(2026, 10, 14), time(9, 0), 1)
 
 
@@ -108,29 +59,27 @@ def test_the_order_key_is_date_time_seq() -> None:
 
 
 def test_an_unknown_id_deletes_nothing() -> None:
-    known = trade()
-    with pytest.raises(DomainError) as error:
-        entries_to_delete([known.id, uuid4()], {known.id})
-
-    assert error.value.code is ErrorCode.NOT_FOUND
-    assert error.value.errors[0].message == "Lançamento não encontrado."
+    known = ledger_trade(DI1F28.id, date(2026, 10, 14), 10, "89006.4625467350")
+    assert validate_deletion([known.id, uuid4()], {known.id}) == (
+        ErrorDetail(ErrorCode.NOT_FOUND, "Lançamento não encontrado."),
+    )
 
 
 def test_an_empty_batch_is_rejected() -> None:
-    with pytest.raises(DomainError) as error:
-        entries_to_delete([], set())
+    (error,) = validate_deletion([], set())
 
-    assert error.value.code is ErrorCode.VALIDATION_ERROR
-    assert error.value.errors[0].field == "ids"
+    assert error.code is ErrorCode.VALIDATION_ERROR
+    assert error.field == "ids"
 
 
 def test_a_mixed_batch_deletes_every_requested_entry() -> None:
-    deposit, sell = cash(date(2026, 10, 14)), trade(date(2026, 10, 16), quantity=-4)
+    deposit = ledger_cash(date(2026, 10, 14), "1500000.00")
+    sell = ledger_trade(DI1F28.id, date(2026, 10, 16), -4, "89006.4625467350")
 
-    assert entries_to_delete([sell.id, deposit.id], {deposit.id, sell.id}) == (sell.id, deposit.id)
+    assert validate_deletion([sell.id, deposit.id], {deposit.id, sell.id}) == ()
 
 
-def test_a_repeated_id_is_deleted_once() -> None:
-    entry = trade()
+def test_a_repeated_id_is_valid() -> None:
+    entry = ledger_trade(DI1F28.id, date(2026, 10, 14), 10, "89006.4625467350")
 
-    assert entries_to_delete([entry.id, entry.id], {entry.id}) == (entry.id,)
+    assert validate_deletion([entry.id, entry.id], {entry.id}) == ()

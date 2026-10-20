@@ -9,10 +9,10 @@ A batch takes three steps, and no transaction is open while the broker answers:
 Consequences:
 
 - a crash after a publish and before step 3 leaves the row unpublished, so the next batch
-  sends it again: delivery is at least once, and consumers absorb the duplicate through the
-  inbox (interfaces.md "Transaction boundaries" 7). Nothing locks the rows between steps 1 and
-  3: one relay runs (compose.yaml), and a second one would at worst publish a row twice, which
-  the inbox absorbs the same way;
+  sends it again: delivery is at least once, and the consumer skips the duplicate (its work
+  has already started; interfaces.md "Transaction boundaries" 7). Nothing locks the rows
+  between steps 1 and 3: one relay runs (compose.yaml), and a second one would at worst publish
+  a row twice, which is skipped the same way;
 - a failed publish (no confirm, no route, a row that is not a valid envelope) increments
   ``publish_attempts`` and keeps the error in ``last_error``; the batch goes on. The broker
   carries no job order (PostgreSQL does: interfaces.md "Transaction boundaries" 3), so
@@ -31,7 +31,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -41,8 +41,8 @@ from sqlalchemy.dialects.postgresql import ARRAY
 
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.platform.messaging.envelope import Envelope
-from di1.platform.messaging.inbox import InboxRetention
 from di1.platform.messaging.publisher import BrokerUnavailableError, PublishFailedError
+from di1.platform.messaging.retention import Retention
 from di1.platform.observability.heartbeat import Heartbeat
 
 logger = logging.getLogger(__name__)
@@ -198,22 +198,22 @@ class OutboxRelay:
         stop: asyncio.Event,
         *,
         poll_interval_seconds: float,
-        inbox_retention: InboxRetention | None = None,
+        retentions: Sequence[Retention] = (),
         heartbeat: Heartbeat | None = None,
     ) -> None:
         """Relay until ``stop`` is set. A full batch is followed at once by the next one; an
         empty, short or failed batch, or a database error, waits ``poll_interval_seconds``.
-        Each turn also runs ``inbox_retention`` when it is due: this loop is the platform's
-        only periodic one (the worker waits for doorbells and runs one job at a time). Each
-        turn ends with a beat of ``heartbeat``: a fresh file shows the loop is progressing."""
+        Each turn also runs each of ``retentions`` (the outbox's) when it is due: this loop is
+        the relay's only periodic work. Each turn ends with a beat of ``heartbeat``: a fresh file
+        shows the loop is progressing."""
         while not stop.is_set():
             try:
                 published = await self.relay_batch()
             except Exception:
                 logger.exception("outbox relay batch failed")
                 published = 0
-            if inbox_retention is not None:
-                await inbox_retention.run_if_due()
+            for retention in retentions:
+                await retention.run_if_due()
             if heartbeat is not None:
                 heartbeat.beat()
             if published < self._batch_size:

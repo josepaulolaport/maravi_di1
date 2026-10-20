@@ -3,13 +3,15 @@ import { setupServer } from 'msw/node';
 
 import type { ProcessingRequest } from '@/api/contract';
 
-import { handlers, problem, fieldError, url } from './handlers';
+import { url } from '../helpers';
+
+import { handlers } from './handlers';
 
 export const server = setupServer(...handlers);
 
 /**
- * Serves the job list (and each job by id) from `jobs.items`, counting the list reads. A test
- * scripts the server by replacing `items` between polls: queued, running, finished.
+ * Serves the job list from `jobs.items`, counting the list reads. A test scripts the server by
+ * replacing `items` between polls: queued, running, finished. Details are read from this list.
  */
 export function serveJobs(items: ProcessingRequest[]) {
   const jobs = { items, polls: 0 };
@@ -17,12 +19,6 @@ export function serveJobs(items: ProcessingRequest[]) {
     http.get(url('/processing/requests'), () => {
       jobs.polls += 1;
       return HttpResponse.json({ items: jobs.items, next_cursor: null });
-    }),
-    http.get(url('/processing/requests/:id'), ({ params }) => {
-      const found = jobs.items.find((j) => j.id === params.id);
-      return found
-        ? HttpResponse.json(found)
-        : problem(404, [fieldError('NOT_FOUND', 'Processamento não encontrado.')]);
     }),
   );
   return jobs;

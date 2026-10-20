@@ -1,25 +1,28 @@
-"""`PortfolioQueryService` (portfolio/public.py): the Carteira and Lançamentos reads.
+"""`PortfolioService` (portfolio/public.py): the Carteira and Lançamentos reads.
 
-Published data only, never recalculated on read (spec §11.4). Each date's chain statuses and
+Published data only, never recalculated on read (spec §11.4), except AUM, the sum of the date's
+published cash and market value (OQ-21). Each date's chain statuses and
 processing times come from Processing's ``DateStatusReader`` on the same Unit of Work as the
 published rows, and the service's first statement makes that transaction one REPEATABLE READ,
 read-only snapshot, so figures and statuses always agree (OQ-23, OQ-31; spec §13 item 12). The
 service must therefore be the first to use its Unit of Work. A position row shows the
-current preferred price of its date from Prices (OQ-30).
+current preferred price of its date from Prices (OQ-30), marked when that price or D−1's was
+registered after the date's positions chain was processed (OQ-50 item 3).
 """
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
 from di1.modules.asset.public import AssetReader
-from di1.modules.portfolio.application.interfaces.repository import (
+from di1.modules.portfolio.application.ports import (
     PortfolioRepository,
+    PublishedPortfolioDay,
     PublishedPosition,
 )
+from di1.modules.portfolio.domain.cash import CashDay
 from di1.modules.portfolio.domain.maturity import is_past_maturity, reference_pu_on
-from di1.modules.portfolio.domain.valuation import ReferenceSource
 from di1.modules.portfolio.public import (
     CashSummaryView,
     PnLPointView,
@@ -28,34 +31,33 @@ from di1.modules.portfolio.public import (
     PositionsSummaryView,
     PositionTableView,
 )
-from di1.modules.prices.public import PriceReader
+from di1.modules.prices.public import PriceReader, PriceSource
 from di1.modules.processing.public import ChainStatus, DateStatus, DateStatusReader
-from di1.platform.database.unit_of_work import UnitOfWork
+from di1.shared.calendar import ONE_DAY
 from di1.shared.clock import Clock
-from di1.shared.decimals import financial_context
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
-
-ZERO = Decimal("0")
-PROCESSED = frozenset({ChainStatus.PROCESSED, ChainStatus.PROCESSED_WITH_ISSUES})
-"""The chain statuses whose published figures a read shows and combines: AUM (OQ-38, OQ-40)
-and a P&L point's daily figures (OQ-41 item 4)."""
+from di1.shared.decimals import ZERO, financial_context
+from di1.shared.errors import DomainError, ErrorDetail, future_date, invalid_range, range_too_long
 
 
-class PortfolioQueries:
-    """Implements `di1.modules.portfolio.public.PortfolioQueryService` on one Unit of Work."""
+def _processed(status: ChainStatus | None) -> bool:
+    """Whether a chain's published figures of the date are shown and combined: AUM (OQ-38,
+    OQ-40) and a P&L point's daily figures (OQ-41 item 4)."""
+    return status is not None and status.is_processed
+
+
+class DefaultPortfolioService:
+    """Public `PortfolioService` on one Unit of Work's session (every reader on it)."""
 
     def __init__(
         self,
         repository: PortfolioRepository,
         *,
-        uow: UnitOfWork,
         assets: AssetReader,
         prices: PriceReader,
         date_statuses: DateStatusReader,
         clock: Clock,
     ) -> None:
         self._repository = repository
-        self._uow = uow
         self._assets = assets
         self._prices = prices
         self._date_statuses = date_statuses
@@ -89,7 +91,7 @@ class PortfolioQueries:
                 cumulative_pnl=None if day is None else day.cumulative_pnl,
                 pnl_status=None if day is None else day.pnl_status,
             ),
-            aum=day.aum if day is not None and _both_processed(status) else None,
+            aum=_aum(status, cash, day),
         )
 
     async def get_position_table(self, on: date) -> PositionTableView:
@@ -99,7 +101,11 @@ class PortfolioQueries:
         published = await self._repository.get_positions(on)
         asset_ids = [p.asset_id for p in published]
         instruments = await self._assets.get_instruments(asset_ids)
-        prices = await self._prices.get_preferred_many(asset_ids, [on]) if asset_ids else {}
+        before = on - ONE_DAY
+        prices = await self._prices.get(asset_ids, [before, on]) if asset_ids else {}
+        processed_at = None if status is None else status.portfolio_processed_at
+        # Q[D−1] per asset, from D−1's published rows (none: zero state or a first trade on D).
+        held_before = {q.asset_id: q.quantity for q in await self._repository.get_positions(before)}
         rows = []
         for p in published:
             instrument = instruments[p.asset_id]
@@ -107,9 +113,20 @@ class PortfolioQueries:
             # After maturity no price is read: the PU is 0 by definition, with no source (OQ-1).
             price = None if is_past_maturity(on, maturity) else prices.get((p.asset_id, on))
             pu = reference_pu_on(on, maturity, None if price is None else price.pu)
-            source = None if price is None else ReferenceSource(price.source.value)
+            source = None if price is None else price.source
             rate = None if price is None else price.rate
-            rows.append(_row(p, instrument.code, maturity, source, pu, rate))
+            # OQ-50 item 3: the stored figures come from the D and D−1 prices the run read; one
+            # registered after it (a re-saved price is a new row, OQ-25) means reprocess D. The
+            # D−1 price counts only while Q[D−1] ≠ 0: otherwise position P&L is 0 (OQ-4).
+            previous = (
+                None
+                if is_past_maturity(before, maturity) or held_before.get(p.asset_id, 0) == 0
+                else prices.get((p.asset_id, before))
+            )
+            changed = processed_at is not None and any(
+                used is not None and used.created_at > processed_at for used in (price, previous)
+            )
+            rows.append(_row(p, instrument.code, maturity, source, pu, rate, changed))
         return PositionTableView(
             date=on,
             status=None if status is None else status.portfolio,
@@ -118,32 +135,28 @@ class PortfolioQueries:
         )
 
     async def get_pnl_series(self, start_date: date, end_date: date) -> tuple[PnLPointView, ...]:
-        errors = []
+        errors: list[ErrorDetail] = []
         if start_date > end_date:
-            errors.append(
-                ErrorDetail(
-                    ErrorCode.INVALID_RANGE,
-                    "A data inicial deve ser anterior ou igual à data final.",
-                    "start_date",
-                )
-            )
+            errors.append(invalid_range())
+        elif (too_long := range_too_long(start_date, end_date)) is not None:
+            errors.append(too_long)
         if end_date > self._clock.today():
-            errors.append(_future_date("end_date"))
+            errors.append(future_date("end_date"))
         if errors:
             raise DomainError(*errors)
         await self._snapshot()
-        statuses = await self._date_statuses.get_date_statuses(start_date, end_date, uow=self._uow)
+        statuses = await self._date_statuses.get_date_statuses(start_date, end_date)
         days = {d.date: d for d in await self._repository.get_portfolio_days(start_date, end_date)}
         points: list[PnLPointView] = []
         running = ZERO
         for offset in range((end_date - start_date).days + 1):
-            current = start_date + timedelta(days=offset)
+            current = start_date + offset * ONE_DAY
             status = statuses.get(current)
             chain = None if status is None else status.portfolio
             # A date's figures show and count only when its positions chain is processed (OQ-23,
             # OQ-41 item 4): not processed, FAILED or RUNNING show no P&L and add 0, whatever
             # older rows remain.
-            day = days.get(current) if chain in PROCESSED else None
+            day = days.get(current) if _processed(chain) else None
             if day is not None and day.daily_pnl is not None:
                 with financial_context():
                     running = running + day.daily_pnl  # a gap or a null daily adds 0 (OQ-41)
@@ -151,11 +164,8 @@ class PortfolioQueries:
                 PnLPointView(
                     date=current,
                     daily_pnl=None if day is None else day.daily_pnl,
-                    cumulative_pnl=None if day is None else day.cumulative_pnl,
                     range_cumulative_pnl=running,
-                    pnl_status=None if day is None else day.pnl_status,
                     status=chain,
-                    published_at=None if status is None else status.portfolio_processed_at,
                 )
             )
         return tuple(points)
@@ -163,7 +173,7 @@ class PortfolioQueries:
     def _reject_future(self, on: date, field: str) -> None:
         """A read dated after today in São Paulo is refused (OQ-35)."""
         if on > self._clock.today():
-            raise DomainError(_future_date(field))
+            raise DomainError(future_date(field))
 
     async def _snapshot(self) -> None:
         """Every read of this Unit of Work, the statuses included, sees one snapshot."""
@@ -172,26 +182,32 @@ class PortfolioQueries:
             self._snapshot_started = True
 
     async def _status(self, on: date) -> DateStatus | None:
-        return (await self._date_statuses.get_date_statuses(on, on, uow=self._uow)).get(on)
+        return (await self._date_statuses.get_date_statuses(on, on)).get(on)
 
 
-def _both_processed(status: DateStatus | None) -> bool:
-    """AUM follows both chains' statuses on the date, whichever run wrote it (OQ-38, OQ-40): a
-    stored AUM is shown only while neither chain is FAILED, RUNNING or not processed."""
-    return status is not None and status.cash in PROCESSED and status.portfolio in PROCESSED
-
-
-def _future_date(field: str) -> ErrorDetail:
-    return ErrorDetail(ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", field)
+def _aum(
+    status: DateStatus | None, cash: CashDay | None, day: PublishedPortfolioDay | None
+) -> Decimal | None:
+    """AUM = the date's cash + its market value, computed on read and never stored (OQ-21,
+    OQ-28). It follows both chains' statuses on the date, whichever run wrote them (OQ-38,
+    OQ-40): null unless both are PROCESSED or PROCESSED_WITH_ISSUES, and null when either side
+    is missing, an expected asset without a price included (OQ-10)."""
+    if status is None or not (_processed(status.cash) and _processed(status.portfolio)):
+        return None
+    if cash is None or day is None or day.positions_market_value is None:
+        return None
+    with financial_context():
+        return cash.cash_balance + day.positions_market_value
 
 
 def _row(
     p: PublishedPosition,
     code: str,
     maturity: date | None,
-    source: ReferenceSource | None,
+    source: PriceSource | None,
     pu: Decimal | None,
     rate: Decimal | None,
+    reference_price_changed: bool,
 ) -> PositionRowView:
     return PositionRowView(
         asset_id=p.asset_id,
@@ -203,6 +219,7 @@ def _row(
         reference_source=source,
         reference_pu=pu,
         reference_rate=rate,
+        reference_price_changed=reference_price_changed,
         financial_total=p.financial_total,
         position_pnl=p.position_pnl,
         trades_pnl=p.trades_pnl,

@@ -3,50 +3,28 @@ and a RabbitMQ connection with a topology of the test's own."""
 
 from __future__ import annotations
 
-import os
 import uuid
-from collections.abc import AsyncIterator, Iterator
-from pathlib import Path
+from collections.abc import AsyncIterator
 
 import pytest
 from aio_pika.abc import AbstractRobustConnection
-from alembic import command
-from alembic.config import Config
 from pydantic import SecretStr
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine
 
-from di1.platform.config import BrokerSettings, Settings
+from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
-from di1.platform.database.session import create_session_factory
 from di1.platform.messaging.connection import connect
-from di1.platform.messaging.topology import QueueSpec, Topology, dead_letter_queue_name
-from tests.integration.databases import fresh_database_url
-
-BACKEND = Path(__file__).resolve().parents[3]
-
-
-@pytest.fixture
-def database_url() -> Iterator[str]:
-    yield from fresh_database_url()
-
-
-@pytest.fixture
-def migrated_database_url(database_url: str) -> str:
-    config = Config(str(BACKEND / "alembic.ini"))
-    config.set_main_option("script_location", str(BACKEND / "migrations"))
-    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    command.upgrade(config, "head")
-    return database_url
-
-
-@pytest.fixture
-def settings(migrated_database_url: str) -> Settings:
-    return Settings(database_url=SecretStr(migrated_database_url))
+from di1.platform.messaging.topology import Topology
+from tests.integration.platform.support import CREATE_EFFECTS
+from tests.support.broker import SilentServer, broker_env, delete_topology, silent_server
 
 
 @pytest.fixture
 async def engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
+    """The test's database, with the handlers' ``public.test_effects`` table."""
     engine = create_engine(settings)
+    async with engine.begin() as connection:
+        await connection.execute(CREATE_EFFECTS)
     try:
         yield engine
     finally:
@@ -54,74 +32,54 @@ async def engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
 
 
 @pytest.fixture
-def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return create_session_factory(engine)
-
-
-@pytest.fixture
-def broker_settings() -> BrokerSettings:
+def broker_url() -> SecretStr:
     """``TEST_RABBITMQ_URL`` is a test broker (``amqp://guest:guest@127.0.0.1:5672/``). Without
     it the broker tests are skipped and reported, so **not verified**; with
     ``REQUIRE_BROKER_TESTS=1`` a missing variable fails the run instead."""
-    url = os.environ.get("TEST_RABBITMQ_URL")
-    if not url:
-        if os.environ.get("REQUIRE_BROKER_TESTS") == "1":
-            pytest.fail("REQUIRE_BROKER_TESTS=1 but TEST_RABBITMQ_URL is not set")
-        pytest.skip("TEST_RABBITMQ_URL is not set: broker tests not run")
-    return BrokerSettings(
-        rabbitmq_url=SecretStr(url),
-        rabbitmq_delivery_limit=2,
-        rabbitmq_retry_base_delay_seconds=0.2,
-        rabbitmq_retry_max_delay_seconds=1,
-        rabbitmq_publish_timeout_seconds=5,
-    )
+    return SecretStr(broker_env("TEST_RABBITMQ_URL"))
 
 
 @pytest.fixture
 def management_url() -> str:
     """``TEST_RABBITMQ_MANAGEMENT_URL`` (``http://guest:guest@127.0.0.1:15672``): the reconnect
     test closes connections through the management API."""
-    url = os.environ.get("TEST_RABBITMQ_MANAGEMENT_URL")
-    if not url:
-        if os.environ.get("REQUIRE_BROKER_TESTS") == "1":
-            pytest.fail("REQUIRE_BROKER_TESTS=1 but TEST_RABBITMQ_MANAGEMENT_URL is not set")
-        pytest.skip("TEST_RABBITMQ_MANAGEMENT_URL is not set: reconnect test not run")
-    return url
+    return broker_env("TEST_RABBITMQ_MANAGEMENT_URL")
 
 
 @pytest.fixture
 def topology() -> Topology:
     """Names of this test's own, so tests never share broker state."""
     prefix = f"test.{uuid.uuid4().hex[:12]}"
-    return Topology(exchange=f"{prefix}.commands", dead_letter_exchange=f"{prefix}.dead-letter")
+    return Topology(exchange=f"{prefix}.commands")
 
 
 @pytest.fixture
 async def broker(
-    broker_settings: BrokerSettings, topology: Topology
+    broker_url: SecretStr, topology: Topology
 ) -> AsyncIterator[AbstractRobustConnection]:
-    connection = await connect(broker_settings, connection_name=f"{topology.exchange}.test")
+    connection = await connect(broker_url, connection_name=f"{topology.exchange}.test")
     try:
         yield connection
     finally:
-        await _delete_topology(connection, topology)
+        await delete_topology(connection, topology)
         await connection.close()
 
 
-async def _delete_topology(connection: AbstractRobustConnection, topology: Topology) -> None:
-    channel = await connection.channel()
-    for queue in TEST_QUEUES:
-        for name in (queue, dead_letter_queue_name(queue)):
-            await channel.queue_delete(f"{topology.exchange}.{name}")
-    await channel.exchange_delete(topology.exchange)
-    await channel.exchange_delete(topology.dead_letter_exchange)
-    await channel.close()
+@pytest.fixture
+async def silent() -> AsyncIterator[SilentServer]:
+    async with silent_server() as server:
+        yield server
 
 
-TEST_QUEUES = ("work", "other")
-"""Queue names the broker tests use, prefixed by their topology's exchange name."""
+@pytest.fixture
+def hanging_broker_url(silent: SilentServer) -> str:
+    """A broker that accepts the connection and never answers."""
+    return f"amqp://guest:s3cret-pw@127.0.0.1:{silent.port}/"
 
 
-def queue_spec(topology: Topology, *routing_keys: str, name: str = "work") -> QueueSpec:
-    assert name in TEST_QUEUES, "add the name to TEST_QUEUES so the test deletes it"
-    return QueueSpec(name=f"{topology.exchange}.{name}", routing_keys=routing_keys)
+@pytest.fixture
+def hanging_database_settings(silent: SilentServer) -> Settings:
+    """A database that accepts the connection and never answers."""
+    return Settings(
+        database_url=SecretStr(f"postgresql+psycopg://u:s3cret-pw@127.0.0.1:{silent.port}/db")
+    )

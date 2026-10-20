@@ -15,19 +15,19 @@ from datetime import timedelta
 
 import pytest
 from aio_pika.abc import AbstractQueue, AbstractRobustConnection
+from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from di1.platform.config import BrokerSettings
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, unit_of_work_factory
 from di1.platform.messaging.envelope import Envelope
-from di1.platform.messaging.inbox import InboxRetention
-from di1.platform.messaging.outbox import add_outbox_message
+from di1.platform.messaging.outbox import OutboxRetention, add_outbox_message
 from di1.platform.messaging.outbox_relay import OutboxRelay
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import Topology, declare_queue
-from tests.integration.platform.conftest import queue_spec
-from tests.integration.platform.support import eventually
+from tests.integration.platform.support import PUBLISH_TIMEOUT_SECONDS
+from tests.support.broker import queue_spec
+from tests.support.waits import eventually
 
 
 class _CrashError(BaseException):
@@ -78,19 +78,19 @@ async def _drain(queue: AbstractQueue) -> list[Envelope]:
 
 @pytest.fixture
 async def queue(
-    broker: AbstractRobustConnection, broker_settings: BrokerSettings, topology: Topology
+    broker: AbstractRobustConnection, broker_url: SecretStr, topology: Topology
 ) -> AbstractQueue:
     channel = await broker.channel()
-    return await declare_queue(
-        channel, topology, queue_spec(topology, "test.command"), settings=broker_settings
-    )
+    return await declare_queue(channel, topology, queue_spec(topology, "test.command"))
 
 
 @pytest.fixture
 async def publisher(
-    broker: AbstractRobustConnection, broker_settings: BrokerSettings, topology: Topology
+    broker: AbstractRobustConnection, broker_url: SecretStr, topology: Topology
 ) -> MessagePublisher:
-    return await MessagePublisher.create(broker, topology, settings=broker_settings)
+    return await MessagePublisher.create(
+        broker, topology, confirm_timeout_seconds=PUBLISH_TIMEOUT_SECONDS
+    )
 
 
 class _Clock:
@@ -168,7 +168,7 @@ async def test_a_crash_after_publish_resends_the_message(
     queue: AbstractQueue,
 ) -> None:
     """The broker has the message but the row was never marked: the next relay sends it
-    again, and the consumer's inbox absorbs the duplicate (test_consumer)."""
+    again; the duplicate takes the next QUEUED request or finds none (OQ-50 item 2)."""
     [envelope] = await _write(session_factory, "test.command")
 
     with pytest.raises(_CrashError):
@@ -186,7 +186,7 @@ async def test_a_failed_row_does_not_block_the_rows_after_it(
     engine: AsyncEngine,
     publisher: MessagePublisher,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     queue: AbstractQueue,
 ) -> None:
@@ -209,7 +209,6 @@ async def test_a_failed_row_does_not_block_the_rows_after_it(
         await broker.channel(),
         topology,
         queue_spec(topology, "test.command", "late.command"),
-        settings=broker_settings,
     )
     assert await relay.relay_batch() == 0  # still pausing
     clock.now += 1.0
@@ -289,13 +288,17 @@ async def test_run_publishes_new_messages_until_stopped(
 
 
 async def _wait_for_message(queue: AbstractQueue) -> bytes:
-    for _ in range(100):
+    bodies: list[bytes] = []
+
+    async def published() -> bool:
         message = await queue.get(timeout=5, fail=False)
         if message is not None:
             await message.ack()
-            return message.body
-        await asyncio.sleep(0.05)
-    raise AssertionError("the relay did not publish the message")
+            bodies.append(message.body)
+        return bool(bodies)
+
+    await eventually(published, every=0.05)
+    return bodies[0]
 
 
 class _FailsOnce:
@@ -434,7 +437,7 @@ async def test_an_unavailable_broker_stops_the_batch_at_its_first_row(
     session_factory: async_sessionmaker[AsyncSession],
     engine: AsyncEngine,
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     publisher: MessagePublisher,
     queue: AbstractQueue,
@@ -443,7 +446,9 @@ async def test_an_unavailable_broker_stops_the_batch_at_its_first_row(
     failure and stops, leaving the others untried, and does not pause the row (the broker,
     not the row, failed), so the next poll tries it again."""
     written = await _write(session_factory, *["test.command"] * 3)
-    down = await MessagePublisher.create(broker, topology, settings=broker_settings)
+    down = await MessagePublisher.create(
+        broker, topology, confirm_timeout_seconds=PUBLISH_TIMEOUT_SECONDS
+    )
     await down.close()
     switch = _Switch(down)
     clock = _Clock()
@@ -464,42 +469,44 @@ async def test_an_unavailable_broker_stops_the_batch_at_its_first_row(
     assert await _drain(queue) == written
 
 
-async def test_run_deletes_old_inbox_rows(
+async def test_run_deletes_old_published_outbox_rows(
     session_factory: async_sessionmaker[AsyncSession],
     engine: AsyncEngine,
     publisher: MessagePublisher,
 ) -> None:
-    """The relay's poll loop runs the inbox retention (the worker has no periodic loop: it
-    waits for doorbells)."""
+    """The outbox otherwise grows by one row per processing request, forever."""
     async with engine.begin() as connection:
         await connection.execute(
             text(
-                "INSERT INTO platform.inbox_messages (consumer_name, message_id, processed_at)"
-                " VALUES ('old', :m, now() - interval '8 days'), ('new', :n, now())"
+                "INSERT INTO platform.outbox_messages"
+                " (message_id, message_type, schema_version, payload, created_at, published_at)"
+                " VALUES (:m, 'old', 1, '{}', now() - interval '9 days',"
+                " now() - interval '8 days'),"
+                " (:n, 'new', 1, '{}', now(), now())"
             ),
             {"m": uuid.uuid4(), "n": uuid.uuid4()},
         )
-    retention = InboxRetention(
+    retention = OutboxRetention(
         unit_of_work_factory(session_factory), older_than=timedelta(days=7), interval_seconds=3600
     )
     stop = asyncio.Event()
     running = asyncio.create_task(
         _relay(session_factory, publisher).run(
-            stop, poll_interval_seconds=0.05, inbox_retention=retention
+            stop, poll_interval_seconds=0.05, retentions=[retention]
         )
     )
 
-    async def consumers() -> list[str]:
+    async def message_types() -> list[str]:
         async with engine.connect() as connection:
             rows = await connection.execute(
-                text("SELECT consumer_name FROM platform.inbox_messages")
+                text("SELECT message_type FROM platform.outbox_messages")
             )
             return [row[0] for row in rows]
 
-    await eventually(lambda: _only_new(consumers))
+    await eventually(lambda: _only_new(message_types), every=0.05)
     stop.set()
     await asyncio.wait_for(running, timeout=5)
 
 
-async def _only_new(consumers: Callable[[], Awaitable[list[str]]]) -> bool:
-    return await consumers() == ["new"]
+async def _only_new(message_types: Callable[[], Awaitable[list[str]]]) -> bool:
+    return await message_types() == ["new"]

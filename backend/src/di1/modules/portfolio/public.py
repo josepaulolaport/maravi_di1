@@ -1,7 +1,9 @@
-"""Portfolio's public contract: the pure chains, the per-date writer, the predecessor readers and
-the published read models (interfaces.md "Portfolio"; OQ-21, OQ-23, OQ-25, OQ-26, OQ-28).
-
-Frozen in W0.3c. Lane E implements the writer, the readers and the query service. The read models
+"""Portfolio's public contract (interfaces.md "Portfolio"; OQ-21, OQ-23, OQ-25, OQ-26, OQ-28): the
+Protocols of the per-date writer, the predecessor reader and the read models; the DTOs and enums
+they carry; and the pure chain functions Processing runs for a date (the three chains and the
+maturity rule; the classes, engines and helpers behind them stay in ``domain/``). The read-model
+views are defined here, not in ``domain/``, because they carry other modules' enums
+(``ChainStatus``, ``PriceSource``), which a domain may not import. The read models
 mirror the frozen HTTP contract (`frontend/src/api/contract/portfolio.ts` at 57b4df0, with the
 OQ-31 status names, which lane I applies); the HTTP layer only renames and formats. A chain
 status of ``None`` is "not processed"; each ``published_at`` is that chain's ``*_processed_at`` in
@@ -19,39 +21,37 @@ from typing import Protocol
 from uuid import UUID
 
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
-from di1.modules.portfolio.domain.cash import CashBalance, CashCalculator, CashDay
+from di1.modules.portfolio.domain.cash import CashBalance, CashDay, calculate_cash_day
 from di1.modules.portfolio.domain.maturity import is_past_maturity, reference_pu_on
 from di1.modules.portfolio.domain.positions import (
     OpenPosition,
     PositionDay,
     PositionsDay,
-    PositionsEngine,
     PositionState,
+    calculate_positions_day,
 )
 from di1.modules.portfolio.domain.trade import Trade
 from di1.modules.portfolio.domain.valuation import (
     AssetValuation,
     AssetValuationInput,
     PortfolioValuation,
-    ReferenceSource,
-    ValuationCalculator,
     ValuationStatus,
+    value_positions,
 )
+from di1.modules.prices.public import PriceSource
 from di1.modules.processing.public import ChainStatus
-from di1.platform.database.unit_of_work import UnitOfWork
 
 __all__ = [
     "AssetValuation",
     "AssetValuationInput",
     "CashBalance",
-    "CashCalculator",
     "CashDay",
     "CashSummaryView",
     "OpenPosition",
     "PnLPointView",
-    "PortfolioQueryService",
     "PortfolioReader",
     "PortfolioResultsWriter",
+    "PortfolioService",
     "PortfolioSummaryView",
     "PortfolioValuation",
     "PositionDay",
@@ -59,15 +59,15 @@ __all__ = [
     "PositionState",
     "PositionTableView",
     "PositionsDay",
-    "PositionsEngine",
     "PositionsSummaryView",
     "PreviousPositionsDay",
-    "ReferenceSource",
     "Trade",
-    "ValuationCalculator",
     "ValuationStatus",
+    "calculate_cash_day",
+    "calculate_positions_day",
     "is_past_maturity",
     "reference_pu_on",
+    "value_positions",
 ]
 
 
@@ -75,17 +75,13 @@ __all__ = [
 
 
 class PortfolioResultsWriter(Protocol):
-    """Publishes one date of a chain inside Processing's date transaction; never commits. Each
+    """Publishes one date of a chain inside Processing's date transaction (built on its session);
+    never commits. Each
     call replaces that date's rows (rows of assets no longer expected on the date are deleted,
-    OQ-10) and recomputes the date's AUM from the other chain's published value (OQ-21).
-
-    ``other_chain_processed`` is Processing's answer for the other chain on that date: ``True``
-    when it is ``PROCESSED`` or ``PROCESSED_WITH_ISSUES``. When ``False`` (``FAILED``,
-    ``RUNNING`` or not processed) the written AUM is null (OQ-38, OQ-40). ALL writes both chains
-    in the same transaction, positions first, then cash (integrator choice):
-    ``write_positions_day`` passes ``False`` and ``write_cash_day``, made after both chains are
-    computed, passes the positions chain's outcome, so AUM never sees a chain ``RUNNING``. When
-    only one chain is alive on an ALL date (OQ-36), Processing makes only that chain's call."""
+    OQ-10). AUM is not written: ``PortfolioService`` computes it on read from the date's
+    published cash and market value when both chains are processed (OQ-21, OQ-38). ALL writes
+    both chains in the same transaction, positions first, then cash (integrator choice); when only
+    one chain is alive on an ALL date (OQ-36), Processing makes only that chain's call."""
 
     async def write_positions_day(
         self,
@@ -93,9 +89,6 @@ class PortfolioResultsWriter(Protocol):
         valuation: PortfolioValuation,
         asset_pnl: Mapping[UUID, AssetPnLResult],
         pnl: PortfolioPnLResult,
-        *,
-        uow: UnitOfWork,
-        other_chain_processed: bool,
     ) -> None:
         """``positions``, ``position_metrics`` and ``portfolio_metrics`` for ``day.date``: the
         quantities and averages of ``day``, each expected asset's ``financial_total`` and P&L
@@ -103,16 +96,11 @@ class PortfolioResultsWriter(Protocol):
         in the price table (OQ-30).
 
         The assets of ``day.positions``, ``valuation.assets`` and ``asset_pnl`` must be the same
-        set, the expected assets of the date; the writer raises ``ValueError`` otherwise.
-        The written AUM is recomputed from the published cash and this market value, or null
-        when ``other_chain_processed`` is ``False`` (OQ-38)."""
+        set, the expected assets of the date; the writer raises ``PortfolioError`` otherwise."""
         ...
 
-    async def write_cash_day(
-        self, day: CashDay, *, uow: UnitOfWork, other_chain_processed: bool
-    ) -> None:
-        """The ``cash_balances`` row for ``day.date``, and the date's AUM (null when
-        ``other_chain_processed`` is ``False``, OQ-38)."""
+    async def write_cash_day(self, day: CashDay) -> None:
+        """The ``cash_balances`` row for ``day.date``."""
         ...
 
 
@@ -177,8 +165,9 @@ class PositionsSummaryView:
 
 @dataclass(frozen=True, slots=True)
 class PortfolioSummaryView:
-    """``aum`` is a plain value with no status of its own: cash plus market value of the date,
-    ``None`` when either side is missing (OQ-28)."""
+    """``aum`` is a plain value with no status of its own, computed on read: cash plus market
+    value of the date, ``None`` when either side is missing or when either chain of the date is
+    not ``PROCESSED``/``PROCESSED_WITH_ISSUES`` (OQ-21, OQ-28, OQ-38)."""
 
     date: date
     cash: CashSummaryView
@@ -191,7 +180,15 @@ class PositionRowView:
     """``reference_source``, ``reference_pu`` and ``reference_rate`` are the current preferred
     price of the date (MANUAL, else B3, exact date; PU 0 after maturity), read from the price
     table; the stored figures are those of the last processing, so after a price correction the
-    two may differ until the user processes the date again (OQ-30, OQ-31)."""
+    two may differ until the user processes the date again (OQ-30, OQ-31).
+    ``reference_price_changed`` marks that case (OQ-50 item 3): the current preferred price of
+    the date, or of the day before while Q[D−1] ≠ 0 (position P&L uses it only then, OQ-4), was
+    registered (``created_at``; a set always inserts a new row, OQ-25) after the date's positions
+    chain was processed (``portfolio_processed_at``). It is ``False`` with no processing time, and
+    when no such price is read (after maturity, OQ-1). Removing the preferred price so an older
+    one becomes current is not marked: that price predates the run (integrator reading).
+    ``created_at`` is the database's ``now()`` and ``portfolio_processed_at`` the worker's
+    ``SystemClock``, on one host (integrator reading)."""
 
     asset_id: UUID
     asset_code: str
@@ -199,9 +196,10 @@ class PositionRowView:
     quantity: int
     average_entry_pu: Decimal | None
     average_entry_rate: Decimal | None
-    reference_source: ReferenceSource | None
+    reference_source: PriceSource | None
     reference_pu: Decimal | None
     reference_rate: Decimal | None
+    reference_price_changed: bool
     financial_total: Decimal | None
     position_pnl: Decimal | None
     trades_pnl: Decimal | None
@@ -220,35 +218,26 @@ class PositionTableView:
 
 @dataclass(frozen=True, slots=True)
 class PnLPointView:
-    """One calendar date of the range for the Carteira chart (OQ-16, OQ-27, OQ-31 item 8, OQ-41):
-    every date of [start_date, end_date] is a point, processed or not. ``cumulative_pnl`` is the
-    stored since-inception figure (``None`` from the first gap, spec §8.3); ``range_cumulative_pnl``
-    is Σ ``daily_pnl`` from the requested start date to this date, summed in the backend on
-    request. A date adds its ``daily_pnl`` only when its positions status is ``PROCESSED`` or
-    ``PROCESSED_WITH_ISSUES`` and ``daily_pnl`` is not ``None``; otherwise (not processed,
-    ``FAILED``, ``RUNNING``, a missing price) it adds 0 (OQ-41). A ``FAILED`` or ``RUNNING``
-    point shows its status with ``daily_pnl``, ``cumulative_pnl`` and ``pnl_status`` ``None`` and
-    ``published_at`` the stored processing time (integrator reading), even if older published
-    rows exist."""
+    """One calendar date of the Carteira chart (OQ-16, OQ-27, OQ-41, OQ-49).
+
+    ``range_cumulative_pnl`` is Σ ``daily_pnl`` from the requested start, summed on request. A date
+    adds its ``daily_pnl`` only when its positions status is ``PROCESSED`` or
+    ``PROCESSED_WITH_ISSUES`` and ``daily_pnl`` is not ``None``; otherwise it adds 0. The stored
+    since-inception ``cumulative_pnl`` and the processing time stay on the summary (OQ-49)."""
 
     date: date
     daily_pnl: Decimal | None
-    cumulative_pnl: Decimal | None
     range_cumulative_pnl: Decimal
     """Never ``None``: a date without a usable daily P&L adds 0 (OQ-41)."""
-    pnl_status: CalculationCompleteness | None
-    """``None`` on a date not processed, ``FAILED`` or ``RUNNING`` (OQ-41)."""
     status: ChainStatus | None
-    """The positions chain status of the date; ``None`` is not processed, which the HTTP layer
-    renames to ``NOT_PROCESSED`` as in every other read (OQ-41)."""
-    published_at: datetime | None
-    """When the positions chain of the date was last processed (OQ-31); ``None`` if never."""
+    """The positions chain of the date; ``None`` is not processed, which the HTTP layer renames
+    to ``NOT_PROCESSED`` (OQ-41)."""
 
 
-class PortfolioQueryService(Protocol):
+class PortfolioService(Protocol):
     """Published data only, never recalculated on read (spec §11.4); each date's chain statuses
     come from ``processing.date_status`` (OQ-23), read in the same transaction as the published
-    rows (``DateStatusReader`` takes the caller's Unit of Work), so figures and statuses always
+    rows (``DateStatusReader`` is built on the same session), so figures and statuses always
     come from one snapshot."""
 
     async def get_summary(self, on: date) -> PortfolioSummaryView: ...
@@ -256,7 +245,7 @@ class PortfolioQueryService(Protocol):
     async def get_position_table(self, on: date) -> PositionTableView: ...
 
     async def get_pnl_series(self, start_date: date, end_date: date) -> tuple[PnLPointView, ...]:
-        """Every date of [start_date, end_date], in date order (OQ-16, OQ-27, OQ-41), each with
-        its positions status and processing time only (OQ-31 item 8) and the running sum of
-        ``daily_pnl`` from ``start_date``, a missing or incomplete date counting as 0."""
+        """Every date of [start_date, end_date], in date order (OQ-16, OQ-27, OQ-41, OQ-49), each
+        with its positions status and the running sum of ``daily_pnl`` from ``start_date``, a
+        missing or incomplete date counting as 0."""
         ...

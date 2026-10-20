@@ -10,7 +10,7 @@ These rules add to the root CLAUDE.md. The authorities are:
 ```text
 backend/
   pyproject.toml  uv.lock  alembic.ini
-  migrations/{env.py, versions/, sql/}  # integrator (X) only; sql/ holds each revision's reviewed SQL; revisions 0001–0006 (head 0006) = docs/schema.sql
+  migrations/{env.py, versions/, sql/}  # integrator (X) only; sql/ holds each revision's reviewed SQL; revisions 0001–0007 (head 0007) = docs/schema.sql
   src/di1/
     main.py                              # integrator
     composition/{routers,dependencies,consumers}.py   # integrator
@@ -20,21 +20,20 @@ backend/
       public.py
       dependencies.py                    # if needed
       domain/
+      application/ports.py               # the repository Protocols the services use
       application/services/
-      application/interfaces/            # only when meaningful
       infrastructure/persistence/{models.py, repositories.py, queries/}
       infrastructure/<adapter>/          # other outbound adapters, when needed
       presentation/http/{router.py, schemas.py}
       presentation/messaging/            # this module's RabbitMQ consumers and handlers
     workers/{main.py, outbox_relay.py}   # lane H; no dispatcher (OQ-46)
-  tests/{unit/<module>/, integration/, architecture/, fakes/}
-  tests/acceptance/                  # spec §13 phase 1, pure; acceptance-tests session
-  tests/integration/acceptance/      # spec §13 phase 2; acceptance-tests session
+  tests/{unit/<module>/, integration/, architecture/, support/}  # support/: shared fakes, builders, db, http, broker
+  tests/integration/acceptance/      # spec §13 scenarios, once, over HTTP; acceptance-tests session
 ```
 
 There is no `tests/e2e/`: the end-to-end smoke is `scripts/e2e.sh` + `scripts/e2e_smoke.py`, run by `make e2e` from the repository root.
 
-Create only the files and packages that are used. Initially only Processing has a messaging consumer. Its handlers parse the message and call `application/`, and hold no business logic. Shared RabbitMQ infrastructure (connection, publisher, consumer base, envelope, outbox, inbox, topology) lives in `platform/messaging/`.
+Create only the files and packages that are used. Initially only Processing has a messaging consumer. Its handlers parse the message and call `application/`, and hold no business logic. Shared RabbitMQ infrastructure (connection, publisher, consumer base and job loop, envelope, outbox, topology) lives in `platform/messaging/`.
 
 ## Python rules
 
@@ -52,7 +51,7 @@ Create only the files and packages that are used. Initially only Processing has 
   - no internal randomness: a calculation that needs it takes an explicit seed or an injected generator (`rng: random.Random`, or `random.Random(seed)`); the module-level `random` functions, `random.seed`, `SystemRandom` and an unseeded `random.Random()` are rejected.
 - **Services:**
   - Services and HTTP may be `async`.
-  - A write receives the Unit of Work (`*, uow`), saves only the fact, then commits once. There is no invalidation and no `FinancialResultInvalidator`: Ledger and Prices never call Processing (OQ-31).
+  - A service is built per request on its Unit of Work (`build_<module>_service(uow, ...)` in the module's `dependencies.py`) and keeps it; its methods never take `uow` (staff review S1; Portfolio and Processing adopt it in later PRs). A write saves only the fact, then commits once. There is no invalidation and no `FinancialResultInvalidator`: Ledger and Prices never call Processing (OQ-31).
   - A write never enqueues processing.
 - **Persistence:**
   - The ORM models mirror `docs/schema.sql` exactly; do not invent columns. A schema change needs the user's decision first (`spec-gap`).
@@ -64,8 +63,8 @@ Create only the files and packages that are used. Initially only Processing has 
   - Fractional powers use `Decimal ** Decimal`; never `math.pow` or a float exponent.
   - One shared context: 34 digits, `ROUND_HALF_UP` (OQ-3). Quantize only on storage (a calculated PU to 10 dp, a calculated rate to 12 dp). A typed value with more decimals is rejected.
 - **Messaging:**
-  - RabbitMQ delivery is at least once. Handlers are idempotent through `platform.inbox_messages`.
-  - Acknowledge only after the durable state change is committed.
+  - RabbitMQ delivery is at least once, and a message is only a hint: a handler takes the waiting work from PostgreSQL (the oldest `QUEUED` request, OQ-50) or finds none, so a duplicate is harmless, and the worker's periodic sweep takes work whose message was lost. There is no inbox, dead-letter queue or redelivery.
+  - Acknowledge once the start the message asks for is committed or skipped.
   - Publish only through `platform.outbox_messages` and the relay.
 - **Errors** are RFC 9457 problem+json with `errors[{code, message, field}]`; codes from the catalogue in `docs/interfaces.md` "Errors" (OQ-15).
   - Raise a business error as `DomainError(ErrorDetail(code, "<pt-BR message>", "<field>"))` from `di1.shared.errors`, in `domain/` or `application/`. `composition/errors.py` renders it; never build an error response yourself.
@@ -87,14 +86,14 @@ Create only the files and packages that are used. Initially only Processing has 
   - FastAPI only in `presentation/`, the module's `dependencies.py` (its dependency providers), `composition/` and `main.py`;
   - SQL only in `infrastructure/`, `dependencies.py`, `platform/` and `composition/`;
   - Pydantic only in `presentation/` and `platform/`;
-  - modules use only the outbox, inbox and envelope parts of `platform.messaging`, and `presentation/messaging/` may also use its consumer base. aio-pika appears only in `platform/` and `workers/`;
+  - modules use only the outbox and envelope parts of `platform.messaging`, and `presentation/messaging/` may also use its consumer base. aio-pika appears only in `platform/` and `workers/`;
   - no dynamic imports. Every file sits in the plan §1 layout: `infrastructure/` may hold any adapter, and `presentation/` holds `http/` and `messaging/`.
 - API tests use FastAPI's `TestClient`, which needs `httpx2`. Async tests run under pytest-asyncio in `auto` mode; do not use the `anyio` marker.
 - Time-based behaviour (queue order, today's date) uses an injected clock, never the wall clock.
 
 ## Commands (from `backend/`)
 
-The full suite is `make test-backend` from the repository root (`scripts/test-backend.sh`): it starts throwaway `postgres:16` and `rabbitmq:4.1-management` containers on free ports (or uses `TEST_DATABASE_URL` / `TEST_RABBITMQ_URL`), sets `REQUIRE_DATABASE_TESTS=1` and `REQUIRE_BROKER_TESTS=1`, and so never skips a database or broker test (README, Setup). Bare `uv run pytest` is for quick local runs:
+The full suite is `make test-backend` from the repository root (`scripts/test-backend.sh`): it starts throwaway `postgres:16` and `rabbitmq:4.1-management` containers on free ports (or uses `TEST_DATABASE_URL` / `TEST_RABBITMQ_URL`), sets `REQUIRE_DATABASE_TESTS=1` and `REQUIRE_BROKER_TESTS=1`, and so never skips a database or broker test (docs/development.md, "Setup in 30 seconds"). Bare `uv run pytest` is for quick local runs:
 
 ```bash
 uv sync

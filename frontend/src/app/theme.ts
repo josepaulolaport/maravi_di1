@@ -35,8 +35,6 @@ const navy: MantineColorsTuple = [
 
 const other = {
   pageBackground: '#F8FAFC',
-  border: '#E2E8F0',
-  textMuted: '#64748B',
   accent: '#29B8D0',
   sidebarMuted: '#94A3B8',
   sidebarHover: 'rgb(255 255 255 / 5%)',
@@ -54,7 +52,6 @@ export const theme = createTheme({
   other,
   components: {
     Paper: { defaultProps: { withBorder: true, radius: 'md' } },
-    Card: { defaultProps: { withBorder: true, radius: 'md' } },
     Tooltip: { defaultProps: { withArrow: true } },
     // Menus and date pickers open from table rows and fields: keep them open while in use,
     // even when the row or field scrolls out of view (Floating UI's "hide" would close them).
@@ -65,9 +62,6 @@ export const theme = createTheme({
 /** Exposes `theme.other` as `--app-*` CSS variables and sets the page background. */
 export const cssVariablesResolver: CSSVariablesResolver = () => {
   const variables = {
-    '--app-page-bg': other.pageBackground,
-    '--app-border': other.border,
-    '--app-text-muted': other.textMuted,
     '--app-accent': other.accent,
     '--app-sidebar-muted': other.sidebarMuted,
     '--app-sidebar-hover': other.sidebarHover,

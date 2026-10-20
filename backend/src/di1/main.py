@@ -5,8 +5,9 @@ at import time::
 
     uvicorn di1.main:create_app --factory
 
-The lifespan creates the process's one engine and session factory (platform) and disposes of the
-engine at shutdown; it first configures logging (``LOG_LEVEL``), once per process. The app's clock
+The lifespan reads the `Settings` (unless a test passes them), configures logging
+(``LOG_LEVEL``) once per process, creates the process's one engine and session factory (platform)
+and disposes of the engine at shutdown. The app's clock
 (OQ-14) is the system clock unless a test passes a fixed one. Every error answers RFC 9457
 problem+json (``composition.errors``).
 """
@@ -22,7 +23,7 @@ from di1.composition.errors import install_problem_handlers
 from di1.composition.health import router as health_router
 from di1.composition.routers import include_routers
 from di1.platform.clock import SystemClock
-from di1.platform.config import Settings, get_logging_settings, get_settings
+from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.observability.logging_setup import configure_logging
@@ -43,8 +44,9 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        configure_logging(get_logging_settings())
-        engine = create_engine(settings if settings is not None else get_settings())
+        resolved = settings if settings is not None else Settings()
+        configure_logging(resolved.log_level)
+        engine = create_engine(resolved)
         app.state.engine = engine
         app.state.session_factory = create_session_factory(engine)
         try:

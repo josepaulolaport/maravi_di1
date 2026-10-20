@@ -1,74 +1,78 @@
 """The predecessor rule, per day (interfaces.md "Predecessor rule, per day"; OQ-26 item 8,
-OQ-31 item 4, OQ-37 item 4, OQ-40 item 5): one pure decision for the preview and the run."""
+OQ-31 item 4, OQ-37 item 4, OQ-40 item 5): one lazy rule for the preview and the run."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from datetime import date
+
 import pytest
 
-from di1.modules.processing.domain.predecessor import (
-    PredecessorFact,
-    PredecessorState,
-    allows_run,
-    predecessor_state,
-)
+from di1.modules.processing.application.services.predecessor import read_predecessor
+from di1.modules.processing.domain.date_status import Chain, ChainStatus
+from di1.modules.processing.domain.predecessor import PredecessorState
+from tests.support.fakes import FakeChainHistory
+from tests.unit.processing.fakes import InMemoryDateStatuses, date_status
 
-RECORDED = [
-    PredecessorState.PROCESSED,
-    PredecessorState.PROCESSED_WITH_ISSUES,
-    PredecessorState.RUNNING,
-    PredecessorState.FAILED,
-]
+D0 = date(2026, 10, 5)
 
 
-@pytest.mark.parametrize("recorded", RECORDED)
-def test_a_status_on_the_day_before_is_reported_as_is_without_asking_for_more(
-    recorded: PredecessorState,
+@dataclass
+class Spy(InMemoryDateStatuses):
+    """Records which chains were asked for an earlier status."""
+
+    asked: list[Chain] = field(default_factory=list)
+
+    async def has_status_before(self, chain: Chain, day: date) -> bool:
+        self.asked.append(chain)
+        return await super().has_status_before(chain, day)
+
+
+async def state(
+    stored: ChainStatus | None,
+    *,
+    earlier: bool = False,
+    entries: bool = False,
+    statuses: Spy | None = None,
+    history: FakeChainHistory | None = None,
+) -> PredecessorState:
+    statuses = statuses or Spy()
+    if earlier:
+        statuses.rows[date(2026, 10, 1)] = date_status(date(2026, 10, 1), cash=ChainStatus.FAILED)
+    history = history or FakeChainHistory(first_cash_movement=D0 if entries else None)
+    return await read_predecessor(Chain.CASH, D0, stored, date_statuses=statuses, history=history)
+
+
+@pytest.mark.parametrize("stored", list(ChainStatus))
+async def test_a_status_on_the_day_before_is_reported_as_is_without_asking_for_more(
+    stored: ChainStatus,
 ) -> None:
-    assert predecessor_state(recorded) is recorded
+    statuses, history = Spy(), FakeChainHistory()
+
+    assert await state(stored, statuses=statuses, history=history) == stored.value
+    assert (statuses.asked, history.asked) == ([], [])
 
 
-def test_without_a_status_the_rule_asks_first_for_an_earlier_status() -> None:
-    assert predecessor_state(None) is PredecessorFact.EARLIER_STATUS
+async def test_an_earlier_status_alone_is_a_gap_and_the_ledger_is_not_asked() -> None:
+    history = FakeChainHistory(first_cash_movement=D0)
+
+    assert await state(None, earlier=True, history=history) is PredecessorState.NOT_PROCESSED
+    assert history.asked == []
 
 
-def test_an_earlier_status_without_one_on_the_day_before_is_a_gap_and_the_ledger_is_not_asked() -> (
-    None
-):
-    assert predecessor_state(None, has_earlier_status=True) is PredecessorState.NOT_PROCESSED
+async def test_entries_of_the_chain_on_or_before_the_day_before_mean_not_processed() -> None:
+    assert await state(None, entries=True) is PredecessorState.NOT_PROCESSED
 
 
-def test_with_no_status_at_all_the_rule_asks_the_ledger() -> None:
-    assert predecessor_state(None, has_earlier_status=False) is PredecessorFact.CHAIN_ENTRIES
+async def test_no_status_and_no_entry_is_the_zero_state() -> None:
+    statuses, history = Spy(), FakeChainHistory()
 
-
-def test_entries_of_the_chain_on_or_before_the_day_before_mean_not_processed() -> None:
-    state = predecessor_state(None, has_earlier_status=False, has_chain_entries=True)
-
-    assert state is PredecessorState.NOT_PROCESSED
-
-
-def test_no_status_and_no_entry_is_the_zero_state() -> None:
-    state = predecessor_state(None, has_earlier_status=False, has_chain_entries=False)
-
-    assert state is PredecessorState.ZERO_STATE
-
-
-def test_a_recorded_status_wins_over_any_fact() -> None:
-    state = predecessor_state(
-        PredecessorState.PROCESSED, has_earlier_status=False, has_chain_entries=False
-    )
-
-    assert state is PredecessorState.PROCESSED
-
-
-@pytest.mark.parametrize("derived", [PredecessorState.NOT_PROCESSED, PredecessorState.ZERO_STATE])
-def test_a_derived_state_is_not_a_recorded_status(derived: PredecessorState) -> None:
-    with pytest.raises(ValueError, match="recorded"):
-        predecessor_state(derived)
+    assert await state(None, statuses=statuses, history=history) is PredecessorState.ZERO_STATE
+    assert (statuses.asked, history.asked) == ([Chain.CASH], [(Chain.CASH, D0)])
 
 
 @pytest.mark.parametrize(
-    ("state", "runs"),
+    ("state_", "runs"),
     [
         (PredecessorState.PROCESSED, True),
         (PredecessorState.PROCESSED_WITH_ISSUES, True),
@@ -79,9 +83,9 @@ def test_a_derived_state_is_not_a_recorded_status(derived: PredecessorState) -> 
     ],
 )
 def test_only_a_processed_day_before_or_the_zero_state_lets_the_date_run(
-    state: PredecessorState, runs: bool
+    state_: PredecessorState, runs: bool
 ) -> None:
-    assert allows_run(state) is runs
+    assert state_.allows_run is runs
 
 
 def test_oq31_the_predecessor_has_no_stale_state() -> None:

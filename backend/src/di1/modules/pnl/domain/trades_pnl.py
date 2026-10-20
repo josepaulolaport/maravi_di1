@@ -12,22 +12,21 @@ from __future__ import annotations
 from collections.abc import Sequence
 from decimal import Decimal
 
-from di1.modules.pnl.domain.results import unsigned_zero
-from di1.modules.pnl.domain.trade import PnLTrade
-from di1.shared.decimals import financial_context
+from di1.modules.pnl.domain.results import PnLTrade
+from di1.shared.decimals import ZERO, financial_context, unsigned
 
 
 def calculate_trades_pnl(
     day_trades: Sequence[PnLTrade], current_reference_pu: Decimal | None
 ) -> Decimal | None:
     if not day_trades:
-        return Decimal(0)
+        return ZERO
     if current_reference_pu is None:
         return None
     with financial_context():
-        return unsigned_zero(
+        return unsigned(
             sum(
                 (t.signed_quantity * (current_reference_pu - t.execution_pu) for t in day_trades),
-                Decimal(0),
+                ZERO,
             )
         )

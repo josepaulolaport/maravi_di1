@@ -1,7 +1,9 @@
 """The worker with the real collaborators on PostgreSQL: Ledger's, Prices', Asset's and
-Portfolio's readers and Portfolio's writer, all on the date's session (plan §7: both chains and
-the AUM of an ALL date in one transaction; ``aum = cash + market value`` after CASH-only,
-POSITIONS-only and ALL publishes; missing price). Expected values by hand from CLAUDE.md §2."""
+Portfolio's readers and Portfolio's writer, all on the date's session (plan §7: both chains of an
+ALL date in one transaction; the Carteira's AUM, computed on read as ``cash + market value``,
+after ALL publishes and after a CASH-only then a POSITIONS-only publish; missing price; a real SQL
+error in one chain's savepoint). Expected values by hand from
+CLAUDE.md §2."""
 
 from __future__ import annotations
 
@@ -15,14 +17,19 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from di1.modules.asset.dependencies import asset_reader
-from di1.modules.ledger.dependencies import ledger_reader
-from di1.modules.portfolio.dependencies import portfolio_reader, results_writer
-from di1.modules.prices.dependencies import price_reader
-from di1.modules.processing.dependencies import make_range_processor
+from di1.modules.asset.dependencies import build_asset_reader
+from di1.modules.ledger.dependencies import build_ledger_reader
+from di1.modules.portfolio.dependencies import (
+    build_portfolio_reader,
+    build_portfolio_service,
+    build_results_writer,
+)
+from di1.modules.prices.dependencies import build_price_reader
+from di1.modules.processing.dependencies import build_date_status_reader, build_range_processor
 from di1.platform.database.unit_of_work import unit_of_work_factory
-from tests.integration.processing.support import seed_instrument
-from tests.integration.processing.worker_support import MutableClock
+from tests.support.builders import DI1F29, T0
+from tests.support.db import seed_catalogue
+from tests.support.fakes import FakeClock
 
 D1, D2, D3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
 
@@ -30,17 +37,17 @@ D1, D2, D3 = date(2026, 10, 6), date(2026, 10, 7), date(2026, 10, 8)
 class RealWorker:
     def __init__(self, engine: AsyncEngine, factory: async_sessionmaker[AsyncSession]) -> None:
         self.engine = engine
-        self.clock = MutableClock()
+        self.clock = FakeClock(T0.date(), T0)
         uow_factory = unit_of_work_factory(factory)
         self.uow_factory = uow_factory
-        self.processor = make_range_processor(  # the worker's wiring (OQ-46)
+        self.processor = build_range_processor(  # the worker's wiring
             uow_factory=uow_factory,
             clock=self.clock,
-            ledger_reader=ledger_reader,
-            price_reader=price_reader,
-            asset_reader=asset_reader,
-            portfolio_reader=portfolio_reader,
-            writer=results_writer(),
+            ledger_reader=build_ledger_reader,
+            price_reader=build_price_reader,
+            asset_reader=build_asset_reader,
+            portfolio_reader=build_portfolio_reader,
+            results_writer=build_results_writer,
         )
 
     async def sql(self, statement: str, **params: Any) -> None:
@@ -57,7 +64,7 @@ class RealWorker:
                 ),
                 {"s": scope, "a": start, "b": end, "t": self.clock.now()},
             )
-        await self.processor.drain()  # the doorbell (OQ-46)
+        await self.processor.sweep()  # the run message is not relayed here
         async with self.engine.connect() as connection:
             row = (
                 await connection.execute(
@@ -65,6 +72,21 @@ class RealWorker:
                 )
             ).one()
         return dict(row._mapping)
+
+    async def aum(self, *days: date) -> list[Decimal | None]:
+        """Each date's AUM as the Carteira summary reads it (computed on read, OQ-21, OQ-38)."""
+        found = []
+        for day in days:
+            async with self.uow_factory() as uow:
+                summary = await build_portfolio_service(
+                    uow,
+                    assets=build_asset_reader(uow.session),
+                    prices=build_price_reader(uow.session),
+                    date_statuses=build_date_status_reader(uow.session, self.clock),
+                    clock=FakeClock(D3),
+                ).get_summary(day)
+            found.append(summary.aum)
+        return found
 
     async def rows(self, query: str) -> list[tuple[Any, ...]]:
         async with self.engine.connect() as connection:
@@ -80,7 +102,8 @@ async def real(
 
 async def seed_day_one(real: RealWorker, *, price_d2: bool = True) -> UUID:
     """Deposit 1 000 000 and buy 10 DI1F29 at 95 000 on D1; B3 prices 95 100 (D1), 95 200 (D2)."""
-    asset = await seed_instrument(real.engine, "DI1F29")
+    seed_catalogue(real.engine, (DI1F29,))
+    asset = DI1F29.id
     await real.sql(
         "INSERT INTO ledger.entries (type, entry_date, entry_time, cash_amount)"
         " VALUES ('CASH', :d, '09:00', 1000000.00)",
@@ -116,12 +139,13 @@ async def test_an_all_run_publishes_both_chains_and_the_aum(real: RealWorker) ->
     ) == [(D1, Decimal("50000")), (D2, Decimal("50000"))]
     # cash 50 000 + 10 × 95 100 = 1 001 000; then 50 000 + 10 × 95 200 = 1 002 000
     assert await real.rows(
-        "SELECT metric_date, positions_market_value, aum, daily_pnl, cumulative_pnl"
+        "SELECT metric_date, positions_market_value, daily_pnl, cumulative_pnl"
         " FROM portfolio.portfolio_metrics ORDER BY 1"
     ) == [
-        (D1, Decimal("951000"), Decimal("1001000"), Decimal("1000"), Decimal("1000")),
-        (D2, Decimal("952000"), Decimal("1002000"), Decimal("1000"), Decimal("2000")),
+        (D1, Decimal("951000"), Decimal("1000"), Decimal("1000")),
+        (D2, Decimal("952000"), Decimal("1000"), Decimal("2000")),
     ]
+    assert await real.aum(D1, D2) == [Decimal("1001000"), Decimal("1002000")]
     assert await real.rows(
         "SELECT date, portfolio, cash FROM processing.date_status ORDER BY 1"
     ) == [(D1, "PROCESSED", "PROCESSED"), (D2, "PROCESSED", "PROCESSED")]
@@ -132,22 +156,10 @@ async def test_aum_after_a_cash_only_then_a_positions_only_run(real: RealWorker)
 
     await real.process("CASH", D1, D2)
     # The positions chain is not processed: no AUM yet (OQ-38).
-    assert await real.rows("SELECT metric_date, aum FROM portfolio.portfolio_metrics") == []
+    assert await real.aum(D1, D2) == [None, None]
 
     await real.process("POSITIONS", D1, D2)
-    assert await real.rows(
-        "SELECT metric_date, aum FROM portfolio.portfolio_metrics ORDER BY 1"
-    ) == [(D1, Decimal("1001000")), (D2, Decimal("1002000"))]
-
-
-async def test_aum_after_a_positions_only_run_without_cash_is_null(real: RealWorker) -> None:
-    await seed_day_one(real)
-
-    await real.process("POSITIONS", D1, D1)
-
-    assert await real.rows(
-        "SELECT metric_date, positions_market_value, aum FROM portfolio.portfolio_metrics"
-    ) == [(D1, Decimal("951000"), None)]
+    assert await real.aum(D1, D2) == [Decimal("1001000"), Decimal("1002000")]
 
 
 async def test_a_missing_price_publishes_quantities_and_cash_with_null_figures(
@@ -157,12 +169,18 @@ async def test_a_missing_price_publishes_quantities_and_cash_with_null_figures(
 
     run = await real.process("ALL", D1, D2)
 
-    assert run["status"] == "COMPLETED_WITH_ISSUES"
+    # A Pendência is not a failure: no error and no failed date on the run.
+    assert (run["status"], run["error_code"], run["failed_date"]) == (
+        "COMPLETED_WITH_ISSUES",
+        None,
+        None,
+    )
     assert await real.rows(
-        "SELECT metric_date, positions_market_value, aum, daily_pnl, cumulative_pnl,"
+        "SELECT metric_date, positions_market_value, daily_pnl, cumulative_pnl,"
         " valuation_status, pnl_status FROM portfolio.portfolio_metrics"
         " WHERE metric_date = '2026-10-07'"
-    ) == [(D2, None, None, None, None, "MISSING", "MISSING")]
+    ) == [(D2, None, None, None, "MISSING", "MISSING")]
+    assert await real.aum(D2) == [None]
     assert await real.rows(
         "SELECT position_date, quantity FROM portfolio.positions WHERE position_date = '2026-10-07'"
     ) == [(D2, 10)]
@@ -190,31 +208,12 @@ async def fail_cash_writes_on(real: RealWorker, day: date) -> None:
     )
 
 
-async def test_a_sql_error_in_the_cash_savepoint_keeps_positions_of_the_date(
+async def test_case_18_24_a_sql_error_in_the_cash_savepoint_lets_the_positions_chain_go_on(
     real: RealWorker,
 ) -> None:
-    await seed_day_one(real)
-    await fail_cash_writes_on(real, D2)
-
-    run = await real.process("ALL", D1, D2)
-
-    assert await real.rows(
-        "SELECT date, portfolio, cash FROM processing.date_status ORDER BY 1"
-    ) == [(D1, "PROCESSED", "PROCESSED"), (D2, "PROCESSED", "FAILED")]
-    assert (run["status"], run["failed_date"], run["failed_chain"], run["progress_date"]) == (
-        "COMPLETED_WITH_ISSUES",
-        D2,
-        "CASH",
-        D2,
-    )
-    assert await real.rows("SELECT balance_date FROM portfolio.cash_balances ORDER BY 1") == [(D1,)]
-    assert await real.rows("SELECT metric_date FROM portfolio.portfolio_metrics ORDER BY 1") == [
-        (D1,),
-        (D2,),
-    ]
-
-
-async def test_case_18_aum_is_null_from_the_failed_date_on(real: RealWorker) -> None:
+    """Case 24: a real SQL error leaves the transaction aborted; only rolling back to the cash
+    chain's savepoint lets positions be written on D2 and go on to D3, while the cash chain
+    stops. Case 18: AUM is null from the failed date on."""
     await seed_day_one(real)
     await real.sql(
         "INSERT INTO prices.reference_prices (asset_id, reference_date, source, input_kind, pu)"
@@ -224,48 +223,21 @@ async def test_case_18_aum_is_null_from_the_failed_date_on(real: RealWorker) -> 
     )
     await fail_cash_writes_on(real, D2)
 
-    await real.process("ALL", D1, D3)
+    run = await real.process("ALL", D1, D3)
 
-    # D1 has both chains; from D2 the cash chain is FAILED, then not processed: AUM null.
     assert await real.rows(
-        "SELECT metric_date, positions_market_value, aum FROM portfolio.portfolio_metrics"
-        " ORDER BY 1"
-    ) == [
-        (D1, Decimal("951000"), Decimal("1001000")),
-        (D2, Decimal("952000"), None),
-        (D3, Decimal("953000"), None),
-    ]
-
-
-async def test_a_d_minus_1_price_corrected_after_processing_changes_no_status(
-    real: RealWorker,
-) -> None:
-    await seed_day_one(real)
-    await real.process("POSITIONS", D1, D2)
-    before = await real.rows(
-        "SELECT date, portfolio, portfolio_processed_at FROM processing.date_status ORDER BY 1"
-    )
-    figures = await real.rows(
-        "SELECT metric_date, daily_pnl FROM portfolio.portfolio_metrics ORDER BY 1"
-    )
-
-    await real.sql(
-        "UPDATE prices.reference_prices SET pu = 95150, updated_at = now()"
-        " WHERE reference_date = :d",
-        d=D1,
-    )
-
-    assert before == [
-        (D1, "PROCESSED", before[0][2]),
-        (D2, "PROCESSED", before[1][2]),
-    ]
+        "SELECT date, portfolio, cash FROM processing.date_status ORDER BY 1"
+    ) == [(D1, "PROCESSED", "PROCESSED"), (D2, "PROCESSED", "FAILED"), (D3, "PROCESSED", None)]
     assert (
-        await real.rows(
-            "SELECT date, portfolio, portfolio_processed_at FROM processing.date_status ORDER BY 1"
-        )
-        == before
-    )  # no staleness (OQ-31): the dates keep their status until reprocessed
-    assert (
-        await real.rows("SELECT metric_date, daily_pnl FROM portfolio.portfolio_metrics ORDER BY 1")
-        == figures
-    )
+        run["status"],
+        run["error_code"],
+        run["failed_date"],
+        run["failed_chain"],
+        run["progress_date"],
+    ) == ("COMPLETED_WITH_ISSUES", "PROCESSING_ERROR", D2, "CASH", D3)
+    assert await real.rows("SELECT balance_date FROM portfolio.cash_balances ORDER BY 1") == [(D1,)]
+    # 10 × 95 100, 10 × 95 200, 10 × 95 300
+    assert await real.rows(
+        "SELECT metric_date, positions_market_value FROM portfolio.portfolio_metrics ORDER BY 1"
+    ) == [(D1, Decimal("951000")), (D2, Decimal("952000")), (D3, Decimal("953000"))]
+    assert await real.aum(D1, D2, D3) == [Decimal("1001000"), None, None]

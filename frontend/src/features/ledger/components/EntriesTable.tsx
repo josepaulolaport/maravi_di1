@@ -21,29 +21,41 @@ import {
   UNAVAILABLE,
 } from '@/shared/format';
 
+import { Figure } from '@/shared/ui/Figure';
 import table from '@/shared/ui/table.module.css';
 
-import { ENTRY_TYPE_LABELS, type LedgerEntry, type SortDirection } from '../entries';
-
-/**
- * Names a row for screen readers and the delete dialogs, with enough of its figures to tell
- * same-day entries apart: "Venda DI1F28 -4 16/10/2026 15:00 PU 89.102,22",
- * "Retirada 16/10/2026 17:30 -R$ 50.000,00".
- */
-export function entryLabel(entry: LedgerEntry): string {
-  const type = ENTRY_TYPE_LABELS[entry.entryType];
-  const when = `${formatDate(entry.date)} ${formatTime(entry.time)}`;
-  if (entry.kind === 'cash') return `${type} ${when} ${formatSignedMoney(entry.signedAmount)}`;
-  const quantity = formatSignedQuantity(entry.signedQuantity);
-  return `${type} ${entry.assetCode} ${quantity} ${when} PU ${formatPu(entry.pu)}`;
-}
+import {
+  ENTRY_TYPE_LABELS,
+  entryLabel,
+  type LedgerEntry,
+  type SortDirection,
+} from '../model/entries';
 
 /** The Financeiro column is the entry's cash effect (`cash_amount`), not a market value. */
 const CASH_EFFECT_HINT =
   'Efeito no caixa: compra negativa, venda positiva; aporte positivo, retirada negativa.';
 
-const dash = <span title="Não se aplica">{UNAVAILABLE}</span>;
-const unknownType = <span title="Indisponível">{UNAVAILABLE}</span>;
+const dash = <Figure text={UNAVAILABLE} missing="Não se aplica" />;
+const unknownType = <Figure text={UNAVAILABLE} />;
+const noDescription = <Figure text={UNAVAILABLE} missing="Sem descrição" />;
+
+/** A cash entry's description (OQ-51): one line, cut with an ellipsis, in full in a tooltip. */
+function Description({ text }: { text: string | null }) {
+  if (!text) return noDescription;
+  return (
+    <Tooltip
+      label={text}
+      multiline
+      maw={360}
+      events={{ hover: true, focus: true, touch: true }}
+      withinPortal
+    >
+      <Text inherit truncate="end" maw={220} tabIndex={0}>
+        {text}
+      </Text>
+    </Tooltip>
+  );
+}
 
 interface EntriesTableProps {
   entries: LedgerEntry[];
@@ -60,7 +72,8 @@ interface EntriesTableProps {
 /**
  * The columns of §11.3: instrument type ("Futuros", "Caixa") and entry type (Compra, Venda,
  * Aporte, Retirada) are separate. A trade shows PU and rate (the typed one and the one the
- * backend computed, OQ-19 item 7); a cash entry has neither, nor an asset or quantity.
+ * backend computed, OQ-19 item 7); a cash entry has neither, nor an asset or quantity, but may
+ * have a description (OQ-51), which a trade never has.
  */
 export function EntriesTable({
   entries,
@@ -76,7 +89,7 @@ export function EntriesTable({
   const allSelected = entries.length > 0 && selectedCount === entries.length;
 
   return (
-    <Table.ScrollContainer minWidth={1040}>
+    <Table.ScrollContainer minWidth={1200}>
       <Table highlightOnHover verticalSpacing="sm" aria-label="Lançamentos">
         <Table.Thead bg="gray.0">
           <Table.Tr>
@@ -104,7 +117,7 @@ export function EntriesTable({
                 </Group>
               </UnstyledButton>
             </Table.Th>
-            {['Tipo de ativo', 'Tipo', 'Ativo'].map((label) => (
+            {['Tipo de ativo', 'Tipo', 'Ativo', 'Descrição'].map((label) => (
               <Table.Th key={label} fw={400} c="dimmed">
                 {label}
               </Table.Th>
@@ -161,6 +174,9 @@ export function EntriesTable({
                   ) : (
                     dash
                   )}
+                </Table.Td>
+                <Table.Td>
+                  {entry.kind === 'cash' ? <Description text={entry.description} /> : dash}
                 </Table.Td>
                 <Table.Td ta="right">
                   {trade ? formatSignedQuantity(trade.signedQuantity) : dash}

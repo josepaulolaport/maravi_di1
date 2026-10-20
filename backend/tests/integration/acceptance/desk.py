@@ -192,4 +192,4 @@ _ROW_FIGURES = {
     "trades_pnl",
     "daily_pnl",
 }
-_SERIES_FIGURES = {"daily_pnl", "cumulative_pnl", "range_cumulative_pnl"}
+_SERIES_FIGURES = {"daily_pnl", "range_cumulative_pnl"}

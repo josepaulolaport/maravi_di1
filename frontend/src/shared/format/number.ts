@@ -7,6 +7,16 @@ import type { Decimal } from '@/api/contract';
 /** Shown wherever a value is unavailable (`null`): never zero. */
 export const UNAVAILABLE = '—';
 
+/**
+ * A chart axis needs a number. This is the pixel position only; every figure shown as text
+ * is formatted from the decimal string. Do not use the result as a money or rate figure.
+ */
+export function plotCoordinate(value: Decimal): number {
+  // The one allowed conversion to a number: an axis coordinate, never a displayed amount.
+  // eslint-disable-next-line no-restricted-syntax -- plot axis only
+  return Number(value);
+}
+
 type Formatter = Intl.NumberFormat;
 
 const money: Formatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -100,6 +110,3 @@ function compareMagnitude(a: string, b: string): number {
   if (padA === padB) return 0;
   return padA < padB ? -1 : 1;
 }
-
-/** A count of days in pt-BR: 1.000. */
-export const formatDays = (days: number) => formatQuantity(days);

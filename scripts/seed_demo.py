@@ -4,9 +4,19 @@ The Compose `demo` service runs it after the API is up (`DI1_DEMO=0` turns it of
 to keep its ledger empty). On an empty ledger it writes, from today − 14 to today (São Paulo), so
 dates are relative to the first `up`: three January DI1 contracts (the next three years, e.g.
 DI1F27, DI1F28, DI1F29 in 2026), deposits, a withdrawal, trades and MANUAL reference prices, all
-through the API, so every pricing and validation rule applies. On a non-empty ledger it adds
-nothing and exits 0 ("already loaded"), so every later `up` is a no-op. It queues no processing
-and writes no positions or P&L: the user processes today − 14 .. today in the Central de Controle.
+through the API, so every pricing and validation rule applies. It queues no processing and writes
+no positions or P&L: the user processes today − 14 .. today in the Central de Controle.
+
+"Already loaded" is decided by the completion marker, the last write: the longest contract's price
+on the run's today. The ledger's earliest entry is the opening deposit, dated the run's today − 14,
+so a later `up` (on another day) finds that today again. With the marker it adds nothing and exits
+0, so every later `up` is a no-op. With the opening deposit but no marker, an earlier run stopped
+part-way: it adds nothing and asks for a fresh stack, since ledger entries cannot be written twice
+safely. A ledger whose earliest entry is not the demo's is left alone.
+
+It always exits 0, whatever the error, so a failure never keeps the web service (which waits
+for it) from starting: a failure prints "DEMO DATA NOT LOADED: <reason>" on stderr, and the
+marker check above still reports a partial load on every later `up`.
 
 The trades exercise the accounting rules (spec §7): buys typed as a rate and as a PU, a partial
 sale (the average PU stays), a sale that crosses zero into a short, two trades of one contract on
@@ -33,6 +43,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, getcontext
@@ -43,6 +54,7 @@ getcontext().prec = 34
 
 DAYS = 14
 FACE_VALUE = Decimal("100000")
+OPENING_DEPOSIT = Decimal("1000000")  # the first entry written, at today − DAYS, 09:00
 
 
 @dataclass(frozen=True)
@@ -85,6 +97,14 @@ class AlreadyLoadedError(Exception):
     pass
 
 
+class NotTheDemoLedgerError(Exception):
+    pass
+
+
+class IncompleteDemoError(Exception):
+    pass
+
+
 def say(message: str, *, error: bool = False) -> None:
     (sys.stderr if error else sys.stdout).write(message + "\n")
 
@@ -101,6 +121,10 @@ def call(api: str, method: str, path: str, body: dict[str, Any] | None = None) -
         raise DemoError(f"{method} {path} → {error.code}: {error.read().decode()}") from error
 
 
+Call = Callable[..., Any]
+"""``call(api, method, path, body=None)``: the HTTP client, replaced in tests."""
+
+
 def round_pu(contract: Contract, day: date, rate: Decimal) -> str:
     """A round PU (2 dp) near ``rate`` on ``day``, to send as a typed PU."""
     days = (contract.maturity - day).days
@@ -114,8 +138,49 @@ def reference_rate(contract: Contract, offset: int) -> str:
     return str(contract.base_rate + drift)
 
 
-def demo(api: str) -> None:
-    today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+def check_not_loaded(api: str, call: Call, today: date) -> None:
+    """Return on an empty ledger; else raise why nothing is added (see the module docstring)."""
+    earliest = call(
+        api,
+        "GET",
+        f"/api/ledger/entries?start_date=1900-01-01&end_date={today}&order=asc&limit=1",
+    )["items"]
+    if not earliest:
+        return
+    first = earliest[0]
+    if not (
+        first["type"] == "CASH"
+        and first["time"].startswith("09:00")
+        and Decimal(first["cash_amount"]) == OPENING_DEPOSIT
+    ):
+        raise NotTheDemoLedgerError
+    run_today = date.fromisoformat(first["date"]) + timedelta(days=DAYS)
+    marker = contracts(run_today)[2]
+    products = call(api, "GET", "/api/products?instrument_type=FUTURE")["items"]
+    product = next((p for p in products if p["code"] == "DI1"), None)
+    listed = (
+        []
+        if product is None
+        else call(api, "GET", f"/api/instruments?product_id={product['id']}")["items"]
+    )
+    instrument = next((i for i in listed if i["code"] == marker.code), None)
+    if (
+        instrument is not None
+        and call(
+            api,
+            "GET",
+            f"/api/reference-prices?asset_id={instrument['id']}"
+            f"&start_date={run_today}&end_date={run_today}",
+        )["items"]
+    ):
+        raise AlreadyLoadedError
+    raise IncompleteDemoError(
+        f"the demo run of {run_today} stopped before its last price ({marker.code} on"
+        f" {run_today}); reset the stack (docker compose down -v, then up) to load it again"
+    )
+
+
+def demo(api: str, call: Call, today: date) -> None:
     start = today - timedelta(days=DAYS)
 
     def day(offset: int) -> date:
@@ -125,11 +190,7 @@ def demo(api: str) -> None:
     short, middle, long = contracts(today)
     all_contracts = (short, middle, long)
 
-    existing = call(
-        api, "GET", f"/api/ledger/entries?start_date=1900-01-01&end_date={today}&limit=1"
-    )
-    if existing["items"]:
-        raise AlreadyLoadedError
+    check_not_loaded(api, call, today)
 
     products = call(api, "GET", "/api/products?instrument_type=FUTURE")["items"]
     product = next((p for p in products if p["code"] == "DI1"), None)
@@ -163,14 +224,20 @@ def demo(api: str) -> None:
             ids[contract.code] = created["id"]
         say(f"  contract {contract.code}, maturity {contract.maturity}")
 
-    def cash(offset: int, time: str, amount: str, label: str) -> None:
+    def cash(offset: int, time: str, amount: str, label: str, description: str) -> None:
         call(
             api,
             "POST",
             "/api/ledger/entries",
-            {"type": "CASH", "date": day(offset).isoformat(), "time": time, "cash_amount": amount},
+            {
+                "type": "CASH",
+                "date": day(offset).isoformat(),
+                "time": time,
+                "cash_amount": amount,
+                "description": description,  # shown in Lançamentos (OQ-51)
+            },
         )
-        say(f"  {day(offset)} {time} {label} {amount}")
+        say(f"  {day(offset)} {time} {label} {amount} ({description})")
 
     def trade(
         offset: int,
@@ -203,19 +270,19 @@ def demo(api: str) -> None:
         )
 
     say("Ledger:")
-    cash(14, "09:00", "1000000", "opening deposit")
+    cash(14, "09:00", "1000000", "opening deposit", "Aporte inicial")
     s, m, lg = short.code, middle.code, long.code
     trade(14, "10:00", s, 4, "buy, typed as a rate", rate="0.1450")
     trade(14, "11:00", lg, 3, "buy, typed as a PU", pu_near="0.1350")
     trade(12, "10:30", s, 2, "buy more, typed as a PU (new average)", pu_near="0.1460")
-    cash(10, "09:00", "200000", "deposit, as in the challenge example")
+    cash(10, "09:00", "200000", "deposit, as in the challenge example", "Aporte do exemplo")
     trade(10, "10:00", m, 1, "buy 1 at 10%, as in the challenge example", rate="0.10")
     trade(8, "10:15", s, -3, "partial sale (average kept)", rate="0.1445")
     trade(8, "11:00", lg, 2, "buy: 3 → 5, new average", rate="0.1352")
     trade(8, "14:30", lg, -1, "same contract, same day, later time: 5 → 4", rate="0.1355")
-    cash(6, "09:00", "300000", "second deposit")
+    cash(6, "09:00", "300000", "second deposit", "Segundo aporte")
     trade(4, "11:00", lg, -7, "sale crossing zero: 4 → −3 (short)", pu_near="0.1348")
-    cash(2, "16:00", "-150000", "withdrawal")
+    cash(2, "16:00", "-150000", "withdrawal", "Retirada parcial")
 
     first_trade = {s: 14, m: 10, lg: 14}
     say("Reference prices (MANUAL, typed as a rate, every calendar day):")
@@ -237,11 +304,44 @@ def demo(api: str) -> None:
             )
             written += 1
         say(f"  {contract.code}: {written} prices, {day(first_trade[contract.code])} to {today}")
+    # The completion marker (check_not_loaded): the last price written is the longest contract's
+    # on today; the loop above writes it last.
     say(f"  deliberate gap: {lg} has no price on {day(GAP_OFFSET)}")
     say(
         f"Nothing was processed. Central de Controle → Processamentos: process Tudo from {start}"
         f" to {today}; expect Concluído com pendências (the {lg} gap on {day(GAP_OFFSET)})."
     )
+
+
+def run(api: str, *, call: Call = call, today: date | None = None) -> int:
+    """The exit status, always 0 (see the module docstring); ``today`` defaults to today in São
+    Paulo."""
+    if today is None:
+        today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    try:
+        demo(api, call, today)
+    except AlreadyLoadedError:
+        say("DEMO DATA ALREADY LOADED: the demo's last price is there; nothing added")
+        return 0
+    except NotTheDemoLedgerError:
+        say("DEMO DATA SKIPPED: the ledger has entries that are not the demo's; nothing added")
+        return 0
+    except (
+        IncompleteDemoError,
+        DemoError,
+        urllib.error.URLError,
+        TimeoutError,
+        ValueError,
+    ) as error:
+        say(f"DEMO DATA NOT LOADED: {error}", error=True)
+        return 0
+    except Exception as error:
+        # Anything not foreseen (a dropped connection, a malformed response) must not block the
+        # web service either (module docstring): still exit 0.
+        say(f"DEMO DATA NOT LOADED: {type(error).__name__}: {error}", error=True)
+        return 0
+    say("DEMO DATA CREATED")
+    return 0
 
 
 def main() -> int:
@@ -251,16 +351,7 @@ def main() -> int:
     if os.environ.get("DI1_DEMO", "1") == "0":
         say("DEMO DATA SKIPPED (DI1_DEMO=0)")
         return 0
-    try:
-        demo(args.api.rstrip("/"))
-    except AlreadyLoadedError:
-        say("DEMO DATA ALREADY LOADED: the ledger has entries; nothing added")
-        return 0
-    except (DemoError, urllib.error.URLError, TimeoutError, ValueError) as error:
-        say(f"DEMO DATA NOT CREATED: {error}", error=True)
-        return 1
-    say("DEMO DATA CREATED")
-    return 0
+    return run(args.api.rstrip("/"))
 
 
 if __name__ == "__main__":

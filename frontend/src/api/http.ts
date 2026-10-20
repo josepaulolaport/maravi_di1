@@ -1,4 +1,4 @@
-import type { FieldError, Problem } from './contract/common';
+import type { Problem } from './contract/common';
 
 // Contract proposal: the API is served under `/api` (configurable with VITE_API_BASE_URL),
 // so the SPA's own routes never collide with API paths.
@@ -15,22 +15,6 @@ export class ApiError extends Error {
     this.name = 'ApiError';
     this.status = problem.status;
     this.problem = problem;
-  }
-
-  /** Field errors keyed by field name, for forms (`errors[].field`). */
-  fieldErrors(): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const error of this.problem.errors ?? []) {
-      if (error.field && !(error.field in result)) result[error.field] = error.message;
-    }
-    return result;
-  }
-
-  /** Messages that belong to no field: shown on the page. */
-  pageErrors(): string[] {
-    const errors: FieldError[] = this.problem.errors ?? [];
-    const general = errors.filter((e) => !e.field).map((e) => e.message);
-    return general.length > 0 || errors.length > 0 ? general : [this.message];
   }
 }
 

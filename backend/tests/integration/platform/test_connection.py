@@ -10,18 +10,18 @@ No RabbitMQ is needed: the brokers here are a closed port and a server that neve
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 
 import pytest
 from aio_pika.exceptions import AMQPConnectionError
 from pydantic import SecretStr
 
-from di1.platform.config import BrokerSettings
 from di1.platform.messaging.connection import connect
+from tests.support.broker import SilentServer
+from tests.support.waits import eventually, keeps_hanging
 
 
-def _broker(url: str) -> BrokerSettings:
-    return BrokerSettings(rabbitmq_url=SecretStr(url))
+def _broker(url: str) -> SecretStr:
+    return SecretStr(url)
 
 
 def _connection_tasks() -> list[str]:
@@ -33,41 +33,22 @@ def _connection_tasks() -> list[str]:
     ]
 
 
-@pytest.fixture
-async def hanging_broker_url() -> AsyncIterator[str]:
-    """A TCP server that accepts connections and never answers."""
-    held: list[asyncio.StreamWriter] = []
-
-    async def hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        held.append(writer)
-
-    server = await asyncio.start_server(hold, "127.0.0.1", 0)
-    port = server.sockets[0].getsockname()[1]
-    try:
-        yield f"amqp://guest:guest@127.0.0.1:{port}/"
-    finally:
-        for writer in held:
-            writer.close()
-        server.close()
-        await server.wait_closed()
-
-
 async def test_a_refused_first_connection_raises_and_leaves_no_task() -> None:
     with pytest.raises(AMQPConnectionError):
         await connect(_broker("amqp://guest:guest@127.0.0.1:1/"), connection_name="test")
 
-    await asyncio.sleep(0.1)
-    assert _connection_tasks() == []
+    await eventually(lambda: _connection_tasks() == [], every=0.05)
 
 
-async def test_a_cancelled_first_connection_leaves_no_task(hanging_broker_url: str) -> None:
+async def test_a_cancelled_first_connection_leaves_no_task(
+    hanging_broker_url: str, silent: SilentServer
+) -> None:
     connecting = asyncio.create_task(connect(_broker(hanging_broker_url), connection_name="test"))
-    await asyncio.sleep(0.3)
-    assert not connecting.done()
+    await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
+    await keeps_hanging(connecting)
 
     connecting.cancel()
     with pytest.raises(asyncio.CancelledError):
         await connecting
 
-    await asyncio.sleep(0.1)
-    assert _connection_tasks() == []
+    await eventually(lambda: _connection_tasks() == [], every=0.05)

@@ -4,18 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
-
-from di1.modules.asset.domain.rules import FuturesTerms
-
-
-@dataclass(frozen=True, slots=True)
-class InstrumentTypeRef:
-    """An instrument type without its classes (``FUTURE``)."""
-
-    id: int
-    code: str
-    name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,11 +28,14 @@ class InstrumentType:
 
 
 @dataclass(frozen=True, slots=True)
-class ClassifiedAssetClass:
-    """An asset class and the instrument type it belongs to."""
+class FuturesTerms:
+    """The shared specification of a futures product (``asset.futures``). The multiplier is stored
+    but never applied (OQ-2)."""
 
-    asset_class: AssetClass
-    instrument_type: InstrumentTypeRef
+    face_value: Decimal
+    contract_multiplier: Decimal
+    settlement_method: str
+    settlement_description: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +47,7 @@ class Product:
     code: str
     name: str
     asset_class: AssetClass
-    instrument_type: InstrumentTypeRef
+    instrument_type: InstrumentType
     instrument_count: int
     futures: FuturesTerms | None
     created_at: datetime
@@ -62,11 +55,20 @@ class Product:
 
 @dataclass(frozen=True, slots=True)
 class Instrument:
-    """A contract (``DI1F27``) of a product, with its own maturity."""
+    """A contract (``DI1F27``) with the product's specification other modules price from.
+
+    ``instrument_type`` and ``asset_class`` are catalogue codes. Futures fields are ``None`` when
+    the product is not a future.
+    """
 
     id: UUID
     code: str
     product_id: UUID
     product_code: str
+    instrument_type: str
+    asset_class: str
     maturity_date: date | None
+    face_value: Decimal | None
+    multiplier: Decimal | None
+    settlement_method: str | None
     created_at: datetime

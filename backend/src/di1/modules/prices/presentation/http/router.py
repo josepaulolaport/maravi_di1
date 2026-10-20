@@ -1,41 +1,26 @@
-"""``/reference-prices`` (interfaces.md "HTTP endpoints"; frontend contract ``prices.ts``;
-OQ-25, OQ-26 items 7 and 8). Parse, call `PriceService`, shape the answer; no rules here.
-
-The composition root builds the router with its provider of the request's Unit of Work and a
-factory of the service on that Unit of Work (``dependencies.price_service`` with the other
-modules' collaborators), so a write commits the transaction it wrote in. Errors are
-`DomainError`s raised by the service; this module raises none.
-"""
+"""``/reference-prices``: parse, call `PriceService`, shape the JSON."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from datetime import date
-from decimal import Decimal
-from http import HTTPStatus
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, status
 
-from di1.modules.prices.application.services.price_service import PriceService, SetReferencePrice
+from di1.modules.prices.application.services.price_service import PriceService
 from di1.modules.prices.presentation.http.schemas import (
-    ReferencePriceDayList,
+    ReferencePriceDayListResponse,
     ReferencePriceDayResponse,
     ReferencePriceResponse,
-    SetReferencePriceBody,
+    SetReferencePriceRequest,
 )
-from di1.modules.prices.public import PriceSource
-from di1.platform.database.unit_of_work import UnitOfWork
 
 
-def create_router(
-    get_unit_of_work: Callable[..., AsyncIterator[UnitOfWork]],
-    price_service: Callable[[UnitOfWork], PriceService],
-) -> APIRouter:
-    """The Prices routes, each on the Unit of Work that ``get_unit_of_work`` provides."""
-    # A plain default, not ``Annotated``: with postponed annotations FastAPI resolves an
-    # annotation in the module's globals, where this closure's provider is not.
-    uow_dependency = Depends(get_unit_of_work)
+def create_router(*, get_service: Callable[..., PriceService]) -> APIRouter:
+    # Dependency objects built here: the handlers' annotations are strings (PEP 563), resolved
+    # from the module's globals, so they cannot name a local alias.
+    service_dependency = Depends(get_service)
     router = APIRouter(prefix="/reference-prices", tags=["prices"])
 
     @router.get("")
@@ -43,31 +28,26 @@ def create_router(
         asset_id: UUID,
         start_date: date,
         end_date: date,
-        uow: UnitOfWork = uow_dependency,
-    ) -> ReferencePriceDayList:
-        days = await price_service(uow).list_reference_days(asset_id, start_date, end_date, uow=uow)
-        return ReferencePriceDayList(items=[ReferencePriceDayResponse.of(day) for day in days])
+        service: PriceService = service_dependency,
+    ) -> ReferencePriceDayListResponse:
+        days = await service.list_reference_days(asset_id, start_date, end_date)
+        return ReferencePriceDayListResponse(
+            items=[ReferencePriceDayResponse.of(day) for day in days]
+        )
 
-    @router.post("", status_code=HTTPStatus.CREATED)
+    @router.post("", status_code=status.HTTP_201_CREATED)
     async def set_reference_price(
-        body: SetReferencePriceBody, uow: UnitOfWork = uow_dependency
+        body: SetReferencePriceRequest, service: PriceService = service_dependency
     ) -> ReferencePriceResponse:
-        record = await price_service(uow).set_reference_price(
-            SetReferencePrice(
-                asset_id=body.asset_id,
-                reference_date=body.reference_date,
-                input_kind=body.input_kind,
-                pu=None if body.pu is None else Decimal(body.pu),
-                rate=None if body.rate is None else Decimal(body.rate),
-                source=PriceSource.MANUAL,
-            ),
-            uow=uow,
+        record = await service.set_reference_price(
+            body.asset_id, body.reference_date, body.input_kind, body.pu, body.rate
         )
         return ReferencePriceResponse.of(record)
 
-    @router.delete("/{price_id}", status_code=HTTPStatus.NO_CONTENT)
-    async def remove_reference_price(price_id: UUID, uow: UnitOfWork = uow_dependency) -> Response:
-        await price_service(uow).remove_reference_price(price_id, uow=uow)
-        return Response(status_code=HTTPStatus.NO_CONTENT)
+    @router.delete("/{price_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def remove_reference_price(
+        price_id: UUID, service: PriceService = service_dependency
+    ) -> None:
+        await service.remove_reference_price(price_id)
 
     return router

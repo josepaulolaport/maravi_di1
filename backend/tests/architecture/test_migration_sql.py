@@ -1,6 +1,6 @@
 """The reviewed SQL of the Alembic revisions (skill `db-migration`; plan §3).
 
-Released revisions never change, so the SQL of 0001 to 0005 is pinned here by hash.
+Released revisions never change, so the SQL of 0001 to 0007 is pinned here by hash.
 `docs/schema.sql` is the result of all revisions, not the text of one;
 `tests/integration/test_migrations_match_schema.py` checks on PostgreSQL that the revisions build
 exactly what `docs/schema.sql` builds. No database is needed here, so this runs in the pre-commit
@@ -40,7 +40,21 @@ RELEASED_SHA256 = {
     "0005_hard_delete_downgrade.sql": (
         "cafabdaedbc1b5c126b299c8db9b0fdd903f3093a01d69c5b57578de4652cbf3"
     ),
+    "0006_failed_chain.sql": "2fe06af71e184b0c6e8b8ac698da05f296f4c0225b9231c832f167c68fb7bdfe",
+    "0006_failed_chain_downgrade.sql": (
+        "1e9a381f5ea9a62df8df4fbad1c72ed9433f4e46c76c25ad5fb5c7c96561bbc4"
+    ),
+    "0007_cash_description.sql": (
+        "45b45e4b49ba5b7d9501abdf96b5e06694416352830a8faf72020192064557f7"
+    ),
+    "0007_cash_description_downgrade.sql": (
+        "83384f7b482bb71bf4c7b92fd1f6966766df1584c6ab46c990cb34f7f4ad544c"
+    ),
 }
+
+
+def test_every_revision_sql_is_pinned() -> None:
+    assert {path.name for path in SQL.glob("*.sql")} == set(RELEASED_SHA256)
 
 
 def test_released_revision_sql_is_never_edited() -> None:

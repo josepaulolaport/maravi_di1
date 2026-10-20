@@ -96,11 +96,11 @@ def problem_response(
 def _validation_detail(error: Mapping[str, Any]) -> ErrorDetail:
     location = tuple(str(part) for part in error.get("loc", ()))
     if error.get("type") == "json_invalid":
-        return ErrorDetail(ErrorCode.VALIDATION_ERROR, "JSON inválido.")
+        return ErrorDetail.validation("JSON inválido.")
     if location and location[0] in _LOCATIONS:
         location = location[1:]
     message = "Campo obrigatório." if error.get("type") == "missing" else "Valor inválido."
-    return ErrorDetail(ErrorCode.VALIDATION_ERROR, message, ".".join(location) or None)
+    return ErrorDetail.validation(message, ".".join(location) or None)
 
 
 def _expect[E: Exception](exc: Exception, kind: type[E]) -> E:

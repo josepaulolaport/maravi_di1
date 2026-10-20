@@ -32,7 +32,7 @@ Rules:
   ``platform/`` and ``composition/``.
 - ``pydantic``: Pydantic only in ``presentation/`` and ``platform/`` (settings).
 - ``messaging``: aio-pika only in ``platform/`` and ``workers/`` (shared RabbitMQ
-  infrastructure). Module code uses only the outbox, inbox and envelope parts of
+  infrastructure). Module code uses only the outbox and envelope parts of
   ``di1.platform.messaging``; a module's ``presentation/messaging/`` (its consumers and
   handlers) may also use ``di1.platform.messaging.consumer``.
 - ``shared-independent``: ``platform/`` and ``shared/`` import no module.
@@ -97,7 +97,6 @@ DOMAIN_FORBIDDEN_CALLS = frozenset(
 SEEDED_GENERATORS = frozenset({"random.Random"})
 BUSINESS_MESSAGING = (
     f"{ROOT}.platform.messaging.outbox",
-    f"{ROOT}.platform.messaging.inbox",
     f"{ROOT}.platform.messaging.envelope",
 )
 CONSUMER_MESSAGING = (*BUSINESS_MESSAGING, f"{ROOT}.platform.messaging.consumer")
@@ -111,7 +110,7 @@ MODULE_ENTRIES = frozenset(
 # Allowed entries directly under a layer; a layer missing here (domain, infrastructure) may hold
 # any sub-package: infrastructure/ holds every outbound adapter a module needs.
 LAYER_ENTRIES = {
-    "application": frozenset({"__init__.py", "services", "interfaces"}),
+    "application": frozenset({"__init__.py", "ports.py", "services"}),
     "presentation": frozenset({"__init__.py", "http", "messaging"}),
 }
 

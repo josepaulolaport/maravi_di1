@@ -6,15 +6,16 @@ import {
   Table,
   Text,
   Title,
+  Tooltip,
   UnstyledButton,
   VisuallyHidden,
 } from '@mantine/core';
 import { IconArrowDown, IconArrowsSort, IconArrowUp } from '@tabler/icons-react';
+import type { ReactNode } from 'react';
 
 import table from '@/shared/ui/table.module.css';
 import type { PositionRow } from '@/api/contract';
 import {
-  UNAVAILABLE,
   countLabel,
   formatDate,
   formatMoney,
@@ -23,20 +24,20 @@ import {
   formatRate,
 } from '@/shared/format';
 import { SearchInput } from '@/shared/ui/SearchInput';
+import { Figure } from '@/shared/ui/Figure';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
 
-import { usePositionsView } from '../hooks/usePortfolio';
-import { type Sort, type SortKey, sortPositions } from './sortPositions';
+import type { PortfolioParams } from '../hooks/usePortfolio';
+import { type Sort, type SortKey, sortPositions } from '../model/sortPositions';
 
 interface Column {
   key: SortKey;
   label: string;
   numeric: boolean;
-  render: (row: PositionRow) => React.ReactNode;
+  render: (row: PositionRow) => ReactNode;
 }
 
-const unavailable = (text: string) =>
-  text === UNAVAILABLE ? <span title="Indisponível">{text}</span> : text;
+const PRICE_CHANGED = 'Preço alterado após o processamento — reprocesse';
 
 // The columns of §11.4, in the design's order. No realized/unrealized P&L, no cumulative P&L
 // per asset, and cash is not a row (D1, OQ-19 item 1).
@@ -62,6 +63,15 @@ const columns: Column[] = [
             </Badge>
           )
         )}
+        {row.reference_price_changed && (
+          // A10: the figures come from the price the run read; the shown price is newer.
+          <Tooltip label={PRICE_CHANGED} withArrow>
+            <Badge color="yellow" variant="light" size="sm" className={table.badge} tabIndex={0}>
+              Preço alterado
+              <VisuallyHidden> após o processamento — reprocesse</VisuallyHidden>
+            </Badge>
+          </Tooltip>
+        )}
       </Stack>
     ),
   },
@@ -76,31 +86,31 @@ const columns: Column[] = [
     key: 'average_entry_pu',
     label: 'PU médio',
     numeric: true,
-    render: (r) => unavailable(formatPu(r.average_entry_pu)),
+    render: (r) => <Figure text={formatPu(r.average_entry_pu)} />,
   },
   {
     key: 'average_entry_rate',
     label: 'Taxa média',
     numeric: true,
-    render: (r) => unavailable(formatRate(r.average_entry_rate)),
+    render: (r) => <Figure text={formatRate(r.average_entry_rate)} />,
   },
   {
     key: 'reference_pu',
     label: 'PU ref.',
     numeric: true,
-    render: (r) => unavailable(formatPu(r.reference_pu)),
+    render: (r) => <Figure text={formatPu(r.reference_pu)} />,
   },
   {
     key: 'reference_rate',
     label: 'Taxa ref.',
     numeric: true,
-    render: (r) => unavailable(formatRate(r.reference_rate)),
+    render: (r) => <Figure text={formatRate(r.reference_rate)} />,
   },
   {
     key: 'financial_total',
     label: 'Valor de mercado',
     numeric: true,
-    render: (r) => unavailable(formatMoney(r.financial_total)),
+    render: (r) => <Figure text={formatMoney(r.financial_total)} />,
   },
   {
     key: 'position_pnl',
@@ -125,8 +135,14 @@ function SortIcon({ active, direction }: { active: boolean; direction: Sort['dir
   );
 }
 
-export function PositionsTable({ rows }: { rows: PositionRow[] }) {
-  const { search, setSearch, sort, setSort } = usePositionsView();
+interface PositionsTableProps {
+  rows: PositionRow[];
+  /** The search and order, in the URL (`usePortfolioParams`). */
+  view: Pick<PortfolioParams, 'search' | 'setSearch' | 'sort' | 'setSort'>;
+}
+
+export function PositionsTable({ rows, view }: PositionsTableProps) {
+  const { search, setSearch, sort, setSort } = view;
 
   const needle = search.trim().toLocaleUpperCase('pt-BR');
   const visible = sortPositions(
