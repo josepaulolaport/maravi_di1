@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from di1.modules.asset.dependencies import asset_reader
+from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.pnl.public import AssetPnLResult, CalculationCompleteness, PortfolioPnLResult
 from di1.modules.portfolio.dependencies import (
     portfolio_query_service,
@@ -32,7 +32,7 @@ from di1.modules.portfolio.domain.valuation import (
 from di1.modules.portfolio.infrastructure.persistence.repositories import SqlPortfolioRepository
 from di1.modules.processing.public import ChainStatus, DateStatus
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
-from di1.shared.clock import FixedClock
+from tests.fakes.clock import FixedClock
 from tests.integration.asset.conftest import Di1Catalogue
 from tests.unit.portfolio.fakes import FakeDateStatusReader, FakePriceReader
 
@@ -513,7 +513,7 @@ async def _aum(
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
         summary = await portfolio_query_service(
             uow,
-            assets=asset_reader(uow.session),
+            assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=statuses,
             clock=FixedClock(on),
@@ -529,7 +529,7 @@ async def test_a_read_keeps_one_snapshot_while_a_date_is_published(
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
         queries = portfolio_query_service(
             uow,
-            assets=asset_reader(uow.session),
+            assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=FakeDateStatusReader(),
             clock=FixedClock(D),
@@ -543,7 +543,7 @@ async def test_a_read_keeps_one_snapshot_while_a_date_is_published(
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
         after = await portfolio_query_service(
             uow,
-            assets=asset_reader(uow.session),
+            assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=FakeDateStatusReader(),
             clock=FixedClock(D),
@@ -619,7 +619,7 @@ async def test_case_27_the_range_sum_skips_unprocessed_and_failed_days(
     async with SqlAlchemyUnitOfWork(session_factory) as uow:
         points = await portfolio_query_service(
             uow,
-            assets=asset_reader(uow.session),
+            assets=build_asset_reader(uow.session),
             prices=FakePriceReader(),
             date_statuses=statuses,
             clock=FixedClock(days[3]),

@@ -11,13 +11,12 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from di1.modules.prices.application.services.price_service import PriceReader, PriceService
-from di1.modules.prices.public import PriceReader as PriceReaderPort
-from di1.modules.prices.public import PriceSource
+from di1.modules.prices.application.services.price_service import DefaultPriceReader, PriceService
+from di1.modules.prices.public import PriceReader, PriceSource
 from di1.modules.pricing.public import Quote
-from di1.shared.clock import FixedClock
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
+from tests.fakes.clock import FixedClock
 from tests.unit.prices.fakes import (
     CALCULATED_PU,
     CALCULATED_RATE,
@@ -48,13 +47,17 @@ class World:
         self.asset = self.assets.add(instrument())
         self.pricing = FakePricing()
         self.repository = InMemoryRepository()
-        self.service = PriceService(
+        self.reader = DefaultPriceReader(self.repository)
+
+    def service(self, uow: FakeUnitOfWork) -> PriceService:
+        """The service on ``uow``, as the composition builds one per request."""
+        return PriceService(
+            self.repository,
+            uow,
             assets=self.assets,
             pricing=self.pricing,
-            repositories=lambda _uow: self.repository,
             clock=FixedClock(TODAY),
         )
-        self.reader = PriceReader(self.repository)
 
     def request(
         self,
@@ -84,7 +87,7 @@ class TestSet:
     async def test_a_typed_pu_is_saved_with_the_calculated_rate(self, world: World) -> None:
         uow = FakeUnitOfWork()
 
-        record = await world.service.set_reference_price(**world.request(), uow=uow)
+        record = await world.service(uow).set_reference_price(**world.request())
 
         assert (record.source, record.input_kind, record.pu, record.rate) == (
             PriceSource.MANUAL,
@@ -98,8 +101,8 @@ class TestSet:
         assert list(world.repository.rows.values()) == [record]
 
     async def test_a_typed_rate_is_saved_with_the_calculated_pu(self, world: World) -> None:
-        record = await world.service.set_reference_price(
-            **world.request(pu=None, rate="0.0980"), uow=FakeUnitOfWork()
+        record = await world.service(FakeUnitOfWork()).set_reference_price(
+            **world.request(pu=None, rate="0.0980"),
         )
 
         assert (record.input_kind, record.pu, record.rate) == (
@@ -111,29 +114,29 @@ class TestSet:
     async def test_the_write_commits_once(self, world: World) -> None:
         uow = FakeUnitOfWork()
 
-        await world.service.set_reference_price(**world.request(), uow=uow)
+        await world.service(uow).set_reference_price(**world.request())
 
         assert uow.commits == 1
 
     async def test_a_second_price_of_the_same_source_replaces_the_first_with_a_new_id(
         self, world: World
     ) -> None:
-        first = await world.service.set_reference_price(
-            **world.request(pu="89200.9008841512"), uow=FakeUnitOfWork()
+        first = await world.service(FakeUnitOfWork()).set_reference_price(
+            **world.request(pu="89200.9008841512"),
         )
 
-        second = await world.service.set_reference_price(
-            **world.request(pu="89250.3147019396"), uow=FakeUnitOfWork()
+        second = await world.service(FakeUnitOfWork()).set_reference_price(
+            **world.request(pu="89250.3147019396"),
         )
 
         assert second.id != first.id
         assert list(world.repository.rows.values()) == [second]
 
     async def test_the_other_source_is_kept(self, world: World) -> None:
-        b3 = await world.service.set_reference_price(
-            **world.request(source=PriceSource.B3, pu="89240.4279488087"), uow=FakeUnitOfWork()
+        b3 = await world.service(FakeUnitOfWork()).set_reference_price(
+            **world.request(source=PriceSource.B3, pu="89240.4279488087"),
         )
-        manual = await world.service.set_reference_price(**world.request(), uow=FakeUnitOfWork())
+        manual = await world.service(FakeUnitOfWork()).set_reference_price(**world.request())
 
         assert set(world.repository.rows.values()) == {b3, manual}
 
@@ -142,7 +145,7 @@ class TestSet:
         uow = FakeUnitOfWork()
 
         with pytest.raises(DomainError) as excinfo:
-            await world.service.set_reference_price(**request, uow=uow)
+            await world.service(uow).set_reference_price(**request)
 
         assert excinfo.value.errors == (
             ErrorDetail(ErrorCode.VALIDATION_ERROR, "Selecione um contrato.", "asset_id"),
@@ -156,7 +159,7 @@ class TestSet:
         uow = FakeUnitOfWork()
 
         with pytest.raises(DomainError) as excinfo:
-            await world.service.set_reference_price(**request, uow=uow)
+            await world.service(uow).set_reference_price(**request)
 
         assert excinfo.value.errors == (
             ErrorDetail(ErrorCode.VALIDATION_ERROR, "Selecione um contrato.", "asset_id"),
@@ -172,8 +175,8 @@ class TestSet:
         uow = FakeUnitOfWork()
 
         with pytest.raises(DomainError) as excinfo:
-            await world.service.set_reference_price(
-                **world.request(reference_date=date(2026, 10, 20)), uow=uow
+            await world.service(uow).set_reference_price(
+                **world.request(reference_date=date(2026, 10, 20)),
             )
 
         assert excinfo.value.code is ErrorCode.FUTURE_DATE
@@ -186,7 +189,7 @@ class TestSet:
         request = world.request(asset_id=matured.id, pu="100000")
 
         with pytest.raises(DomainError) as excinfo:
-            await world.service.set_reference_price(**request, uow=uow)
+            await world.service(uow).set_reference_price(**request)
 
         assert excinfo.value.code is ErrorCode.CONTRACT_MATURED
         self._assert_nothing_written(world, uow)
@@ -195,8 +198,8 @@ class TestSet:
         uow = FakeUnitOfWork()
 
         with pytest.raises(DomainError) as excinfo:
-            await world.service.set_reference_price(
-                **world.request(pu="89250.31470193961"), uow=uow
+            await world.service(uow).set_reference_price(
+                **world.request(pu="89250.31470193961"),
             )
 
         assert excinfo.value.errors == (
@@ -212,24 +215,24 @@ class TestSet:
 
 class TestRemove:
     async def test_removal_deletes_and_commits_once(self, world: World) -> None:
-        price = await world.service.set_reference_price(**world.request(), uow=FakeUnitOfWork())
+        price = await world.service(FakeUnitOfWork()).set_reference_price(**world.request())
         uow = FakeUnitOfWork()
 
-        await world.service.remove_reference_price(price.id, uow=uow)
+        await world.service(uow).remove_reference_price(price.id)
 
         assert world.repository.rows == {}
         assert uow.commits == 1
 
     async def test_removing_manual_lets_b3_prevail(self, world: World) -> None:
-        b3 = await world.service.set_reference_price(
-            **world.request(source=PriceSource.B3, pu="89240.4279488087"), uow=FakeUnitOfWork()
+        b3 = await world.service(FakeUnitOfWork()).set_reference_price(
+            **world.request(source=PriceSource.B3, pu="89240.4279488087"),
         )
-        manual = await world.service.set_reference_price(**world.request(), uow=FakeUnitOfWork())
+        manual = await world.service(FakeUnitOfWork()).set_reference_price(**world.request())
         assert (await world.reader.get([world.asset.id], [DAY])).get(
             (world.asset.id, DAY)
         ) == manual
 
-        await world.service.remove_reference_price(manual.id, uow=FakeUnitOfWork())
+        await world.service(FakeUnitOfWork()).remove_reference_price(manual.id)
 
         assert (await world.reader.get([world.asset.id], [DAY])).get((world.asset.id, DAY)) == b3
 
@@ -239,7 +242,7 @@ class TestRemove:
         uow = FakeUnitOfWork()
 
         with pytest.raises(DomainError) as excinfo:
-            await world.service.remove_reference_price(uuid4(), uow=uow)
+            await world.service(uow).remove_reference_price(uuid4())
 
         assert excinfo.value.code is ErrorCode.NOT_FOUND
         assert uow.commits == 0
@@ -249,17 +252,18 @@ class TestListDays:
     async def test_days_with_a_price_newest_first_with_the_preferred_source_first(
         self, world: World
     ) -> None:
-        older = await world.service.set_reference_price(
+        older = await world.service(FakeUnitOfWork()).set_reference_price(
             **world.request(reference_date=date(2026, 10, 14), source=PriceSource.B3),
-            uow=FakeUnitOfWork(),
         )
-        b3 = await world.service.set_reference_price(
-            **world.request(source=PriceSource.B3, pu="89240.4279488087"), uow=FakeUnitOfWork()
+        b3 = await world.service(FakeUnitOfWork()).set_reference_price(
+            **world.request(source=PriceSource.B3, pu="89240.4279488087"),
         )
-        manual = await world.service.set_reference_price(**world.request(), uow=FakeUnitOfWork())
+        manual = await world.service(FakeUnitOfWork()).set_reference_price(**world.request())
 
-        days = await world.service.list_reference_days(
-            world.asset.id, date(2026, 10, 1), DAY, uow=FakeUnitOfWork()
+        days = await world.service(FakeUnitOfWork()).list_reference_days(
+            world.asset.id,
+            date(2026, 10, 1),
+            DAY,
         )
 
         assert [(d.reference_date, d.preferred, d.sources) for d in days] == [
@@ -270,18 +274,22 @@ class TestListDays:
     async def test_dates_outside_the_range_and_without_a_price_are_absent(
         self, world: World
     ) -> None:
-        await world.service.set_reference_price(**world.request(), uow=FakeUnitOfWork())
+        await world.service(FakeUnitOfWork()).set_reference_price(**world.request())
 
-        days = await world.service.list_reference_days(
-            world.asset.id, date(2026, 10, 17), date(2026, 10, 18), uow=FakeUnitOfWork()
+        days = await world.service(FakeUnitOfWork()).list_reference_days(
+            world.asset.id,
+            date(2026, 10, 17),
+            date(2026, 10, 18),
         )
 
         assert days == []
 
     async def test_an_inverted_range_and_an_unknown_asset_are_reported(self, world: World) -> None:
         with pytest.raises(DomainError) as excinfo:
-            await world.service.list_reference_days(
-                uuid4(), date(2026, 10, 18), date(2026, 10, 17), uow=FakeUnitOfWork()
+            await world.service(FakeUnitOfWork()).list_reference_days(
+                uuid4(),
+                date(2026, 10, 18),
+                date(2026, 10, 17),
             )
 
         assert excinfo.value.errors == (
@@ -296,12 +304,12 @@ class TestListDays:
 
 class TestPriceReader:
     def test_it_satisfies_the_public_contract(self, world: World) -> None:
-        reader: PriceReaderPort = world.reader
+        reader: PriceReader = world.reader
         assert reader is world.reader
 
     async def test_exact_date_only_never_carry_forward(self, world: World) -> None:
-        await world.service.set_reference_price(
-            **world.request(reference_date=date(2026, 10, 16)), uow=FakeUnitOfWork()
+        await world.service(FakeUnitOfWork()).set_reference_price(
+            **world.request(reference_date=date(2026, 10, 16)),
         )
 
         # 17/10 is a Saturday with no price: the 16/10 price is not used for it.
@@ -311,18 +319,17 @@ class TestPriceReader:
 
     async def test_many_pairs_in_one_read_with_absent_pairs_left_out(self, world: World) -> None:
         other = world.assets.add(instrument(maturity_date=date(2029, 1, 2)))
-        b3 = await world.service.set_reference_price(
-            **world.request(source=PriceSource.B3), uow=FakeUnitOfWork()
+        b3 = await world.service(FakeUnitOfWork()).set_reference_price(
+            **world.request(source=PriceSource.B3),
         )
-        manual = await world.service.set_reference_price(**world.request(), uow=FakeUnitOfWork())
-        other_price = await world.service.set_reference_price(
+        manual = await world.service(FakeUnitOfWork()).set_reference_price(**world.request())
+        other_price = await world.service(FakeUnitOfWork()).set_reference_price(
             **world.request(
                 asset_id=other.id,
                 reference_date=date(2026, 10, 15),
                 pu="80206.1333187932",
                 source=PriceSource.B3,
             ),
-            uow=FakeUnitOfWork(),
         )
 
         found = await world.reader.get([world.asset.id, other.id], [date(2026, 10, 15), DAY])
@@ -339,31 +346,31 @@ class TestLatest:
     """`PriceReader.latest`, for ``Instrument.last_reference`` (OQ-48)."""
 
     def test_it_satisfies_the_public_contract(self, world: World) -> None:
-        reader: PriceReaderPort = world.reader
-        assert inspect.signature(type(reader).latest) == inspect.signature(PriceReaderPort.latest)
+        reader: PriceReader = world.reader
+        assert inspect.signature(type(reader).latest) == inspect.signature(PriceReader.latest)
 
     async def test_the_latest_date_wins_over_the_source(self, world: World) -> None:
         # MANUAL on 14/10 is older than B3 on 16/10: the latest date comes first, then MANUAL > B3.
-        await world.service.set_reference_price(
-            **world.request(reference_date=date(2026, 10, 14)), uow=FakeUnitOfWork()
+        await world.service(FakeUnitOfWork()).set_reference_price(
+            **world.request(reference_date=date(2026, 10, 14)),
         )
-        b3 = await world.service.set_reference_price(
-            **world.request(source=PriceSource.B3, pu="89240.4279488087"), uow=FakeUnitOfWork()
+        b3 = await world.service(FakeUnitOfWork()).set_reference_price(
+            **world.request(source=PriceSource.B3, pu="89240.4279488087"),
         )
 
         assert await world.reader.latest([world.asset.id]) == {world.asset.id: b3}
 
     async def test_on_the_latest_date_manual_wins_over_b3(self, world: World) -> None:
-        await world.service.set_reference_price(
-            **world.request(source=PriceSource.B3, pu="89240.4279488087"), uow=FakeUnitOfWork()
+        await world.service(FakeUnitOfWork()).set_reference_price(
+            **world.request(source=PriceSource.B3, pu="89240.4279488087"),
         )
-        manual = await world.service.set_reference_price(**world.request(), uow=FakeUnitOfWork())
+        manual = await world.service(FakeUnitOfWork()).set_reference_price(**world.request())
 
         assert await world.reader.latest([world.asset.id]) == {world.asset.id: manual}
 
     async def test_assets_without_a_price_are_absent(self, world: World) -> None:
         other = world.assets.add(instrument(maturity_date=date(2029, 1, 2)))
-        price = await world.service.set_reference_price(**world.request(), uow=FakeUnitOfWork())
+        price = await world.service(FakeUnitOfWork()).set_reference_price(**world.request())
 
         found = await world.reader.latest([world.asset.id, other.id, uuid4()])
 

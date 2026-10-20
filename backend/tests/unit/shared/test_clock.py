@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
-from di1.shared.clock import SAO_PAULO, Clock, FixedClock
+from di1.shared.clock import SAO_PAULO, Clock
+from tests.fakes.clock import FixedClock
 
 
 def test_fixed_clock_gives_the_pinned_date() -> None:

@@ -20,7 +20,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from di1.composition.dependencies import get_asset_service, get_unit_of_work
+from di1.composition.dependencies import get_asset_service
 from di1.main import create_app
 from di1.modules.asset.presentation.http.router import create_router
 from di1.modules.prices.public import PriceSource
@@ -118,7 +118,7 @@ def client(
 ) -> Iterator[TestClient]:
     app = create_app(settings)
     app.include_router(
-        create_router(get_asset_service, get_unit_of_work, lambda uow: latest_prices)
+        create_router(get_service=get_asset_service, get_price_reader=lambda: latest_prices)
     )
     with TestClient(app) as client:
         yield client
@@ -356,7 +356,7 @@ class TestCreateProduct:
             ("VALIDATION_ERROR", "Informe a especificação do contrato futuro.", "futures")
         ]
 
-    @pytest.mark.parametrize("asset_class_id", [999, 40000])
+    @pytest.mark.parametrize("asset_class_id", [999, 0, -1, 40000, 10**12])
     def test_an_unknown_class_is_422_on_asset_class_id(
         self, client: TestClient, asset_class_id: int
     ) -> None:
@@ -367,6 +367,22 @@ class TestCreateProduct:
             PROBLEM,
             [("VALIDATION_ERROR", "Classe de ativo não encontrada.", "asset_class_id")],
         )
+
+    @pytest.mark.parametrize(
+        ("path", "field"), [("/products", "unknown"), ("/instruments", "unknown")]
+    )
+    def test_an_unknown_body_field_is_422(
+        self, client: TestClient, seeded: Di1Catalogue, path: str, field: str
+    ) -> None:
+        body: dict[str, Any] = (
+            DAP | {"asset_class_id": seeded.interest_rate_class_id}
+            if path == "/products"
+            else {"product_id": str(seeded.di1_id), "code": "DI1N27", "maturity_date": None}
+        )
+
+        status, _, errors = _problem(client.post(path, json=body | {field: 1}))
+
+        assert (status, errors) == (422, [("VALIDATION_ERROR", "Valor inválido.", field)])
 
     @pytest.mark.parametrize("face_value", [100000, 1.5, "1e5", "Infinity", "NaN", "", "1,5"])
     def test_decimals_are_plain_decimal_strings(

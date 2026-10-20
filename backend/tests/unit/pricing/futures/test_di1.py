@@ -22,22 +22,17 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from di1.modules.pricing.domain.di1 import DI1Calculator
-from di1.modules.pricing.domain.model import (
-    FuturesTerms,
-    InputKind,
-    Price,
-    Quote,
-)
+from di1.modules.pricing.domain import di1
+from di1.modules.pricing.domain.model import DI1Terms, Price, Quote
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
+from di1.shared.input_kind import InputKind
 
 FACE = Decimal("100000")
 MATURITY = date(2028, 1, 1)
-calculator = DI1Calculator()
 
 
 def price(reference_date: date, quote: Quote, face: Decimal = FACE) -> Price:
-    return calculator.calculate(FuturesTerms(MATURITY, face), reference_date, quote)
+    return di1.price(DI1Terms(MATURITY, face), reference_date, quote)
 
 
 def days_before_maturity(days: int) -> date:
@@ -138,8 +133,8 @@ def test_days_to_maturity_are_calendar_days() -> None:
 
 
 def test_leap_year_uses_366_days_over_365() -> None:
-    result = calculator.calculate(
-        FuturesTerms(date(2029, 1, 1), FACE),
+    result = di1.price(
+        DI1Terms(date(2029, 1, 1), FACE),
         date(2028, 1, 1),
         Quote(InputKind.RATE, Decimal("0.10")),
     )
@@ -398,9 +393,9 @@ def test_pu_to_rate_to_pu_round_trip(pu: Decimal, d: int) -> None:
 
 def test_the_multiplier_is_not_a_pricing_term() -> None:
     # OQ-2: the multiplier stays in the product registry and is not applied.
-    assert {field.name for field in fields(FuturesTerms)} == {"maturity_date", "face_value"}
+    assert {field.name for field in fields(DI1Terms)} == {"maturity_date", "face_value"}
 
 
 def test_a_float_face_value_is_refused() -> None:
     with pytest.raises(TypeError):
-        FuturesTerms(MATURITY, 100000.0)  # type: ignore[arg-type]
+        DI1Terms(MATURITY, 100000.0)  # type: ignore[arg-type]

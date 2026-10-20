@@ -1,16 +1,15 @@
-"""What `PriceService` needs for its own persistence (interfaces.md "Prices"). The PU ↔ rate
-calculation is Pricing's public `PricingService`."""
+"""What `PriceService` and `DefaultPriceReader` need from persistence (interfaces.md "Prices").
+The PU ↔ rate calculation is Pricing's public `PricingService`."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Collection, Sequence
 from datetime import date
 from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
-from di1.modules.prices.public import PriceSource, ReferencePriceRecord
-from di1.platform.database.unit_of_work import UnitOfWork
+from di1.modules.prices.domain.reference_price import PriceSource, ReferencePriceRecord
 from di1.shared.input_kind import InputKind
 
 
@@ -30,8 +29,6 @@ class ReferencePriceRepository(Protocol):
         """Save this observation; an existing row of the same (asset, date, source) is replaced
         by it, with a new id and new timestamps (OQ-26 item 7)."""
         ...
-
-    async def get(self, price_id: UUID) -> ReferencePriceRecord | None: ...
 
     async def delete(self, price_id: UUID) -> ReferencePriceRecord | None:
         """Delete ``price_id``; the deleted row, or ``None`` when it did not exist."""
@@ -55,7 +52,3 @@ class ReferencePriceRepository(Protocol):
     ) -> Sequence[ReferencePriceRecord]:
         """Every observation of ``asset_id`` dated in [start_date, end_date]."""
         ...
-
-
-RepositoryFactory = Callable[[UnitOfWork], ReferencePriceRepository]
-"""Builds the repository over a Unit of Work's session."""
