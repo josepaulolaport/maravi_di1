@@ -68,10 +68,9 @@ class Recorder:
         return handle
 
 
-async def serving(loop: JobLoop) -> asyncio.Task[None]:
-    task = asyncio.create_task(loop.run())
-    await asyncio.sleep(0)
-    return task
+def serving(loop: JobLoop) -> asyncio.Task[None]:
+    """The loop waits on its own event, so an offer made before it first runs is kept."""
+    return asyncio.create_task(loop.run())
 
 
 async def stop(task: asyncio.Task[None]) -> None:
@@ -83,7 +82,7 @@ async def stop(task: asyncio.Task[None]) -> None:
 async def test_the_message_is_acked_once_its_start_ran_and_the_job_then_a_sweep_run() -> None:
     recorder = Recorder()
     loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=LONG)
-    task = await serving(loop)
+    task = serving(loop)
     message = FakeMessage(make_envelope().to_json(), events=recorder.events)
 
     await MessageConsumer(name="test", handler=recorder.handler(), jobs=loop).handle(message)
@@ -97,7 +96,7 @@ async def test_the_message_is_acked_once_its_start_ran_and_the_job_then_a_sweep_
 async def test_a_message_whose_request_does_not_start_is_acked_and_the_sweep_runs() -> None:
     recorder = Recorder()
     loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=LONG)
-    task = await serving(loop)
+    task = serving(loop)
     message = FakeMessage(make_envelope().to_json(), events=recorder.events)
 
     await MessageConsumer(name="test", handler=recorder.handler(start=False), jobs=loop).handle(
@@ -115,7 +114,7 @@ async def test_a_message_during_a_job_is_acked_at_once_and_skipped() -> None:
     unacknowledged behind a long run (RabbitMQ's consumer timeout)."""
     recorder = Recorder(hold=asyncio.Event())
     loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=LONG)
-    task = await serving(loop)
+    task = serving(loop)
     consumer = MessageConsumer(name="test", handler=recorder.handler(), jobs=loop)
     await consumer.handle(FakeMessage(make_envelope().to_json()))
     await eventually(lambda: recorder.events == ["start"])
@@ -137,7 +136,7 @@ async def test_a_failing_start_is_logged_the_message_acked_and_the_sweep_runs(
     """The message is only a hint: the sweep retries whatever is still QUEUED."""
     recorder = Recorder()
     loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=LONG)
-    task = await serving(loop)
+    task = serving(loop)
     message = FakeMessage(make_envelope().to_json())
 
     await MessageConsumer(name="test", handler=recorder.handler(fail=True), jobs=loop).handle(
@@ -168,7 +167,7 @@ async def test_a_body_that_is_not_an_envelope_is_acked_and_dropped(
 async def test_the_sweep_runs_on_every_interval() -> None:
     recorder = Recorder()
     loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=0.01)
-    task = await serving(loop)
+    task = serving(loop)
 
     await eventually(lambda: recorder.events.count("sweep") >= 3)
 
@@ -192,7 +191,7 @@ async def test_a_failing_job_or_sweep_ends_the_loop_with_its_error(where: str) -
         return work
 
     loop = JobLoop(sweep=sweep, sweep_interval_seconds=LONG)
-    task = await serving(loop)
+    task = serving(loop)
 
     await MessageConsumer(name="test", handler=handle, jobs=loop).handle(
         FakeMessage(make_envelope().to_json())
@@ -220,7 +219,7 @@ async def test_a_cancelled_delivery_leaves_the_message_unacked_and_the_job_runs(
         return work
 
     loop = JobLoop(sweep=recorder.sweep, sweep_interval_seconds=LONG)
-    task = await serving(loop)
+    task = serving(loop)
     message = FakeMessage(make_envelope().to_json())
     delivery = asyncio.create_task(
         MessageConsumer(name="test", handler=handle, jobs=loop).handle(message)

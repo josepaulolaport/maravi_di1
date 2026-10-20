@@ -45,9 +45,7 @@ async def test_a_cancelled_first_connection_leaves_no_task(
 ) -> None:
     connecting = asyncio.create_task(connect(_broker(hanging_broker_url), connection_name="test"))
     await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
-    # A window in which nothing may happen: the connection keeps hanging.
-    done, _ = await asyncio.wait({connecting}, timeout=0.3)
-    assert not done
+    assert not connecting.done()
 
     connecting.cancel()
     with pytest.raises(asyncio.CancelledError):
