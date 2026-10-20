@@ -97,6 +97,11 @@ class RunStore(Protocol):
         """Whether any run is QUEUED (a plain read)."""
         ...
 
+    async def lock_the_queue(self, *, uow: UnitOfWork) -> None:
+        """Takes the queue's transaction-scoped lock, held until the Unit of Work ends: two takes
+        are serialized, so "nothing RUNNING, then lock the oldest QUEUED" is one atomic step."""
+        ...
+
     async def lock_running_runs(self, *, uow: UnitOfWork) -> Sequence[ProcessingRequest]:
         """The RUNNING runs, oldest first, row-locked: the run the worker is processing, or at
         its start the one it was (OQ-45). DISPATCHED and CANCELLING are never written (OQ-46)."""

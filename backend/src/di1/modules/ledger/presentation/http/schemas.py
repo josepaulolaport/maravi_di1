@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, date, datetime, time
-from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -19,17 +18,11 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictInt, W
 
 from di1.modules.ledger.application.services.ledger_service import LedgerEntryView
 from di1.modules.ledger.domain.entries import EntryDraft, EntryType
+from di1.platform.http import DecimalString
 from di1.shared.decimals import to_plain
 from di1.shared.input_kind import InputKind
 
-_DECIMAL = re.compile(r"^-?\d+(\.\d+)?$")
-_WALL_TIME = re.compile(r"^\d{2}:\d{2}(:\d{2})?$")
-
-
-def _decimal_string(value: object) -> Decimal:
-    if not isinstance(value, str) or not _DECIMAL.fullmatch(value):
-        raise ValueError("a decimal number as a string")
-    return Decimal(value)
+_WALL_TIME = re.compile(r"^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$")
 
 
 def _wall_time(value: object) -> time:
@@ -37,14 +30,6 @@ def _wall_time(value: object) -> time:
         raise ValueError("HH:MM or HH:MM:SS")
     return time.fromisoformat(value)
 
-
-DecimalString = Annotated[
-    Decimal,
-    BeforeValidator(_decimal_string),
-    WithJsonSchema({"type": "string", "pattern": _DECIMAL.pattern}),
-]
-"""A plain decimal number sent as a string (``"89006.4625467350"``); trailing zeros are kept,
-since they were typed (OQ-3). A JSON number is refused: it may already have lost precision."""
 
 WallTime = Annotated[
     time,

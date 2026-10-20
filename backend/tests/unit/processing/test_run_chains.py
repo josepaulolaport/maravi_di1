@@ -3,6 +3,7 @@ Expected values follow the formulas of CLAUDE.md §2, worked by hand."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
@@ -20,8 +21,10 @@ from di1.modules.portfolio.public import (
 from di1.modules.processing.application.interfaces.repositories import IssueRecord, IssueType
 from di1.modules.processing.application.services.run_chains import (
     ChainDataError,
+    cash_totals,
     process_cash_day,
     process_positions_day,
+    trade_of,
 )
 from tests.unit.processing.fakes import FakeUnitOfWork
 from tests.unit.processing.run_fakes import RecordingWriter, World, cash_movement, trade
@@ -231,3 +234,23 @@ async def test_a_traded_asset_without_an_instrument_is_a_data_error() -> None:
     w.ledger.trades.append(trade(F29, D1, 1, "95000.0000000000"))
     with pytest.raises(ChainDataError):
         await positions(w, D1, zero_state=True)
+
+
+# --- malformed ledger rows (explicit raises, not asserts: they hold under python -O) --------
+
+
+@pytest.mark.parametrize(
+    "missing", ["asset_id", "signed_quantity", "execution_pu", "execution_rate"]
+)
+def test_a_trade_missing_a_trade_field_is_a_data_error(missing: str) -> None:
+    broken = replace(trade(F29, D1, 1, "95000.0000000000"), **{missing: None})  # type: ignore[arg-type]
+
+    with pytest.raises(ChainDataError):
+        trade_of(broken)
+
+
+def test_a_cash_movement_without_an_amount_is_a_data_error() -> None:
+    broken = replace(cash_movement(D1, "100.00"), cash_amount=None)
+
+    with pytest.raises(ChainDataError):
+        cash_totals([broken])

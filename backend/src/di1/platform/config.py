@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     database_pool_size: int = Field(default=5, ge=1)
     database_max_overflow: int = Field(default=10, ge=0)
     database_echo: bool = False
+    worker_statement_timeout_seconds: float = Field(default=60.0, gt=0)
+    """``statement_timeout`` of the processing worker's connections (`create_worker_engine`):
+    longer than one date's transaction, so a hung query fails the unit of work instead of
+    hanging the worker while its heartbeat keeps it healthy. The API keeps the server default."""
+    worker_lock_timeout_seconds: float = Field(default=10.0, gt=0)
+    """``lock_timeout`` of the processing worker's connections: the longest wait for a row or
+    advisory lock (a cancel or a write holds one only for its own short transaction)."""
 
     @field_validator("database_url")
     @classmethod
@@ -93,6 +100,10 @@ class BrokerSettings(BaseSettings):
     inbox_retention_days: int = Field(default=7, ge=1)
     """Inbox records older than this are deleted by the outbox relay (user decision M9)."""
     inbox_retention_interval_seconds: float = Field(default=3600.0, gt=0)
+    outbox_retention_days: int = Field(default=7, ge=1)
+    """Outbox rows published longer ago than this are deleted by the outbox relay; an
+    unpublished row is never deleted."""
+    outbox_retention_interval_seconds: float = Field(default=3600.0, gt=0)
 
     @field_validator("rabbitmq_url")
     @classmethod

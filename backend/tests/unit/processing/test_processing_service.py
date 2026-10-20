@@ -4,7 +4,7 @@ OQ-11, OQ-21, OQ-23, OQ-26, OQ-29, OQ-30, OQ-31)."""
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from datetime import date
+from datetime import date, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -176,6 +176,24 @@ async def test_the_preview_refuses_a_start_after_the_end(harness: Harness) -> No
             "start_date",
         ),
     )
+
+
+TOO_LONG = ErrorDetail(
+    ErrorCode.INVALID_RANGE, "O período deve ter no máximo 3.660 dias.", "end_date"
+)
+
+
+async def test_a_range_of_3660_dates_is_allowed_and_one_more_is_refused(harness: Harness) -> None:
+    """A run of decades would hold the one worker for hours; the span is capped at 3,660
+    dates (about ten years, ends included)."""
+    end = date(2026, 10, 19)
+    longest = end - timedelta(days=3659)
+
+    await harness.service.preview_range(ALL, longest, end, uow=FakeUnitOfWork())
+    for call in (harness.service.preview_range, harness.service.enqueue_range):
+        with pytest.raises(DomainError) as raised:
+            await call(ALL, longest - timedelta(days=1), end, uow=FakeUnitOfWork())
+        assert _error(raised) == (TOO_LONG,)
 
 
 FUTURE = "A data não pode ser posterior a hoje."

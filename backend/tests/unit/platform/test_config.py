@@ -24,7 +24,14 @@ from di1.platform.config import (
 )
 
 URL = "postgresql+psycopg://di1:s3cret-pw@db:5432/di1"
-ENV_NAMES = ("DATABASE_URL", "DATABASE_POOL_SIZE", "DATABASE_MAX_OVERFLOW", "DATABASE_ECHO")
+ENV_NAMES = (
+    "DATABASE_URL",
+    "DATABASE_POOL_SIZE",
+    "DATABASE_MAX_OVERFLOW",
+    "DATABASE_ECHO",
+    "WORKER_STATEMENT_TIMEOUT_SECONDS",
+    "WORKER_LOCK_TIMEOUT_SECONDS",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +67,39 @@ def test_pool_values_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) 
 
     assert (settings.database_pool_size, settings.database_max_overflow) == (3, 0)
     assert settings.database_echo is True
+
+
+def test_worker_timeout_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Long enough for one date's transaction, short enough that a hung query or lock wait
+    ends the worker's unit of work instead of hanging it."""
+    monkeypatch.setenv("DATABASE_URL", URL)
+
+    settings = Settings()
+
+    assert settings.worker_statement_timeout_seconds == 60
+    assert settings.worker_lock_timeout_seconds == 10
+
+
+def test_worker_timeouts_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", URL)
+    monkeypatch.setenv("WORKER_STATEMENT_TIMEOUT_SECONDS", "120")
+    monkeypatch.setenv("WORKER_LOCK_TIMEOUT_SECONDS", "2.5")
+
+    settings = Settings()
+
+    assert settings.worker_statement_timeout_seconds == 120
+    assert settings.worker_lock_timeout_seconds == 2.5
+
+
+@pytest.mark.parametrize(
+    "name", ["WORKER_STATEMENT_TIMEOUT_SECONDS", "WORKER_LOCK_TIMEOUT_SECONDS"]
+)
+def test_worker_timeouts_are_positive(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    monkeypatch.setenv("DATABASE_URL", URL)
+    monkeypatch.setenv(name, "0")
+
+    with pytest.raises(ValidationError, match=name.lower()):
+        Settings()
 
 
 def test_the_database_url_is_required() -> None:
@@ -141,6 +181,8 @@ BROKER_ENV_NAMES = (
     "OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS",
     "INBOX_RETENTION_DAYS",
     "INBOX_RETENTION_INTERVAL_SECONDS",
+    "OUTBOX_RETENTION_DAYS",
+    "OUTBOX_RETENTION_INTERVAL_SECONDS",
 )
 
 
@@ -167,6 +209,8 @@ def test_broker_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.outbox_relay_retry_max_delay_seconds == 60.0
     assert settings.inbox_retention_days == 7
     assert settings.inbox_retention_interval_seconds == 3600.0
+    assert settings.outbox_retention_days == 7
+    assert settings.outbox_retention_interval_seconds == 3600.0
 
 
 @pytest.mark.usefixtures("clean_broker_environment")
@@ -183,6 +227,8 @@ def test_broker_values_come_from_the_environment(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS", "8")
     monkeypatch.setenv("INBOX_RETENTION_DAYS", "30")
     monkeypatch.setenv("INBOX_RETENTION_INTERVAL_SECONDS", "600")
+    monkeypatch.setenv("OUTBOX_RETENTION_DAYS", "14")
+    monkeypatch.setenv("OUTBOX_RETENTION_INTERVAL_SECONDS", "900")
 
     settings = get_broker_settings()
 
@@ -196,6 +242,8 @@ def test_broker_values_come_from_the_environment(monkeypatch: pytest.MonkeyPatch
     assert settings.outbox_relay_retry_max_delay_seconds == 8.0
     assert settings.inbox_retention_days == 30
     assert settings.inbox_retention_interval_seconds == 600.0
+    assert settings.outbox_retention_days == 14
+    assert settings.outbox_retention_interval_seconds == 900.0
 
 
 @pytest.mark.usefixtures("clean_broker_environment")
@@ -234,6 +282,8 @@ def test_only_amqp_urls_are_accepted(monkeypatch: pytest.MonkeyPatch, url: str) 
         ("OUTBOX_RELAY_RETRY_MAX_DELAY_SECONDS", "0"),
         ("INBOX_RETENTION_DAYS", "0"),
         ("INBOX_RETENTION_INTERVAL_SECONDS", "0"),
+        ("OUTBOX_RETENTION_DAYS", "0"),
+        ("OUTBOX_RETENTION_INTERVAL_SECONDS", "0"),
     ],
 )
 def test_broker_bounds(monkeypatch: pytest.MonkeyPatch, name: str, value: str) -> None:

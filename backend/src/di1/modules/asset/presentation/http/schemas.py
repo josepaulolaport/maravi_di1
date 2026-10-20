@@ -6,10 +6,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel
 
 from di1.modules.asset.domain.model import (
     AssetClass,
@@ -19,6 +18,7 @@ from di1.modules.asset.domain.model import (
     Product,
 )
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
+from di1.platform.http import DecimalString
 from di1.shared.decimals import to_plain
 
 
@@ -165,21 +165,16 @@ class CreateInstrumentIn(BaseModel):
     maturity_date: date | None
 
 
-PlainDecimal = Annotated[str, StringConstraints(pattern=r"^-?[0-9]+(\.[0-9]+)?$")]
-"""A decimal as a JSON string in plain notation ("100000", "0.5"): never a JSON number, an
-exponent or a non-finite value (CLAUDE.md §2)."""
-
-
 class FuturesSpecIn(BaseModel):
-    face_value: PlainDecimal
-    contract_multiplier: PlainDecimal = "1"
+    face_value: DecimalString
+    contract_multiplier: DecimalString = Decimal("1")
     settlement_method: str
     settlement_description: str | None = None
 
     def terms(self) -> FuturesTerms:
         return FuturesTerms(
-            face_value=Decimal(self.face_value),
-            contract_multiplier=Decimal(self.contract_multiplier),
+            face_value=self.face_value,
+            contract_multiplier=self.contract_multiplier,
             settlement_method=self.settlement_method,
             settlement_description=self.settlement_description,
         )
