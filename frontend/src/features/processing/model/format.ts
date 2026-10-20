@@ -1,12 +1,10 @@
-import { formatDays } from '@/shared/format';
-
-export { formatDays, formatPeriod } from '@/shared/format';
+import { formatQuantity } from '@/shared/format';
 
 // Formatting used only by Central de Controle. Dates and counts, never money.
 
 /** Days committed of the range: "2 / 5 dias" (OQ-23). */
 export function formatProgress(done: number, total: number): string {
-  return `${formatDays(done)} / ${formatDays(total)} ${total === 1 ? 'dia' : 'dias'}`;
+  return `${formatQuantity(done)} / ${formatQuantity(total)} ${total === 1 ? 'dia' : 'dias'}`;
 }
 
 /** The first block of the request's UUID, enough to tell jobs apart in the history. */

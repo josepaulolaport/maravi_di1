@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 import type { Instrument } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
 import { formatDate, formatPu, formatRate, UNAVAILABLE } from '@/shared/format';
+import { Figure } from '@/shared/ui/Figure';
 
 /**
  * A product's contracts (§11.2). The PU and rate are the latest reference observation, always
@@ -54,9 +55,15 @@ export function ContractsTable({
                   </Text>
                 </Table.Td>
                 <Table.Td>{formatDate(instrument.maturity_date)}</Table.Td>
-                <Table.Td ta="right">{last ? formatPu(last.pu) : UNAVAILABLE}</Table.Td>
-                <Table.Td ta="right">{last ? formatRate(last.rate) : UNAVAILABLE}</Table.Td>
-                <Table.Td>{last ? formatDate(last.reference_date) : UNAVAILABLE}</Table.Td>
+                <Table.Td ta="right">
+                  <Figure text={last ? formatPu(last.pu) : UNAVAILABLE} />
+                </Table.Td>
+                <Table.Td ta="right">
+                  <Figure text={last ? formatRate(last.rate) : UNAVAILABLE} />
+                </Table.Td>
+                <Table.Td>
+                  <Figure text={last ? formatDate(last.reference_date) : UNAVAILABLE} />
+                </Table.Td>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap" justify="flex-end">
                     <Menu position="bottom-end" withinPortal>

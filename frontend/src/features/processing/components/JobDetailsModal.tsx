@@ -7,7 +7,9 @@ import { ActionModal } from '@/shared/ui/ActionModal';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { SCOPE_LABELS } from '@/shared/processing/scope';
 
-import { formatDays, formatPeriod, shortId } from '../model/format';
+import { formatPeriod, formatQuantity } from '@/shared/format';
+
+import { shortId } from '../model/format';
 import {
   canCancel,
   failedChainOf,
@@ -92,10 +94,10 @@ export function JobDetailsModal({ job, onClose, onCancel, onRequestAgain }: JobD
             <Field label="Finalização">{formatDateTime(job.finished_at)}</Field>
           </SimpleGrid>
           <SimpleGrid cols={3}>
-            <Field label="Total de dias">{formatDays(progress.total)}</Field>
-            <Field label="Dias concluídos">{formatDays(progress.done)}</Field>
+            <Field label="Total de dias">{formatQuantity(progress.total)}</Field>
+            <Field label="Dias concluídos">{formatQuantity(progress.done)}</Field>
             {/* Counts of calendar days from the range and progress_date, never money. */}
-            <Field label="Dias restantes">{formatDays(progress.total - progress.done)}</Field>
+            <Field label="Dias restantes">{formatQuantity(progress.total - progress.done)}</Field>
           </SimpleGrid>
           {/* CANCELLING is never sent since OQ-46; kept as a safe default. */}
           {(job.status === 'RUNNING' || job.status === 'CANCELLING') && (

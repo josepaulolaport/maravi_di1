@@ -9,6 +9,7 @@ import type { Issue, IssueType } from '@/api/contract';
 import { assetLinks, ledgerLinks } from '@/app/paths';
 import { UNAVAILABLE, countLabel, formatDate } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
+import { Figure } from '@/shared/ui/Figure';
 
 import type { useIssues } from '../hooks/useProcessing';
 
@@ -122,7 +123,9 @@ function IssueRow({ issue }: { issue: Issue }) {
         whose price is needed, which can precede the affected day (its D−1 price).
       */}
       <Table.Td>{formatDate(issue.required_price_date)}</Table.Td>
-      <Table.Td fw={500}>{issue.asset_code ?? UNAVAILABLE}</Table.Td>
+      <Table.Td fw={500}>
+        <Figure text={issue.asset_code ?? UNAVAILABLE} />
+      </Table.Td>
       <Table.Td>
         <Group gap={6} wrap="nowrap">
           <Text span c="yellow.8" display="inline-flex" aria-hidden>

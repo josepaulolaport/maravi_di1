@@ -8,12 +8,12 @@ import { FormActions } from '@/shared/ui/FormActions';
 
 import { useAllInstruments, useAllProducts } from '@/shared/queries';
 import { MessageAlert } from '@/shared/ui/MessageAlert';
-import { PriceInput, typedPrice } from '@/shared/ui/PriceInput';
+import { PriceInput } from '@/shared/ui/PriceInput';
 import type { CreateTradeEntryRequest, InputKind, IsoDate } from '@/api/contract';
-import { formatDate } from '@/shared/format';
+import { formatDate, typedPrice } from '@/shared/format';
 
 import { useCreateEntry } from '../hooks/useLedger';
-import { PastDateInput } from '@/shared/ui/PastDateInput';
+import { DateField } from '@/shared/ui/DateField';
 
 import { nowInSaoPaulo, toIsoTime } from '../model/time';
 
@@ -194,15 +194,7 @@ export function TradeForm({
           />
         </Group>
         <Group grow align="flex-start">
-          <PastDateInput
-            today={today}
-            label="Data"
-            withAsterisk
-            valueFormat="DD/MM/YYYY"
-            maxDate={today}
-            placeholder="DD/MM/AAAA"
-            {...form.getInputProps('date')}
-          />
+          <DateField label="Data" withAsterisk {...form.getInputProps('date')} />
           <TimeInput label="Hora" withAsterisk {...form.getInputProps('time')} />
         </Group>
         <NumberInput

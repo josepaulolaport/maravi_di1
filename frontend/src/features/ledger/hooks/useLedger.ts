@@ -8,7 +8,7 @@ import {
 import type { CreateLedgerEntryRequest, IsoDate, LedgerOrder } from '@/api/contract';
 import { ledgerApi } from '@/api/endpoints';
 import { mutationKeys, paramsOf, queryKeys } from '@/api/queryKeys';
-import { addDays, todayInSaoPaulo } from '@/shared/format';
+import { addDays } from '@/shared/format';
 import {
   dateParam,
   enumParam,
@@ -16,6 +16,7 @@ import {
   useQueryParams,
   withFallback,
 } from '@/shared/url/useQueryParams';
+import { useToday } from '@/shared/hooks/useToday';
 
 import type { LedgerEntry } from '../model/entries';
 
@@ -31,7 +32,7 @@ const ORDERS: Record<LedgerOrder, string> = { asc: 'asc', desc: 'desc' };
  * end, gives the end's 30-day window. Newest first unless `?ordem=asc`.
  */
 export function useLedgerFilters() {
-  const today = todayInSaoPaulo();
+  const today = useToday();
   const { values, set } = useQueryParams(
     {
       inicio: dateParam({ max: today }),

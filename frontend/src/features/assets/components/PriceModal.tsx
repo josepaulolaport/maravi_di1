@@ -1,9 +1,11 @@
 import { Alert, Select, Stack, Text, TextInput } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { IconCalendar, IconInfoCircle } from '@tabler/icons-react';
+import { IconInfoCircle } from '@tabler/icons-react';
 import type { UseMutationResult } from '@tanstack/react-query';
 
+import { typedPrice } from '@/shared/format';
 import { useApiForm } from '@/shared/form/useApiForm';
+import { useToday } from '@/shared/hooks/useToday';
 import { ActionModal } from '@/shared/ui/ActionModal';
 import { FormActions } from '@/shared/ui/FormActions';
 import { MessageAlert } from '@/shared/ui/MessageAlert';
@@ -14,12 +16,11 @@ import type {
   ReferencePrice,
   SetReferencePriceRequest,
 } from '@/api/contract';
-import { todayInSaoPaulo } from '@/shared/format';
-import { PriceInput, typedPrice } from '@/shared/ui/PriceInput';
+import { PriceInput } from '@/shared/ui/PriceInput';
 
 import { useSetReferencePrice } from '../hooks/usePrices';
 import { lastDay } from '../model/calendarData';
-import { PastDateInput } from '@/shared/ui/PastDateInput';
+import { DateField } from '@/shared/ui/DateField';
 
 interface PriceModalProps {
   /** The contract the price is for; `null` with `contracts` lets the user pick it. */
@@ -127,8 +128,8 @@ function PriceForm({
 
   const chosen = contracts?.find((c) => c.id === form.values.assetId) ?? instrument;
   // Nothing after today (OQ-14), nor after the contract's maturity (OQ-1).
-  const today = todayInSaoPaulo();
-  const maxDate = lastDay(chosen, today);
+  const today = useToday();
+  const maxDate = lastDay(chosen?.maturity_date, today);
 
   const submit = onSubmit((values) => {
     const value = typedPrice(values.kind, values.price);
@@ -171,7 +172,7 @@ function PriceForm({
               save.reset();
               form.setFieldValue('assetId', assetId);
               const next = contracts.find((c) => c.id === assetId) ?? null;
-              const limit = lastDay(next, today);
+              const limit = lastDay(next?.maturity_date, today);
               if (form.values.date !== null && form.values.date > limit) {
                 form.setFieldValue('date', null);
                 form.setFieldError('date', 'O contrato já venceu nesta data.');
@@ -181,14 +182,10 @@ function PriceForm({
         ) : (
           <TextInput label="Contrato" value={instrument?.code ?? ''} readOnly />
         )}
-        <PastDateInput
-          today={today}
+        <DateField
           label="Data de referência"
-          placeholder="DD/MM/AAAA"
-          valueFormat="DD/MM/YYYY"
           maxDate={maxDate}
           limitMessage="O contrato já venceu nesta data."
-          leftSection={<IconCalendar size={16} stroke={1.5} />}
           {...form.getInputProps('date')}
         />
         <PriceInput

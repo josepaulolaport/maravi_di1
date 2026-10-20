@@ -8,6 +8,7 @@ import type { IsoDate, PortfolioSummary } from '@/api/contract';
 import { addDays, formatDate, formatMoney, UNAVAILABLE } from '@/shared/format';
 import { DATE_STATUS, needsProcessing, processedAt } from '@/shared/ui/dateStatus';
 import { useSummary } from '@/shared/queries';
+import { Figure } from '@/shared/ui/Figure';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
 
 // OQ-19 item 3, amended by OQ-21: Caixa D0 is the published cash on the range's end
@@ -34,7 +35,7 @@ function CashCard({ label, date, summary }: CashCardProps) {
   if (summary.isPending) {
     value = <Loading label={`Carregando ${label}`} h={24} w={140} />;
   } else if (summary.isError) {
-    value = <span title="Indisponível">{UNAVAILABLE}</span>;
+    value = <Figure text={UNAVAILABLE} />;
     marker = <StatusBadge label="Erro ao carregar" color="red" />;
   } else {
     // The published cash, if any (a failed date keeps what it had), with its processing time
@@ -43,9 +44,9 @@ function CashCard({ label, date, summary }: CashCardProps) {
     time = processedAt(summary.data.cash.published_at);
     value =
       status === 'NOT_PROCESSED' ? (
-        <span title="Indisponível">{UNAVAILABLE}</span>
+        <Figure text={UNAVAILABLE} />
       ) : (
-        formatMoney(summary.data.cash.balance)
+        <Figure text={formatMoney(summary.data.cash.balance)} />
       );
     if (status !== 'PROCESSED') {
       marker = <StatusBadge label={DATE_STATUS[status].label} color={DATE_STATUS[status].color} />;

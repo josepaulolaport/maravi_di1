@@ -1,16 +1,16 @@
 import { Stack, TextInput } from '@mantine/core';
-import { IconCalendar } from '@tabler/icons-react';
 import { useState } from 'react';
 
 import type { Instrument, IsoDate, ReferencePriceDay } from '@/api/contract';
-import { todayInSaoPaulo } from '@/shared/format';
+import { useToday } from '@/shared/hooks/useToday';
 import { ActionModal } from '@/shared/ui/ActionModal';
 import { FormActions } from '@/shared/ui/FormActions';
 import { MessageAlert } from '@/shared/ui/MessageAlert';
-import { PastDateInput } from '@/shared/ui/PastDateInput';
+import { DateField } from '@/shared/ui/DateField';
 import { problemMessages } from '@/shared/ui/problemMessages';
 
 import { useReferencePriceDays } from '../hooks/usePrices';
+import { lastDay } from '../model/calendarData';
 import { RemovePriceModal } from './RemovePriceModal';
 
 interface RemovePriceByDateModalProps {
@@ -33,6 +33,7 @@ export function RemovePriceByDateModal({ instrument, onClose }: RemovePriceByDat
 const NO_PRICE = 'Nenhum preço registrado nesta data.';
 
 function DatePicker({ instrument, onClose }: { instrument: Instrument; onClose: () => void }) {
+  const today = useToday();
   const [date, setDate] = useState<IsoDate | null>(null);
   const [missing, setMissing] = useState(false);
   // The date whose prices are read, once "Continuar" is pressed.
@@ -52,9 +53,7 @@ function DatePicker({ instrument, onClose }: { instrument: Instrument; onClose: 
   if (day) return <RemovePriceModal day={day} onClose={onClose} />;
 
   // Nothing after today (OQ-14), nor after the contract's maturity (OQ-1).
-  const today = todayInSaoPaulo();
-  const maturity = instrument.maturity_date;
-  const maxDate = maturity !== null && maturity < today ? maturity : today;
+  const maxDate = lastDay(instrument.maturity_date, today);
   const none = fresh && live === null;
   const error = missing ? 'Informe a data.' : none ? NO_PRICE : undefined;
 
@@ -62,12 +61,10 @@ function DatePicker({ instrument, onClose }: { instrument: Instrument; onClose: 
     <ActionModal opened onClose={onClose} title="Remover preço de referência" size="md">
       <Stack gap="md">
         <TextInput label="Contrato" value={instrument.code} readOnly />
-        <PastDateInput
-          today={today}
+        <DateField
           label="Data de referência"
           maxDate={maxDate}
           limitMessage="O contrato já venceu nesta data."
-          leftSection={<IconCalendar size={16} stroke={1.5} />}
           value={date}
           error={error}
           onChange={(value) => {

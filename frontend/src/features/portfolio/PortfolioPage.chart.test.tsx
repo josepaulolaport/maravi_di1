@@ -7,7 +7,7 @@ import { url } from '@/test/msw/handlers';
 import { server } from '@/test/msw/server';
 import { renderApp, renderUi } from '@/test/render';
 
-import { ChartTooltip } from './components/CumulativePnlCard';
+import { PnlTooltip } from './components/PnlTooltip';
 import { toChartData } from './model/chartData';
 import { INCOMPLETE_NOTE, recordPnlRanges, openCarteira } from './portfolioPage.support';
 
@@ -24,9 +24,7 @@ describe('Carteira (§11.4)', () => {
     await waitFor(() => {
       expect(ranges.at(-1)).toEqual(['2026-09-17', '2026-10-16']);
     });
-    expect(screen.getByRole('button', { name: /Início do gráfico/ })).toHaveTextContent(
-      '17/09/2026',
-    );
+    expect(screen.getByRole('textbox', { name: 'Início do gráfico' })).toHaveValue('17/09/2026');
   });
 
   it('§11.4 OQ-16 OQ-48 picking a chart start reloads the chart, and its headline total, up to the date', async () => {
@@ -53,7 +51,7 @@ describe('Carteira (§11.4)', () => {
     expect(await card.findByText('+R$ 1.500,00')).toBeInTheDocument();
     expect(card.getByText('Desde 10/10/2026')).toBeInTheDocument();
 
-    await user.click(await screen.findByRole('button', { name: /Início do gráfico/ }));
+    await user.click(await screen.findByRole('textbox', { name: 'Início do gráfico' }));
     await user.click(await screen.findByRole('button', { name: '14 outubro 2026' }));
 
     expect(new URLSearchParams(router.state.location.search).get('pnl_start')).toBe('2026-10-14');
@@ -68,7 +66,7 @@ describe('Carteira (§11.4)', () => {
   it('§11.4 OQ-16 offers chart starts only before the date', async () => {
     const { user } = renderApp('/carteira?date=2026-10-16&pnl_start=2026-10-10');
 
-    await user.click(await screen.findByRole('button', { name: /Início do gráfico/ }));
+    await user.click(await screen.findByRole('textbox', { name: 'Início do gráfico' }));
 
     expect(await screen.findByRole('button', { name: '15 outubro 2026' })).toBeEnabled();
     // A disabled day is out of the accessibility tree's buttons; find it by its label.
@@ -98,7 +96,7 @@ describe('Carteira (§11.4)', () => {
     });
 
     // A Carteira date before the start drops the start.
-    await user.click(await screen.findByRole('button', { name: /Data de avaliação/ }));
+    await user.click(await screen.findByRole('textbox', { name: 'Data de avaliação' }));
     await user.click(await screen.findByRole('button', { name: '10 outubro 2026' }));
     // 10/10 is not processed, so no chart is shown, but the start is still dropped.
     await waitFor(() => {
@@ -110,7 +108,7 @@ describe('Carteira (§11.4)', () => {
     await waitFor(() => {
       expect(document.querySelector('[aria-label="10 outubro 2026"]')).toBeNull();
     });
-    await user.click(screen.getByRole('button', { name: /Data de avaliação/ }));
+    await user.click(screen.getByRole('textbox', { name: 'Data de avaliação' }));
     // jsdom has no layout, so Mantine may hide this calendar as "detached"; find it by label.
     await user.click(await screen.findByLabelText('15 outubro 2026'));
     await waitFor(() => {
@@ -170,7 +168,7 @@ describe('Carteira (§11.4)', () => {
           range_cumulative_pnl: '-8034.1345282660',
         },
       ]);
-      renderUi(<ChartTooltip active payload={[{ payload: point }]} />);
+      renderUi(<PnlTooltip active payload={[{ payload: point }]} />);
 
       expect(screen.getByText('17/10/2026')).toBeInTheDocument();
       expect(screen.getByText(reason)).toBeInTheDocument();

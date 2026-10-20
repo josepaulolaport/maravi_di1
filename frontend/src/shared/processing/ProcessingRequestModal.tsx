@@ -17,7 +17,8 @@ import { MessageAlert } from '@/shared/ui/MessageAlert';
 
 import { useEnqueue, usePreview } from './hooks';
 import { PreviewSummary } from './PreviewSummary';
-import { isValidRange, RangeFields } from './RangeFields';
+import { isValidRange } from './range';
+import { RangeFields } from './RangeFields';
 import { ScopeField } from './ScopeField';
 
 export interface ProcessingDraft {

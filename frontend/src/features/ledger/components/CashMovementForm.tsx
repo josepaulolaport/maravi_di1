@@ -9,7 +9,7 @@ import type { IsoDate } from '@/api/contract';
 import { formatDate, parsePtBrDecimal } from '@/shared/format';
 
 import { useCreateEntry } from '../hooks/useLedger';
-import { PastDateInput } from '@/shared/ui/PastDateInput';
+import { DateField } from '@/shared/ui/DateField';
 
 import { nowInSaoPaulo, toIsoTime } from '../model/time';
 
@@ -94,15 +94,7 @@ export function CashMovementForm({
       <Stack gap="md">
         <MessageAlert messages={pageErrors} />
         <Group grow align="flex-start">
-          <PastDateInput
-            today={today}
-            label="Data"
-            withAsterisk
-            valueFormat="DD/MM/YYYY"
-            maxDate={today}
-            placeholder="DD/MM/AAAA"
-            {...form.getInputProps('date')}
-          />
+          <DateField label="Data" withAsterisk {...form.getInputProps('date')} />
           <TimeInput label="Hora" withAsterisk {...form.getInputProps('time')} />
         </Group>
         <TextInput

@@ -5,7 +5,7 @@ import { useState } from 'react';
 import type { IsoDate } from '@/api/contract';
 import { renderUi } from '@/test/render';
 
-import { PastDateInput } from './PastDateInput';
+import { DateField } from './DateField';
 
 function Harness({
   maxDate,
@@ -24,9 +24,8 @@ function Harness({
         onSubmit(date);
       }}
     >
-      <PastDateInput
+      <DateField
         label="Data"
-        today="2026-10-18"
         maxDate={maxDate}
         limitMessage={limitMessage}
         value={date}
@@ -36,7 +35,7 @@ function Harness({
   );
 }
 
-describe('PastDateInput', () => {
+describe('DateField', () => {
   it('OQ-14 refuses a future date typed and submitted with Enter: the old date never goes out', async () => {
     const submitted: (IsoDate | null)[] = [];
     renderUi(<Harness maxDate="2026-10-18" onSubmit={(d) => submitted.push(d)} />);

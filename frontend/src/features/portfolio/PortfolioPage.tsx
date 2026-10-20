@@ -1,12 +1,11 @@
 import { Group, Stack } from '@mantine/core';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { DatePickerInput } from '@mantine/dates';
-import { IconCalendar } from '@tabler/icons-react';
 
 import { PageTitle } from '@/shared/ui/PageTitle';
 import { useSummary } from '@/shared/queries';
 import { Loading } from '@/shared/ui/Loading';
 import type { PortfolioPositions, PortfolioSummary } from '@/api/contract';
+import { DateField } from '@/shared/ui/DateField';
 import { ErrorState } from '@/shared/ui/ErrorState';
 
 import { CumulativePnlCard } from './components/CumulativePnlCard';
@@ -35,15 +34,13 @@ export function PortfolioPage() {
     <Stack gap="md">
       <PageTitle>Carteira</PageTitle>
       <Group justify="space-between" align="flex-end">
-        <DatePickerInput
+        <DateField
           label="Data de avaliação"
           value={date}
           onChange={(value) => {
             if (value) setDate(value);
           }}
           maxDate={today}
-          valueFormat="DD/MM/YYYY"
-          leftSection={<IconCalendar size={16} stroke={1.5} />}
           w={220}
         />
         {summary.data && <DataStatus summary={summary.data} />}

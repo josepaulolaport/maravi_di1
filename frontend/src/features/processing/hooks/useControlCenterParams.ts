@@ -1,5 +1,5 @@
 import type { IsoDate, ProcessingScope } from '@/api/contract';
-import { todayInSaoPaulo } from '@/shared/format';
+
 import { SCOPE_URL } from '@/shared/processing/scope';
 import {
   dateParam,
@@ -8,6 +8,7 @@ import {
   useQueryParams,
   withFallback,
 } from '@/shared/url/useQueryParams';
+import { useToday } from '@/shared/hooks/useToday';
 
 // Central de Controle keeps its URL state in the query string, with the keys
 // `controlCenterLinks` builds: `tab`, `inicio`, `fim`, `escopo`, plus `busca` for the search.
@@ -20,7 +21,7 @@ const TABS: Record<ControlCenterTab, string> = {
 };
 
 export function useControlCenterParams() {
-  const today = todayInSaoPaulo();
+  const today = useToday();
   const { values, set } = useQueryParams({
     tab: withFallback(enumParam(TABS), 'pendencias'),
     // Never after today (OQ-14, OQ-29); a future date in a link is reported and dropped.

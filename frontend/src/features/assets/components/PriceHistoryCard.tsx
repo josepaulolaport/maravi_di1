@@ -3,7 +3,8 @@ import { Group, Paper, SegmentedControl, Text, Title } from '@mantine/core';
 import { useState } from 'react';
 
 import type { IsoDate, ReferencePriceDay } from '@/api/contract';
-import { formatDate, formatPu, formatRate } from '@/shared/format';
+import { formatPu, formatRate } from '@/shared/format';
+import { chartTooltip } from '@/shared/ui/ChartTooltip';
 
 import { type ChartMode, type PricePoint, toPriceChart } from '../model/calendarData';
 
@@ -18,28 +19,15 @@ const formatters: Record<ChartMode, (value: string) => string> = {
   RATE: formatRate,
 };
 
-interface TooltipContentProps {
-  active?: boolean;
-  payload?: readonly { payload?: unknown }[];
-}
-
-/** Tooltip text is formatted from the exact decimal string, never from the plotted float. */
-function tooltipFor(format: (value: string) => string) {
-  return function ChartTooltip({ active, payload }: TooltipContentProps) {
-    const point = payload?.[0]?.payload as PricePoint | undefined;
-    if (!active || !point || point.text === null) return null;
-    return (
-      <Paper p="xs" shadow="sm">
-        <Text size="xs" c="dimmed">
-          {formatDate(point.date)}
-        </Text>
-        <Text size="sm" fw={500}>
-          {format(point.text)}
-        </Text>
-      </Paper>
-    );
-  };
-}
+/** A day's preferred observation, as PU or rate; a day without one shows no tooltip. */
+const tooltipFor = (format: (value: string) => string) =>
+  chartTooltip<PricePoint>((point) =>
+    point.text === null ? null : (
+      <Text size="sm" fw={500}>
+        {format(point.text)}
+      </Text>
+    ),
+  );
 
 const tooltips: Record<ChartMode, ReturnType<typeof tooltipFor>> = {
   PU: tooltipFor(formatPu),

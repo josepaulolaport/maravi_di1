@@ -1,55 +1,22 @@
 import { LineChart } from '@mantine/charts';
 import { Divider, Group, Paper, Skeleton, Stack, Text } from '@mantine/core';
-import { DatePickerInput } from '@mantine/dates';
-import { IconCalendar } from '@tabler/icons-react';
 
-import { Loading } from '@/shared/ui/Loading';
 import type { IsoDate } from '@/api/contract';
 import { addDays, formatDate, formatSignedMoney } from '@/shared/format';
+import { DateField } from '@/shared/ui/DateField';
 import { ErrorState } from '@/shared/ui/ErrorState';
+import { Loading } from '@/shared/ui/Loading';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
 
 import { useCumulativePnl } from '../hooks/usePortfolio';
-import {
-  type ChartPoint,
-  hasIncompleteDay,
-  incompleteReason,
-  toChartData,
-} from '../model/chartData';
+import { hasIncompleteDay, toChartData } from '../model/chartData';
+import { PnlTooltip } from './PnlTooltip';
 
 interface CumulativePnlCardProps {
   date: IsoDate;
   /** The chart's first day, before `date` (`useChartStart`). */
   start: IsoDate;
   onStartChange: (start: IsoDate) => void;
-}
-
-interface TooltipContentProps {
-  active?: boolean;
-  payload?: readonly { payload?: unknown }[];
-}
-
-/**
- * Tooltip text formatted from the exact decimal string, never from the plotted float, with the
- * reason a day adds nothing when it is not complete (OQ-41 item 5).
- */
-export function ChartTooltip({ active, payload }: TooltipContentProps) {
-  const point = payload?.[0]?.payload as ChartPoint | undefined;
-  if (!active || !point) return null;
-  const reason = incompleteReason(point);
-  return (
-    <Paper p="xs" shadow="sm">
-      <Text size="xs" c="dimmed">
-        {formatDate(point.date)}
-      </Text>
-      <SignedMoney value={point.cumulativeText} size="sm" fw={500} />
-      {reason !== null && (
-        <Text size="xs" c="dimmed">
-          {reason}
-        </Text>
-      )}
-    </Paper>
-  );
 }
 
 /**
@@ -82,7 +49,7 @@ export function CumulativePnlCard({ date, start, onStartChange }: CumulativePnlC
           </Text>
         </Stack>
         <Stack gap={4} align="flex-end">
-          <DatePickerInput
+          <DateField
             label="Início do gráfico"
             size="xs"
             value={start}
@@ -90,8 +57,7 @@ export function CumulativePnlCard({ date, start, onStartChange }: CumulativePnlC
               if (value) onStartChange(value);
             }}
             maxDate={addDays(date, -1)}
-            valueFormat="DD/MM/YYYY"
-            leftSection={<IconCalendar size={14} stroke={1.5} />}
+            limitMessage="O início do gráfico deve ser anterior à data de avaliação."
             w={160}
           />
           <Text size="sm" c="dimmed">
@@ -119,7 +85,7 @@ export function CumulativePnlCard({ date, start, onStartChange }: CumulativePnlC
             withLegend={false}
             gridAxis="y"
             valueFormatter={(value) => formatSignedMoney(String(value))}
-            tooltipProps={{ content: ChartTooltip }}
+            tooltipProps={{ content: PnlTooltip }}
             yAxisProps={{ width: 90 }}
           />
         ) : (

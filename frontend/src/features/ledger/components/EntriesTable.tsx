@@ -21,6 +21,7 @@ import {
   UNAVAILABLE,
 } from '@/shared/format';
 
+import { Figure } from '@/shared/ui/Figure';
 import table from '@/shared/ui/table.module.css';
 
 import {
@@ -34,8 +35,8 @@ import {
 const CASH_EFFECT_HINT =
   'Efeito no caixa: compra negativa, venda positiva; aporte positivo, retirada negativa.';
 
-const dash = <span title="Não se aplica">{UNAVAILABLE}</span>;
-const unknownType = <span title="Indisponível">{UNAVAILABLE}</span>;
+const dash = <Figure text={UNAVAILABLE} missing="Não se aplica" />;
+const unknownType = <Figure text={UNAVAILABLE} />;
 
 interface EntriesTableProps {
   entries: LedgerEntry[];

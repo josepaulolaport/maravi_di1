@@ -1,12 +1,10 @@
 import { Stack, TextInput } from '@mantine/core';
-import { DateInput } from '@mantine/dates';
 import { notifications } from '@mantine/notifications';
-import { IconCalendar } from '@tabler/icons-react';
 import type { UseMutationResult } from '@tanstack/react-query';
 
-import { parsePtBrDate } from '@/shared/format';
 import { useApiForm } from '@/shared/form/useApiForm';
 import { ActionModal } from '@/shared/ui/ActionModal';
+import { DateField } from '@/shared/ui/DateField';
 import { FormActions } from '@/shared/ui/FormActions';
 import { MessageAlert } from '@/shared/ui/MessageAlert';
 import type { CreateInstrumentRequest, Instrument, IsoDate, Product } from '@/api/contract';
@@ -81,13 +79,11 @@ function ContractForm({ product, create, onClose }: ContractFormProps) {
           withAsterisk
           {...form.getInputProps('code')}
         />
-        <DateInput
+        <DateField
           label="Vencimento"
-          placeholder="DD/MM/AAAA"
-          valueFormat="DD/MM/YYYY"
-          dateParser={parsePtBrDate}
           withAsterisk
-          leftSection={<IconCalendar size={16} stroke={1.5} />}
+          // A maturity may be in the future (OQ-1 limits prices, not maturities).
+          maxDate={null}
           {...form.getInputProps('maturity')}
         />
         <MessageAlert messages={pageErrors} />

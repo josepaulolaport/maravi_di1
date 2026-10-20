@@ -1,7 +1,9 @@
-import { Text, type TextProps } from '@mantine/core';
+import type { TextProps } from '@mantine/core';
 
 import type { Decimal } from '@/api/contract';
-import { displayedSign, formatSignedMoney, UNAVAILABLE } from '@/shared/format';
+import { displayedSign, formatSignedMoney } from '@/shared/format';
+
+import { Figure } from './Figure';
 
 interface SignedMoneyProps extends TextProps {
   value: Decimal | null | undefined;
@@ -15,10 +17,5 @@ export function SignedMoney({ value, ...props }: SignedMoneyProps) {
   const text = formatSignedMoney(value);
   const sign = displayedSign(text);
   const colorProps = sign === 1 ? { c: 'teal.8' } : sign === -1 ? { c: 'red.7' } : {};
-  const titleProps = text === UNAVAILABLE ? { title: 'Indisponível' } : {};
-  return (
-    <Text component="span" inherit {...colorProps} {...titleProps} {...props}>
-      {text}
-    </Text>
-  );
+  return <Figure text={text} {...colorProps} {...props} />;
 }

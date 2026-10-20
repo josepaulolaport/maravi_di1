@@ -15,7 +15,7 @@ describe('Carteira (§11.4)', () => {
   it('§11.4 picking a date in the calendar loads that date and puts it in the URL', async () => {
     const { user, router } = await openCarteira('2026-10-15');
 
-    await user.click(screen.getByRole('button', { name: /Data de avaliação/ }));
+    await user.click(screen.getByRole('textbox', { name: 'Data de avaliação' }));
     await user.click(await screen.findByRole('button', { name: '16 outubro 2026' }));
 
     expect(router.state.location.search).toBe('?date=2026-10-16');
@@ -28,7 +28,7 @@ describe('Carteira (§11.4)', () => {
 
     const [year, month, day] = todayInSaoPaulo().split('-');
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Data de avaliação/ })).toHaveTextContent(
+      expect(screen.getByRole('textbox', { name: 'Data de avaliação' })).toHaveValue(
         `${day ?? ''}/${month ?? ''}/${year ?? ''}`,
       );
     });

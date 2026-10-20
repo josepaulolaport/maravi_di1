@@ -2,11 +2,9 @@ import { Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
 import type { CashSummary, Decimal, PortfolioSummary } from '@/api/contract';
-import { formatMoney, UNAVAILABLE } from '@/shared/format';
+import { formatMoney } from '@/shared/format';
+import { Figure } from '@/shared/ui/Figure';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
-
-/** A money figure never breaks: its sign stays with the number (QA 2026-10-19 #2). */
-const NOWRAP = { whiteSpace: 'nowrap' } as const;
 
 function Kpi({
   label,
@@ -47,7 +45,7 @@ function CashBreakdown({ cash }: { cash: CashSummary }) {
   );
   return (
     <Stack gap={2} mt="xs" role="group" aria-label="Movimentação do caixa no dia">
-      {line('Operações', <SignedMoney value={cash.trades_cash_flow} style={NOWRAP} />)}
+      {line('Operações', <SignedMoney value={cash.trades_cash_flow} />)}
       {line('Aportes', <Money value={cash.deposits} />)}
       {line('Retiradas', <Money value={cash.withdrawals} />)}
     </Stack>
@@ -55,12 +53,7 @@ function CashBreakdown({ cash }: { cash: CashSummary }) {
 }
 
 function Money({ value }: { value: Decimal | null }) {
-  const text = formatMoney(value);
-  return (
-    <span title={text === UNAVAILABLE ? 'Indisponível' : undefined} style={NOWRAP}>
-      {text}
-    </span>
-  );
+  return <Figure text={formatMoney(value)} />;
 }
 
 /**
@@ -81,13 +74,13 @@ export function KpiGrid({ summary }: { summary: PortfolioSummary }) {
         <Money value={aum} />
       </Kpi>
       <Kpi label="P&L diário">
-        <SignedMoney value={positions.daily_pnl} style={NOWRAP} />
+        <SignedMoney value={positions.daily_pnl} />
       </Kpi>
       <Kpi label="P&L posições">
-        <SignedMoney value={positions.position_pnl} style={NOWRAP} />
+        <SignedMoney value={positions.position_pnl} />
       </Kpi>
       <Kpi label="P&L operações">
-        <SignedMoney value={positions.trades_pnl} style={NOWRAP} />
+        <SignedMoney value={positions.trades_pnl} />
       </Kpi>
     </SimpleGrid>
   );

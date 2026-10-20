@@ -2,7 +2,8 @@ import { Button, Group, Paper, Stack, Text, Title } from '@mantine/core';
 import { IconPlayerPlay } from '@tabler/icons-react';
 
 import type { ProcessingDraft } from '@/shared/processing/ProcessingRequestModal';
-import { isValidRange, RangeFields } from '@/shared/processing/RangeFields';
+import { isValidRange } from '@/shared/processing/range';
+import { RangeFields } from '@/shared/processing/RangeFields';
 import { ScopeField } from '@/shared/processing/ScopeField';
 
 import type { ControlCenterParams } from '../hooks/useControlCenterParams';

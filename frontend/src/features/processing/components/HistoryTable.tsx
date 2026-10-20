@@ -8,10 +8,11 @@ import { countLabel } from '@/shared/format';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { LoadMore } from '@/shared/ui/LoadMore';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { formatPeriod } from '@/shared/format';
 
 import { SCOPE_LABELS } from '@/shared/processing/scope';
 
-import { formatPeriod, formatProgress, shortId } from '../model/format';
+import { formatProgress, shortId } from '../model/format';
 import type { useProcessingRequests } from '../hooks/useProcessing';
 import { canCancel, runBadge, progressOf, retryRequests } from '../model/jobStatus';
 import type { RetryRequest } from '../model/jobStatus';

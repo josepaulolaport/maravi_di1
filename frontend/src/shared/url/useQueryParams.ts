@@ -2,7 +2,8 @@ import { useEffect } from 'react';
 import { useSearchParams } from 'react-router';
 
 import type { IsoDate } from '@/api/contract';
-import { isIsoDate, todayInSaoPaulo } from '@/shared/format';
+import { isIsoDate } from '@/shared/format';
+import { useToday } from '@/shared/hooks/useToday';
 
 import { useFutureDateNotice } from './futureDate';
 
@@ -43,7 +44,7 @@ export function useQueryParams<D extends Defs>(
   refine?: (values: QueryValues<D>) => Partial<QueryValues<D>>,
 ) {
   const [params, setParams] = useSearchParams();
-  const today = todayInSaoPaulo();
+  const today = useToday();
 
   const entries = Object.entries<QueryParam<unknown>>(defs);
   const parsed: Record<string, unknown> = {};

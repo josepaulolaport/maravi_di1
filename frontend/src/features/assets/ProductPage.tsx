@@ -12,7 +12,8 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 import { textParam, useQueryParams } from '@/shared/url/useQueryParams';
 
 import { ContractsTable } from './components/ContractsTable';
-import { countLabel, todayInSaoPaulo } from '@/shared/format';
+import { countLabel } from '@/shared/format';
+import { useToday } from '@/shared/hooks/useToday';
 import { NewContractModal } from './components/NewContractModal';
 import { lastDay } from './model/calendarData';
 import { PageHeader } from './components/PageHeader';
@@ -40,6 +41,7 @@ export function ProductPage() {
 }
 
 function ProductBody({ product }: { product: Product }) {
+  const today = useToday();
   const { values, set } = useQueryParams({ busca: textParam });
   const search = values.busca;
   const setSearch = (busca: string) => {
@@ -55,7 +57,7 @@ function ProductBody({ product }: { product: Product }) {
   });
   // The form opens on today, or on a matured contract's last day (OQ-1).
   const openPrice = (instrument: Instrument | null) => {
-    setPrice({ instrument, date: lastDay(instrument, todayInSaoPaulo()) });
+    setPrice({ instrument, date: lastDay(instrument?.maturity_date, today) });
   };
   const [removing, setRemoving] = useState<Instrument | null>(null);
 

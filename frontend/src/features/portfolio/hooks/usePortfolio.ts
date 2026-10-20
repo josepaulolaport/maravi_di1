@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { IsoDate } from '@/api/contract';
 import { portfolioApi } from '@/api/endpoints';
 import { queryKeys } from '@/api/queryKeys';
-import { addDays, todayInSaoPaulo } from '@/shared/format';
+import { addDays } from '@/shared/format';
 import {
   dateParam,
   type QueryParam,
@@ -11,6 +11,7 @@ import {
   useQueryParams,
   withFallback,
 } from '@/shared/url/useQueryParams';
+import { useToday } from '@/shared/hooks/useToday';
 
 import { DEFAULT_SORT, SORT_KEYS, type Sort } from '../model/sortPositions';
 
@@ -55,7 +56,7 @@ const isDefaultSort = (sort: Sort) =>
  * - `?busca=` and `?ordem=` the positions table's search and order.
  */
 export function usePortfolioParams() {
-  const today = todayInSaoPaulo();
+  const today = useToday();
   const { values, set } = useQueryParams(
     {
       date: withFallback(dateParam({ max: today }), today),

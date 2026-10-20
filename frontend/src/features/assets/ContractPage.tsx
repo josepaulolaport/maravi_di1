@@ -6,7 +6,8 @@ import { useParams } from 'react-router';
 import { Loading } from '@/shared/ui/Loading';
 import type { Instrument, IsoDate, ReferencePriceDay } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
-import { formatDate, todayInSaoPaulo } from '@/shared/format';
+import { formatDate } from '@/shared/format';
+import { useToday } from '@/shared/hooks/useToday';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { PeriodPicker } from '@/shared/ui/PeriodPicker';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
@@ -14,7 +15,7 @@ import { dateParam, useQueryParams } from '@/shared/url/useQueryParams';
 
 import { PageHeader } from './components/PageHeader';
 import { PriceCalendar } from './components/PriceCalendar';
-import { calendarRows, calendarWindow, resolveRange } from './model/calendarData';
+import { calendarRows, calendarWindow, lastDay, resolveRange } from './model/calendarData';
 import { PriceModal } from './components/PriceModal';
 import { PriceHistoryCard } from './components/PriceHistoryCard';
 import { RemovePriceModal } from './components/RemovePriceModal';
@@ -50,13 +51,13 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
     registrar: dateParam(),
   });
   const requested = values.registrar;
-  const today = todayInSaoPaulo();
+  const today = useToday();
   const { start, end } = resolveRange(
     { start: values.inicio, end: values.fim, register: requested },
     today,
     instrument.maturity_date,
   );
-  const lastDay = resolveRange({}, today, instrument.maturity_date).end;
+  const maxDate = lastDay(instrument.maturity_date, today);
   const days = useReferencePriceDays({ assetId: instrument.id, start, end });
   const setRange = (next: { start: IsoDate; end: IsoDate }) => {
     set({ inicio: next.start, fim: next.end }, { push: true });
@@ -108,7 +109,7 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
         }
       />
       <Group>
-        <PeriodPicker start={start} end={end} maxDate={lastDay} onChange={setRange} />
+        <PeriodPicker start={start} end={end} maxDate={maxDate} onChange={setRange} />
       </Group>
       {days.isError ? (
         <ErrorState error={days.error} onRetry={() => void days.refetch()} />

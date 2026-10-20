@@ -2,21 +2,18 @@ import { Checkbox, Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useState } from 'react';
 
-import type { ReferencePrice, ReferencePriceDay } from '@/api/contract';
-import { formatDate, formatPu, formatRate } from '@/shared/format';
+import type { ReferencePriceDay } from '@/api/contract';
+import { formatDate } from '@/shared/format';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 
 import { useRemoveReferencePrices } from '../hooks/usePrices';
-import { SOURCE_LABELS } from './PriceCalendar';
+import { observationLabel } from '../model/prices';
 
 interface RemovePriceModalProps {
   /** The date whose observations may be removed; `null` closes the modal. */
   day: ReferencePriceDay | null;
   onClose: () => void;
 }
-
-const observationLabel = (price: ReferencePrice) =>
-  `${SOURCE_LABELS[price.source]}: PU ${formatPu(price.pu)}, taxa ${formatRate(price.rate)}`;
 
 /**
  * "Remover" (§5): the user selects which prices of the date to remove, of any source (user

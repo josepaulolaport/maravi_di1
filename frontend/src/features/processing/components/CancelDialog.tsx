@@ -3,8 +3,9 @@ import { Stack, Text } from '@mantine/core';
 import type { ProcessingRequest } from '@/api/contract';
 import { ConfirmModal } from '@/shared/ui/ConfirmModal';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { formatPeriod } from '@/shared/format';
 
-import { formatPeriod, formatProgress, shortId } from '../model/format';
+import { formatProgress, shortId } from '../model/format';
 import { useCancel } from '../hooks/useProcessing';
 import { runBadge, progressOf } from '../model/jobStatus';
 import { Field } from '@/shared/ui/Field';

@@ -1,13 +1,12 @@
 import { ActionIcon, Group, Menu, Paper, Table, Text, Title, VisuallyHidden } from '@mantine/core';
 import { IconDots, IconPencil, IconPlus, IconTrash } from '@tabler/icons-react';
 
-import type { IsoDate, PriceSource, ReferencePriceDay } from '@/api/contract';
-import { formatDate, formatPu, formatRate, UNAVAILABLE } from '@/shared/format';
+import type { IsoDate, ReferencePriceDay } from '@/api/contract';
+import { countLabel, formatDate, formatPu, formatRate, UNAVAILABLE } from '@/shared/format';
+import { Figure } from '@/shared/ui/Figure';
 
-import { countLabel } from '@/shared/format';
 import type { CalendarRow } from '../model/calendarData';
-
-export const SOURCE_LABELS: Record<PriceSource, string> = { MANUAL: 'Manual', B3: 'B3' };
+import { SOURCE_LABELS } from '../model/prices';
 
 interface PriceCalendarProps {
   rows: CalendarRow[];
@@ -60,11 +59,15 @@ export function PriceCalendar({ rows, onRegister, onCorrect, onRemove }: PriceCa
               return (
                 <Table.Tr key={date}>
                   <Table.Td>{label}</Table.Td>
-                  <Table.Td ta="right">{preferred ? formatPu(preferred.pu) : UNAVAILABLE}</Table.Td>
                   <Table.Td ta="right">
-                    {preferred ? formatRate(preferred.rate) : UNAVAILABLE}
+                    <Figure text={preferred ? formatPu(preferred.pu) : UNAVAILABLE} />
                   </Table.Td>
-                  <Table.Td>{preferred ? SOURCE_LABELS[preferred.source] : UNAVAILABLE}</Table.Td>
+                  <Table.Td ta="right">
+                    <Figure text={preferred ? formatRate(preferred.rate) : UNAVAILABLE} />
+                  </Table.Td>
+                  <Table.Td>
+                    <Figure text={preferred ? SOURCE_LABELS[preferred.source] : UNAVAILABLE} />
+                  </Table.Td>
                   <Table.Td ta="right">
                     {day ? (
                       <Menu position="bottom-end" withinPortal>
