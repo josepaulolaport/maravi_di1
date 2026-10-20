@@ -6,7 +6,7 @@ export type TradeLedgerEntry = Schemas['TradeEntryResponse'];
 /** An aporte (`cash_amount` > 0) or a retirada (< 0), with an optional description (OQ-51). */
 export type CashLedgerEntry = Schemas['CashEntryResponse'];
 export type LedgerEntry = TradeLedgerEntry | CashLedgerEntry;
-export type LedgerEntryType = LedgerEntry['type'];
+export type LedgerEntryType = Schemas['EntryType'];
 export type LedgerOrder = Schemas['ListOrder'];
 
 /** PU **or** rate is typed (OQ-19 item 7); the schema flattens this choice into optionals. */
@@ -31,7 +31,7 @@ export interface CreateCashEntryRequest {
 
 export type CreateLedgerEntryRequest = Fits<
   CreateTradeEntryRequest | CreateCashEntryRequest,
-  Schemas['CreateLedgerEntryBody']
+  Schemas['CreateLedgerEntryRequest']
 >;
 
-export type DeleteLedgerEntriesRequest = Schemas['DeleteLedgerEntriesBody'];
+export type DeleteLedgerEntriesRequest = Schemas['DeleteLedgerEntriesRequest'];

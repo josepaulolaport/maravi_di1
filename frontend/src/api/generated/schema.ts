@@ -299,8 +299,8 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** AssetClassOut */
-        AssetClassOut: {
+        /** AssetClassResponse */
+        AssetClassResponse: {
             /** Code */
             code: string;
             /** Id */
@@ -364,11 +364,11 @@ export interface components {
             withdrawals: string | null;
         };
         /**
-         * CreateInstrumentIn
+         * CreateInstrumentRequest
          * @description ``POST /instruments``. ``maturity_date`` is always sent; ``null`` is accepted here because
          *     whether a maturity is required depends on the product's type, which the service checks.
          */
-        CreateInstrumentIn: {
+        CreateInstrumentRequest: {
             /** Code */
             code: string;
             /** Maturity Date */
@@ -380,12 +380,12 @@ export interface components {
             product_id: string;
         };
         /**
-         * CreateLedgerEntryBody
+         * CreateLedgerEntryRequest
          * @description ``POST /ledger/entries``: a TRADE (contract, signed quantity, and the PU or the rate named
          *     by ``input_kind``) or a CASH entry (signed ``cash_amount`` and an optional ``description``,
          *     OQ-51).
          */
-        CreateLedgerEntryBody: {
+        CreateLedgerEntryRequest: {
             /** Asset Id */
             asset_id?: string | null;
             /** Cash Amount */
@@ -404,42 +404,43 @@ export interface components {
             execution_pu?: string | null;
             /** Execution Rate */
             execution_rate?: string | null;
-            /** Input Kind */
-            input_kind?: ("PU" | "RATE") | null;
+            input_kind?: components["schemas"]["InputKind"] | null;
             /** Signed Quantity */
             signed_quantity?: number | null;
             /** Time */
             time: string;
-            /**
-             * Type
-             * @enum {string}
-             */
-            type: "TRADE" | "CASH";
+            type: components["schemas"]["EntryType"];
         };
         /**
-         * CreateProductIn
+         * CreateProductRequest
          * @description ``POST /products`` (interfaces.md "HTTP endpoints"). ``futures`` is required exactly for a
          *     product whose type is FUTURE, which the service checks.
          */
-        CreateProductIn: {
+        CreateProductRequest: {
             /** Asset Class Id */
             asset_class_id: number;
             /** Code */
             code: string;
-            futures?: components["schemas"]["FuturesSpecIn"] | null;
+            futures?: components["schemas"]["FuturesSpecRequest"] | null;
             /** Name */
             name: string;
         };
         /**
-         * DeleteLedgerEntriesBody
+         * DeleteLedgerEntriesRequest
          * @description ``POST /ledger/entries/deletions``.
          */
-        DeleteLedgerEntriesBody: {
+        DeleteLedgerEntriesRequest: {
             /** Ids */
             ids: string[];
         };
-        /** FuturesSpecIn */
-        FuturesSpecIn: {
+        /**
+         * EntryType
+         * @description Schema ``entries_type_check``.
+         * @enum {string}
+         */
+        EntryType: "TRADE" | "CASH";
+        /** FuturesSpecRequest */
+        FuturesSpecRequest: {
             /**
              * Contract Multiplier
              * @default 1
@@ -452,8 +453,8 @@ export interface components {
             /** Settlement Method */
             settlement_method: string;
         };
-        /** FuturesSpecOut */
-        FuturesSpecOut: {
+        /** FuturesSpecResponse */
+        FuturesSpecResponse: {
             /** Contract Multiplier */
             contract_multiplier: string;
             /** Face Value */
@@ -474,13 +475,13 @@ export interface components {
          * @enum {string}
          */
         InputKind: "PU" | "RATE";
-        /** InstrumentList */
-        InstrumentList: {
+        /** InstrumentListResponse */
+        InstrumentListResponse: {
             /** Items */
-            items: components["schemas"]["InstrumentOut"][];
+            items: components["schemas"]["InstrumentResponse"][];
         };
-        /** InstrumentOut */
-        InstrumentOut: {
+        /** InstrumentResponse */
+        InstrumentResponse: {
             /** Code */
             code: string;
             /**
@@ -493,7 +494,7 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            last_reference: components["schemas"]["LastReferenceOut"] | null;
+            last_reference: components["schemas"]["LastReferenceResponse"] | null;
             /** Maturity Date */
             maturity_date: string | null;
             /** Product Code */
@@ -504,15 +505,13 @@ export interface components {
              */
             product_id: string;
         };
-        /** InstrumentTypeList */
-        InstrumentTypeList: {
+        /** InstrumentTypeListResponse */
+        InstrumentTypeListResponse: {
             /** Items */
-            items: components["schemas"]["InstrumentTypeOut"][];
+            items: components["schemas"]["InstrumentTypeResponse"][];
         };
-        /** InstrumentTypeOut */
-        InstrumentTypeOut: {
-            /** Asset Classes */
-            asset_classes: components["schemas"]["AssetClassOut"][];
+        /** InstrumentTypeRefResponse */
+        InstrumentTypeRefResponse: {
             /** Code */
             code: string;
             /** Id */
@@ -520,8 +519,10 @@ export interface components {
             /** Name */
             name: string;
         };
-        /** InstrumentTypeRefOut */
-        InstrumentTypeRefOut: {
+        /** InstrumentTypeResponse */
+        InstrumentTypeResponse: {
+            /** Asset Classes */
+            asset_classes: components["schemas"]["AssetClassResponse"][];
             /** Code */
             code: string;
             /** Id */
@@ -566,11 +567,11 @@ export interface components {
          */
         IssueType: "MISSING_REFERENCE_PRICE" | "EXPIRED_OPEN_POSITION";
         /**
-         * LastReferenceOut
+         * LastReferenceResponse
          * @description The instrument's latest preferred reference price, always shown with its own date, never
          *     as today's price (OQ-48, OQ-19 item 5).
          */
-        LastReferenceOut: {
+        LastReferenceResponse: {
             /** Pu */
             pu: string;
             /** Rate */
@@ -713,7 +714,7 @@ export interface components {
         PredecessorState: "PROCESSED" | "PROCESSED_WITH_ISSUES" | "RUNNING" | "FAILED" | "NOT_PROCESSED" | "ZERO_STATE";
         /**
          * PriceSource
-         * @description Where a reference observation came from. MANUAL wins over B3 on the same date (spec §5).
+         * @description Where a reference observation came from (schema ``reference_prices_source_check``).
          * @enum {string}
          */
         PriceSource: "MANUAL" | "B3";
@@ -833,14 +834,14 @@ export interface components {
          * @enum {string}
          */
         ProcessingStatus: "QUEUED" | "DISPATCHED" | "RUNNING" | "CANCELLING" | "COMPLETED" | "COMPLETED_WITH_ISSUES" | "CANCELLED" | "FAILED";
-        /** ProductList */
-        ProductList: {
+        /** ProductListResponse */
+        ProductListResponse: {
             /** Items */
-            items: components["schemas"]["ProductOut"][];
+            items: components["schemas"]["ProductResponse"][];
         };
-        /** ProductOut */
-        ProductOut: {
-            asset_class: components["schemas"]["AssetClassOut"];
+        /** ProductResponse */
+        ProductResponse: {
+            asset_class: components["schemas"]["AssetClassResponse"];
             /** Code */
             code: string;
             /**
@@ -848,7 +849,7 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-            futures: components["schemas"]["FuturesSpecOut"] | null;
+            futures: components["schemas"]["FuturesSpecResponse"] | null;
             /**
              * Id
              * Format: uuid
@@ -856,15 +857,15 @@ export interface components {
             id: string;
             /** Instrument Count */
             instrument_count: number;
-            instrument_type: components["schemas"]["InstrumentTypeRefOut"];
+            instrument_type: components["schemas"]["InstrumentTypeRefResponse"];
             /** Name */
             name: string;
         };
         /**
-         * ReferencePriceDayList
+         * ReferencePriceDayListResponse
          * @description ``ListResponse<ReferencePriceDay>``: newest date first, dates without a price absent.
          */
-        ReferencePriceDayList: {
+        ReferencePriceDayListResponse: {
             /** Items */
             items: components["schemas"]["ReferencePriceDayResponse"][];
         };
@@ -916,11 +917,11 @@ export interface components {
             source: components["schemas"]["PriceSource"];
         };
         /**
-         * SetReferencePriceBody
+         * SetReferencePriceRequest
          * @description ``POST /reference-prices``: a MANUAL price typed as a PU or as a rate. One flat model, so a
          *     field error names ``pu`` or ``rate`` as the client sent it.
          */
-        SetReferencePriceBody: {
+        SetReferencePriceRequest: {
             /**
              * Asset Id
              * Format: uuid
@@ -970,11 +971,7 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /**
-             * Input Kind
-             * @enum {string}
-             */
-            input_kind: "PU" | "RATE";
+            input_kind: components["schemas"]["InputKind"];
             /** Instrument Type Code */
             instrument_type_code: string;
             /** Seq */
@@ -1029,7 +1026,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InstrumentTypeList"];
+                    "application/json": components["schemas"]["InstrumentTypeListResponse"];
                 };
             };
         };
@@ -1052,7 +1049,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InstrumentList"];
+                    "application/json": components["schemas"]["InstrumentListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1075,7 +1072,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateInstrumentIn"];
+                "application/json": components["schemas"]["CreateInstrumentRequest"];
             };
         };
         responses: {
@@ -1085,7 +1082,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InstrumentOut"];
+                    "application/json": components["schemas"]["InstrumentResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1116,7 +1113,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InstrumentOut"];
+                    "application/json": components["schemas"]["InstrumentResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1137,7 +1134,7 @@ export interface operations {
                 end_date: string;
                 search?: string | null;
                 order?: components["schemas"]["ListOrder"];
-                limit?: number | null;
+                limit?: number;
                 cursor?: string | null;
             };
             header?: never;
@@ -1175,7 +1172,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateLedgerEntryBody"];
+                "application/json": components["schemas"]["CreateLedgerEntryRequest"];
             };
         };
         responses: {
@@ -1208,7 +1205,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DeleteLedgerEntriesBody"];
+                "application/json": components["schemas"]["DeleteLedgerEntriesRequest"];
             };
         };
         responses: {
@@ -1522,7 +1519,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductList"];
+                    "application/json": components["schemas"]["ProductListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1545,7 +1542,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateProductIn"];
+                "application/json": components["schemas"]["CreateProductRequest"];
             };
         };
         responses: {
@@ -1555,7 +1552,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductOut"];
+                    "application/json": components["schemas"]["ProductResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1586,7 +1583,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductOut"];
+                    "application/json": components["schemas"]["ProductResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1619,7 +1616,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReferencePriceDayList"];
+                    "application/json": components["schemas"]["ReferencePriceDayListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1642,7 +1639,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SetReferencePriceBody"];
+                "application/json": components["schemas"]["SetReferencePriceRequest"];
             };
         };
         responses: {

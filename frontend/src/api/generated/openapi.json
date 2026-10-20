@@ -1,7 +1,7 @@
 {
   "components": {
     "schemas": {
-      "AssetClassOut": {
+      "AssetClassResponse": {
         "properties": {
           "code": {
             "title": "Code",
@@ -21,7 +21,7 @@
           "code",
           "name"
         ],
-        "title": "AssetClassOut",
+        "title": "AssetClassResponse",
         "type": "object"
       },
       "CashEntryResponse": {
@@ -160,7 +160,8 @@
         "title": "CashSummaryOut",
         "type": "object"
       },
-      "CreateInstrumentIn": {
+      "CreateInstrumentRequest": {
+        "additionalProperties": false,
         "description": "``POST /instruments``. ``maturity_date`` is always sent; ``null`` is accepted here because\nwhether a maturity is required depends on the product's type, which the service checks.",
         "properties": {
           "code": {
@@ -190,10 +191,10 @@
           "code",
           "maturity_date"
         ],
-        "title": "CreateInstrumentIn",
+        "title": "CreateInstrumentRequest",
         "type": "object"
       },
-      "CreateLedgerEntryBody": {
+      "CreateLedgerEntryRequest": {
         "additionalProperties": false,
         "description": "``POST /ledger/entries``: a TRADE (contract, signed quantity, and the PU or the rate named\nby ``input_kind``) or a CASH entry (signed ``cash_amount`` and an optional ``description``,\nOQ-51).",
         "properties": {
@@ -265,17 +266,12 @@
           "input_kind": {
             "anyOf": [
               {
-                "enum": [
-                  "PU",
-                  "RATE"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/InputKind"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Input Kind"
+            ]
           },
           "signed_quantity": {
             "anyOf": [
@@ -294,12 +290,7 @@
             "type": "string"
           },
           "type": {
-            "enum": [
-              "TRADE",
-              "CASH"
-            ],
-            "title": "Type",
-            "type": "string"
+            "$ref": "#/components/schemas/EntryType"
           }
         },
         "required": [
@@ -307,10 +298,11 @@
           "date",
           "time"
         ],
-        "title": "CreateLedgerEntryBody",
+        "title": "CreateLedgerEntryRequest",
         "type": "object"
       },
-      "CreateProductIn": {
+      "CreateProductRequest": {
+        "additionalProperties": false,
         "description": "``POST /products`` (interfaces.md \"HTTP endpoints\"). ``futures`` is required exactly for a\nproduct whose type is FUTURE, which the service checks.",
         "properties": {
           "asset_class_id": {
@@ -324,7 +316,7 @@
           "futures": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/FuturesSpecIn"
+                "$ref": "#/components/schemas/FuturesSpecRequest"
               },
               {
                 "type": "null"
@@ -341,10 +333,10 @@
           "code",
           "name"
         ],
-        "title": "CreateProductIn",
+        "title": "CreateProductRequest",
         "type": "object"
       },
-      "DeleteLedgerEntriesBody": {
+      "DeleteLedgerEntriesRequest": {
         "additionalProperties": false,
         "description": "``POST /ledger/entries/deletions``.",
         "properties": {
@@ -360,10 +352,20 @@
         "required": [
           "ids"
         ],
-        "title": "DeleteLedgerEntriesBody",
+        "title": "DeleteLedgerEntriesRequest",
         "type": "object"
       },
-      "FuturesSpecIn": {
+      "EntryType": {
+        "description": "Schema ``entries_type_check``.",
+        "enum": [
+          "TRADE",
+          "CASH"
+        ],
+        "title": "EntryType",
+        "type": "string"
+      },
+      "FuturesSpecRequest": {
+        "additionalProperties": false,
         "properties": {
           "contract_multiplier": {
             "default": "1",
@@ -396,10 +398,10 @@
           "face_value",
           "settlement_method"
         ],
-        "title": "FuturesSpecIn",
+        "title": "FuturesSpecRequest",
         "type": "object"
       },
-      "FuturesSpecOut": {
+      "FuturesSpecResponse": {
         "properties": {
           "contract_multiplier": {
             "title": "Contract Multiplier",
@@ -431,7 +433,7 @@
           "settlement_method",
           "settlement_description"
         ],
-        "title": "FuturesSpecOut",
+        "title": "FuturesSpecResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -456,11 +458,11 @@
         "title": "InputKind",
         "type": "string"
       },
-      "InstrumentList": {
+      "InstrumentListResponse": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/InstrumentOut"
+              "$ref": "#/components/schemas/InstrumentResponse"
             },
             "title": "Items",
             "type": "array"
@@ -469,10 +471,10 @@
         "required": [
           "items"
         ],
-        "title": "InstrumentList",
+        "title": "InstrumentListResponse",
         "type": "object"
       },
-      "InstrumentOut": {
+      "InstrumentResponse": {
         "properties": {
           "code": {
             "title": "Code",
@@ -491,7 +493,7 @@
           "last_reference": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/LastReferenceOut"
+                "$ref": "#/components/schemas/LastReferenceResponse"
               },
               {
                 "type": "null"
@@ -529,14 +531,14 @@
           "last_reference",
           "created_at"
         ],
-        "title": "InstrumentOut",
+        "title": "InstrumentResponse",
         "type": "object"
       },
-      "InstrumentTypeList": {
+      "InstrumentTypeListResponse": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/InstrumentTypeOut"
+              "$ref": "#/components/schemas/InstrumentTypeResponse"
             },
             "title": "Items",
             "type": "array"
@@ -545,14 +547,37 @@
         "required": [
           "items"
         ],
-        "title": "InstrumentTypeList",
+        "title": "InstrumentTypeListResponse",
         "type": "object"
       },
-      "InstrumentTypeOut": {
+      "InstrumentTypeRefResponse": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "name"
+        ],
+        "title": "InstrumentTypeRefResponse",
+        "type": "object"
+      },
+      "InstrumentTypeResponse": {
         "properties": {
           "asset_classes": {
             "items": {
-              "$ref": "#/components/schemas/AssetClassOut"
+              "$ref": "#/components/schemas/AssetClassResponse"
             },
             "title": "Asset Classes",
             "type": "array"
@@ -576,30 +601,7 @@
           "name",
           "asset_classes"
         ],
-        "title": "InstrumentTypeOut",
-        "type": "object"
-      },
-      "InstrumentTypeRefOut": {
-        "properties": {
-          "code": {
-            "title": "Code",
-            "type": "string"
-          },
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "code",
-          "name"
-        ],
-        "title": "InstrumentTypeRefOut",
+        "title": "InstrumentTypeResponse",
         "type": "object"
       },
       "IssueList": {
@@ -695,7 +697,7 @@
         "title": "IssueType",
         "type": "string"
       },
-      "LastReferenceOut": {
+      "LastReferenceResponse": {
         "description": "The instrument's latest preferred reference price, always shown with its own date, never\nas today's price (OQ-48, OQ-19 item 5).",
         "properties": {
           "pu": {
@@ -728,7 +730,7 @@
           "rate",
           "source"
         ],
-        "title": "LastReferenceOut",
+        "title": "LastReferenceResponse",
         "type": "object"
       },
       "LedgerEntryPageResponse": {
@@ -1207,7 +1209,7 @@
         "type": "string"
       },
       "PriceSource": {
-        "description": "Where a reference observation came from. MANUAL wins over B3 on the same date (spec §5).",
+        "description": "Where a reference observation came from (schema ``reference_prices_source_check``).",
         "enum": [
           "MANUAL",
           "B3"
@@ -1500,11 +1502,11 @@
         "title": "ProcessingStatus",
         "type": "string"
       },
-      "ProductList": {
+      "ProductListResponse": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/ProductOut"
+              "$ref": "#/components/schemas/ProductResponse"
             },
             "title": "Items",
             "type": "array"
@@ -1513,13 +1515,13 @@
         "required": [
           "items"
         ],
-        "title": "ProductList",
+        "title": "ProductListResponse",
         "type": "object"
       },
-      "ProductOut": {
+      "ProductResponse": {
         "properties": {
           "asset_class": {
-            "$ref": "#/components/schemas/AssetClassOut"
+            "$ref": "#/components/schemas/AssetClassResponse"
           },
           "code": {
             "title": "Code",
@@ -1533,7 +1535,7 @@
           "futures": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/FuturesSpecOut"
+                "$ref": "#/components/schemas/FuturesSpecResponse"
               },
               {
                 "type": "null"
@@ -1550,7 +1552,7 @@
             "type": "integer"
           },
           "instrument_type": {
-            "$ref": "#/components/schemas/InstrumentTypeRefOut"
+            "$ref": "#/components/schemas/InstrumentTypeRefResponse"
           },
           "name": {
             "title": "Name",
@@ -1567,10 +1569,10 @@
           "futures",
           "created_at"
         ],
-        "title": "ProductOut",
+        "title": "ProductResponse",
         "type": "object"
       },
-      "ReferencePriceDayList": {
+      "ReferencePriceDayListResponse": {
         "description": "``ListResponse<ReferencePriceDay>``: newest date first, dates without a price absent.",
         "properties": {
           "items": {
@@ -1584,7 +1586,7 @@
         "required": [
           "items"
         ],
-        "title": "ReferencePriceDayList",
+        "title": "ReferencePriceDayListResponse",
         "type": "object"
       },
       "ReferencePriceDayResponse": {
@@ -1672,7 +1674,7 @@
         "title": "ReferencePriceResponse",
         "type": "object"
       },
-      "SetReferencePriceBody": {
+      "SetReferencePriceRequest": {
         "additionalProperties": false,
         "description": "``POST /reference-prices``: a MANUAL price typed as a PU or as a rate. One flat model, so a\nfield error names ``pu`` or ``rate`` as the client sent it.",
         "properties": {
@@ -1719,7 +1721,7 @@
           "reference_date",
           "input_kind"
         ],
-        "title": "SetReferencePriceBody",
+        "title": "SetReferencePriceRequest",
         "type": "object"
       },
       "TradeEntryResponse": {
@@ -1762,12 +1764,7 @@
             "type": "string"
           },
           "input_kind": {
-            "enum": [
-              "PU",
-              "RATE"
-            ],
-            "title": "Input Kind",
-            "type": "string"
+            "$ref": "#/components/schemas/InputKind"
           },
           "instrument_type_code": {
             "title": "Instrument Type Code",
@@ -1867,7 +1864,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstrumentTypeList"
+                  "$ref": "#/components/schemas/InstrumentTypeListResponse"
                 }
               }
             },
@@ -1923,7 +1920,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstrumentList"
+                  "$ref": "#/components/schemas/InstrumentListResponse"
                 }
               }
             },
@@ -1951,7 +1948,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateInstrumentIn"
+                "$ref": "#/components/schemas/CreateInstrumentRequest"
               }
             }
           },
@@ -1962,7 +1959,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstrumentOut"
+                  "$ref": "#/components/schemas/InstrumentResponse"
                 }
               }
             },
@@ -2005,7 +2002,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstrumentOut"
+                  "$ref": "#/components/schemas/InstrumentResponse"
                 }
               }
             },
@@ -2082,15 +2079,9 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Limit"
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
             }
           },
           {
@@ -2143,7 +2134,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateLedgerEntryBody"
+                "$ref": "#/components/schemas/CreateLedgerEntryRequest"
               }
             }
           },
@@ -2199,7 +2190,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DeleteLedgerEntriesBody"
+                "$ref": "#/components/schemas/DeleteLedgerEntriesRequest"
               }
             }
           },
@@ -2673,7 +2664,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProductList"
+                  "$ref": "#/components/schemas/ProductListResponse"
                 }
               }
             },
@@ -2701,7 +2692,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateProductIn"
+                "$ref": "#/components/schemas/CreateProductRequest"
               }
             }
           },
@@ -2712,7 +2703,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProductOut"
+                  "$ref": "#/components/schemas/ProductResponse"
                 }
               }
             },
@@ -2755,7 +2746,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProductOut"
+                  "$ref": "#/components/schemas/ProductResponse"
                 }
               }
             },
@@ -2818,7 +2809,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReferencePriceDayList"
+                  "$ref": "#/components/schemas/ReferencePriceDayListResponse"
                 }
               }
             },
@@ -2846,7 +2837,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetReferencePriceBody"
+                "$ref": "#/components/schemas/SetReferencePriceRequest"
               }
             }
           },

@@ -13,5 +13,5 @@ export type SetReferencePriceRequest = Fits<
     | { input_kind: Extract<InputKind, 'PU'>; pu: Decimal }
     | { input_kind: Extract<InputKind, 'RATE'>; rate: Decimal }
   ),
-  Schemas['SetReferencePriceBody']
+  Schemas['SetReferencePriceRequest']
 >;
