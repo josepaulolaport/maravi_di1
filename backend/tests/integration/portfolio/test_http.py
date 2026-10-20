@@ -142,7 +142,6 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                     COMPLETE,
                 ),
                 uow=uow,
-                other_chain_processed=False,
             )
             await writer.write_cash_day(
                 CashDay(
@@ -154,7 +153,6 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                     Decimal("609935.3745326500"),
                 ),
                 uow=uow,
-                other_chain_processed=True,
             )
             await uow.commit()
         async with SqlAlchemyUnitOfWork(factory) as uow:
@@ -222,7 +220,6 @@ async def _publish_fixture_days(settings: Settings, di1f28: UUID, di1f29: UUID) 
                     COMPLETE,
                 ),
                 uow=uow,
-                other_chain_processed=False,
             )
             await uow.commit()
     finally:

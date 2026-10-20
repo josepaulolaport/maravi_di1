@@ -54,7 +54,6 @@ def _day(on: date, daily: str | None, cumulative: str | None = None) -> Publishe
     return PublishedPortfolioDay(
         date=on,
         positions_market_value=Decimal("950000"),
-        aum=Decimal("1000000"),
         position_pnl=value,
         trades_pnl=None if value is None else Decimal("0"),
         daily_pnl=value,
@@ -122,7 +121,7 @@ def queries(
 
 
 class TestSummary:
-    async def test_a_processed_date_shows_both_chains_and_the_stored_aum(
+    async def test_a_processed_date_shows_both_chains_and_aum_computed_on_read(
         self,
         queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
@@ -153,7 +152,7 @@ class TestSummary:
         assert summary.positions.daily_pnl == Decimal("10")
         assert summary.positions.cumulative_pnl == Decimal("15")
         assert summary.positions.pnl_status is COMPLETE
-        assert summary.aum == Decimal("1000000")
+        assert summary.aum == Decimal("1000000")  # 50000 cash + 950000 market value, on read
         assert statuses.seen_uows == [uow]  # read in the published rows' transaction
         assert repository.snapshots == 1  # started once, before any read
 
@@ -190,17 +189,15 @@ class TestSummary:
 
 
 class TestAumNeedsBothChainsProcessed:
-    """OQ-38, OQ-40: AUM follows both chains' statuses on the date, whichever run wrote it. A
-    stored AUM is shown only while both chains are PROCESSED or PROCESSED_WITH_ISSUES, so a
-    later FAILED or RUNNING chain hides it (reviewer M1)."""
+    """OQ-21, OQ-38, OQ-40: AUM is computed on read from the date's published cash and market
+    value, whichever runs wrote them, and only while both chains are PROCESSED or
+    PROCESSED_WITH_ISSUES, so a later FAILED or RUNNING chain hides it (reviewer M1)."""
 
     @pytest.fixture(autouse=True)
     def published(self, repository: InMemoryPortfolioRepository) -> None:
-        # D processed as ALL: cash 100 + market value 50 → AUM 150 stored.
+        # D processed: cash 100 + market value 50 → AUM 150.
         repository.cash[DAY] = stored_cash(DAY, Decimal("100"), ZERO, Decimal("100"), ZERO)
-        repository.days[DAY] = replace(
-            _day(DAY, "0"), positions_market_value=Decimal("50"), aum=Decimal("150")
-        )
+        repository.days[DAY] = replace(_day(DAY, "0"), positions_market_value=Decimal("50"))
 
     @pytest.mark.parametrize(
         ("positions", "cash"),
@@ -235,6 +232,49 @@ class TestAumNeedsBothChainsProcessed:
         statuses.statuses[DAY] = _status(DAY, status, ChainStatus.PROCESSED)
 
         assert (await queries.get_summary(DAY)).aum == Decimal("150")
+
+    async def test_a_missing_market_value_gives_no_aum(
+        self,
+        queries: PortfolioService,
+        repository: InMemoryPortfolioRepository,
+        statuses: FakeDateStatusReader,
+    ) -> None:
+        # An expected asset without a reference price: the market value is unknown (OQ-10).
+        repository.days[DAY] = replace(
+            _day(DAY, None), positions_market_value=None, valuation_status=MISSING
+        )
+        statuses.statuses[DAY] = _status(
+            DAY, ChainStatus.PROCESSED_WITH_ISSUES, ChainStatus.PROCESSED
+        )
+
+        summary = await queries.get_summary(DAY)
+
+        assert summary.aum is None
+        assert summary.cash.balance == Decimal("100")
+
+    async def test_a_day_with_no_expected_asset_has_aum_equal_to_cash(
+        self,
+        queries: PortfolioService,
+        repository: InMemoryPortfolioRepository,
+        statuses: FakeDateStatusReader,
+    ) -> None:
+        # OQ-22 item 5, OQ-38: no expected asset → market value 0 → AUM = cash.
+        repository.days[DAY] = replace(_day(DAY, "0"), positions_market_value=ZERO)
+        statuses.statuses[DAY] = _status(DAY, ChainStatus.PROCESSED, ChainStatus.PROCESSED)
+
+        assert (await queries.get_summary(DAY)).aum == Decimal("100")
+
+    async def test_the_aum_follows_a_cash_row_rewritten_after_the_positions(
+        self,
+        queries: PortfolioService,
+        repository: InMemoryPortfolioRepository,
+        statuses: FakeDateStatusReader,
+    ) -> None:
+        # A later CASH run republishes D with another balance: AUM follows on read (OQ-21).
+        repository.cash[DAY] = stored_cash(DAY, Decimal("400"), ZERO, Decimal("400"), ZERO)
+        statuses.statuses[DAY] = _status(DAY, ChainStatus.PROCESSED, ChainStatus.PROCESSED)
+
+        assert (await queries.get_summary(DAY)).aum == Decimal("450")
 
 
 class TestPositionTable:

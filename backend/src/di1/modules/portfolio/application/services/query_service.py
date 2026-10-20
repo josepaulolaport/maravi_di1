@@ -1,6 +1,7 @@
 """`PortfolioService` (portfolio/public.py): the Carteira and Lançamentos reads.
 
-Published data only, never recalculated on read (spec §11.4). Each date's chain statuses and
+Published data only, never recalculated on read (spec §11.4), except AUM, the sum of the date's
+published cash and market value (OQ-21). Each date's chain statuses and
 processing times come from Processing's ``DateStatusReader`` on the same Unit of Work as the
 published rows, and the service's first statement makes that transaction one REPEATABLE READ,
 read-only snapshot, so figures and statuses always agree (OQ-23, OQ-31; spec §13 item 12). The
@@ -16,8 +17,10 @@ from decimal import Decimal
 from di1.modules.asset.public import AssetReader
 from di1.modules.portfolio.application.services.repository import (
     PortfolioRepository,
+    PublishedPortfolioDay,
     PublishedPosition,
 )
+from di1.modules.portfolio.domain.cash import CashDay
 from di1.modules.portfolio.domain.maturity import is_past_maturity, reference_pu_on
 from di1.modules.portfolio.domain.valuation import PriceSource
 from di1.modules.portfolio.public import (
@@ -89,7 +92,7 @@ class PortfolioService:
                 cumulative_pnl=None if day is None else day.cumulative_pnl,
                 pnl_status=None if day is None else day.pnl_status,
             ),
-            aum=day.aum if day is not None and _both_processed(status) else None,
+            aum=_aum(status, cash, day),
         )
 
     async def get_position_table(self, on: date) -> PositionTableView:
@@ -172,10 +175,19 @@ class PortfolioService:
         return (await self._date_statuses.get_date_statuses(on, on, uow=self._uow)).get(on)
 
 
-def _both_processed(status: DateStatus | None) -> bool:
-    """AUM follows both chains' statuses on the date, whichever run wrote it (OQ-38, OQ-40): a
-    stored AUM is shown only while neither chain is FAILED, RUNNING or not processed."""
-    return status is not None and status.cash in PROCESSED and status.portfolio in PROCESSED
+def _aum(
+    status: DateStatus | None, cash: CashDay | None, day: PublishedPortfolioDay | None
+) -> Decimal | None:
+    """AUM = the date's cash + its market value, computed on read and never stored (OQ-21,
+    OQ-28). It follows both chains' statuses on the date, whichever run wrote them (OQ-38,
+    OQ-40): null unless both are PROCESSED or PROCESSED_WITH_ISSUES, and null when either side
+    is missing, an expected asset without a price included (OQ-10)."""
+    if status is None or status.cash not in PROCESSED or status.portfolio not in PROCESSED:
+        return None
+    if cash is None or day is None or day.positions_market_value is None:
+        return None
+    with financial_context():
+        return cash.cash_balance + day.positions_market_value
 
 
 def _future_date(field: str) -> ErrorDetail:

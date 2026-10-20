@@ -233,9 +233,8 @@ CREATE TABLE portfolio.position_metrics (
 );
 CREATE INDEX position_metrics_date_idx ON portfolio.position_metrics (metric_date, asset_id);
 
--- aum = cash_balances.cash_balance + positions_market_value for the same date. The two live in
--- different tables (OQ-21), so this is a publish invariant: whichever scope publishes recomputes
--- aum for its days in the same transaction. A row can only check that aum needs a market value.
+-- aum is kept but unused (NULL): AUM = cash_balances.cash_balance + positions_market_value of the
+-- same date is computed on read, when both chains of the date are processed (OQ-21, OQ-38).
 CREATE TABLE portfolio.portfolio_metrics (
     metric_date DATE PRIMARY KEY,
     positions_market_value NUMERIC,

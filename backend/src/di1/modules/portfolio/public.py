@@ -77,15 +77,10 @@ __all__ = [
 class PortfolioResultsWriter(Protocol):
     """Publishes one date of a chain inside Processing's date transaction; never commits. Each
     call replaces that date's rows (rows of assets no longer expected on the date are deleted,
-    OQ-10) and recomputes the date's AUM from the other chain's published value (OQ-21).
-
-    ``other_chain_processed`` is Processing's answer for the other chain on that date: ``True``
-    when it is ``PROCESSED`` or ``PROCESSED_WITH_ISSUES``. When ``False`` (``FAILED``,
-    ``RUNNING`` or not processed) the written AUM is null (OQ-38, OQ-40). ALL writes both chains
-    in the same transaction, positions first, then cash (integrator choice):
-    ``write_positions_day`` passes ``False`` and ``write_cash_day``, made after both chains are
-    computed, passes the positions chain's outcome, so AUM never sees a chain ``RUNNING``. When
-    only one chain is alive on an ALL date (OQ-36), Processing makes only that chain's call."""
+    OQ-10). AUM is not written: ``PortfolioService`` computes it on read from the date's
+    published cash and market value when both chains are processed (OQ-21, OQ-38). ALL writes
+    both chains in the same transaction, positions first, then cash (integrator choice); when only
+    one chain is alive on an ALL date (OQ-36), Processing makes only that chain's call."""
 
     async def write_positions_day(
         self,
@@ -95,7 +90,6 @@ class PortfolioResultsWriter(Protocol):
         pnl: PortfolioPnLResult,
         *,
         uow: UnitOfWork,
-        other_chain_processed: bool,
     ) -> None:
         """``positions``, ``position_metrics`` and ``portfolio_metrics`` for ``day.date``: the
         quantities and averages of ``day``, each expected asset's ``financial_total`` and P&L
@@ -103,16 +97,11 @@ class PortfolioResultsWriter(Protocol):
         in the price table (OQ-30).
 
         The assets of ``day.positions``, ``valuation.assets`` and ``asset_pnl`` must be the same
-        set, the expected assets of the date; the writer raises ``ValueError`` otherwise.
-        The written AUM is recomputed from the published cash and this market value, or null
-        when ``other_chain_processed`` is ``False`` (OQ-38)."""
+        set, the expected assets of the date; the writer raises ``ValueError`` otherwise."""
         ...
 
-    async def write_cash_day(
-        self, day: CashDay, *, uow: UnitOfWork, other_chain_processed: bool
-    ) -> None:
-        """The ``cash_balances`` row for ``day.date``, and the date's AUM (null when
-        ``other_chain_processed`` is ``False``, OQ-38)."""
+    async def write_cash_day(self, day: CashDay, *, uow: UnitOfWork) -> None:
+        """The ``cash_balances`` row for ``day.date``."""
         ...
 
 
@@ -177,8 +166,9 @@ class PositionsSummaryView:
 
 @dataclass(frozen=True, slots=True)
 class PortfolioSummaryView:
-    """``aum`` is a plain value with no status of its own: cash plus market value of the date,
-    ``None`` when either side is missing (OQ-28)."""
+    """``aum`` is a plain value with no status of its own, computed on read: cash plus market
+    value of the date, ``None`` when either side is missing or when either chain of the date is
+    not ``PROCESSED``/``PROCESSED_WITH_ISSUES`` (OQ-21, OQ-28, OQ-38)."""
 
     date: date
     cash: CashSummaryView
