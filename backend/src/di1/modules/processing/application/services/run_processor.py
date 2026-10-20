@@ -198,8 +198,10 @@ class PortfolioRangeProcessor:
         """Locks the oldest QUEUED request and sets it RUNNING, in one transaction. ``None`` only
         when none is queued (a cancel and a take on the same row: whichever commits first wins),
         or while a run is still RUNNING: one stopped by an error it could not record waits for
-        the worker's next start, so two runs never overlap."""
+        the worker's next start, so two runs never overlap. The queue lock makes the check and
+        the take one atomic step, even for two concurrent takes."""
         async with self._uow_factory() as uow:
+            await self._store.lock_the_queue(uow=uow)
             if await self._store.lock_running_runs(uow=uow):
                 await uow.commit()
                 return None

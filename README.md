@@ -93,6 +93,17 @@ request from PostgreSQL under a row lock, runs it, and repeats until none is lef
 - Rejected alternative: PostgreSQL LISTEN/NOTIFY or polling. It removes one service, but it drops
   the messaging part of the challenge and would rework tested code.
 
+**Decided, implemented in later PRs on `simplify` (OQ-50, 2026-10-19):** the user asked "Is it
+really necessary? I want to keep the queue" about the doorbell and chose option 1. Each request
+gets its own message, carrying its `request_id`, published through the outbox; the `request_id` is for tracing and logs only.
+The worker consumes one at a time and, on any message, takes the oldest `QUEUED` request by
+`(created_at, id)`, so FIFO is unchanged. A sweep in the worker, every few seconds, does the same
+while anything is `QUEUED`, so a lost message only delays a run. The inbox and its
+retention, the dead-letter queues, the delivery limit, the redelivery backoff and the after-ack job
+queue go. The same decision computes AUM at read time instead of storing it, derives "Processando"
+from the active run instead of writing it per date, and marks a Carteira row whose price changed
+after processing (the price of the date or of the day before). See [docs/open-questions.md](docs/open-questions.md) (OQ-50).
+
 ## Demo: the challenge example, end to end
 
 ```bash
@@ -123,9 +134,12 @@ automated acceptance tests with a fixed clock (`backend/tests/acceptance/`,
 `docker compose up` loads two weeks of demo history: after the API is healthy, the one-shot `demo`
 service runs `scripts/seed_demo.py`, which writes through the HTTP API (so every validation and
 pricing rule applies). The dates are relative to the **first** `up`: data written on day X is dated
-X − 14 to X (São Paulo). Every later `up` finds a non-empty ledger and adds nothing ("already
-loaded"); `docker compose down -v` and `up` load a fresh copy dated from that day. `DI1_DEMO=0`
-turns it off (`make e2e` does, to keep its ledger empty).
+X − 14 to X (São Paulo). Every later `up` finds the demo's last price and adds nothing ("already
+loaded"); a run that stopped part-way is reported instead ("DEMO DATA NOT LOADED").
+`docker compose down -v` and `up` load a fresh copy dated from that day. `DI1_DEMO=0`
+turns it off (`make e2e` does, to keep its ledger empty). The demo always exits 0, so a failure never keeps
+the UI from starting: the app works without its data, and `docker compose logs demo` shows
+"DEMO DATA NOT LOADED: <reason>".
 
 - Three contracts: the January DI1 of each of the next three years (DI1F27, DI1F28 and DI1F29 when
   loaded in 2026, maturing 04/01/2027, 03/01/2028 and 02/01/2029).
@@ -187,8 +201,6 @@ rather than refactor before delivery (OQ-47); none changes a business result.
   predecessor rule is in its `domain/`.
 - **Wiring differs per module (M10):** routers and dependency providers are not built the same way
   in every module.
-- **Three decimal-string types (M11):** the HTTP schemas of asset, ledger and prices each define
-  their own decimal-string type instead of sharing one.
 - **Two `FuturesTerms` classes (M12):** one in asset's domain, one in pricing's.
 - **Timestamp types (M13):** timestamps are not typed the same way across modules.
 - **A migrated database per test (M14):** integration tests migrate a fresh database each, which
@@ -202,6 +214,11 @@ rather than refactor before delivery (OQ-47); none changes a business result.
   and the frontend keeps the two status labels as a safe default.
 - **Inbox retention is unbatched (M9):** the retention `DELETE` of old `platform.inbox_messages`
   rows runs as one statement, and `processed_at` has no index; fine at doorbell volume.
+  Goes with the inbox itself under OQ-50 item 2; `inbox_messages`, `portfolio_metrics.aum` and
+  `date_status.*_previous` then stay in the schema unused, like the columns above.
+- **Outbox retention is unbatched:** the retention `DELETE` of `platform.outbox_messages` rows
+  published more than `OUTBOX_RETENTION_DAYS` ago runs as one statement, and `published_at` has
+  no index; fine at one row per processing request.
 
 ## CI
 

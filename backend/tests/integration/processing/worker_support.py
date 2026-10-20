@@ -242,9 +242,9 @@ class Worker:
             )
             return [(row[0], row[1], row[2]) for row in result]
 
-    async def wait_for_a_lock_waiter(self) -> None:
-        """Returns once another session of this database waits on a lock (the cancel queued
-        behind the run's row lock); fails after 5 seconds."""
+    async def wait_for_a_lock_waiter(self, count: int = 1) -> None:
+        """Returns once ``count`` other sessions of this database wait on a lock (the cancel
+        queued behind the run's row lock); fails after 5 seconds."""
         async with asyncio.timeout(5):
             while True:
                 async with self.engine.connect() as connection:
@@ -254,7 +254,7 @@ class Worker:
                             " WHERE datname = current_database() AND wait_event_type = 'Lock'"
                         )
                     )
-                if waiting:
+                if waiting >= count:
                     return
                 await asyncio.sleep(0.01)
 

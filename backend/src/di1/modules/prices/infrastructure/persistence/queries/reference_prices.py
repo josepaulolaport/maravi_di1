@@ -38,6 +38,9 @@ def replace_price(
         pu=pu,
         rate=rate,
     )
+    # Not an in-place update: OQ-25 item 2 (user decision) is "delete the old price and register
+    # the new one". The new id and timestamps are deliberate; this is that delete and insert,
+    # done atomically.
     return statement.on_conflict_do_update(
         constraint=ONE_PER_SOURCE,
         set_={

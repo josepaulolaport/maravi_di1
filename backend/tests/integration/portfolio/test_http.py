@@ -429,6 +429,20 @@ def test_a_start_after_the_end_is_an_invalid_range(client: TestClient) -> None:
     ]
 
 
+def test_a_pnl_range_longer_than_3660_dates_is_an_invalid_range(client: TestClient) -> None:
+    # 2016-10-09 .. 2026-10-16 is 3,660 dates, ends included; from 2016-10-08 it is 3,661.
+    _get(client, "/portfolio/pnl?start_date=2016-10-09&end_date=2026-10-16", status=200)
+    body = _get(client, "/portfolio/pnl?start_date=2016-10-08&end_date=2026-10-16", status=422)
+
+    assert body["errors"] == [
+        {
+            "code": "INVALID_RANGE",
+            "message": "O período deve ter no máximo 3.660 dias.",
+            "field": "end_date",
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("path", "field"),
     [

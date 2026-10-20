@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from functools import partial
 
@@ -26,7 +27,8 @@ class ErrorCode(StrEnum):
     NOT_FOUND = "NOT_FOUND"
     """The resource does not exist."""
     INVALID_RANGE = "INVALID_RANGE"
-    """A processing or query range whose start is after its end (OQ-11)."""
+    """A processing or query range whose start is after its end (OQ-11), or longer than
+    `MAX_RANGE_DATES`."""
     JOB_NOT_CANCELLABLE = "JOB_NOT_CANCELLABLE"
     """Cancellation requested for a job that has already finished."""
 
@@ -101,3 +103,20 @@ def invalid_cursor() -> ErrorDetail:
 def limit_out_of_range(maximum: int) -> ErrorDetail:
     """A page size outside [1, ``maximum``] (spec §12)."""
     return ErrorDetail.validation(f"Use um limite entre 1 e {maximum}.", "limit")
+
+
+MAX_RANGE_DATES = 3660
+"""The most dates, both ends included (about ten years), a processing request or a P&L series
+may span: a run of decades would hold the one worker for hours, and a series of decades builds
+hundreds of thousands of points in memory."""
+
+
+def range_too_long(start_date: date, end_date: date) -> ErrorDetail | None:
+    """``INVALID_RANGE`` on ``end_date`` when [start, end] holds more than `MAX_RANGE_DATES`."""
+    if (end_date - start_date).days + 1 <= MAX_RANGE_DATES:
+        return None
+    return ErrorDetail(
+        ErrorCode.INVALID_RANGE,
+        f"O período deve ter no máximo {MAX_RANGE_DATES:,} dias.".replace(",", "."),
+        "end_date",
+    )

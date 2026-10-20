@@ -67,8 +67,13 @@ class ChainDataError(RuntimeError):
 
 def trade_of(record: LedgerEntry) -> Trade:
     """Ledger's trade as the portfolio chains read it (interfaces.md "Portfolio")."""
-    assert record.asset_id is not None and record.signed_quantity is not None
-    assert record.execution_pu is not None and record.execution_rate is not None
+    if (
+        record.asset_id is None
+        or record.signed_quantity is None
+        or record.execution_pu is None
+        or record.execution_rate is None
+    ):
+        raise ChainDataError(f"trade {record.id} lacks its contract, quantity, PU or rate")
     return Trade(
         asset_id=record.asset_id,
         trade_date=record.entry_date,
@@ -86,7 +91,8 @@ def cash_totals(movements: Sequence[LedgerEntry]) -> tuple[Decimal, Decimal]:
     deposits = withdrawals = ZERO
     with financial_context():
         for movement in movements:
-            assert movement.cash_amount is not None
+            if movement.cash_amount is None:
+                raise ChainDataError(f"cash movement {movement.id} has no amount")
             if movement.cash_amount > 0:
                 deposits += movement.cash_amount
             else:
