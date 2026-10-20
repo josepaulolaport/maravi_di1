@@ -1,8 +1,5 @@
-"""The SQL of Portfolio's published tables, one date at a time (OQ-23).
-
-AUM lives in ``portfolio_metrics`` but its cash side is in ``cash_balances`` (OQ-21): both writes
-recompute it in SQL from the two rows of the same date, so it is exact NUMERIC and ``NULL`` when
-either side is missing (OQ-28)."""
+"""The SQL of Portfolio's published tables, one date at a time (OQ-23). AUM is not written: the
+read models compute it from the date's cash and market value (OQ-21)."""
 
 from __future__ import annotations
 
@@ -15,13 +12,11 @@ from sqlalchemy import (
     Insert,
     Select,
     TextClause,
-    Update,
     delete,
     func,
     insert,
     select,
     text,
-    update,
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -65,27 +60,6 @@ def upsert_cash_balance(values: Mapping[str, Any]) -> Insert:
     return statement.on_conflict_do_update(
         index_elements=[CashBalanceRow.balance_date],
         set_={**changed, "updated_at": func.now()},
-    )
-
-
-def recompute_aum(on: date, *, other_chain_processed: bool) -> Update:
-    """AUM = the date's cash + its market value; NULL propagates from either side, and AUM is
-    NULL while the other chain of the date is not processed (OQ-38)."""
-    if not other_chain_processed:
-        return (
-            update(PortfolioMetricsRow)
-            .where(PortfolioMetricsRow.metric_date == on)
-            .values(aum=None, updated_at=func.now())
-        )
-    cash = (
-        select(CashBalanceRow.cash_balance)
-        .where(CashBalanceRow.balance_date == on)
-        .scalar_subquery()
-    )
-    return (
-        update(PortfolioMetricsRow)
-        .where(PortfolioMetricsRow.metric_date == on)
-        .values(aum=cash + PortfolioMetricsRow.positions_market_value, updated_at=func.now())
     )
 
 

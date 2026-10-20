@@ -54,7 +54,6 @@ def _day(on: date, daily: str | None, cumulative: str | None = None) -> Publishe
     return PublishedPortfolioDay(
         date=on,
         positions_market_value=Decimal("950000"),
-        aum=Decimal("1000000"),
         position_pnl=value,
         trades_pnl=None if value is None else Decimal("0"),
         daily_pnl=value,
@@ -122,7 +121,7 @@ def queries(
 
 
 class TestSummary:
-    async def test_a_processed_date_shows_both_chains_and_the_stored_aum(
+    async def test_a_processed_date_shows_both_chains_and_aum_computed_on_read(
         self,
         queries: PortfolioService,
         repository: InMemoryPortfolioRepository,
@@ -153,7 +152,7 @@ class TestSummary:
         assert summary.positions.daily_pnl == Decimal("10")
         assert summary.positions.cumulative_pnl == Decimal("15")
         assert summary.positions.pnl_status is COMPLETE
-        assert summary.aum == Decimal("1000000")
+        assert summary.aum == Decimal("1000000")  # 50000 cash + 950000 market value, on read
         assert statuses.seen_uows == [uow]  # read in the published rows' transaction
         assert repository.snapshots == 1  # started once, before any read
 
@@ -190,17 +189,15 @@ class TestSummary:
 
 
 class TestAumNeedsBothChainsProcessed:
-    """OQ-38, OQ-40: AUM follows both chains' statuses on the date, whichever run wrote it. A
-    stored AUM is shown only while both chains are PROCESSED or PROCESSED_WITH_ISSUES, so a
-    later FAILED or RUNNING chain hides it (reviewer M1)."""
+    """OQ-21, OQ-38, OQ-40: AUM is computed on read from the date's published cash and market
+    value, whichever runs wrote them, and only while both chains are PROCESSED or
+    PROCESSED_WITH_ISSUES, so a later FAILED or RUNNING chain hides it (reviewer M1)."""
 
     @pytest.fixture(autouse=True)
     def published(self, repository: InMemoryPortfolioRepository) -> None:
-        # D processed as ALL: cash 100 + market value 50 → AUM 150 stored.
+        # D processed: cash 100 + market value 50 → AUM 150.
         repository.cash[DAY] = stored_cash(DAY, Decimal("100"), ZERO, Decimal("100"), ZERO)
-        repository.days[DAY] = replace(
-            _day(DAY, "0"), positions_market_value=Decimal("50"), aum=Decimal("150")
-        )
+        repository.days[DAY] = replace(_day(DAY, "0"), positions_market_value=Decimal("50"))
 
     @pytest.mark.parametrize(
         ("positions", "cash"),
@@ -235,6 +232,49 @@ class TestAumNeedsBothChainsProcessed:
         statuses.statuses[DAY] = _status(DAY, status, ChainStatus.PROCESSED)
 
         assert (await queries.get_summary(DAY)).aum == Decimal("150")
+
+    async def test_a_missing_market_value_gives_no_aum(
+        self,
+        queries: PortfolioService,
+        repository: InMemoryPortfolioRepository,
+        statuses: FakeDateStatusReader,
+    ) -> None:
+        # An expected asset without a reference price: the market value is unknown (OQ-10).
+        repository.days[DAY] = replace(
+            _day(DAY, None), positions_market_value=None, valuation_status=MISSING
+        )
+        statuses.statuses[DAY] = _status(
+            DAY, ChainStatus.PROCESSED_WITH_ISSUES, ChainStatus.PROCESSED
+        )
+
+        summary = await queries.get_summary(DAY)
+
+        assert summary.aum is None
+        assert summary.cash.balance == Decimal("100")
+
+    async def test_a_day_with_no_expected_asset_has_aum_equal_to_cash(
+        self,
+        queries: PortfolioService,
+        repository: InMemoryPortfolioRepository,
+        statuses: FakeDateStatusReader,
+    ) -> None:
+        # OQ-22 item 5, OQ-38: no expected asset → market value 0 → AUM = cash.
+        repository.days[DAY] = replace(_day(DAY, "0"), positions_market_value=ZERO)
+        statuses.statuses[DAY] = _status(DAY, ChainStatus.PROCESSED, ChainStatus.PROCESSED)
+
+        assert (await queries.get_summary(DAY)).aum == Decimal("100")
+
+    async def test_the_aum_follows_a_cash_row_rewritten_after_the_positions(
+        self,
+        queries: PortfolioService,
+        repository: InMemoryPortfolioRepository,
+        statuses: FakeDateStatusReader,
+    ) -> None:
+        # A later CASH run republishes D with another balance: AUM follows on read (OQ-21).
+        repository.cash[DAY] = stored_cash(DAY, Decimal("400"), ZERO, Decimal("400"), ZERO)
+        statuses.statuses[DAY] = _status(DAY, ChainStatus.PROCESSED, ChainStatus.PROCESSED)
+
+        assert (await queries.get_summary(DAY)).aum == Decimal("450")
 
 
 class TestPositionTable:
@@ -306,6 +346,114 @@ class TestPositionTable:
         assert table.status is None
         assert table.published_at is None
         assert table.items == ()
+
+
+class TestReferencePriceChanged:
+    """A10: a row is marked when its current preferred price of the date was registered after
+    the date's positions chain was processed, since its figures come from the price the run read
+    (OQ-30, OQ-31). Prices are re-registered with a new row, so ``created_at`` is the time of the
+    last set (OQ-25)."""
+
+    @pytest.fixture(autouse=True)
+    def published(
+        self, repository: InMemoryPortfolioRepository, statuses: FakeDateStatusReader
+    ) -> None:
+        repository.positions[DAY] = (_position(DI1F28, 10, "951000"),)
+        statuses.statuses[DAY] = _status(DAY, ChainStatus.PROCESSED, None)
+
+    async def test_a_price_set_after_the_processing_marks_the_row(
+        self, queries: PortfolioService, prices: FakePriceReader
+    ) -> None:
+        prices.add(
+            DI1F28,
+            DAY,
+            PriceSource.MANUAL,
+            "95300",
+            "0.0970",
+            created_at=POSITIONS_AT + timedelta(seconds=1),
+        )
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is True
+
+    @pytest.mark.parametrize("before", [timedelta(0), timedelta(minutes=-5)])
+    async def test_a_price_set_before_or_at_the_processing_does_not(
+        self, queries: PortfolioService, prices: FakePriceReader, before: timedelta
+    ) -> None:
+        prices.add(DI1F28, DAY, PriceSource.B3, "95100", "0.0990", created_at=POSITIONS_AT + before)
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is False
+
+    async def test_a_d_minus_1_price_set_after_the_processing_marks_the_row(
+        self, queries: PortfolioService, prices: FakePriceReader
+    ) -> None:
+        # OQ-50 item 3: position P&L uses the D−1 price too (integrator reading).
+        prices.add(DI1F28, DAY, PriceSource.B3, "95100", "0.0990", created_at=POSITIONS_AT)
+        prices.add(
+            DI1F28,
+            DAY - timedelta(days=1),
+            PriceSource.MANUAL,
+            "95000",
+            "0.1000",
+            created_at=POSITIONS_AT + timedelta(minutes=1),
+        )
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is True
+        assert row.reference_pu == Decimal("95100")  # the row still shows D's price
+
+    async def test_a_price_of_another_date_set_later_does_not_mark_the_row(
+        self, queries: PortfolioService, prices: FakePriceReader
+    ) -> None:
+        later = POSITIONS_AT + timedelta(days=1)
+        prices.add(DI1F28, DAY + timedelta(days=1), PriceSource.B3, "1", None, created_at=later)
+        prices.add(DI1F28, DAY - timedelta(days=2), PriceSource.B3, "1", None, created_at=later)
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is False
+
+    async def test_no_price_does_not_mark_the_row(self, queries: PortfolioService) -> None:
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is False
+
+    async def test_a_date_without_a_processing_time_does_not_mark_the_row(
+        self, queries: PortfolioService, prices: FakePriceReader, statuses: FakeDateStatusReader
+    ) -> None:
+        statuses.statuses.pop(DAY)
+        prices.add(
+            DI1F28,
+            DAY,
+            PriceSource.MANUAL,
+            "95300",
+            "0.0970",
+            created_at=POSITIONS_AT + timedelta(days=1),
+        )
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is False
+
+    async def test_after_maturity_no_price_is_read_so_no_mark(
+        self,
+        queries: PortfolioService,
+        repository: InMemoryPortfolioRepository,
+        prices: FakePriceReader,
+    ) -> None:
+        # OQ-1: the PU is 0 by definition after maturity, whatever the price table holds.
+        repository.positions[DAY] = (_position(DI1F27, 3, "0"),)
+        prices.add(
+            DI1F27, DAY, PriceSource.MANUAL, "1", None, created_at=POSITIONS_AT + timedelta(days=1)
+        )
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is False
 
 
 class TestPnLSeries:

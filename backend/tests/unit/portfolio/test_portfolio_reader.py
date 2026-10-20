@@ -43,7 +43,6 @@ def _portfolio_day(cumulative: str | None) -> PublishedPortfolioDay:
     return PublishedPortfolioDay(
         YESTERDAY,
         Decimal("0"),
-        None,
         Decimal("0"),
         Decimal("0"),
         Decimal("0"),

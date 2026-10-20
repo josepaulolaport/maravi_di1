@@ -8,7 +8,6 @@ faked through their public protocols only.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -61,19 +60,12 @@ class InMemoryPortfolioRepository:
         self,
         day: PublishedPortfolioDay,
         positions: Sequence[PublishedPosition],
-        *,
-        cash_processed: bool,
     ) -> None:
-        aum = self._aum(day.date, day.positions_market_value) if cash_processed else None
-        self.days[day.date] = replace(day, aum=aum)
+        self.days[day.date] = day
         self.positions[day.date] = tuple(sorted(positions, key=lambda p: p.asset_id))
 
-    async def upsert_cash_day(self, cash: CashDay, *, positions_processed: bool) -> None:
+    async def upsert_cash_day(self, cash: CashDay) -> None:
         self.cash[cash.date] = cash
-        day = self.days.get(cash.date)
-        if day is not None:
-            aum = self._aum(cash.date, day.positions_market_value) if positions_processed else None
-            self.days[cash.date] = replace(day, aum=aum)
 
     async def get_cash(self, on: date) -> CashDay | None:
         return self.cash.get(on)
@@ -88,12 +80,6 @@ class InMemoryPortfolioRepository:
 
     async def get_positions(self, on: date) -> Sequence[PublishedPosition]:
         return self.positions.get(on, ())
-
-    def _aum(self, on: date, market_value: Decimal | None) -> Decimal | None:
-        cash = self.cash.get(on)
-        if cash is None or market_value is None:
-            return None
-        return cash.cash_balance + market_value
 
 
 class FakeUnitOfWork:
@@ -123,8 +109,17 @@ class FakePriceReader:
     def __init__(self) -> None:
         self.prices: dict[tuple[UUID, date], ReferencePriceRecord] = {}
 
-    def add(self, asset_id: UUID, on: date, source: PriceSource, pu: str, rate: str | None) -> None:
-        stamp = datetime(2026, 10, 16, 21, 0, tzinfo=UTC)
+    def add(
+        self,
+        asset_id: UUID,
+        on: date,
+        source: PriceSource,
+        pu: str,
+        rate: str | None,
+        *,
+        created_at: datetime | None = None,
+    ) -> None:
+        stamp = created_at or datetime(2026, 10, 16, 21, 0, tzinfo=UTC)
         self.prices[(asset_id, on)] = ReferencePriceRecord(
             id=UUID(int=len(self.prices) + 1),
             asset_id=asset_id,

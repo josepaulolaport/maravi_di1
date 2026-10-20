@@ -35,12 +35,11 @@ class PublishedPosition:
 
 @dataclass(frozen=True, slots=True)
 class PublishedPortfolioDay:
-    """A ``portfolio_metrics`` row. ``aum`` is read back as stored; on a write it is ignored and
-    recomputed from the date's published cash (OQ-21, OQ-28)."""
+    """A ``portfolio_metrics`` row. Its ``aum`` column is unused: AUM is computed on read from
+    the date's cash and market value (OQ-21, OQ-28)."""
 
     date: date
     positions_market_value: Decimal | None
-    aum: Decimal | None
     position_pnl: Decimal | None
     trades_pnl: Decimal | None
     daily_pnl: Decimal | None
@@ -59,19 +58,14 @@ class PortfolioRepository(Protocol):
         self,
         day: PublishedPortfolioDay,
         positions: Sequence[PublishedPosition],
-        *,
-        cash_processed: bool,
     ) -> None:
         """Replace ``day.date``'s ``positions``, ``position_metrics`` and ``portfolio_metrics``
-        rows (rows of assets not in ``positions`` are deleted, OQ-10) and set its AUM from the
-        date's published cash: ``NULL`` when either side is missing or when the date's cash
-        chain is not processed (OQ-38)."""
+        rows (rows of assets not in ``positions`` are deleted, OQ-10)."""
         ...
 
-    async def upsert_cash_day(self, cash: CashDay, *, positions_processed: bool) -> None:
-        """Insert or replace ``cash.date``'s ``cash_balances`` row and recompute that date's AUM
-        when its ``portfolio_metrics`` row exists: ``NULL`` when the date's positions chain is
-        not processed (OQ-38). A published row has no previous balance (``None``)."""
+    async def upsert_cash_day(self, cash: CashDay) -> None:
+        """Insert or replace ``cash.date``'s ``cash_balances`` row. A published row has no
+        previous balance (``None``)."""
         ...
 
     async def get_cash(self, on: date) -> CashDay | None: ...

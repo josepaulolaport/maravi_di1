@@ -13,7 +13,8 @@ Hand computation (spec §4.1, OQ-3; CLAUDE.md §2):
   1 × (90909.0909090909 − 90909.0909090909) = 0; market value 90909.0909090909;
   AUM = 109090.9090909091 + 90909.0909090909 = 200000.
 - After the MANUAL price is corrected to 12% and then removed, B3 prevails (spec §5): the
-  Carteira shows B3's PU and rate, but every processed figure is the first run's.
+  Carteira shows B3's PU and rate, but every processed figure is the first run's. While the
+  corrected price, set after the run, is the current one, its row is marked (A10).
 - Reprocessing values the day at B3's PU(11%) = 100000 / 1.11: trades P&L = PU(11%) − PU(10%),
   market value PU(11%), AUM = cash + PU(11%).
 """
@@ -21,7 +22,7 @@ Hand computation (spec §4.1, OQ-3; CLAUDE.md §2):
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -158,13 +159,22 @@ def test_a_used_price_corrected_or_removed_keeps_the_processed_date_until_reproc
     assert datetime.fromisoformat(processed["cash.published_at"]) == FIRST_RUN
     assert datetime.fromisoformat(processed["positions.published_at"]) == FIRST_RUN
     assert _reference(row) == ("MANUAL", PU_10, Decimal("0.10"))
+    assert row["reference_price_changed"] is False
 
     # Correcting the used price is allowed and marks nothing (OQ-25, OQ-31).
     corrected = _post(client, "/api/reference-prices", price_body(asset, DAY, rate="0.12"))
+    # created_at is the database's now(), not the test's injected 2027 clock: put the correction
+    # where the wall clock would, half an hour after the first run.
+    sql(
+        database_url,
+        "UPDATE prices.reference_prices SET created_at = %s WHERE id = %s",
+        (FIRST_RUN + timedelta(minutes=30), corrected["id"]),
+    )
     summary, row = _carteira(client)
 
     assert _figures(summary, row) == processed
     assert _reference(row) == ("MANUAL", pu_12, Decimal("0.12"))  # the current price (OQ-30)
+    assert row["reference_price_changed"] is True  # set after the run: reprocess (A10)
     assert date_statuses(database_url) == {TODAY: ("PROCESSED", "PROCESSED")}
 
     # Removing it lets B3 prevail, and still marks nothing.
@@ -203,3 +213,4 @@ def test_a_used_price_corrected_or_removed_keeps_the_processed_date_until_reproc
     assert datetime.fromisoformat(reprocessed["cash.published_at"]) == REPROCESSING
     assert datetime.fromisoformat(reprocessed["positions.published_at"]) == REPROCESSING
     assert _reference(row) == ("B3", pu_11, Decimal("0.11"))
+    assert row["reference_price_changed"] is False
