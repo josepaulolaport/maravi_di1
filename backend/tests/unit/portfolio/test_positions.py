@@ -7,6 +7,7 @@ quantity, and the average rate is weighted on its own.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from datetime import timedelta
 from decimal import Decimal
@@ -267,5 +268,7 @@ def test_an_impossible_input_is_rejected(build: Callable[[], object]) -> None:
 @pytest.mark.parametrize("gap", [2, 0])
 def test_a_day_cannot_be_skipped_or_repeated(gap: int) -> None:
     # Every calendar day is processed (spec §7.1): a day starts from the day before.
-    with pytest.raises(PortfolioError, match="previous state must be"):
+    # The full message names both dates, so a wrong day in it fails the test too.
+    expected = f"the previous state must be of {YESTERDAY}, not {DAY - timedelta(days=gap)}"
+    with pytest.raises(PortfolioError, match=re.escape(expected)):
         calculate_positions_day(PositionState.zero(DAY - timedelta(days=gap)), [], DAY)

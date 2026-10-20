@@ -7,6 +7,7 @@ reference prices: the cash chain receives neither, and runs without the position
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from decimal import Decimal
 
@@ -105,5 +106,7 @@ def test_a_negative_zero_total_is_stored_unsigned() -> None:
 @pytest.mark.parametrize("gap", [2, 0])
 def test_a_day_cannot_be_skipped_or_repeated(gap: int) -> None:
     # Every calendar day is processed (spec §7.1): a day starts from the day before.
-    with pytest.raises(PortfolioError, match="previous state must be"):
+    # The full message names both dates, so a wrong day in it fails the test too.
+    expected = f"the previous state must be of {YESTERDAY}, not {DAY - timedelta(days=gap)}"
+    with pytest.raises(PortfolioError, match=re.escape(expected)):
         calculate_cash_day(CashBalance.zero(DAY - timedelta(days=gap)), [], ZERO, ZERO, DAY)
