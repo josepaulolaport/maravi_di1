@@ -27,7 +27,8 @@ print(*(s.getsockname()[1] for s in socks))
 export DI1_API_PORT="${DI1_E2E_API_PORT:-$free_api}"
 export DI1_WEB_PORT="${DI1_E2E_WEB_PORT:-$free_web}"
 export DI1_RABBITMQ_MANAGEMENT_PORT="${DI1_E2E_RABBITMQ_MANAGEMENT_PORT:-$free_rabbitmq}"
-# The challenge checks need an empty ledger: the demo service skips its data.
+# The challenge checks need an empty ledger: the demo service is not started (--scale demo=0
+# below; nothing waits on it, so `up --wait` would fail on its exit), and skips its data if it is.
 export DI1_DEMO=0
 # Compose project names allow only lowercase letters, digits, - and _; the hash is hex.
 project="${DI1_E2E_PROJECT:-di1-e2e-$(python3 -c '
@@ -88,7 +89,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"${compose[@]}" up -d --build --wait
+"${compose[@]}" up -d --build --wait --scale demo=0
 # The container's own user and database: Compose may have taken them from a .env this shell
 # never read.
 "${compose[@]}" exec -T postgres sh -c \
