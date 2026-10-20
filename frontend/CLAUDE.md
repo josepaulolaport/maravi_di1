@@ -14,6 +14,7 @@ The Aura Build designs are the visual base, and the screens implement them; they
 - **Calls are limited.** The user's Figma seat has a small monthly MCP quota. Prefer one `get_metadata` and one high-resolution `get_screenshot` of the page, cropped locally per frame, over many per-node calls. The text layers are named "Text", so labels come from screenshots, not metadata.
 - Read frames, components and variables through the MCP tools, and take spacing, colours and typography from the design, mapped onto Mantine theme tokens.
 - **Design-vs-spec decisions already taken:** OQ-19 and OQ-20 in `docs/open-questions.md`. Follow them; do not re-ask.
+- **No brand in the navbar** (user, 2026-10-19: "also remove the Maravi BackOffice from the navbar in the frontend"): the sidebar header holds only the collapse button; the browser tab title keeps "<Página> · Maravi Backoffice".
 - When a screen has no design in Figma or in the Aura Build HTML, raise a `spec-gap` and do not invent one. Drawers and modals without a design are the exception: they are built in the same visual language (OQ-19 item 8). When the design and the spec disagree (a column, a figure or a state), **the user decides which is right**. Follow neither silently: stop that part, raise a `spec-gap` that quotes both (spec section and Figma frame) with your recommendation, and keep building the parts that do not depend on it.
 
 ## Stack and layout (plan §0–§1)
