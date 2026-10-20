@@ -73,13 +73,17 @@ describe('Ativos: catálogo (§11.2)', () => {
     await waitFor(() => {
       expect(router.state.location.search).toContain('busca=juros');
     });
+    // The request proves the page rendered the new search: only then is the box cleared, or a
+    // late render would put "juros" back under the typing (the router updates in a transition).
+    await waitFor(() => {
+      expect(searches).toContain('juros');
+    });
     expect(await screen.findByText('1 produto encontrado')).toBeInTheDocument();
 
     await user.clear(search);
     await user.type(search, 'xyz');
     expect(await screen.findByText('0 produtos encontrados')).toBeInTheDocument();
     expect(screen.queryByRole('row', { name: /DI1/ })).not.toBeInTheDocument();
-    expect(searches).toContain('juros');
     expect(searches.at(-1)).toBe('xyz');
   });
 
