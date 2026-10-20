@@ -10,7 +10,12 @@ import { ErrorState } from '@/shared/ui/ErrorState';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
 
 import { useCumulativePnl } from '../hooks/usePortfolio';
-import { type ChartPoint, hasIncompleteDay, incompleteReason, toChartData } from '../model/chartData';
+import {
+  type ChartPoint,
+  hasIncompleteDay,
+  incompleteReason,
+  toChartData,
+} from '../model/chartData';
 
 interface CumulativePnlCardProps {
   date: IsoDate;

@@ -1,8 +1,10 @@
 import { Button, Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core';
 import { IconPlayerPlay } from '@tabler/icons-react';
+import type { UseQueryResult } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 
 import { Loading } from '@/shared/ui/Loading';
-import type { IsoDate } from '@/api/contract';
+import type { IsoDate, PortfolioSummary } from '@/api/contract';
 import { addDays, formatDate, formatMoney, UNAVAILABLE } from '@/shared/format';
 import { DATE_STATUS, needsProcessing, processedAt } from '@/shared/ui/dateStatus';
 import { useSummary } from '@/shared/queries';
@@ -14,16 +16,20 @@ import { StatusBadge } from '@/shared/ui/StatusBadge';
 // computed from the rows.
 
 /** A day's cash needs processing when its last attempt failed or it was never processed. */
-function useCashBehind(date: IsoDate): boolean {
-  const status = useSummary(date).data?.cash.status;
+function cashBehind(summary: UseQueryResult<PortfolioSummary>): boolean {
+  const status = summary.data?.cash.status;
   return status !== undefined && needsProcessing(status);
 }
 
-function CashCard({ label, date }: { label: string; date: IsoDate }) {
-  const summary = useSummary(date);
+interface CashCardProps {
+  label: string;
+  date: IsoDate;
+  summary: UseQueryResult<PortfolioSummary>;
+}
 
-  let value: React.ReactNode;
-  let marker: React.ReactNode = null;
+function CashCard({ label, date, summary }: CashCardProps) {
+  let value: ReactNode;
+  let marker: ReactNode = null;
   let time: string | null = null;
   if (summary.isPending) {
     value = <Loading label={`Carregando ${label}`} h={24} w={140} />;
@@ -79,14 +85,15 @@ interface CashStripProps {
 
 export function CashStrip({ end, onProcessCash }: CashStripProps) {
   const before = addDays(end, -1);
-  const beforeBehind = useCashBehind(before);
-  const endBehind = useCashBehind(end);
-  const from = beforeBehind ? before : endBehind ? end : null;
+  // One read per date, shared with Carteira's cache entry for it.
+  const beforeSummary = useSummary(before);
+  const endSummary = useSummary(end);
+  const from = cashBehind(beforeSummary) ? before : cashBehind(endSummary) ? end : null;
   return (
     <Stack gap="xs">
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-        <CashCard label="Caixa D−1" date={before} />
-        <CashCard label="Caixa D0" date={end} />
+        <CashCard label="Caixa D−1" date={before} summary={beforeSummary} />
+        <CashCard label="Caixa D0" date={end} summary={endSummary} />
       </SimpleGrid>
       {from !== null && (
         <Group justify="flex-end">

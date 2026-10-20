@@ -51,7 +51,7 @@ function ContractBody({ instrument }: { instrument: Instrument }) {
     instrument.maturity_date,
   );
   const lastDay = resolveRange({}, todayInSaoPaulo(), instrument.maturity_date).end;
-  const days = useReferencePriceDays(instrument.id, start, end);
+  const days = useReferencePriceDays({ assetId: instrument.id, start, end });
   const setRange = (next: { start: IsoDate; end: IsoDate }) => {
     setParams(
       (current) => {

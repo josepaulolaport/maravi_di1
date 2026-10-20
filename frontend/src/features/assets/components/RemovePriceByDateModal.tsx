@@ -35,7 +35,9 @@ function DatePicker({ instrument, onClose }: { instrument: Instrument; onClose: 
   const [missing, setMissing] = useState(false);
   // The date whose prices are read, once "Continuar" is pressed.
   const [lookup, setLookup] = useState<IsoDate | null>(null);
-  const days = useReferencePriceDays(instrument.id, lookup ?? '', lookup ?? '', lookup !== null);
+  const days = useReferencePriceDays(
+    lookup === null ? null : { assetId: instrument.id, start: lookup, end: lookup },
+  );
   // Only an answer read for this lookup counts: a cached one may be from before a write.
   const fresh = lookup !== null && days.isSuccess && !days.isFetching;
   const live = fresh ? (days.data.items.find((d) => d.reference_date === lookup) ?? null) : null;

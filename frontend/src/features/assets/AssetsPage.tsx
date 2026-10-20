@@ -22,7 +22,7 @@ export function AssetsPage() {
 
   const items = types.data?.items ?? [];
   const requested = params.get('tipo');
-  const selected = items.find((t) => t.code === requested)?.code ?? items[0]?.code;
+  const selected = items.find((t) => t.code === requested)?.code ?? items[0]?.code ?? null;
   const products = useProducts(selected, search);
 
   const selectType = (code: string | null) => {
@@ -48,7 +48,7 @@ export function AssetsPage() {
           Nenhum tipo de instrumento cadastrado.
         </Text>
       ) : (
-        <Tabs value={selected ?? null} onChange={selectType}>
+        <Tabs value={selected} onChange={selectType}>
           <Tabs.List>
             {items.map((type) => (
               <Tabs.Tab key={type.code} value={type.code}>

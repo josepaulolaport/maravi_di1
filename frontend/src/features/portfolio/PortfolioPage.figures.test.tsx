@@ -3,8 +3,9 @@ import { notifications } from '@mantine/notifications';
 import { http, HttpResponse } from 'msw';
 
 import type { PortfolioPositions, PortfolioSummary } from '@/api/contract';
+import { job } from '@/test/msw/fixtures';
 import { url } from '@/test/msw/handlers';
-import { server } from '@/test/msw/server';
+import { server, serveJobs } from '@/test/msw/server';
 import { renderApp } from '@/test/render';
 
 import {
@@ -216,7 +217,9 @@ describe('Carteira (§11.4)', () => {
     expect(reads).toBeGreaterThanOrEqual(2);
   });
 
-  it('OQ-23 when a date finishes processing, its positions are read again too', async () => {
+  it('OQ-23 §10.4 when the run of a date ends, its positions are read again too', async () => {
+    const run = { start_date: '2026-10-15', end_date: '2026-10-15', started_at: null };
+    const jobs = serveJobs([job({ ...run, status: 'RUNNING' })]);
     let summaryReads = 0;
     let positionsReads = 0;
     server.use(
@@ -244,6 +247,8 @@ describe('Carteira (§11.4)', () => {
       }),
     );
     await openCarteira('2026-10-15');
+    // The next poll of the jobs sees the run finished: the JobWatcher refreshes the portfolio.
+    jobs.items = [job({ ...run, status: 'COMPLETED', progress_date: '2026-10-15' })];
 
     expect(
       await screen.findByText('DI1F28', { selector: 'td *' }, { timeout: 5_000 }),
@@ -273,7 +278,7 @@ describe('Carteira (§11.4)', () => {
     await waitFor(() => {
       expect(screen.getByText('DI1F29', { selector: 'td *' })).toBeInTheDocument();
     });
-    // Leaving a RUNNING date is not "the date finished processing": nothing is re-read.
+    // Only the JobWatcher refreshes the portfolio, when a run ends: nothing is re-read here.
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(summaryReads.filter((date) => date === '2026-10-16')).toHaveLength(1);
   });

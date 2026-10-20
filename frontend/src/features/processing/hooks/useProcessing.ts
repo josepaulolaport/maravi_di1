@@ -9,15 +9,9 @@ import { useEffect, useRef } from 'react';
 
 import type { JobStatus } from '@/api/contract';
 import { processingApi } from '@/api/endpoints';
-import { invalidateAfterJobFinished, queryRoots } from '@/api/queryRoots';
+import { queryKeys } from '@/api/queryKeys';
 
 import { isActive, isFinal } from '../model/jobStatus';
-
-const processingKeys = {
-  all: queryRoots.processing,
-  requests: () => [...processingKeys.all, 'requests'] as const,
-  issues: () => [...processingKeys.all, 'issues'] as const,
-};
 
 /** How often the history is read while a job is active (§12). */
 const POLL_INTERVAL_MS = 2_000;
@@ -27,14 +21,14 @@ const JOBS_PAGE_SIZE = 20;
 
 export function useIssues() {
   return useQuery({
-    queryKey: processingKeys.issues(),
+    queryKey: queryKeys.processing.issues(),
     queryFn: () => processingApi.listIssues(),
   });
 }
 
 /** The job history, newest first, read page by page (P21). One cache entry for every reader. */
 const requestsQuery = infiniteQueryOptions({
-  queryKey: processingKeys.requests(),
+  queryKey: queryKeys.processing.requests(),
   queryFn: ({ pageParam }) =>
     processingApi.listRequests({
       limit: JOBS_PAGE_SIZE,
@@ -96,7 +90,11 @@ export function useJobWatcher(): void {
       return Number.isFinite(created) ? Math.max(latest, created) : latest;
     }, seen?.newest ?? Number.NEGATIVE_INFINITY);
     lastSeen.current = { statuses: new Map(items.map((job) => [job.id, job.status])), newest };
-    if (finished) void invalidateAfterJobFinished(queryClient);
+    // Published results and the job views changed (§10.4).
+    if (finished) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.portfolio.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.processing.all });
+    }
   }, [query.data, queryClient]);
 }
 
@@ -104,7 +102,7 @@ function useProcessingMutation<TVariables, TData>(fn: (variables: TVariables) =>
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: processingKeys.all }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.processing.all }),
   });
 }
 
