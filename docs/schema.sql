@@ -235,8 +235,9 @@ CREATE TABLE portfolio.position_metrics (
 );
 CREATE INDEX position_metrics_date_idx ON portfolio.position_metrics (metric_date, asset_id);
 
--- aum is kept but unused (NULL): AUM = cash_balances.cash_balance + positions_market_value of the
--- same date is computed on read, when both chains of the date are processed (OQ-21, OQ-38).
+-- aum is no longer written or read (OQ-50 item 1); rows written before keep a stale value.
+-- AUM = cash_balances.cash_balance + positions_market_value of the same date is computed on
+-- read, when both chains of the date are processed (OQ-21, OQ-38).
 CREATE TABLE portfolio.portfolio_metrics (
     metric_date DATE PRIMARY KEY,
     positions_market_value NUMERIC,

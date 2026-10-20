@@ -349,10 +349,10 @@ class TestPositionTable:
 
 
 class TestReferencePriceChanged:
-    """A10: a row is marked when its current preferred price of the date was registered after
-    the date's positions chain was processed, since its figures come from the price the run read
-    (OQ-30, OQ-31). Prices are re-registered with a new row, so ``created_at`` is the time of the
-    last set (OQ-25)."""
+    """OQ-50 item 3: a row is marked when the current preferred price of D, or of D−1 while
+    Q[D−1] ≠ 0, was registered after the date's positions chain was processed, since its figures
+    come from the prices the run read (OQ-30, OQ-31). Prices are re-registered with a new row, so
+    ``created_at`` is the time of the last set (OQ-25)."""
 
     @pytest.fixture(autouse=True)
     def published(
@@ -388,9 +388,13 @@ class TestReferencePriceChanged:
         assert row.reference_price_changed is False
 
     async def test_a_d_minus_1_price_set_after_the_processing_marks_the_row(
-        self, queries: PortfolioService, prices: FakePriceReader
+        self,
+        queries: PortfolioService,
+        repository: InMemoryPortfolioRepository,
+        prices: FakePriceReader,
     ) -> None:
-        # OQ-50 item 3: position P&L uses the D−1 price too (integrator reading).
+        # OQ-50 item 3: position P&L uses the D−1 price too while Q[D−1] ≠ 0 (OQ-4).
+        repository.positions[DAY - timedelta(days=1)] = (_position(DI1F28, 10, "950000"),)
         prices.add(DI1F28, DAY, PriceSource.B3, "95100", "0.0990", created_at=POSITIONS_AT)
         prices.add(
             DI1F28,
@@ -405,6 +409,31 @@ class TestReferencePriceChanged:
 
         assert row.reference_price_changed is True
         assert row.reference_pu == Decimal("95100")  # the row still shows D's price
+
+    @pytest.mark.parametrize("previous", [None, 0], ids=["first-buy-on-d", "closed-on-d-1"])
+    async def test_a_d_minus_1_price_is_ignored_while_q_d_minus_1_is_zero(
+        self,
+        queries: PortfolioService,
+        repository: InMemoryPortfolioRepository,
+        prices: FakePriceReader,
+        previous: int | None,
+    ) -> None:
+        # OQ-4: with Q[D−1] = 0 position P&L is exactly 0 and the D−1 price is never used.
+        if previous is not None:
+            repository.positions[DAY - timedelta(days=1)] = (_position(DI1F28, previous, "0"),)
+        prices.add(DI1F28, DAY, PriceSource.B3, "95100", "0.0990", created_at=POSITIONS_AT)
+        prices.add(
+            DI1F28,
+            DAY - timedelta(days=1),
+            PriceSource.MANUAL,
+            "95000",
+            "0.1000",
+            created_at=POSITIONS_AT + timedelta(minutes=1),
+        )
+
+        (row,) = (await queries.get_position_table(DAY)).items
+
+        assert row.reference_price_changed is False
 
     async def test_a_price_of_another_date_set_later_does_not_mark_the_row(
         self, queries: PortfolioService, prices: FakePriceReader

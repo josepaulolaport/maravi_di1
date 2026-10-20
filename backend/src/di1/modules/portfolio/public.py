@@ -181,11 +181,14 @@ class PositionRowView:
     price of the date (MANUAL, else B3, exact date; PU 0 after maturity), read from the price
     table; the stored figures are those of the last processing, so after a price correction the
     two may differ until the user processes the date again (OQ-30, OQ-31).
-    ``reference_price_changed`` marks that case (OQ-50 item 3): the current preferred price of the
-    date or of the day before (position P&L uses both) was registered (``created_at``; a set always
-    inserts a new row, OQ-25) after the date's positions chain was processed
-    (``portfolio_processed_at``). It is ``False`` with no processing time, and when neither D's
-    nor D−1's price is read (both after maturity, OQ-1)."""
+    ``reference_price_changed`` marks that case (OQ-50 item 3): the current preferred price of
+    the date, or of the day before while Q[D−1] ≠ 0 (position P&L uses it only then, OQ-4), was
+    registered (``created_at``; a set always inserts a new row, OQ-25) after the date's positions
+    chain was processed (``portfolio_processed_at``). It is ``False`` with no processing time, and
+    when no such price is read (after maturity, OQ-1). Removing the preferred price so an older
+    one becomes current is not marked: that price predates the run (integrator reading).
+    ``created_at`` is the database's ``now()`` and ``portfolio_processed_at`` the worker's
+    ``SystemClock``, on one host (integrator reading)."""
 
     asset_id: UUID
     asset_code: str
