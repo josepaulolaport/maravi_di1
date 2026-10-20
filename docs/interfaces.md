@@ -145,7 +145,7 @@ Every error response is RFC 9457 `application/problem+json`:
 | `FUTURE_DATE` | 422 | An entry or price written with a date after today (São Paulo; not `GET /reference-prices`, OQ-42), a processing range (request, preview) ending after today (OQ-29), or a Portfolio read (`summary`/`positions` `date`, `pnl` `end_date`) after today (OQ-35) |
 | `CONTRACT_MATURED` | 422 | A trade or reference price dated after the instrument's maturity |
 | `NOT_FOUND` | 404 | The resource in the URL path does not exist. An unknown id in the request body (e.g. `product_id`, `asset_class_id`) is a 422 `VALIDATION_ERROR` on that field (OQ-33). Exception: the `ids` of `POST /ledger/entries/deletions` are the resources being deleted, so an unknown or already-deleted id answers 404 and nothing is deleted (OQ-32) |
-| `INVALID_RANGE` | 422 | A processing or query range with start after end, or a start with no predecessor day (0001-01-01) |
+| `INVALID_RANGE` | 422 | A processing or query range with start after end, or a start with no predecessor day (0001-01-01); a processing request or `GET /portfolio/pnl` spanning more than 3,660 dates, ends included ("O período deve ter no máximo 3.660 dias.", on `end_date`) |
 | `JOB_NOT_CANCELLABLE` | 409 | Cancel requested for a job that is already finished, or a second cancel of a `RUNNING` job (OQ-29; `CANCELLING` is never set since OQ-46) |
 
 Run error codes are not HTTP statuses: they are stored on the run as `error_code` with a pt-BR `error_message`, read through the run's DTO and shown in Processamentos (OQ-36 item 6):

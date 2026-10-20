@@ -36,7 +36,7 @@ from di1.modules.processing.public import (
 )
 from di1.platform.database.unit_of_work import UnitOfWork
 from di1.shared.clock import Clock
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
+from di1.shared.errors import DomainError, ErrorCode, ErrorDetail, range_too_long
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +81,9 @@ class IssueView:
 
 def validate_range(start_date: date, end_date: date, today: date) -> None:
     """``INVALID_RANGE`` when the start is the first representable date (it has no day before)
-    or after the end, else ``FUTURE_DATE`` when the range ends after today in São Paulo
-    (interfaces.md "Errors", OQ-29)."""
+    or after the end, or when the range holds more than ``MAX_RANGE_DATES`` dates; else
+    ``FUTURE_DATE`` when the range ends after today in São Paulo (interfaces.md "Errors",
+    OQ-29)."""
     if start_date == date.min:
         # The run and the preview need the day before the start; 01/01/0001 has none.
         raise DomainError(
@@ -100,6 +101,8 @@ def validate_range(start_date: date, end_date: date, today: date) -> None:
                 "start_date",
             )
         )
+    if (too_long := range_too_long(start_date, end_date)) is not None:
+        raise DomainError(too_long)
     if end_date > today:
         raise DomainError(
             ErrorDetail(ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", "end_date")
