@@ -5,7 +5,6 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router';
 
 import type { CreateInstrumentRequest } from '@/api/contract';
 import { assetsApi } from '@/api/endpoints';
@@ -57,23 +56,4 @@ export function useCreateInstrument() {
     mutationFn: (body: CreateInstrumentRequest) => assetsApi.createInstrument(body),
     onSuccess: () => queryClient.invalidateQueries(),
   });
-}
-
-/**
- * The catalogue's search (`?busca=`): the value the queries use, and its setter, a REPLACE
- * navigation so a search is not a history entry. The box is `SearchInput`.
- */
-export function useSearchParam(): [string, (value: string) => void] {
-  const [params, setParams] = useSearchParams();
-  const setSearch = (value: string) => {
-    setParams(
-      (current) => {
-        if (value) current.set('busca', value);
-        else current.delete('busca');
-        return current;
-      },
-      { replace: true },
-    );
-  };
-  return [params.get('busca') ?? '', setSearch];
 }

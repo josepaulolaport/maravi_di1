@@ -4,88 +4,61 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query';
-import { useCallback } from 'react';
-import { useSearchParams } from 'react-router';
 
 import type { CreateLedgerEntryRequest, IsoDate, LedgerOrder } from '@/api/contract';
 import { ledgerApi } from '@/api/endpoints';
 import { mutationKeys, paramsOf, queryKeys } from '@/api/queryKeys';
-import { addDays, isIsoDate, todayInSaoPaulo } from '@/shared/format';
-import { useFutureDateNotice } from '@/shared/ui/futureDate';
+import { addDays, todayInSaoPaulo } from '@/shared/format';
+import {
+  dateParam,
+  enumParam,
+  textParam,
+  useQueryParams,
+  withFallback,
+} from '@/shared/url/useQueryParams';
 
 import type { LedgerEntry } from '../model/entries';
 
-/** Days in the default range, ending today (São Paulo). */
+/** Days in the default range, ending on its end date. */
 const DEFAULT_RANGE_DAYS = 30;
 
-interface LedgerFilters {
-  start: IsoDate;
-  end: IsoDate;
-  search: string;
-  today: IsoDate;
-  /** Newest first by default; `?ordem=asc` for the oldest first. */
-  order: LedgerOrder;
-  setRange: (start: IsoDate, end: IsoDate) => void;
-  setSearch: (search: string) => void;
-  setOrder: (order: LedgerOrder) => void;
-}
+const ORDERS: Record<LedgerOrder, string> = { asc: 'asc', desc: 'desc' };
 
 /**
  * The inclusive range, the search and the order live in the URL (`?inicio=&fim=&busca=&ordem=`,
- * `ledgerLinks`), so a filtered view can be linked. A missing, invalid or future end is today (a
- * future one is reported, OQ-14); a missing or
- * invalid start, or one after the end, is the end's 30-day window.
+ * `ledgerLinks`), so a filtered view can be linked. A missing end is today; an invalid or future
+ * one is corrected to today (a future one is reported, OQ-14). A missing start, or one after the
+ * end, gives the end's 30-day window. Newest first unless `?ordem=asc`.
  */
-export function useLedgerFilters(): LedgerFilters {
-  const [params, setParams] = useSearchParams();
+export function useLedgerFilters() {
   const today = todayInSaoPaulo();
-  const requestedEnd = params.get('fim');
-  const requestedStart = params.get('inicio');
-  useFutureDateNotice([requestedStart, requestedEnd], today);
-  const end = isIsoDate(requestedEnd) && requestedEnd <= today ? requestedEnd : today;
-  const start =
-    isIsoDate(requestedStart) && requestedStart <= end
-      ? requestedStart
-      : addDays(end, -(DEFAULT_RANGE_DAYS - 1));
-  const search = params.get('busca') ?? '';
-  const order: LedgerOrder = params.get('ordem') === 'asc' ? 'asc' : 'desc';
-
-  const update = useCallback(
-    (changes: Record<string, string>, replace: boolean) => {
-      setParams(
-        (current) => {
-          for (const [key, value] of Object.entries(changes)) {
-            if (value) current.set(key, value);
-            else current.delete(key);
-          }
-          return current;
-        },
-        { replace },
-      );
+  const { values, set } = useQueryParams(
+    {
+      inicio: dateParam({ max: today }),
+      fim: withFallback(dateParam({ max: today }), today),
+      busca: textParam,
+      ordem: withFallback(enumParam(ORDERS), 'desc'),
     },
-    [setParams],
+    (v) => ({ inicio: v.inicio !== null && v.inicio <= v.fim ? v.inicio : null }),
   );
-  const setRange = useCallback(
-    (nextStart: IsoDate, nextEnd: IsoDate) => {
-      update({ inicio: nextStart, fim: nextEnd }, false);
+  const end = values.fim;
+  return {
+    start: values.inicio ?? addDays(end, -(DEFAULT_RANGE_DAYS - 1)),
+    end,
+    search: values.busca,
+    order: values.ordem,
+    today,
+    setRange: (start: IsoDate, nextEnd: IsoDate) => {
+      set({ inicio: start, fim: nextEnd }, { push: true });
     },
-    [update],
-  );
-  const setSearch = useCallback(
-    (next: string) => {
-      // Typing is debounced into the URL; each pause is not a history entry.
-      update({ busca: next.trim() }, true);
+    /** Typing is debounced into the URL; each pause is not a history entry. */
+    setSearch: (search: string) => {
+      set({ busca: search.trim() });
     },
-    [update],
-  );
-  const setOrder = useCallback(
-    (next: LedgerOrder) => {
-      update({ ordem: next === 'asc' ? 'asc' : '' }, true);
+    setOrder: (order: LedgerOrder) => {
+      set({ ordem: order === 'desc' ? null : order });
     },
-    [update],
-  );
-
-  return { start, end, search, today, setRange, setSearch, order, setOrder };
+  };
 }
 
 /** Entries per page of the list (P21); "Carregar mais" reads the next one. */

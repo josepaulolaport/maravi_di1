@@ -25,7 +25,7 @@ import {
 import { SearchInput } from '@/shared/ui/SearchInput';
 import { SignedMoney } from '@/shared/ui/SignedMoney';
 
-import { usePositionsView } from '../hooks/usePortfolio';
+import type { PortfolioParams } from '../hooks/usePortfolio';
 import { type Sort, type SortKey, sortPositions } from '../model/sortPositions';
 
 interface Column {
@@ -125,8 +125,14 @@ function SortIcon({ active, direction }: { active: boolean; direction: Sort['dir
   );
 }
 
-export function PositionsTable({ rows }: { rows: PositionRow[] }) {
-  const { search, setSearch, sort, setSort } = usePositionsView();
+interface PositionsTableProps {
+  rows: PositionRow[];
+  /** The search and order, in the URL (`usePortfolioParams`). */
+  view: Pick<PortfolioParams, 'search' | 'setSearch' | 'sort' | 'setSort'>;
+}
+
+export function PositionsTable({ rows, view }: PositionsTableProps) {
+  const { search, setSearch, sort, setSort } = view;
 
   const needle = search.trim().toLocaleUpperCase('pt-BR');
   const visible = sortPositions(

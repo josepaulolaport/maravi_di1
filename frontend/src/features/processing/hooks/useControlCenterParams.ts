@@ -1,68 +1,61 @@
-import { useSearchParams } from 'react-router';
-
 import type { IsoDate, ProcessingScope } from '@/api/contract';
-import { isIsoDate, todayInSaoPaulo } from '@/shared/format';
-import { scopeFromUrl, scopeToUrl } from '@/shared/processing/scope';
-import { useFutureDateNotice } from '@/shared/ui/futureDate';
+import { todayInSaoPaulo } from '@/shared/format';
+import { SCOPE_URL } from '@/shared/processing/scope';
+import {
+  dateParam,
+  enumParam,
+  textParam,
+  useQueryParams,
+  withFallback,
+} from '@/shared/url/useQueryParams';
 
-// Central de Controle keeps its URL state in the query string (frontend/CLAUDE.md), with the
-// keys `controlCenterLinks` builds: `tab`, `inicio`, `fim`, `escopo`, plus `busca` for the search.
+// Central de Controle keeps its URL state in the query string, with the keys
+// `controlCenterLinks` builds: `tab`, `inicio`, `fim`, `escopo`, plus `busca` for the search.
 
 export type ControlCenterTab = 'pendencias' | 'processamentos';
 
-const TABS: readonly ControlCenterTab[] = ['pendencias', 'processamentos'];
-
-/** A date from the URL, or `null` when missing, invalid or after today (OQ-14, reported). */
-function readDate(value: string | null, today: IsoDate): IsoDate | null {
-  return isIsoDate(value) && value <= today ? value : null;
-}
+const TABS: Record<ControlCenterTab, string> = {
+  pendencias: 'pendencias',
+  processamentos: 'processamentos',
+};
 
 export function useControlCenterParams() {
-  const [params, setParams] = useSearchParams();
   const today = todayInSaoPaulo();
-  const requestedTab = params.get('tab');
-  useFutureDateNotice([params.get('inicio'), params.get('fim')], today);
-  const tab: ControlCenterTab = TABS.find((t) => t === requestedTab) ?? 'pendencias';
-
-  const update = (changes: Record<string, string | null>) => {
-    setParams(
-      (current) => {
-        for (const [key, value] of Object.entries(changes)) {
-          if (value) current.set(key, value);
-          else current.delete(key);
-        }
-        return current;
-      },
-      { replace: true },
-    );
-  };
+  const { values, set } = useQueryParams({
+    tab: withFallback(enumParam(TABS), 'pendencias'),
+    // Never after today (OQ-14, OQ-29); a future date in a link is reported and dropped.
+    inicio: dateParam({ max: today }),
+    fim: dateParam({ max: today }),
+    /** The request's scope (OQ-21): Tudo unless the URL says otherwise. */
+    escopo: withFallback(enumParam(SCOPE_URL), 'ALL'),
+    busca: textParam,
+  });
 
   return {
-    tab,
+    tab: values.tab,
     /** A new tab starts with an empty search. */
-    setTab: (next: ControlCenterTab) => {
-      update({ tab: next, busca: null });
+    setTab: (tab: ControlCenterTab) => {
+      set({ tab, busca: null });
     },
-    start: readDate(params.get('inicio'), today),
-    end: readDate(params.get('fim'), today),
+    start: values.inicio,
+    end: values.fim,
     setStart: (date: IsoDate | null) => {
-      update({ inicio: date });
+      set({ inicio: date }, { push: true });
     },
     setEnd: (date: IsoDate | null) => {
-      update({ fim: date });
+      set({ fim: date }, { push: true });
     },
-    /** The request's scope (OQ-21): Tudo unless the URL says otherwise. */
-    scope: scopeFromUrl(params.get('escopo')) ?? 'ALL',
+    scope: values.escopo,
     setScope: (scope: ProcessingScope) => {
-      update({ escopo: scopeToUrl(scope) });
+      set({ escopo: scope });
     },
     /** Prefills the request form ("Solicitar novo processamento", OQ-20, OQ-21). */
     setRange: (start: IsoDate, end: IsoDate, scope: ProcessingScope) => {
-      update({ tab: 'processamentos', inicio: start, fim: end, escopo: scopeToUrl(scope) });
+      set({ tab: 'processamentos', inicio: start, fim: end, escopo: scope }, { push: true });
     },
-    search: params.get('busca') ?? '',
+    search: values.busca,
     setSearch: (text: string) => {
-      update({ busca: text });
+      set({ busca: text });
     },
     today,
   };

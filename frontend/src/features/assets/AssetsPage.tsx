@@ -1,14 +1,14 @@
 import { Paper, Stack, Tabs, Text } from '@mantine/core';
-import { useSearchParams } from 'react-router';
 
 import { PageTitle } from '@/shared/ui/PageTitle';
 import { SearchInput } from '@/shared/ui/SearchInput';
 import { useInstrumentTypes } from '@/shared/queries';
 import { Loading } from '@/shared/ui/Loading';
 import { ErrorState } from '@/shared/ui/ErrorState';
+import { textParam, useQueryParams } from '@/shared/url/useQueryParams';
 
 import { ProductsTable } from './components/ProductsTable';
-import { useProducts, useSearchParam } from './hooks/useAssets';
+import { useProducts } from './hooks/useAssets';
 
 /**
  * Ativos catalogue (spec §11.2, design 2:2): instrument types as tabs, then the products of the
@@ -17,23 +17,19 @@ import { useProducts, useSearchParam } from './hooks/useAssets';
  */
 export function AssetsPage() {
   const types = useInstrumentTypes();
-  const [params, setParams] = useSearchParams();
-  const [search, setSearch] = useSearchParam();
+  // The type is checked against the API's list below, not by its parser.
+  const { values, set } = useQueryParams({ tipo: textParam, busca: textParam });
+  const search = values.busca;
 
   const items = types.data?.items ?? [];
-  const requested = params.get('tipo');
-  const selected = items.find((t) => t.code === requested)?.code ?? items[0]?.code ?? null;
+  const selected = items.find((t) => t.code === values.tipo)?.code ?? items[0]?.code ?? null;
   const products = useProducts(selected, search);
 
   const selectType = (code: string | null) => {
-    if (!code) return;
-    setParams(
-      (current) => {
-        current.set('tipo', code);
-        return current;
-      },
-      { replace: true },
-    );
+    if (code) set({ tipo: code });
+  };
+  const setSearch = (busca: string) => {
+    set({ busca });
   };
 
   return (

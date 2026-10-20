@@ -4,7 +4,7 @@ import { type SyntheticEvent, useState } from 'react';
 import type { IsoDate } from '@/api/contract';
 import { parsePtBrDate } from '@/shared/format';
 
-import { FUTURE_DATE_MESSAGE } from './futureDate';
+import { FUTURE_DATE_MESSAGE } from '@/shared/url/futureDate';
 
 interface PastDateInputProps extends Omit<DateInputProps, 'onChange' | 'maxDate'> {
   /** Today in São Paulo (OQ-14); a typed date after it is refused with FUTURE_DATE's message. */

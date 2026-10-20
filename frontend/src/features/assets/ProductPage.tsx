@@ -9,6 +9,7 @@ import type { Instrument, IsoDate, Product } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
 import { ErrorState } from '@/shared/ui/ErrorState';
 import { StatusBadge } from '@/shared/ui/StatusBadge';
+import { textParam, useQueryParams } from '@/shared/url/useQueryParams';
 
 import { ContractsTable } from './components/ContractsTable';
 import { countLabel, todayInSaoPaulo } from '@/shared/format';
@@ -17,7 +18,7 @@ import { lastDay } from './model/calendarData';
 import { PageHeader } from './components/PageHeader';
 import { PriceModal } from './components/PriceModal';
 import { RemovePriceByDateModal } from './components/RemovePriceByDateModal';
-import { useInstruments, useProduct, useSearchParam } from './hooks/useAssets';
+import { useInstruments, useProduct } from './hooks/useAssets';
 
 /**
  * A product (spec §11.2, design 2:165): its contracts, each with its latest reference
@@ -39,7 +40,11 @@ export function ProductPage() {
 }
 
 function ProductBody({ product }: { product: Product }) {
-  const [search, setSearch] = useSearchParam();
+  const { values, set } = useQueryParams({ busca: textParam });
+  const search = values.busca;
+  const setSearch = (busca: string) => {
+    set({ busca });
+  };
   const [modalOpen, setModalOpen] = useState(false);
   const instruments = useInstruments(product.id, search);
   // Every contract of the product, whatever the search, for the price form's select.
