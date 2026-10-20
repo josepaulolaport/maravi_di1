@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import date
-from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
@@ -16,17 +15,16 @@ from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from di1.modules.asset.public import Instrument
+from di1.modules.asset.dependencies import build_asset_reader
 from di1.modules.prices.application.services.price_service import PriceService
 from di1.modules.prices.dependencies import build_price_service
+from di1.modules.pricing.dependencies import build_pricing_service
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import UnitOfWork
-from tests.fakes.asset import CREATED_AT
 from tests.fakes.clock import FixedClock
 from tests.integration.databases import fresh_database_url
-from tests.unit.prices.fakes import FakeAssets, FakePricing
 
 BACKEND = Path(__file__).resolve().parents[3]
 TODAY = date(2026, 10, 19)
@@ -71,37 +69,19 @@ def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return create_session_factory(engine)
 
 
-@pytest.fixture
-def assets() -> FakeAssets:
-    fake = FakeAssets()
-    for instrument_id, (code, maturity) in INSTRUMENTS.items():
-        fake.add(
-            Instrument(
-                id=instrument_id,
-                code=code,
-                product_id=PRODUCT,
-                product_code="DI1",
-                instrument_type="FUTURE",
-                asset_class="INTEREST_RATE_FUTURE",
-                maturity_date=maturity,
-                face_value=Decimal("100000"),
-                multiplier=Decimal("1"),
-                settlement_method="CASH",
-                created_at=CREATED_AT,
-            )
-        )
-    return fake
-
-
 ServiceOn = Callable[[UnitOfWork], PriceService]
 """Builds the service on a Unit of Work, as the composition does per request."""
 
 
 @pytest.fixture
-def service(assets: FakeAssets) -> ServiceOn:
+def service() -> ServiceOn:
+    """The service with the real Asset reader and Pricing service on the caller's session, as
+    the composition wires it."""
+
     def on(uow: UnitOfWork) -> PriceService:
+        assets = build_asset_reader(uow.session)
         return build_price_service(
-            uow, assets=assets, pricing=FakePricing(), clock=FixedClock(TODAY)
+            uow, assets=assets, pricing=build_pricing_service(assets), clock=FixedClock(TODAY)
         )
 
     return on
