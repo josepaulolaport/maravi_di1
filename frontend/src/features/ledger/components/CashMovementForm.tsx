@@ -1,34 +1,33 @@
-import { Button, Group, Stack, TextInput } from '@mantine/core';
+import { Group, Stack, TextInput } from '@mantine/core';
 import { TimeInput } from '@mantine/dates';
-import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { useState } from 'react';
 
+import { useApiForm } from '@/shared/form/useApiForm';
+import { FormActions } from '@/shared/ui/FormActions';
 import { MessageAlert } from '@/shared/ui/MessageAlert';
 import type { IsoDate } from '@/api/contract';
 import { formatDate, parsePtBrDecimal } from '@/shared/format';
 
 import { useCreateEntry } from '../hooks/useLedger';
-import { splitProblem } from '@/shared/ui/problemMessages';
-import { PastDateInput } from '@/shared/ui/PastDateInput';
+import { DateField } from '@/shared/ui/DateField';
 
-import { nowInSaoPaulo, toIsoTime } from './formSupport';
+import { nowInSaoPaulo, toIsoTime } from '../model/time';
 
 export type CashSide = 'DEPOSIT' | 'WITHDRAWAL';
 
-interface CashValues {
+interface CashValues extends Record<string, unknown> {
   date: IsoDate | null;
   time: string;
   amount: string;
   description: string;
 }
 
-const FIELD_MAP: Record<string, keyof CashValues> = {
+const FIELD_MAP = {
   date: 'date',
   time: 'time',
   cash_amount: 'amount',
   description: 'description',
-};
+} as const;
 
 /** `ledger.entries.description VARCHAR(200)` (OQ-51). */
 const DESCRIPTION_MAX_LENGTH = 200;
@@ -61,54 +60,47 @@ export function CashMovementForm({
   onDone: () => void;
 }) {
   const createMovement = useCreateEntry();
-  const [pageErrors, setPageErrors] = useState<string[]>([]);
 
-  const form = useForm<CashValues>({
-    initialValues: { date: today, time: nowInSaoPaulo(), amount: '', description: '' },
-    validate: {
-      date: (value) => (value ? null : 'Informe a data.'),
-      time: (value) => (/^\d{2}:\d{2}(:\d{2})?$/.test(value) ? null : 'Informe a hora.'),
-      amount: (value) => {
-        if (!value.trim()) return 'Informe o valor.';
-        const amount = parsePtBrDecimal(value);
-        if (amount === null) return 'Informe um valor válido, como 1.234,56.';
-        // The side gives the sign: a typed sign or a zero would turn an aporte into a retirada.
-        return amount.startsWith('-') || /^0+(\.0+)?$/.test(amount)
-          ? 'Informe um valor maior que zero.'
-          : null;
+  const { form, pageErrors, onSubmit } = useApiForm<CashValues>(
+    {
+      initialValues: { date: today, time: nowInSaoPaulo(), amount: '', description: '' },
+      validate: {
+        date: (value) => (value ? null : 'Informe a data.'),
+        time: (value) => (/^\d{2}:\d{2}(:\d{2})?$/.test(value) ? null : 'Informe a hora.'),
+        amount: (value) => {
+          if (!value.trim()) return 'Informe o valor.';
+          const amount = parsePtBrDecimal(value);
+          if (amount === null) return 'Informe um valor válido, como 1.234,56.';
+          // The side gives the sign: a typed sign or a zero would turn an aporte into a retirada.
+          return amount.startsWith('-') || /^0+(\.0+)?$/.test(amount)
+            ? 'Informe um valor maior que zero.'
+            : null;
+        },
       },
     },
-  });
+    FIELD_MAP,
+  );
 
-  const submit = form.onSubmit((values) => {
+  const submit = onSubmit((values) => {
     const amount = parsePtBrDecimal(values.amount);
     const date = values.date;
-    if (!date || amount === null) return;
-    setPageErrors([]);
+    if (!date || amount === null) return undefined;
     const description = values.description.trim();
-    createMovement.mutate(
-      {
+    return createMovement
+      .mutateAsync({
         type: 'CASH',
         date,
         time: toIsoTime(values.time),
         cash_amount: type === 'DEPOSIT' ? amount : `-${amount}`,
         ...(description ? { description } : {}),
-      },
-      {
-        onSuccess: () => {
-          notifications.show({
-            color: 'teal',
-            message: `${LABELS[type].done} O caixa precisa ser processado a partir de ${formatDate(date)}: use o escopo Caixa.`,
-          });
-          onDone();
-        },
-        onError: (error) => {
-          const { fields, page } = splitProblem(error, FIELD_MAP);
-          form.setErrors(fields);
-          setPageErrors(page);
-        },
-      },
-    );
+      })
+      .then(() => {
+        notifications.show({
+          color: 'teal',
+          message: `${LABELS[type].done} O caixa precisa ser processado a partir de ${formatDate(date)}: use o escopo Caixa.`,
+        });
+        onDone();
+      });
   });
 
   return (
@@ -116,15 +108,7 @@ export function CashMovementForm({
       <Stack gap="md">
         <MessageAlert messages={pageErrors} />
         <Group grow align="flex-start">
-          <PastDateInput
-            today={today}
-            label="Data"
-            withAsterisk
-            valueFormat="DD/MM/YYYY"
-            maxDate={today}
-            placeholder="DD/MM/AAAA"
-            {...form.getInputProps('date')}
-          />
+          <DateField label="Data" withAsterisk {...form.getInputProps('date')} />
           <TimeInput label="Hora" withAsterisk {...form.getInputProps('time')} />
         </Group>
         <TextInput
@@ -141,14 +125,11 @@ export function CashMovementForm({
           placeholder="Aporte inicial"
           {...form.getInputProps('description')}
         />
-        <Group justify="flex-end" gap="sm">
-          <Button variant="default" onClick={onDone} disabled={createMovement.isPending}>
-            Cancelar
-          </Button>
-          <Button type="submit" loading={createMovement.isPending}>
-            {LABELS[type].submit}
-          </Button>
-        </Group>
+        <FormActions
+          submitLabel={LABELS[type].submit}
+          onCancel={onDone}
+          pending={createMovement.isPending}
+        />
       </Stack>
     </form>
   );

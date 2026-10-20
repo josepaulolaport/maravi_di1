@@ -5,7 +5,7 @@ import { Link } from 'react-router';
 import type { Product } from '@/api/contract';
 import { assetLinks } from '@/app/paths';
 
-import { countLabel } from '@/shared/format';
+import { countLabel, formatQuantity } from '@/shared/format';
 
 /** Catalogue rows (§11.2): código, produto, classe, contratos; each opens its product. */
 export function ProductsTable({ products }: { products: Product[] }) {
@@ -32,7 +32,7 @@ export function ProductsTable({ products }: { products: Product[] }) {
                 </Table.Td>
                 <Table.Td>{product.name}</Table.Td>
                 <Table.Td>{product.asset_class.name}</Table.Td>
-                <Table.Td ta="right">{product.instrument_count}</Table.Td>
+                <Table.Td ta="right">{formatQuantity(product.instrument_count)}</Table.Td>
                 <Table.Td>
                   <ActionIcon
                     component={Link}

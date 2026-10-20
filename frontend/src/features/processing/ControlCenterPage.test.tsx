@@ -3,9 +3,9 @@ import { http, HttpResponse } from 'msw';
 
 import type { Issue } from '@/api/contract';
 import { IDS } from '@/test/msw/fixtures';
-import { url } from '@/test/msw/handlers';
+import { url, rowContaining } from '@/test/helpers';
 import { server } from '@/test/msw/server';
-import { renderApp } from '@/test/render';
+import { renderRoute } from '@/test/render';
 
 // Expected values come from the fixture scenario (src/test/msw/fixtures.ts): one
 // MISSING_REFERENCE_PRICE issue for DI1F29 on 16/10/2026, and five finished jobs.
@@ -27,15 +27,9 @@ const issue = (changes: Partial<Issue>): Issue => ({
   ...changes,
 });
 
-function issueRow(text: string) {
-  const row = screen.getByText(text, { selector: 'td, td *' }).closest('tr');
-  if (!row) throw new Error(`no row for ${text}`);
-  return within(row);
-}
-
 describe('Central de Controle (§11.1)', () => {
   it('§11.1 opens on Pendências, with the issue count on its tab', async () => {
-    renderApp(PAGE);
+    renderRoute(PAGE);
 
     const tab = await screen.findByRole('tab', { name: /Pendências/ });
     expect(tab).toHaveAttribute('aria-selected', 'true');
@@ -51,7 +45,7 @@ describe('Central de Controle (§11.1)', () => {
   });
 
   it('§11.1 opens the tab named in ?tab= (deep link)', async () => {
-    renderApp(`${PAGE}?tab=processamentos`);
+    renderRoute(`${PAGE}?tab=processamentos`);
 
     expect(await screen.findByRole('tab', { name: 'Processamentos' })).toHaveAttribute(
       'aria-selected',
@@ -63,7 +57,7 @@ describe('Central de Controle (§11.1)', () => {
   });
 
   it('§11.1 writes the chosen tab to ?tab=', async () => {
-    const { user, router } = renderApp(PAGE);
+    const { user, router } = renderRoute(PAGE);
 
     await user.click(await screen.findByRole('tab', { name: 'Processamentos' }));
 
@@ -73,7 +67,7 @@ describe('Central de Controle (§11.1)', () => {
   });
 
   it('§11.1 shows no financial KPIs', async () => {
-    renderApp(PAGE);
+    renderRoute(PAGE);
     await screen.findByText('Preço de referência ausente');
 
     expect(screen.queryByText(/Saldo em caixa|Patrimônio|P&L/)).not.toBeInTheDocument();
@@ -82,12 +76,12 @@ describe('Central de Controle (§11.1)', () => {
 
 describe('Pendências (§11.1, §10.3)', () => {
   it('§10.3 lists the missing reference price with its date, asset and "Definir preço"', async () => {
-    renderApp(PAGE);
+    renderRoute(PAGE);
 
     await screen.findByText('Preço de referência ausente');
     const headers = screen.getAllByRole('columnheader').map((th) => th.textContent);
     expect(headers.slice(0, 3)).toEqual(['Data', 'Ativo', 'Pendência']);
-    const row = issueRow('DI1F29');
+    const row = rowContaining('DI1F29');
     // The needed price date, then the earliest affected date (OQ-37): both 16/10 here.
     expect(row.getAllByText('16/10/2026')).toHaveLength(2);
     expect(row.getByText('Preço de referência ausente')).toBeInTheDocument();
@@ -108,7 +102,7 @@ describe('Pendências (§11.1, §10.3)', () => {
         required_price_date: null,
       }),
     ]);
-    renderApp(PAGE);
+    renderRoute(PAGE);
 
     const row = await screen.findByText('Contrato vencido com posição aberta');
     const cells = within(row.closest('tr') as HTMLElement);
@@ -127,13 +121,13 @@ describe('Pendências (§11.1, §10.3)', () => {
 
   it('§10.3 OQ-37 shows the date whose price is needed and, apart, the earliest affected date', async () => {
     serveIssues([issue({ affected_date: '2026-10-16', required_price_date: '2026-10-15' })]);
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
 
     await screen.findByText('DI1F29');
     const headers = screen.getAllByRole('columnheader').map((th) => th.textContent);
     expect(headers.slice(0, 4)).toEqual(['Data', 'Ativo', 'Pendência', 'Afetado desde']);
     expect(
-      issueRow('DI1F29')
+      rowContaining('DI1F29')
         .getAllByRole('cell')
         .map((cell) => cell.textContent),
     ).toEqual([
@@ -143,7 +137,7 @@ describe('Pendências (§11.1, §10.3)', () => {
       '16/10/2026',
       'Definir preço',
     ]);
-    const row = issueRow('DI1F29');
+    const row = rowContaining('DI1F29');
     expect(row.getByRole('link', { name: 'Definir preço' })).toHaveAttribute(
       'href',
       `/ativos/contratos/${IDS.di1f29}?registrar=2026-10-15`,
@@ -164,7 +158,7 @@ describe('Pendências (§11.1, §10.3)', () => {
         required_price_date: '2026-10-15',
       }),
     ]);
-    const { user } = renderApp(PAGE);
+    const { user } = renderRoute(PAGE);
     await screen.findByText('DI1F28');
     expect(screen.getByText('2 pendências encontradas')).toBeInTheDocument();
 
@@ -185,7 +179,7 @@ describe('Pendências (§11.1, §10.3)', () => {
 
   it('§11.1 says when there is nothing to show', async () => {
     serveIssues([]);
-    renderApp(PAGE);
+    renderRoute(PAGE);
 
     expect(await screen.findByText('Nenhuma pendência encontrada.')).toBeInTheDocument();
     expect(screen.getByText('0 pendências encontradas')).toBeInTheDocument();
@@ -205,7 +199,7 @@ describe('Pendências (§11.1, §10.3)', () => {
         ),
       ),
     );
-    renderApp(PAGE);
+    renderRoute(PAGE);
 
     expect(await screen.findByText('Serviço indisponível.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();

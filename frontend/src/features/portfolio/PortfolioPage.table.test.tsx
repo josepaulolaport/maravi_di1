@@ -1,15 +1,10 @@
 import { screen, waitFor } from '@testing-library/react';
 import { notifications } from '@mantine/notifications';
 
-import { renderApp } from '@/test/render';
+import { rowContaining } from '@/test/helpers';
+import { renderRoute } from '@/test/render';
 
-import {
-  expectNoCard,
-  rowOf,
-  POSITIONS_15,
-  override15,
-  openCarteira,
-} from './portfolioPage.support';
+import { expectNoCard, POSITIONS_15, override15, openCarteira } from '@/test/screens/portfolio';
 
 // The notifications store is module-global: a notice of one test must not stay for the next.
 afterEach(() => {
@@ -33,7 +28,7 @@ describe('Carteira (§11.4)', () => {
   });
 
   it('§11.4 reads the positions search and order from the URL (a linked view)', async () => {
-    renderApp('/carteira?date=2026-10-15&busca=f2&ordem=-financial_total');
+    renderRoute('/carteira?date=2026-10-15&busca=f2&ordem=-financial_total');
     await screen.findByRole('group', { name: 'Saldo em caixa' });
 
     expect(screen.getByRole('textbox', { name: 'Buscar ativo' })).toHaveValue('f2');
@@ -85,16 +80,18 @@ describe('Carteira (§11.4)', () => {
     await openCarteira('2026-10-15');
 
     expectNoCard();
-    expect(rowOf('DI1F28').getByText('P&L indisponível')).toBeInTheDocument();
-    expect(rowOf('DI1F29').queryByText('P&L indisponível')).not.toBeInTheDocument();
+    expect(rowContaining('DI1F28').getByText('P&L indisponível')).toBeInTheDocument();
+    expect(rowContaining('DI1F29').queryByText('P&L indisponível')).not.toBeInTheDocument();
   });
 
   it('§11.4 OQ-30/OQ-31 marks a row whose price was set after the processing (A10)', async () => {
     const { user } = await openCarteira('2026-10-16');
 
-    const badge = rowOf('DI1F28').getByText('Preço alterado', { exact: false });
+    const badge = rowContaining('DI1F28').getByText('Preço alterado', { exact: false });
     expect(badge).toHaveTextContent('Preço alterado após o processamento — reprocesse');
-    expect(rowOf('DI1F29').queryByText('Preço alterado', { exact: false })).not.toBeInTheDocument();
+    expect(
+      rowContaining('DI1F29').queryByText('Preço alterado', { exact: false }),
+    ).not.toBeInTheDocument();
     await user.hover(badge);
     expect(
       await screen.findByRole('tooltip', {

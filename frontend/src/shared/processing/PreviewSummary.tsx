@@ -2,7 +2,7 @@ import { Alert, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 
 import type { PredecessorState, ProcessingChain, ProcessingPreview } from '@/api/contract';
-import { formatDate, formatDays, formatPeriod } from '@/shared/format';
+import { formatDate, formatDayMonth, formatPeriod, formatQuantity } from '@/shared/format';
 import { DATE_STATUS } from '@/shared/ui/dateStatus';
 import { Field } from '@/shared/ui/Field';
 
@@ -18,7 +18,7 @@ function stateText(state: PredecessorState, predecessorDate: string): string {
   if (state === 'ZERO_STATE') return 'Estado inicial (sem lançamentos anteriores)';
   const label = DATE_STATUS[state].label;
   return state === 'PROCESSED' || state === 'PROCESSED_WITH_ISSUES'
-    ? `${label} (${formatDate(predecessorDate).slice(0, 5)})`
+    ? `${label} (${formatDayMonth(predecessorDate)})`
     : label;
 }
 
@@ -56,7 +56,7 @@ export function PreviewSummary({ preview }: { preview: ProcessingPreview }) {
   return (
     <Stack gap="sm">
       <Field label="Período solicitado">{formatPeriod(preview.start_date, preview.end_date)}</Field>
-      <Field label="Dias a processar">{formatDays(preview.total_days)}</Field>
+      <Field label="Dias a processar">{formatQuantity(preview.total_days)}</Field>
       <Field label="Escopo">{SCOPE_LABELS[preview.scope]}</Field>
       {chains.map((chain) => (
         <Field key={chain} label={CHAIN_FIELD[chain]}>

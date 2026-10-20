@@ -1,7 +1,7 @@
 import { lazy } from 'react';
 import { Navigate, type RouteObject } from 'react-router';
 
-import { JobWatcher } from '@/features/processing/JobWatcher';
+import { JobWatcher } from '@/features/processing/components/JobWatcher';
 import { AppLayout } from '@/shared/layout/AppLayout';
 import { NotFoundPage } from '@/shared/layout/NotFoundPage';
 import { RouteErrorPage } from '@/shared/layout/RouteErrorPage';

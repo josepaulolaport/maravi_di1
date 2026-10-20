@@ -1,7 +1,8 @@
-import { Modal, SegmentedControl, Stack } from '@mantine/core';
+import { SegmentedControl, Stack } from '@mantine/core';
 import { useState } from 'react';
 
 import type { IsoDate } from '@/api/contract';
+import { ActionModal } from '@/shared/ui/ActionModal';
 
 import { CashMovementForm, type CashSide } from './CashMovementForm';
 import { TradeForm, type TradeSide } from './TradeForm';
@@ -22,20 +23,9 @@ interface NewEntryModalProps {
  */
 export function NewEntryModal({ opened, onClose, today, saving }: NewEntryModalProps) {
   return (
-    <Modal
-      opened={opened}
-      onClose={onClose}
-      title="Novo lançamento"
-      size="lg"
-      centered
-      closeOnEscape={!saving}
-      closeOnClickOutside={!saving}
-      withCloseButton={!saving}
-      closeButtonProps={{ 'aria-label': 'Fechar' }}
-    >
-      {/* Mounted only while open, so every opening starts from a blank form. */}
-      {opened && <NewEntry today={today} onDone={onClose} saving={saving} />}
-    </Modal>
+    <ActionModal opened={opened} onClose={onClose} title="Novo lançamento" pending={saving}>
+      <NewEntry today={today} onDone={onClose} saving={saving} />
+    </ActionModal>
   );
 }
 
