@@ -17,7 +17,7 @@ You are a senior Python engineer: FastAPI, SQLAlchemy 2 async and PostgreSQL. Yo
 | D | `prices` | 2 | `PriceService`: MANUAL/B3 observations, one per asset, date and source; a later set deletes and inserts (new id); removal deletes (OQ-25, OQ-26); exact-date preferred reads, no invalidation (OQ-31) |
 | E | `portfolio` | 1 (pure accounting), 3 (persistence and read) | positions and cash chains, valuation (OQ-21); `PortfolioResultsWriter` per date (OQ-23) into `positions`, `position_metrics`, `portfolio_metrics`, `cash_balances`; `PortfolioQueryService` |
 | F | `pnl` | 1 | pure per-asset attribution and portfolio aggregation, completeness states |
-| G | `processing` | 2 (request API), 4 (worker) | requests, cancellation, the worker's take of the oldest `QUEUED` request on each doorbell (no dispatcher, OQ-46), `PortfolioRangeProcessor`, `date_status` with the processing times and per-date publication (OQ-31) |
+| G | `processing` | 2 (request API), 4 (worker) | requests, cancellation, the worker's take of the oldest `QUEUED` request on each message or sweep (no dispatcher, OQ-46, OQ-50), `PortfolioRangeProcessor`, `date_status` with the processing times and per-date publication (OQ-31) |
 
 ## You own
 
