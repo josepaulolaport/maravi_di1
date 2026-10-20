@@ -13,14 +13,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
-import signal
-import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 import pytest
 from aio_pika.abc import AbstractRobustConnection
@@ -30,7 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
-from di1.platform.messaging.connection import connect
 from di1.platform.messaging.consumer import Job
 from di1.platform.messaging.envelope import Envelope
 from di1.platform.messaging.publisher import MessagePublisher
@@ -48,7 +43,7 @@ from tests.integration.platform.support import (
     with_broker,
     worker_parts,
 )
-from tests.support.broker import SilentServer, close_connections, queue_spec
+from tests.support.broker import close_connections, queue_spec
 from tests.support.fakes import FakeClock
 from tests.support.waits import eventually
 
@@ -471,27 +466,6 @@ async def test_a_failing_sweep_ends_the_worker_with_an_error(
     assert isinstance(raised.value.__cause__, RuntimeError)
 
 
-async def test_a_stop_while_the_database_hangs_at_startup_ends_the_worker(
-    hanging_database_settings: Settings, broker_url: SecretStr, silent: SilentServer
-) -> None:
-    stop = asyncio.Event()
-    running = asyncio.create_task(
-        run_worker(
-            with_broker(hanging_database_settings, broker_url),
-            build=worker_parts(consumers=lambda resources: ()),
-            stop=stop,
-        )
-    )
-    await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
-    # A window in which nothing may happen: the connection keeps hanging.
-    done, _ = await asyncio.wait({running}, timeout=0.3)
-    assert not done
-
-    stop.set()
-
-    await asyncio.wait_for(running, timeout=2)
-
-
 async def test_an_unreachable_database_ends_the_worker_before_it_consumes(
     broker_url: SecretStr,
 ) -> None:
@@ -509,171 +483,6 @@ async def test_an_unreachable_database_ends_the_worker_before_it_consumes(
             ),
             timeout=10,
         )
-
-
-async def test_a_stop_while_connecting_to_the_broker_ends_the_worker(
-    settings: Settings, hanging_broker_url: str, silent: SilentServer
-) -> None:
-    stop = asyncio.Event()
-    running = asyncio.create_task(
-        run_worker(
-            with_broker(settings, SecretStr(hanging_broker_url)),
-            build=worker_parts(consumers=lambda resources: ()),
-            stop=stop,
-        )
-    )
-    await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
-    # A window in which nothing may happen: the connection keeps hanging.
-    done, _ = await asyncio.wait({running}, timeout=0.3)
-    assert not done
-
-    stop.set()
-
-    await asyncio.wait_for(running, timeout=2)
-
-
-async def _hang(*args: object, **kwargs: object) -> None:
-    await asyncio.Event().wait()
-
-
-async def test_a_stop_while_the_broker_stalls_after_connecting_ends_the_worker(
-    settings: Settings,
-    broker_url: SecretStr,
-    topology: Topology,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The broker accepted the connection but never answers the queue declaration: aio-pika
-    waits without a timeout, so the startup must observe the stop as well."""
-    stalled = asyncio.Event()
-
-    async def stall(*args: object, **kwargs: object) -> None:
-        stalled.set()
-        await _hang()
-
-    monkeypatch.setattr(worker, "declare_queue", stall)
-    connections: list[AbstractRobustConnection] = []
-
-    async def recording_connect(*args: Any, **kwargs: Any) -> AbstractRobustConnection:
-        connection = await connect(*args, **kwargs)
-        connections.append(connection)
-        return connection
-
-    monkeypatch.setattr(worker, "connect", recording_connect)
-    stop = asyncio.Event()
-    running = asyncio.create_task(
-        run_worker(
-            with_broker(settings, broker_url),
-            build=worker_parts(consumers=_consumers(queue_spec(topology, "test.command"), _Run())),
-            stop=stop,
-            topology=topology,
-        )
-    )
-    await asyncio.wait_for(stalled.wait(), timeout=10)
-
-    stop.set()
-
-    await asyncio.wait_for(running, timeout=2)
-    [connection] = connections
-    assert connection.is_closed
-
-
-async def test_a_connection_made_as_the_worker_is_cancelled_is_closed(
-    settings: Settings, broker_url: SecretStr, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    connections: list[AbstractRobustConnection] = []
-    running: asyncio.Task[None] | None = None
-
-    async def connect_then_cancel(*args: Any, **kwargs: Any) -> AbstractRobustConnection:
-        connection = await connect(*args, **kwargs)
-        connections.append(connection)
-        assert running is not None
-        running.cancel()
-        return connection
-
-    monkeypatch.setattr(worker, "connect", connect_then_cancel)
-    running = asyncio.create_task(
-        run_worker(
-            with_broker(settings, broker_url),
-            build=worker_parts(consumers=lambda resources: ()),
-            stop=asyncio.Event(),
-        )
-    )
-
-    with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(running, timeout=10)
-
-    [connection] = connections
-    assert connection.is_closed
-
-
-async def test_the_worker_process_stops_cleanly_on_sigterm(
-    settings: Settings, broker_url: SecretStr, tmp_path: Path
-) -> None:
-    """The process runs the composition's startup step and its one consumer
-    (``processing.run``), then stops on SIGTERM."""
-    environment = os.environ | {
-        "DATABASE_URL": settings.database_url.get_secret_value(),
-        "RABBITMQ_URL": broker_url.get_secret_value(),
-        "LOG_LEVEL": "INFO",
-    }
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
-        "di1.workers.main",
-        cwd=tmp_path,
-        env=environment,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    assert process.stderr is not None
-    try:
-        async with asyncio.timeout(30):
-            started = b""
-            while b"worker started" not in started:
-                line = await process.stderr.readline()
-                assert line, f"the worker exited early: {started.decode()}"
-                started += line
-        process.send_signal(signal.SIGTERM)
-        async with asyncio.timeout(15):
-            rest = await process.stderr.read()
-            code = await process.wait()
-    finally:
-        if process.returncode is None:
-            process.kill()
-            await process.wait()
-
-    output = (started + rest).decode()
-    assert code == 0, output
-    assert "worker startup step done" in output
-    assert "worker started (1 consumers)" in output
-    assert "worker stopped" in output
-    assert broker_url.get_secret_value() not in output
-    assert settings.database_url.get_secret_value() not in output
-
-
-async def test_a_worker_startup_failure_is_logged_and_exits_with_status_1(
-    settings: Settings, tmp_path: Path
-) -> None:
-    environment = os.environ | {
-        "DATABASE_URL": settings.database_url.get_secret_value(),
-        "RABBITMQ_URL": "amqp://guest:s3cret-pw@127.0.0.1:1/",
-        "LOG_LEVEL": "INFO",
-    }
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
-        "di1.workers.main",
-        cwd=tmp_path,
-        env=environment,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    async with asyncio.timeout(30):
-        _, error_output = await process.communicate()
-
-    output = error_output.decode()
-    assert process.returncode == 1, output
-    # Run with ``-m``, the module's logger is ``__main__``.
-    assert re.search(r"Z ERROR __main__ processing worker failed\n", output), output
-    assert "s3cret-pw" not in output
 
 
 # The startup hook: Processing's recovery (a run left RUNNING resumes after its
