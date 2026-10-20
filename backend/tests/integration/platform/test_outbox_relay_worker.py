@@ -24,7 +24,7 @@ from aio_pika.exceptions import ChannelClosed, ChannelInvalidStateError
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from di1.platform.config import BrokerSettings, Settings
+from di1.platform.config import Settings
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork
 from di1.platform.messaging.connection import connect
 from di1.platform.messaging.envelope import Envelope
@@ -35,14 +35,14 @@ from di1.platform.observability.heartbeat import Heartbeat
 from di1.workers import outbox_relay
 from di1.workers.outbox_relay import run_outbox_relay
 from tests.integration.platform.conftest import queue_spec
-from tests.integration.platform.support import eventually
+from tests.integration.platform.support import eventually, with_broker
 
 
 async def test_the_relay_declares_the_queues_and_publishes_until_stopped(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
     broker: AbstractRobustConnection,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
 ) -> None:
     """No worker has declared the queue yet: the relay does, so the command is routed."""
@@ -53,7 +53,9 @@ async def test_the_relay_declares_the_queues_and_publishes_until_stopped(
     stop = asyncio.Event()
 
     running = asyncio.create_task(
-        run_outbox_relay(settings, broker_settings, queues=[spec], stop=stop, topology=topology)
+        run_outbox_relay(
+            with_broker(settings, broker_url), queues=[spec], stop=stop, topology=topology
+        )
     )
     message = await _first_message(broker, spec.name, running)
     stop.set()
@@ -64,7 +66,7 @@ async def test_the_relay_declares_the_queues_and_publishes_until_stopped(
 
 async def test_the_relay_beats_its_heartbeat_once_it_relays(
     settings: Settings,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     tmp_path: Path,
 ) -> None:
@@ -76,8 +78,7 @@ async def test_the_relay_beats_its_heartbeat_once_it_relays(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_outbox_relay(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             queues=[],
             stop=stop,
             topology=topology,
@@ -144,8 +145,7 @@ async def test_a_stop_while_connecting_to_the_broker_ends_the_relay(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_outbox_relay(
-            settings,
-            BrokerSettings(rabbitmq_url=SecretStr(hanging_broker_url)),
+            with_broker(settings, SecretStr(hanging_broker_url)),
             queues=(),
             stop=stop,
         )
@@ -159,14 +159,14 @@ async def test_a_stop_while_connecting_to_the_broker_ends_the_relay(
 
 
 async def test_the_relay_process_stops_cleanly_on_sigterm(
-    settings: Settings, broker_settings: BrokerSettings, tmp_path: Path
+    settings: Settings, broker_url: SecretStr, tmp_path: Path
 ) -> None:
     """The process runs its real topology (``di1.commands``): the one exception to test-owned
     broker names. It declares the composition's one queue, ``processing.run``; the declarations
     are idempotent, so it leaves nothing that another test could conflict with."""
     environment = os.environ | {
         "DATABASE_URL": settings.database_url.get_secret_value(),
-        "RABBITMQ_URL": broker_settings.rabbitmq_url.get_secret_value(),
+        "RABBITMQ_URL": broker_url.get_secret_value(),
         "LOG_LEVEL": "INFO",
     }
     process = await asyncio.create_subprocess_exec(
@@ -198,7 +198,7 @@ async def test_the_relay_process_stops_cleanly_on_sigterm(
     assert code == 0, output
     assert "outbox relay started (1 queues declared)" in output
     assert "outbox relay stopped" in output
-    assert broker_settings.rabbitmq_url.get_secret_value() not in output
+    assert broker_url.get_secret_value() not in output
     assert settings.database_url.get_secret_value() not in output
 
 
@@ -235,7 +235,7 @@ async def _hang(*args: object, **kwargs: object) -> None:
 @pytest.mark.parametrize("step", ["declare_queue", "MessagePublisher.create"])
 async def test_a_stop_while_the_broker_stalls_after_connecting_ends_the_relay(
     settings: Settings,
-    broker_settings: BrokerSettings,
+    broker_url: SecretStr,
     topology: Topology,
     monkeypatch: pytest.MonkeyPatch,
     step: str,
@@ -263,8 +263,7 @@ async def test_a_stop_while_the_broker_stalls_after_connecting_ends_the_relay(
     stop = asyncio.Event()
     running = asyncio.create_task(
         run_outbox_relay(
-            settings,
-            broker_settings,
+            with_broker(settings, broker_url),
             queues=[queue_spec(topology, "test.command")],
             stop=stop,
             topology=topology,
@@ -280,7 +279,7 @@ async def test_a_stop_while_the_broker_stalls_after_connecting_ends_the_relay(
 
 
 async def test_a_connection_made_as_the_relay_is_cancelled_is_closed(
-    settings: Settings, broker_settings: BrokerSettings, monkeypatch: pytest.MonkeyPatch
+    settings: Settings, broker_url: SecretStr, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The cancellation lands in the same loop step as the connection: it must not leak a
     connection, and its reconnect task, that nobody closes."""
@@ -296,7 +295,7 @@ async def test_a_connection_made_as_the_relay_is_cancelled_is_closed(
 
     monkeypatch.setattr(outbox_relay, "connect", connect_then_cancel)
     running = asyncio.create_task(
-        run_outbox_relay(settings, broker_settings, queues=(), stop=asyncio.Event())
+        run_outbox_relay(with_broker(settings, broker_url), queues=(), stop=asyncio.Event())
     )
 
     with pytest.raises(asyncio.CancelledError):

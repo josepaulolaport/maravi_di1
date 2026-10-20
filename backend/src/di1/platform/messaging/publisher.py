@@ -14,7 +14,6 @@ import aio_pika
 from aio_pika.abc import AbstractExchange, AbstractRobustChannel, AbstractRobustConnection
 from aio_pika.exceptions import AMQPError, ChannelInvalidStateError, DeliveryError
 
-from di1.platform.config import BrokerSettings
 from di1.platform.messaging.envelope import CONTENT_TYPE, Envelope
 from di1.platform.messaging.topology import Topology, declare_exchange
 
@@ -41,11 +40,13 @@ class MessagePublisher:
         connection: AbstractRobustConnection,
         topology: Topology,
         *,
-        settings: BrokerSettings,
+        confirm_timeout_seconds: float,
     ) -> MessagePublisher:
+        """``confirm_timeout_seconds``: how long a publish waits for its confirm
+        (``RABBITMQ_PUBLISH_TIMEOUT_SECONDS``)."""
         channel = await connection.channel(publisher_confirms=True, on_return_raises=True)
         exchange = await declare_exchange(channel, topology)
-        return cls(channel, exchange, timeout=settings.rabbitmq_publish_timeout_seconds)
+        return cls(channel, exchange, timeout=confirm_timeout_seconds)
 
     async def publish(self, envelope: Envelope) -> None:
         message = aio_pika.Message(

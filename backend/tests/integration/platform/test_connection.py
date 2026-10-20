@@ -16,12 +16,11 @@ import pytest
 from aio_pika.exceptions import AMQPConnectionError
 from pydantic import SecretStr
 
-from di1.platform.config import BrokerSettings
 from di1.platform.messaging.connection import connect
 
 
-def _broker(url: str) -> BrokerSettings:
-    return BrokerSettings(rabbitmq_url=SecretStr(url))
+def _broker(url: str) -> SecretStr:
+    return SecretStr(url)
 
 
 def _connection_tasks() -> list[str]:

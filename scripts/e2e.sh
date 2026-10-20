@@ -8,24 +8,26 @@
 # - project: di1-e2e-<hash of the checkout's path> by default; DI1_E2E_PROJECT overrides it.
 # - images: the built images are tagged with the project instead of :local, so one run never
 #   starts the code another checkout built; cleanup removes those tags.
-# - ports: free host ports picked at start (printed); DI1_E2E_API_PORT, DI1_E2E_WEB_PORT and
-#   DI1_E2E_RABBITMQ_MANAGEMENT_PORT override them.
+# - ports: free host ports picked at start (printed), whatever the root .env sets;
+#   DI1_E2E_API_PORT, DI1_E2E_WEB_PORT, DI1_E2E_DB_PORT and DI1_E2E_RABBITMQ_MANAGEMENT_PORT
+#   override them.
 # KEEP_E2E_STACK=1 leaves the stack running for inspection.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-# Three distinct free ports on 127.0.0.1 (where compose.yaml publishes). They are free when picked,
+# Four distinct free ports on 127.0.0.1 (where compose.yaml publishes). They are free when picked,
 # not reserved: something may take one before `up` binds it, and `up` then fails loudly ("port is
 # already allocated"); run again, or set the DI1_E2E_*_PORT variables.
-read -r free_api free_web free_rabbitmq < <(python3 -c '
+read -r free_api free_web free_db free_rabbitmq < <(python3 -c '
 import socket
-socks = [socket.socket() for _ in range(3)]
+socks = [socket.socket() for _ in range(4)]
 for s in socks:
     s.bind(("127.0.0.1", 0))
 print(*(s.getsockname()[1] for s in socks))
 ')
 export DI1_API_PORT="${DI1_E2E_API_PORT:-$free_api}"
 export DI1_WEB_PORT="${DI1_E2E_WEB_PORT:-$free_web}"
+export DI1_DB_PORT="${DI1_E2E_DB_PORT:-$free_db}"
 export DI1_RABBITMQ_MANAGEMENT_PORT="${DI1_E2E_RABBITMQ_MANAGEMENT_PORT:-$free_rabbitmq}"
 # The challenge checks need an empty ledger: the demo service skips its data.
 export DI1_DEMO=0
@@ -36,7 +38,7 @@ print(hashlib.sha256(os.getcwd().encode()).hexdigest()[:8])
 ')}"
 compose=(docker compose -p "$project")
 echo "e2e: project ${project}; API on :${DI1_API_PORT}, web on :${DI1_WEB_PORT}," \
-  "RabbitMQ management on :${DI1_RABBITMQ_MANAGEMENT_PORT}"
+  "PostgreSQL on :${DI1_DB_PORT}, RabbitMQ management on :${DI1_RABBITMQ_MANAGEMENT_PORT}"
 remove_hint="docker compose -p ${project} down -v; docker image rm di1-backend:${project} di1-web:${project}"
 
 # A stack left by KEEP_E2E_STACK=1, an interrupted run, or a `down` without -v (its volumes) would

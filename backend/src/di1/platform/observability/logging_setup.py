@@ -16,7 +16,7 @@ import sys
 import time
 from typing import TextIO
 
-from di1.platform.config import LoggingSettings
+from di1.platform.config import LogLevel
 
 _HANDLER_NAME = "di1"
 """Marks the handler this module adds, so a second call replaces it instead of adding one."""
@@ -25,8 +25,8 @@ _FORMAT = "%(asctime)s.%(msecs)03dZ %(levelname)s %(name)s %(message)s"
 _DATE_FORMAT = "%Y-%m-%dT%H:%M:%S"
 
 
-def configure_logging(settings: LoggingSettings, *, stream: TextIO | None = None) -> None:
-    """Send every record at ``settings.log_level`` or above to ``stream`` (standard error).
+def configure_logging(level: LogLevel, *, stream: TextIO | None = None) -> None:
+    """Send every record at ``level`` (``LOG_LEVEL``) or above to ``stream`` (standard error).
 
     Handlers added by others (a test runner, a server) are left in place; calling it again
     replaces only its own handler and the level.
@@ -42,4 +42,4 @@ def configure_logging(settings: LoggingSettings, *, stream: TextIO | None = None
         root.removeHandler(existing)
         existing.close()
     root.addHandler(handler)
-    root.setLevel(settings.log_level)
+    root.setLevel(level)
