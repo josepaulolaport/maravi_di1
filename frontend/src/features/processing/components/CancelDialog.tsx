@@ -30,9 +30,7 @@ export function CancelDialog({ job, onClose }: CancelDialogProps) {
     <ConfirmModal
       opened={job !== null}
       onClose={close}
-      onConfirm={() => {
-        if (job) cancel.mutate(job.id, { onSuccess: close });
-      }}
+      onConfirm={() => (job ? cancel.mutateAsync(job.id).then(close) : Promise.resolve())}
       title="Cancelar processamento?"
       confirmLabel="Confirmar cancelamento"
       loading={cancel.isPending}

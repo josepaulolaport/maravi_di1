@@ -83,7 +83,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
-    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
     expect(await modal.findByText('14/10/2026 a 16/10/2026')).toBeInTheDocument();
     expect(modal.getByText('3')).toBeInTheDocument();
     expect(field(modal, 'Escopo').getByText('Tudo')).toBeInTheDocument();
@@ -102,7 +102,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
-    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
     await modal.findByText('15/10/2026 a 16/10/2026');
     expect(
       field(modal, 'Estado anterior do caixa').getByText('Processado (14/10)'),
@@ -122,7 +122,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
-    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
     // The fields appear once the preview has loaded.
     await modal.findByText('17/10/2026 a 18/10/2026');
     expect(
@@ -142,7 +142,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
-    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
     // Neither chain has 17/10: one warning each.
     const warnings = await modal.findAllByRole('alert');
     expect(warnings.map((w) => w.textContent)).toEqual([
@@ -164,7 +164,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
-    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
     const warnings = await modal.findAllByRole('alert');
     expect(warnings.map((w) => w.textContent)).toEqual([
       'O fechamento das posições de 17/10/2026 não foi processado. O fechamento das posições falhará no primeiro dia (dia anterior não processado), sem publicar nenhum dia; o fechamento do caixa seguirá até o fim do período. Processe antes um intervalo que inclua esse dia.',
@@ -186,7 +186,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
       await user.click(await screen.findByRole('radio', { name: scope }));
       await user.click(screen.getByRole('button', { name: 'Solicitar processamento' }));
 
-      const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+      const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
       await modal.findByRole('group', { name: shown });
       expect(modal.getAllByRole('group', { name: /Estado anterior/ })).toHaveLength(1);
       expect(modal.queryAllByRole('alert')).toHaveLength(warnings);
@@ -211,7 +211,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     await user.click(screen.getByRole('radio', { name: 'Caixa' }));
     await user.click(screen.getByRole('button', { name: 'Solicitar processamento' }));
 
-    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
     expect(await modal.findByText('Processado (16/10)')).toBeInTheDocument();
     expect(field(modal, 'Escopo').getByText('Caixa')).toBeInTheDocument();
     expect(modal.queryByRole('group', { name: 'Estado anterior das posições' })).toBeNull();
@@ -236,7 +236,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     await findJobRow('01/10/2026 a 05/10/2026', 'Falhou');
 
     await user.click(screen.getByRole('button', { name: 'Solicitar processamento' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Confirmar processamento' });
+    const dialog = await screen.findByRole('dialog', { name: 'Solicitar processamento' });
     await within(dialog).findByText('17/10/2026 a 18/10/2026');
     await user.click(within(dialog).getByRole('button', { name: 'Confirmar processamento' }));
 
@@ -255,14 +255,14 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 
     await typeRange(user, '17/10/2026', '18/10/2026');
     await user.click(screen.getByRole('button', { name: 'Solicitar processamento' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Confirmar processamento' });
+    const dialog = await screen.findByRole('dialog', { name: 'Solicitar processamento' });
     await within(dialog).findByText('17/10/2026 a 18/10/2026');
     await user.click(within(dialog).getByRole('button', { name: 'Confirmar processamento' }));
 
     const row = await findJobRow('17/10/2026 a 18/10/2026', 'Na fila');
     expect(row.getByText('0 / 2 dias')).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Confirmar processamento' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: 'Solicitar processamento' })).toBeNull();
     });
     expect(screen.getByText('6 processamentos encontrados')).toBeInTheDocument();
   });
@@ -273,12 +273,12 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
     await findJobRow('01/10/2026 a 05/10/2026', 'Falhou');
 
     await user.click(screen.getByRole('button', { name: 'Solicitar processamento' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Confirmar processamento' });
+    const dialog = await screen.findByRole('dialog', { name: 'Solicitar processamento' });
     await within(dialog).findByText('3');
     await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Confirmar processamento' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: 'Solicitar processamento' })).toBeNull();
     });
     expect(screen.getByText('5 processamentos encontrados')).toBeInTheDocument();
     expect(bodies).toEqual([]);
@@ -288,7 +288,7 @@ describe('Processamentos: request (§11.1, OQ-20)', () => {
 describe('Processamentos: request safety (§10.2, OQ-15)', () => {
   async function openConfirmation(user: ReturnType<typeof renderApp>['user']) {
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Confirmar processamento' });
+    const dialog = await screen.findByRole('dialog', { name: 'Solicitar processamento' });
     await within(dialog).findByText('3');
     return within(dialog);
   }
@@ -316,11 +316,11 @@ describe('Processamentos: request safety (§10.2, OQ-15)', () => {
     let dialog = await openConfirmation(user);
     await user.click(dialog.getByRole('button', { name: 'Confirmar processamento' }));
     await user.keyboard('{Escape}');
-    expect(screen.getByRole('dialog', { name: 'Confirmar processamento' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Solicitar processamento' })).toBeInTheDocument();
     open();
     await findJobRow('14/10/2026 a 16/10/2026', 'Na fila');
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Confirmar processamento' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: 'Solicitar processamento' })).toBeNull();
     });
 
     dialog = await openConfirmation(user);
@@ -345,7 +345,7 @@ describe('Processamentos: request safety (§10.2, OQ-15)', () => {
     expect(await dialog.findByRole('alert')).toHaveTextContent(
       'A data não pode ser posterior a hoje.',
     );
-    expect(screen.getByRole('dialog', { name: 'Confirmar processamento' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Solicitar processamento' })).toBeInTheDocument();
     expect(screen.getByText('5 processamentos encontrados')).toBeInTheDocument();
   });
 });
@@ -361,7 +361,7 @@ describe('Processamentos: preview failure (OQ-15)', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Solicitar processamento' }));
 
-    const modal = within(await screen.findByRole('dialog', { name: 'Confirmar processamento' }));
+    const modal = within(await screen.findByRole('dialog', { name: 'Solicitar processamento' }));
     expect(await modal.findByText('A data não pode ser posterior a hoje.')).toBeInTheDocument();
     expect(modal.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument();
     expect(modal.getByRole('button', { name: 'Confirmar processamento' })).toBeDisabled();

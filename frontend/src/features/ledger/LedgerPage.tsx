@@ -208,6 +208,7 @@ export function LedgerPage() {
           setProcessing(null);
         }}
         today={today}
+        queuedMessage="Processamento colocado na fila. Acompanhe em Central de Controle."
       />
 
       <DeleteDialog

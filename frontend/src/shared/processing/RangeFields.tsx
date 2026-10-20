@@ -1,6 +1,6 @@
 import { Group } from '@mantine/core';
 import { IconCalendar } from '@tabler/icons-react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 
 import type { IsoDate } from '@/api/contract';
 
@@ -20,8 +20,8 @@ interface RangeFieldsProps {
   onEndChange: (date: IsoDate | null) => void;
   maxDate: IsoDate;
   /** API messages bound to `start_date` / `end_date` (OQ-15). */
-  startError?: string | undefined;
-  endError?: string | undefined;
+  startError?: ReactNode;
+  endError?: ReactNode;
 }
 
 /** "Data inicial" and "Data final", typed as DD/MM/AAAA or picked; never after today. */
@@ -58,7 +58,7 @@ export function RangeFields({
 
 interface DateFieldProps {
   label: string;
-  error?: string | undefined;
+  error?: ReactNode;
   value: IsoDate | null;
   onChange: (date: IsoDate | null) => void;
   maxDate: IsoDate;

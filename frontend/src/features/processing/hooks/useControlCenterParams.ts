@@ -60,3 +60,5 @@ export function useControlCenterParams() {
     today,
   };
 }
+
+export type ControlCenterParams = ReturnType<typeof useControlCenterParams>;

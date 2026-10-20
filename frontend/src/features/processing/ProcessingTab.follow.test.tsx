@@ -19,6 +19,8 @@ describe('Processamentos: polling (§11.1, §12)', () => {
     const jobs = serveJobs([...processingRequests]);
     renderApp(PAGE);
     await findJobRow('01/10/2026 a 05/10/2026', 'Falhou');
+    // Opening the page reads the history once more (refetch on mount); only later reads poll.
+    await act(() => vi.advanceTimersByTimeAsync(500));
     const before = jobs.polls;
 
     await act(() => vi.advanceTimersByTimeAsync(10_000));

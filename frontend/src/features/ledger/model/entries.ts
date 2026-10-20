@@ -1,4 +1,11 @@
 import type { Decimal, IsoDate, IsoTime, LedgerEntry as ApiLedgerEntry } from '@/api/contract';
+import {
+  formatDate,
+  formatPu,
+  formatSignedMoney,
+  formatSignedQuantity,
+  formatTime,
+} from '@/shared/format';
 
 // One table row of Lançamentos (§11.3), mapped from a GET /ledger/entries row. The backend
 // filters and orders the rows and signs every cash effect (P18); nothing is merged, sorted or
@@ -65,4 +72,17 @@ export function toRow(entry: ApiLedgerEntry): LedgerEntry {
     kind: 'cash',
     entryType: entry.cash_amount.startsWith('-') ? 'WITHDRAWAL' : 'DEPOSIT',
   };
+}
+
+/**
+ * Names a row for screen readers and the delete dialogs, with enough of its figures to tell
+ * same-day entries apart: "Venda DI1F28 -4 16/10/2026 15:00 PU 89.102,22",
+ * "Retirada 16/10/2026 17:30 -R$ 50.000,00".
+ */
+export function entryLabel(entry: LedgerEntry): string {
+  const type = ENTRY_TYPE_LABELS[entry.entryType];
+  const when = `${formatDate(entry.date)} ${formatTime(entry.time)}`;
+  if (entry.kind === 'cash') return `${type} ${when} ${formatSignedMoney(entry.signedAmount)}`;
+  const quantity = formatSignedQuantity(entry.signedQuantity);
+  return `${type} ${entry.assetCode} ${quantity} ${when} PU ${formatPu(entry.pu)}`;
 }

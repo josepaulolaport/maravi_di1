@@ -23,20 +23,12 @@ import {
 
 import table from '@/shared/ui/table.module.css';
 
-import { ENTRY_TYPE_LABELS, type LedgerEntry, type SortDirection } from '../model/entries';
-
-/**
- * Names a row for screen readers and the delete dialogs, with enough of its figures to tell
- * same-day entries apart: "Venda DI1F28 -4 16/10/2026 15:00 PU 89.102,22",
- * "Retirada 16/10/2026 17:30 -R$ 50.000,00".
- */
-export function entryLabel(entry: LedgerEntry): string {
-  const type = ENTRY_TYPE_LABELS[entry.entryType];
-  const when = `${formatDate(entry.date)} ${formatTime(entry.time)}`;
-  if (entry.kind === 'cash') return `${type} ${when} ${formatSignedMoney(entry.signedAmount)}`;
-  const quantity = formatSignedQuantity(entry.signedQuantity);
-  return `${type} ${entry.assetCode} ${quantity} ${when} PU ${formatPu(entry.pu)}`;
-}
+import {
+  ENTRY_TYPE_LABELS,
+  entryLabel,
+  type LedgerEntry,
+  type SortDirection,
+} from '../model/entries';
 
 /** The Financeiro column is the entry's cash effect (`cash_amount`), not a market value. */
 const CASH_EFFECT_HINT =

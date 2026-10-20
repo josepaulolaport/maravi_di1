@@ -36,22 +36,18 @@ function RemoveForm({ day, onClose }: { day: ReferencePriceDay; onClose: () => v
   const listed = chosen.filter((id) => day.sources.some((price) => price.id === id));
   const selected = listed.length > 0 ? listed : [day.preferred.id];
 
-  // At least one observation stays selected: ConfirmModal's double-click guard reopens only
-  // when an attempt finishes, so an empty "Remover" must never reach `onConfirm`.
-  const confirm = () => {
-    remove.mutate(selected, {
-      onSuccess: () => {
-        notifications.show({
-          color: 'teal',
-          message:
-            selected.length === 1
-              ? 'Preço de referência removido.'
-              : 'Preços de referência removidos.',
-        });
-        onClose();
-      },
+  // At least one observation stays selected, so "Remover" always has something to remove.
+  const confirm = () =>
+    remove.mutateAsync(selected).then(() => {
+      notifications.show({
+        color: 'teal',
+        message:
+          selected.length === 1
+            ? 'Preço de referência removido.'
+            : 'Preços de referência removidos.',
+      });
+      onClose();
     });
-  };
 
   return (
     <ConfirmModal

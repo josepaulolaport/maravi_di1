@@ -1,56 +1,31 @@
 import { Stack } from '@mantine/core';
 import { useState } from 'react';
 
-import type {
-  IsoDate,
-  ProcessingRangeRequest,
-  ProcessingRequest,
-  ProcessingScope,
-} from '@/api/contract';
+import type { ProcessingRequest } from '@/api/contract';
+import {
+  type ProcessingDraft,
+  ProcessingRequestModal,
+} from '@/shared/processing/ProcessingRequestModal';
 
-import type { useProcessingRequests } from '../hooks/useProcessing';
+import { useControlCenterParams } from '../hooks/useControlCenterParams';
+import { useProcessingRequests } from '../hooks/useProcessing';
+import type { RetryRequest } from '../model/jobStatus';
 import { CancelDialog } from './CancelDialog';
-import { ConfirmProcessingModal } from './ConfirmProcessingModal';
 import { HistoryTable } from './HistoryTable';
 import { JobDetailsModal } from './JobDetailsModal';
-import { isValidRange } from '@/shared/processing/RangeFields';
-import type { RetryRequest } from '../model/jobStatus';
 import { RequestCard } from './RequestCard';
 
 type Dialog = { kind: 'details' | 'cancel'; jobId: string } | null;
 
-interface ProcessingTabProps {
-  requests: ReturnType<typeof useProcessingRequests>;
-  start: IsoDate | null;
-  end: IsoDate | null;
-  onStartChange: (date: IsoDate | null) => void;
-  onEndChange: (date: IsoDate | null) => void;
-  scope: ProcessingScope;
-  onScopeChange: (scope: ProcessingScope) => void;
-  onRequestAgain: (start: IsoDate, end: IsoDate, scope: ProcessingScope) => void;
-  search: string;
-  onSearchChange: (text: string) => void;
-  today: IsoDate;
-}
-
 /**
  * Processamentos (§11.1, OQ-20): request an exact range, confirm it against the preview, and
- * follow, cancel or replace jobs in the history.
+ * follow, cancel or ask again for jobs in the history. The range, scope and search live in the
+ * URL; the history is polled by the app-wide JobWatcher.
  */
-export function ProcessingTab({
-  requests,
-  start,
-  end,
-  onStartChange,
-  onEndChange,
-  scope,
-  onScopeChange,
-  onRequestAgain,
-  search,
-  onSearchChange,
-  today,
-}: ProcessingTabProps) {
-  const [confirming, setConfirming] = useState<ProcessingRangeRequest | null>(null);
+export function ProcessingTab() {
+  const params = useControlCenterParams();
+  const requests = useProcessingRequests();
+  const [draft, setDraft] = useState<ProcessingDraft | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   // Dialogs show the job as the history polls it, so its status and progress stay current.
   const jobFor = (kind: NonNullable<Dialog>['kind']): ProcessingRequest | null =>
@@ -67,41 +42,27 @@ export function ProcessingTab({
     setDialog(null);
     // From where the run stopped, or the failed chain from its failed date, to the original end
     // (OQ-23 item 10, OQ-40 items 3 and 6).
-    onRequestAgain(retry.start, retry.end, retry.scope);
+    params.setRange(retry.start, retry.end, retry.scope);
   };
 
   return (
     <Stack gap="md">
-      <RequestCard
-        start={start}
-        end={end}
-        onStartChange={onStartChange}
-        onEndChange={onEndChange}
-        scope={scope}
-        onScopeChange={onScopeChange}
-        today={today}
-        onRequest={() => {
-          if (start && end && isValidRange(start, end)) {
-            setConfirming({ start_date: start, end_date: end, scope });
-          }
-        }}
-      />
+      <RequestCard params={params} onRequest={setDraft} />
       <HistoryTable
         requests={requests}
-        search={search}
-        onSearchChange={onSearchChange}
+        search={params.search}
+        onSearchChange={params.setSearch}
         onDetails={open('details')}
         onCancel={open('cancel')}
         onRequestAgain={requestAgain}
       />
-      <ConfirmProcessingModal
-        range={confirming}
+      <ProcessingRequestModal
+        draft={draft}
         onClose={() => {
-          setConfirming(null);
+          setDraft(null);
         }}
-        onQueued={() => {
-          setConfirming(null);
-        }}
+        today={params.today}
+        queuedMessage="Processamento colocado na fila."
       />
       <JobDetailsModal
         job={jobFor('details')}

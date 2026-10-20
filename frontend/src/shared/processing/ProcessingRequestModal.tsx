@@ -1,20 +1,24 @@
-import { Button, Group, Modal, Stack, Text } from '@mantine/core';
+import { Stack, Text } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { useRef, useState } from 'react';
+import type { UseMutationResult } from '@tanstack/react-query';
 
-import { Loading } from '@/shared/ui/Loading';
-import type { IsoDate, ProcessingScope } from '@/api/contract';
-import { ApiError } from '@/api/http';
-import { ActionError } from '@/shared/ui/ActionError';
+import type {
+  IsoDate,
+  ProcessingRangeRequest,
+  ProcessingRequest,
+  ProcessingScope,
+} from '@/api/contract';
+import { useApiForm } from '@/shared/form/useApiForm';
+import { ActionModal } from '@/shared/ui/ActionModal';
 import { ErrorState } from '@/shared/ui/ErrorState';
+import { FormActions } from '@/shared/ui/FormActions';
+import { Loading } from '@/shared/ui/Loading';
+import { MessageAlert } from '@/shared/ui/MessageAlert';
 
 import { useEnqueue, usePreview } from './hooks';
 import { PreviewSummary } from './PreviewSummary';
 import { isValidRange, RangeFields } from './RangeFields';
 import { ScopeField } from './ScopeField';
-
-/** The request's fields shown as inputs here: their API messages go on the inputs. */
-const SHOWN_FIELDS = ['start_date', 'end_date', 'scope'] as const;
 
 export interface ProcessingDraft {
   start: IsoDate;
@@ -22,133 +26,130 @@ export interface ProcessingDraft {
   scope: ProcessingScope;
 }
 
+interface DraftValues extends Record<string, unknown> {
+  start: IsoDate | null;
+  end: IsoDate | null;
+  scope: ProcessingScope;
+}
+
+// API field → form field, for the problem+json errors (OQ-15).
+const FIELD_MAP = { start_date: 'start', end_date: 'end', scope: 'scope' } as const;
+
 interface ProcessingRequestModalProps {
   /** The prefilled request; `null` keeps the modal closed. */
   draft: ProcessingDraft | null;
   onClose: () => void;
   today: IsoDate;
+  /** The notification once the job is queued. */
+  queuedMessage: string;
 }
 
 /**
- * "Solicitar processamento" in place (§10.1, OQ-21): the range and scope, prefilled and
- * editable, previewed as they change, then queued. The job is followed in Processamentos.
+ * "Solicitar processamento" (§10.1, OQ-11, OQ-21), the one way to queue a job, from Central de
+ * Controle and from Lançamentos: the range and scope, prefilled and editable, previewed as they
+ * change (exactly [A, B], its days and the state before it per chain), then queued. The modal
+ * stays open while the job is queued, so the outcome is always shown.
  */
-export function ProcessingRequestModal({ draft, onClose, today }: ProcessingRequestModalProps) {
+export function ProcessingRequestModal({
+  draft,
+  onClose,
+  today,
+  queuedMessage,
+}: ProcessingRequestModalProps) {
   const enqueue = useEnqueue();
-  // It cannot close while the request runs, so its outcome (or error) is always shown.
   const close = () => {
-    if (enqueue.isPending) return;
     enqueue.reset();
     onClose();
   };
   return (
-    <Modal
+    <ActionModal
       opened={draft !== null}
       onClose={close}
       title="Solicitar processamento"
-      centered
-      size="lg"
-      closeOnEscape={!enqueue.isPending}
-      closeOnClickOutside={!enqueue.isPending}
-      withCloseButton={!enqueue.isPending}
-      closeButtonProps={{ 'aria-label': 'Fechar' }}
+      pending={enqueue.isPending}
     >
       {draft && (
         <RequestForm
-          key={`${draft.start}:${draft.end}:${draft.scope}`}
           draft={draft}
           enqueue={enqueue}
           onClose={close}
           today={today}
+          queuedMessage={queuedMessage}
         />
       )}
-    </Modal>
+    </ActionModal>
   );
 }
 
 interface RequestFormProps {
   draft: ProcessingDraft;
-  enqueue: ReturnType<typeof useEnqueue>;
+  enqueue: UseMutationResult<ProcessingRequest, Error, ProcessingRangeRequest>;
   onClose: () => void;
   today: IsoDate;
+  queuedMessage: string;
 }
 
-function RequestForm({ draft, enqueue, onClose, today }: RequestFormProps) {
-  const [start, setStart] = useState<IsoDate | null>(draft.start);
-  const [end, setEnd] = useState<IsoDate | null>(draft.end);
-  const [scope, setScope] = useState<ProcessingScope>(draft.scope);
-  const valid = isValidRange(start, end);
-  const preview = usePreview(
-    valid && start && end ? { start_date: start, end_date: end, scope } : null,
+function RequestForm({ draft, enqueue, onClose, today, queuedMessage }: RequestFormProps) {
+  const { form, pageErrors, onSubmit } = useApiForm<DraftValues>(
+    { initialValues: { ...draft } },
+    FIELD_MAP,
   );
-  // One job per click, before `isPending` is rendered (two would queue two jobs, §10.2).
-  const sending = useRef(false);
-  const fieldErrors: Partial<Record<string, string>> =
-    enqueue.error instanceof ApiError ? enqueue.error.fieldErrors() : {};
+  const { start, end, scope } = form.values;
+  const range = start && end && isValidRange(start, end) ? { start, end } : null;
+  const preview = usePreview(range && { start_date: range.start, end_date: range.end, scope });
 
-  const confirm = () => {
-    if (!start || !end || !valid || sending.current) return;
-    sending.current = true;
-    enqueue.mutate(
-      { start_date: start, end_date: end, scope },
-      {
-        onSuccess: () => {
-          sending.current = false;
-          notifications.show({
-            color: 'teal',
-            message: 'Processamento colocado na fila. Acompanhe em Central de Controle.',
-          });
-          enqueue.reset();
+  const submit = onSubmit(() =>
+    range
+      ? enqueue.mutateAsync({ start_date: range.start, end_date: range.end, scope }).then(() => {
+          notifications.show({ color: 'teal', message: queuedMessage });
           onClose();
-        },
-        onError: () => {
-          sending.current = false;
-        },
-      },
-    );
-  };
+        })
+      : undefined,
+  );
 
   return (
-    <Stack gap="md">
-      <RangeFields
-        start={start}
-        end={end}
-        onStartChange={setStart}
-        onEndChange={setEnd}
-        maxDate={today}
-        startError={fieldErrors.start_date}
-        endError={fieldErrors.end_date}
-      />
-      <ScopeField
-        value={scope}
-        onChange={setScope}
-        disabled={enqueue.isPending}
-        error={fieldErrors.scope}
-      />
-      {!valid ? (
-        <Text size="sm" c="dimmed">
-          Informe um intervalo válido para ver o que será processado.
-        </Text>
-      ) : preview.isError ? (
-        <ErrorState error={preview.error} onRetry={() => void preview.refetch()} />
-      ) : preview.isPending || preview.isFetching ? (
-        <Loading label="Carregando pré-visualização" h={160} />
-      ) : (
-        <PreviewSummary preview={preview.data} />
-      )}
-      <ActionError error={enqueue.error} shownOnFields={SHOWN_FIELDS} />
-      <Group justify="flex-end" gap="sm">
-        <Button variant="default" onClick={onClose} disabled={enqueue.isPending}>
-          Cancelar
-        </Button>
-        <Button
-          onClick={confirm}
-          loading={enqueue.isPending}
-          disabled={!valid || !preview.isSuccess || preview.isFetching}
-        >
-          Confirmar processamento
-        </Button>
-      </Group>
-    </Stack>
+    <form onSubmit={submit} noValidate>
+      <Stack gap="md">
+        <RangeFields
+          start={start}
+          end={end}
+          onStartChange={(date) => {
+            form.setFieldValue('start', date);
+          }}
+          onEndChange={(date) => {
+            form.setFieldValue('end', date);
+          }}
+          maxDate={today}
+          startError={form.errors.start}
+          endError={form.errors.end}
+        />
+        <ScopeField
+          value={scope}
+          onChange={(next) => {
+            form.setFieldValue('scope', next);
+          }}
+          disabled={enqueue.isPending}
+          error={form.errors.scope}
+        />
+        {range === null ? (
+          <Text size="sm" c="dimmed">
+            Informe um intervalo válido para ver o que será processado.
+          </Text>
+        ) : preview.isError ? (
+          <ErrorState error={preview.error} onRetry={() => void preview.refetch()} />
+        ) : preview.isPending || preview.isFetching ? (
+          <Loading label="Carregando pré-visualização" h={160} />
+        ) : (
+          <PreviewSummary preview={preview.data} />
+        )}
+        <MessageAlert messages={pageErrors} />
+        <FormActions
+          submitLabel="Confirmar processamento"
+          onCancel={onClose}
+          pending={enqueue.isPending}
+          disabled={!preview.isSuccess || preview.isFetching}
+        />
+      </Stack>
+    </form>
   );
 }
