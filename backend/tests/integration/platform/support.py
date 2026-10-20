@@ -58,16 +58,17 @@ async def has_effects(engine: AsyncEngine, expected: list[uuid.UUID]) -> bool:
 
 @dataclass
 class RecordingHandler:
-    """Commits the effect of each message and starts nothing after it."""
+    """Commits the effect of each message and starts nothing after it. ``calls`` records a
+    message only once its effect has committed, so a test waiting on it sees the effect."""
 
     uow_factory: Callable[[], SqlAlchemyUnitOfWork]
     calls: list[uuid.UUID] = field(default_factory=list)
 
     async def __call__(self, envelope: Envelope) -> Job | None:
-        self.calls.append(envelope.message_id)
         async with self.uow_factory() as uow:
             await uow.session.execute(EFFECT, {"m": envelope.message_id})
             await uow.commit()
+        self.calls.append(envelope.message_id)
         return None
 
 
