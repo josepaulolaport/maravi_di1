@@ -1,5 +1,7 @@
-"""Processing's routes over PostgreSQL 16, through the factories the composition will use
-(``dependencies.py``, ``create_router``) and a request-scoped Unit of Work."""
+"""Processing's routes over PostgreSQL 16, through the factories the composition uses
+(``dependencies.py``, ``create_router``) and a request-scoped Unit of Work. Queueing, listing and
+cancelling over the full app are covered by ``tests/integration/acceptance/``; the preview is read
+only here."""
 
 from __future__ import annotations
 
@@ -18,8 +20,6 @@ from di1.modules.processing.presentation.http.router import create_router
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
 from tests.support.fakes import FakeAssetReader, stepping_clock
 from tests.support.http import app_client
-
-BODY = {"start_date": "2026-10-14", "end_date": "2026-10-16", "scope": "ALL"}
 
 
 class _NoEntries:
@@ -54,25 +54,6 @@ def client(session_factory: async_sessionmaker[AsyncSession]) -> Iterator[TestCl
 
     with app_client(create_router(get_service=service)) as client:
         yield client
-
-
-def test_gate_2_requests_can_be_queued_listed_and_cancelled(
-    client: TestClient,
-) -> None:
-    first = client.post("/processing/requests", json=BODY)
-    second = client.post("/processing/requests", json=BODY)
-    assert (first.status_code, second.status_code) == (201, 201)
-
-    listed = client.get("/processing/requests").json()
-    assert [r["id"] for r in listed["items"]] == [second.json()["id"], first.json()["id"]]
-    assert listed["next_cursor"] is None
-
-    cancelled = client.post(f"/processing/requests/{first.json()['id']}/cancel")
-    assert (cancelled.status_code, cancelled.json()["status"]) == (200, "CANCELLED")
-
-    again = client.post(f"/processing/requests/{first.json()['id']}/cancel")
-    assert again.status_code == 409
-    assert again.headers["content-type"] == "application/problem+json"
 
 
 def test_the_preview_and_the_issues_answer_from_the_database(client: TestClient) -> None:
