@@ -34,7 +34,7 @@
 | processing | `calculation_state` | constant `TRUE` | the former active-request slot; `active_request_id` unused (OQ-46) |
 | processing | `date_status` | `date` | the current status of the portfolio and cash chains on each date and when each was last processed (OQ-23, OQ-31); `RUNNING` and `*_previous` unused since OQ-50 |
 | processing | `issues` | `id` | job issues: `MISSING_REFERENCE_PRICE`, `EXPIRED_OPEN_POSITION` (OQ-31) |
-| platform | `outbox_messages` | `id` | committed commands awaiting broker publication |
+| platform | `outbox_messages` | `id` | committed commands awaiting broker publication; rows published more than `OUTBOX_RETENTION_DAYS` ago (default 7) are deleted hourly by the outbox relay, unpublished rows never |
 | platform | `inbox_messages` | `(consumer_name, message_id)` | handler delivery deduplication; rows processed more than `INBOX_RETENTION_DAYS` ago (default 7) are deleted hourly by the outbox relay (OQ-47 item 2); unused since OQ-50 item 2 (no inbox, no retention) |
 
 ## Important database integrity decisions

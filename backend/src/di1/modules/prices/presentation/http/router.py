@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from datetime import date
-from decimal import Decimal
 from http import HTTPStatus
 from uuid import UUID
 
@@ -49,8 +48,8 @@ def create_router(
             body.asset_id,
             body.reference_date,
             body.input_kind,
-            None if body.pu is None else Decimal(body.pu),
-            None if body.rate is None else Decimal(body.rate),
+            body.pu,
+            body.rate,
             uow=uow,
         )
         return ReferencePriceResponse.of(record)

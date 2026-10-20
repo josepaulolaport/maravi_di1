@@ -67,7 +67,7 @@ from di1.platform.config import (
     get_heartbeat_settings,
     get_settings,
 )
-from di1.platform.database.engine import check_connection, create_engine
+from di1.platform.database.engine import check_connection, create_worker_engine
 from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.connection import connect
@@ -158,7 +158,7 @@ async def _serve(
     broker connection and the engine. A failed work after an ack is then raised as
     `AfterAckFailedError`."""
     topology = topology if topology is not None else Topology()
-    engine = create_engine(settings)
+    engine = create_worker_engine(settings)
     try:
         resources = WorkerResources(
             uow_factory=unit_of_work_factory(create_session_factory(engine)),

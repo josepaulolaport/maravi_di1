@@ -7,7 +7,9 @@ settings (`di1.platform.config`), configures logging once, declares the consumer
 given, then publishes committed ``platform.outbox_messages`` rows until SIGTERM or SIGINT
 (`di1.platform.messaging.outbox_relay`). Its poll loop also deletes the inbox records older
 than ``INBOX_RETENTION_DAYS``, once per ``INBOX_RETENTION_INTERVAL_SECONDS``
-(`di1.platform.messaging.inbox.InboxRetention`), and touches ``HEARTBEAT_FILE``, when set,
+(`di1.platform.messaging.inbox.InboxRetention`) and the outbox rows published more than
+``OUTBOX_RETENTION_DAYS`` ago, once per ``OUTBOX_RETENTION_INTERVAL_SECONDS``
+(`di1.platform.messaging.outbox.OutboxRetention`), and touches ``HEARTBEAT_FILE``, when set,
 after each turn, for compose.yaml's health check (`di1.workers.healthcheck`). Everything is
 built with plain factories, not FastAPI dependencies (interfaces.md "DI composition").
 
@@ -43,6 +45,7 @@ from di1.platform.database.session import create_session_factory
 from di1.platform.database.unit_of_work import unit_of_work_factory
 from di1.platform.messaging.connection import connect
 from di1.platform.messaging.inbox import InboxRetention
+from di1.platform.messaging.outbox import OutboxRetention
 from di1.platform.messaging.outbox_relay import OutboxRelay
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import QueueSpec, Topology, declare_queue
@@ -95,15 +98,22 @@ async def run_outbox_relay(
                 retry_max_delay_seconds=broker_settings.outbox_relay_retry_max_delay_seconds,
             )
             logger.info("outbox relay started (%d queues declared)", len(queues))
-            retention = InboxRetention(
-                uow_factory,
-                older_than=timedelta(days=broker_settings.inbox_retention_days),
-                interval_seconds=broker_settings.inbox_retention_interval_seconds,
+            retentions = (
+                InboxRetention(
+                    uow_factory,
+                    older_than=timedelta(days=broker_settings.inbox_retention_days),
+                    interval_seconds=broker_settings.inbox_retention_interval_seconds,
+                ),
+                OutboxRetention(
+                    uow_factory,
+                    older_than=timedelta(days=broker_settings.outbox_retention_days),
+                    interval_seconds=broker_settings.outbox_retention_interval_seconds,
+                ),
             )
             await relay.run(
                 stop,
                 poll_interval_seconds=broker_settings.outbox_relay_poll_interval_seconds,
-                inbox_retention=retention,
+                retentions=retentions,
                 heartbeat=heartbeat,
             )
         finally:

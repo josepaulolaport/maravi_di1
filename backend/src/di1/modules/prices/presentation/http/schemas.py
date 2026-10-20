@@ -5,19 +5,16 @@ the business checks are the service's."""
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Annotated, Self
+from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict
 
 from di1.modules.prices.application.services.price_service import ReferencePriceDay
 from di1.modules.prices.public import PriceSource, ReferencePriceRecord
+from di1.platform.http import DecimalString
 from di1.shared.decimals import to_plain
 from di1.shared.input_kind import InputKind
-
-DecimalString = Annotated[str, StringConstraints(pattern=r"^-?[0-9]+(\.[0-9]+)?$")]
-r"""A typed decimal, ``"89250.3147019396"``; never a JSON number (CLAUDE.md §2). ASCII digits
-only: ``\d`` would also accept other scripts' digits."""
 
 
 class SetReferencePriceBody(BaseModel):

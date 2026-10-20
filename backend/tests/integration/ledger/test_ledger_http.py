@@ -375,7 +375,16 @@ def test_a_json_number_for_a_decimal_is_refused(client: TestClient) -> None:
     assert errors[0]["message"] == "Valor inválido."
 
 
-@pytest.mark.parametrize("value", ["25:00", "9:00", "10:30:00.5", ""])
+def test_non_ascii_digits_in_a_decimal_are_refused(client: TestClient) -> None:
+    # Arabic-Indic "123": Decimal() parses it to 123, yet only ASCII [0-9] is a typed decimal.
+    body = {**FIXTURE_REQUESTS[2], "execution_pu": "\u0661\u0662\u0663"}
+
+    assert_problem(
+        client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "execution_pu")
+    )
+
+
+@pytest.mark.parametrize("value", ["25:00", "9:00", "10:30:00.5", "", "\u0661\u0660:\u0663\u0660"])
 def test_a_malformed_time_is_refused(client: TestClient, value: str) -> None:
     body = {**FIXTURE_REQUESTS[0], "time": value}
 
