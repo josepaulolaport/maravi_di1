@@ -8,8 +8,8 @@ A caller that already runs an event loop (an async test or fixture) cannot let t
 function sets ``config.attributes["connection"]`` and calls ``command.upgrade``, and the migration
 then runs on that connection, inside the caller's transaction.
 
-Migrations are SQL-first: the revisions run reviewed SQL, so there is no ``target_metadata`` until
-the modules' ORM models exist (then autogenerate compares them, with ``compare_type``).
+Migrations are SQL-first: the revisions run reviewed SQL (``migrations/sql``) and autogenerate is
+not used, so the context gets no ``target_metadata`` and none of autogenerate's options.
 """
 
 from __future__ import annotations
@@ -41,14 +41,7 @@ def _database_url() -> str:
 
 
 def _configure(connection: Connection | None = None, url: str | None = None) -> None:
-    context.configure(
-        connection=connection,
-        url=url,
-        target_metadata=None,
-        include_schemas=True,
-        compare_type=True,
-        literal_binds=connection is None,
-    )
+    context.configure(connection=connection, url=url, literal_binds=connection is None)
 
 
 def run_migrations_offline() -> None:
