@@ -17,11 +17,11 @@ from uuid import UUID
 from di1.modules.asset.public import AssetReader
 from di1.modules.ledger.public import LedgerEntry, LedgerReader
 from di1.modules.pnl.public import (
-    AssetPnLCalculator,
     AssetPnLResult,
     MissingReferencePrice,
     PnLTrade,
-    PortfolioPnLCalculator,
+    aggregate_pnl,
+    calculate_asset_pnl,
 )
 from di1.modules.portfolio.public import (
     AssetValuationInput,
@@ -168,7 +168,7 @@ async def process_positions_day(
                 reference_pu=None if current is None else current.pu,
             )
         )
-        result = AssetPnLCalculator().calculate(
+        result = calculate_asset_pnl(
             position.previous_quantity,
             [PnLTrade(t.signed_quantity, t.execution_pu) for t in position.trades],
             reference_pu(asset_id, previous_day),
@@ -187,7 +187,7 @@ async def process_positions_day(
             issues.append(IssueRecord(IssueType.EXPIRED_OPEN_POSITION, asset_id, day, None))
 
     valuation = ValuationCalculator().calculate_day(day, valuation_inputs)
-    pnl = PortfolioPnLCalculator().aggregate(set(asset_ids), asset_pnl, previous_cumulative)
+    pnl = aggregate_pnl(set(asset_ids), asset_pnl, previous_cumulative)
     await writer.write_positions_day(
         positions_day,
         valuation,
