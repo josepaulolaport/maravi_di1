@@ -38,7 +38,7 @@ from di1.workers.main import run_worker
 from di1.workers.outbox_relay import run_outbox_relay
 from tests.integration.platform.support import with_broker, worker_parts
 from tests.support.broker import SilentServer, queue_spec
-from tests.support.waits import eventually
+from tests.support.waits import eventually, keeps_hanging
 
 
 async def _no_start(envelope: Envelope) -> Job | None:
@@ -109,7 +109,7 @@ async def test_a_stop_while_a_dependency_hangs_at_startup_ends_the_process(
     stop = asyncio.Event()
     running = process.start(configured, stop, None)
     await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
-    assert not running.done()
+    await keeps_hanging(running)
 
     stop.set()
 
