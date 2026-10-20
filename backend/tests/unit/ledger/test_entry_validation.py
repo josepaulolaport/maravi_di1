@@ -21,6 +21,7 @@ from di1.modules.ledger.application.services.ledger_service import validate_trad
 from di1.modules.ledger.domain.entries import (
     EntryDraft,
     EntryType,
+    cash_description,
     validate_cash_movement,
 )
 from di1.modules.ledger.domain.entries import validate_trade as validate_any_trade
@@ -351,8 +352,8 @@ def test_a_deposit_is_positive_and_a_withdrawal_negative() -> None:
     deposit = validate_cash_movement(_cash(), today=TODAY)
     withdrawal = validate_cash_movement(_cash(cash_amount=Decimal("-50000.00")), today=TODAY)
 
-    assert deposit.amount == Decimal("1500000.00")
-    assert withdrawal.amount == Decimal("-50000.00")
+    assert deposit == Decimal("1500000.00")
+    assert withdrawal == Decimal("-50000.00")
 
 
 @pytest.mark.parametrize("amount", [None, "0", "0.00", "-0"])
@@ -375,8 +376,8 @@ def test_an_amount_with_more_than_2_places_is_rejected() -> None:
 
 def test_the_amount_fits_numeric_20_2() -> None:
     largest = Decimal("999999999999999999.99")
-    assert validate_cash_movement(_cash(cash_amount=largest), today=TODAY).amount == largest
-    assert validate_cash_movement(_cash(cash_amount=-largest), today=TODAY).amount == -largest
+    assert validate_cash_movement(_cash(cash_amount=largest), today=TODAY) == largest
+    assert validate_cash_movement(_cash(cash_amount=-largest), today=TODAY) == -largest
 
     with pytest.raises(DomainError) as error:
         validate_cash_movement(_cash(cash_amount=Decimal("1000000000000000000")), today=TODAY)
@@ -413,27 +414,27 @@ def test_trade_fields_on_a_cash_movement_are_rejected() -> None:
 
 
 def test_a_cash_movement_keeps_its_description_trimmed() -> None:
-    movement = validate_cash_movement(_cash(description="  Aporte inicial \n"), today=TODAY)
+    draft = _cash(description="  Aporte inicial \n")
 
-    assert movement.description == "Aporte inicial"
+    assert validate_cash_movement(draft, today=TODAY) == Decimal("1500000.00")
+    assert cash_description(draft) == "Aporte inicial"
 
 
 def test_a_description_is_stored_composed() -> None:
     # The list's SQL search folds precomposed letters (OQ-51): "a" + U+0301 is stored as "á".
-    movement = validate_cash_movement(_cash(description="Aplicac\u0327a\u0303o"), today=TODAY)
-
-    assert movement.description == "Aplicação"
+    assert cash_description(_cash(description="Aplicac\u0327a\u0303o")) == "Aplicação"
 
 
 @pytest.mark.parametrize("description", [None, "", "   ", "\t\n"])
 def test_an_absent_or_blank_description_is_none(description: str | None) -> None:
-    assert validate_cash_movement(_cash(description=description), today=TODAY).description is None
+    assert cash_description(_cash(description=description)) is None
 
 
 def test_a_description_of_200_characters_is_accepted() -> None:
-    text = "á" * 200
+    draft = _cash(description=f" {'á' * 200} ")
 
-    assert validate_cash_movement(_cash(description=f" {text} "), today=TODAY).description == text
+    assert validate_cash_movement(draft, today=TODAY) == Decimal("1500000.00")
+    assert cash_description(draft) == "á" * 200
 
 
 def test_a_description_longer_than_200_characters_is_rejected_not_cut() -> None:

@@ -74,14 +74,6 @@ class EntryDraft:
 
 
 @dataclass(frozen=True, slots=True)
-class CashMovement:
-    """A valid aporte or retirada: its signed amount and its trimmed description, if any."""
-
-    amount: Decimal
-    description: str | None
-
-
-@dataclass(frozen=True, slots=True)
 class LedgerEntry:
     """One row of ``ledger.entries``. The trade fields are set only on a TRADE and
     ``cash_amount`` only on a CASH entry (schema ``entries_trade_shape``/``entries_cash_shape``);
@@ -168,7 +160,7 @@ def validate_trade(
     return typed_value
 
 
-def validate_cash_movement(draft: EntryDraft, *, today: date) -> CashMovement:
+def validate_cash_movement(draft: EntryDraft, *, today: date) -> Decimal:
     """The aporte or retirada a draft describes. Raises `DomainError` with every input error."""
     if draft.type is not EntryType.CASH:
         raise ValueError(f"validate_cash_movement expects a CASH draft, got {draft.type}")
@@ -192,8 +184,7 @@ def validate_cash_movement(draft: EntryDraft, *, today: date) -> CashMovement:
         errors.append(ErrorDetail.validation("O valor deve ser diferente de zero.", "cash_amount"))
     elif abs(amount) >= _CASH_LIMIT:
         errors.append(ErrorDetail.validation("O valor excede o limite permitido.", "cash_amount"))
-    # Composed (NFC), so the list's SQL search folds its accents like `EntrySearch` does.
-    description = unicodedata.normalize("NFC", (draft.description or "").strip()) or None
+    description = cash_description(draft)
     if description is not None and len(description) > DESCRIPTION_MAX_LENGTH:
         errors.append(
             ErrorDetail.validation(
@@ -204,7 +195,14 @@ def validate_cash_movement(draft: EntryDraft, *, today: date) -> CashMovement:
     if errors:
         raise DomainError(*errors)
     assert amount is not None
-    return CashMovement(amount, description)
+    return amount
+
+
+def cash_description(draft: EntryDraft) -> str | None:
+    """The description a CASH draft stores (OQ-51): trimmed, ``None`` when blank, and composed
+    (NFC), so the list's SQL search folds its accents as `EntrySearch` does.
+    `validate_cash_movement` checks its length."""
+    return unicodedata.normalize("NFC", (draft.description or "").strip()) or None
 
 
 def entries_to_delete(
