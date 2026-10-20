@@ -35,13 +35,10 @@ from di1.platform.messaging.consumer import Job
 from di1.platform.messaging.envelope import Envelope
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import QueueSpec, Topology, declare_queue
-from di1.platform.messaging.worker import (
-    ConsumerFactory,
-    ConsumerRegistration,
-    WorkerResources,
-)
+from di1.platform.messaging.worker import ConsumerRegistration, WorkerResources
 from di1.platform.observability.heartbeat import Heartbeat
 from di1.shared.clock import FixedClock
+from di1.workers import lifecycle
 from di1.workers import main as worker
 from di1.workers.main import JobFailedError, run_worker
 from tests.integration.platform.conftest import queue_spec
@@ -53,6 +50,7 @@ from tests.integration.platform.support import (
     eventually,
     make_envelope,
     with_broker,
+    worker_parts,
 )
 
 
@@ -101,7 +99,7 @@ class _Run:
 
 def _consumers(
     spec: QueueSpec, handler: _Run, given: list[WorkerResources] | None = None
-) -> ConsumerFactory:
+) -> Callable[[WorkerResources], Sequence[ConsumerRegistration]]:
     def factory(resources: WorkerResources) -> Sequence[ConsumerRegistration]:
         if given is not None:
             given.append(resources)
@@ -147,7 +145,7 @@ async def test_the_worker_consumes_its_queue_and_runs_the_work_after_the_ack(
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url),
-            consumers=_consumers(spec, handler, given),
+            build=worker_parts(consumers=_consumers(spec, handler, given)),
             stop=stop,
             topology=topology,
             clock=clock,
@@ -185,10 +183,9 @@ async def test_the_worker_beats_its_heartbeat_from_its_start_until_it_stops(
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url, heartbeat_interval_seconds=0.05),
-            consumers=lambda resources: [],
+            build=worker_parts(consumers=lambda resources: [], on_startup=recover),
             stop=stop,
             topology=topology,
-            on_startup=recover,
             heartbeat=Heartbeat(path),
         )
     )
@@ -236,7 +233,7 @@ async def test_a_stop_during_the_run_after_the_ack_cancels_it_and_the_message_st
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url),
-            consumers=_consumers(spec, handler),
+            build=worker_parts(consumers=_consumers(spec, handler)),
             stop=stop,
             topology=topology,
         )
@@ -272,7 +269,7 @@ async def test_a_failure_after_the_ack_ends_the_worker_with_an_error(
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url),
-            consumers=_consumers(spec, handler),
+            build=worker_parts(consumers=_consumers(spec, handler)),
             stop=asyncio.Event(),
             topology=topology,
         )
@@ -305,7 +302,7 @@ async def test_a_stop_before_the_ack_rolls_back_and_returns_the_message(
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url),
-            consumers=_consumers(spec, handler),
+            build=worker_parts(consumers=_consumers(spec, handler)),
             stop=stop,
             topology=topology,
         )
@@ -344,7 +341,7 @@ async def test_a_dropped_broker_connection_does_not_cancel_the_run(
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url),
-            consumers=_consumers(spec, handler),
+            build=worker_parts(consumers=_consumers(spec, handler)),
             stop=stop,
             topology=topology,
         )
@@ -390,10 +387,9 @@ async def test_a_message_arriving_during_a_run_is_acked_at_once_and_starts_nothi
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url),
-            consumers=_consumers(spec, handler),
+            build=worker_parts(consumers=_consumers(spec, handler), sweep=sweep),
             stop=stop,
             topology=topology,
-            sweep=sweep,
         )
     )
     first, second = make_envelope(), make_envelope()
@@ -433,10 +429,9 @@ async def test_the_sweep_runs_on_every_interval_without_any_message(
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url, worker_sweep_interval_seconds=0.05),
-            consumers=lambda resources: [],
+            build=worker_parts(consumers=lambda resources: [], sweep=sweep),
             stop=stop,
             topology=topology,
-            sweep=sweep,
         )
     )
 
@@ -463,10 +458,9 @@ async def test_a_failing_sweep_ends_the_worker_with_an_error(
         await asyncio.wait_for(
             run_worker(
                 with_broker(settings, broker_url, worker_sweep_interval_seconds=0.05),
-                consumers=lambda resources: [],
+                build=worker_parts(consumers=lambda resources: [], sweep=sweep),
                 stop=asyncio.Event(),
                 topology=topology,
-                sweep=sweep,
             ),
             timeout=10,
         )
@@ -498,7 +492,7 @@ async def test_a_stop_while_the_database_hangs_at_startup_ends_the_worker(
     running = asyncio.create_task(
         run_worker(
             with_broker(hanging_database_settings, broker_url),
-            consumers=lambda resources: (),
+            build=worker_parts(consumers=lambda resources: ()),
             stop=stop,
         )
     )
@@ -522,7 +516,7 @@ async def test_an_unreachable_database_ends_the_worker_before_it_consumes(
         await asyncio.wait_for(
             run_worker(
                 with_broker(unreachable, broker_url),
-                consumers=lambda resources: (),
+                build=worker_parts(consumers=lambda resources: ()),
                 stop=asyncio.Event(),
             ),
             timeout=10,
@@ -557,7 +551,7 @@ async def test_a_stop_while_connecting_to_the_broker_ends_the_worker(
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, SecretStr(hanging_broker_url)),
-            consumers=lambda resources: (),
+            build=worker_parts(consumers=lambda resources: ()),
             stop=stop,
         )
     )
@@ -600,7 +594,7 @@ async def test_a_stop_while_the_broker_stalls_after_connecting_ends_the_worker(
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url),
-            consumers=_consumers(queue_spec(topology, "test.command"), _Run()),
+            build=worker_parts(consumers=_consumers(queue_spec(topology, "test.command"), _Run())),
             stop=stop,
             topology=topology,
         )
@@ -630,7 +624,9 @@ async def test_a_connection_made_as_the_worker_is_cancelled_is_closed(
     monkeypatch.setattr(worker, "connect", connect_then_cancel)
     running = asyncio.create_task(
         run_worker(
-            with_broker(settings, broker_url), consumers=lambda resources: (), stop=asyncio.Event()
+            with_broker(settings, broker_url),
+            build=worker_parts(consumers=lambda resources: ()),
+            stop=asyncio.Event(),
         )
     )
 
@@ -751,10 +747,9 @@ async def test_the_startup_hook_runs_once_before_the_first_delivery(
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url),
-            consumers=_consumers(spec, handler),
+            build=worker_parts(consumers=_consumers(spec, handler), on_startup=recover),
             stop=stop,
             topology=topology,
-            on_startup=recover,
         )
     )
     await eventually(lambda: order == ["startup"])
@@ -807,10 +802,9 @@ async def test_a_failing_startup_hook_ends_the_worker_before_it_consumes(
         await asyncio.wait_for(
             run_worker(
                 with_broker(settings, broker_url),
-                consumers=_consumers(spec, handler),
+                build=worker_parts(consumers=_consumers(spec, handler), on_startup=recover),
                 stop=asyncio.Event(),
                 topology=topology,
-                on_startup=recover,
             ),
             timeout=10,
         )
@@ -847,10 +841,9 @@ async def test_a_stop_during_the_startup_hook_cancels_it_and_consumes_nothing(
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url),
-            consumers=_consumers(spec, handler),
+            build=worker_parts(consumers=_consumers(spec, handler), on_startup=recover),
             stop=stop,
             topology=topology,
-            on_startup=recover,
         )
     )
     await asyncio.wait_for(entered.wait(), timeout=10)
@@ -873,6 +866,7 @@ async def test_a_startup_hook_that_ignores_its_cancellation_does_not_hold_the_st
     """A recovery that swallows the cancellation (a retry around a commit) is waited for at
     most `CLOSE_TIMEOUT_SECONDS`, then left behind with a warning, before Docker's SIGKILL."""
     monkeypatch.setattr(worker, "CLOSE_TIMEOUT_SECONDS", 0.3)
+    monkeypatch.setattr(lifecycle, "CLOSE_TIMEOUT_SECONDS", 0.3)
     entered = asyncio.Event()
     finish = asyncio.Event()
 
@@ -887,9 +881,8 @@ async def test_a_startup_hook_that_ignores_its_cancellation_does_not_hold_the_st
     running = asyncio.create_task(
         run_worker(
             with_broker(settings, broker_url),
-            consumers=lambda resources: (),
+            build=worker_parts(consumers=lambda resources: (), on_startup=recover),
             stop=stop,
-            on_startup=recover,
         )
     )
     await asyncio.wait_for(entered.wait(), timeout=10)
@@ -897,5 +890,5 @@ async def test_a_startup_hook_that_ignores_its_cancellation_does_not_hold_the_st
     stop.set()
 
     await asyncio.wait_for(running, timeout=3)
-    assert "the startup step did not stop in 0.3 s" in caplog.text
+    assert "a startup step did not stop in 0.3 s" in caplog.text
     finish.set()

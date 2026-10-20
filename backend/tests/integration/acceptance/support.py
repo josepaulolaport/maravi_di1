@@ -23,7 +23,7 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from di1.composition.consumers import processing_startup
+from di1.composition.consumers import build_processing_worker
 from di1.main import create_app
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
@@ -83,9 +83,9 @@ def acceptance_app(today: date) -> Iterator[tuple[TestClient, str]]:
 
 def run_worker(database_url: str, now: datetime) -> None:
     """The processing worker starting at ``now``, in-process on the same database, with the real
-    composition (``processing_startup``): it recovers, then sweeps every QUEUED request oldest
-    first (OQ-45). The run messages left in the outbox are not relayed; RabbitMQ delivery is the
-    worker's end-to-end test, not these."""
+    composition (``build_processing_worker``'s startup): it recovers, then sweeps every QUEUED
+    request oldest first (OQ-45). The run messages left in the outbox are not relayed; RabbitMQ
+    delivery is the worker's end-to-end test, not these."""
     asyncio.run(_run_worker(database_url, now))
 
 
@@ -96,7 +96,7 @@ async def _run_worker(database_url: str, now: datetime) -> None:
             uow_factory=unit_of_work_factory(create_session_factory(engine)),
             clock=FixedClock(now.date(), fixed_now=now),
         )
-        await processing_startup(resources)
+        await build_processing_worker(resources).startup()
     finally:
         await engine.dispose()
 

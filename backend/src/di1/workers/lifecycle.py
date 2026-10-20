@@ -1,16 +1,15 @@
-"""What every worker process shares: the settings and logging, the stop signals, stop-aware
-startup steps, a bounded close of the broker connection, and the exit status on a fatal error.
+"""What every worker process shares: the settings and logging, the stop signals, stop-aware steps,
+a bounded close of the broker connection, and the exit status on a fatal error.
 
-SIGTERM or SIGINT sets a stop event. Startup steps that wait on the broker or the database run
-under that event, so a dependency that hangs at startup does not keep SIGTERM waiting until
-Docker's SIGKILL. A failure is logged through the configured logging and ends the process with
-status 1.
+SIGTERM or SIGINT sets a stop event. Steps that wait on the broker or the database (connecting,
+declaring, the startup recovery) run under that event (`unless_stopped`), so a dependency that
+hangs does not keep SIGTERM waiting until Docker's SIGKILL. A failure is logged through the
+configured logging and ends the process with status 1.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import signal
 from collections.abc import Awaitable, Callable
@@ -31,11 +30,15 @@ async def unless_stopped[T](
     *,
     discard: Callable[[T], Awaitable[None]] | None = None,
 ) -> T | None:
-    """Await ``step``, or cancel it and return `None` if ``stop`` is set first.
+    """Await ``step``, or cancel it and return `None` if ``stop`` is set first; a failure of
+    ``step`` is raised. A step whose result may be `None` tells the two apart by
+    ``stop.is_set()``.
 
-    If the caller is cancelled while ``step`` has just produced its result, nobody will use
-    that result: ``discard`` releases it (a connection, which would otherwise keep its
-    reconnect task running)."""
+    A cancelled step is waited for at most `CLOSE_TIMEOUT_SECONDS`: one that ignores its
+    cancellation is left behind with a warning rather than holding the stop until SIGKILL. If
+    the caller is cancelled while ``step`` has just produced its result, nobody will use that
+    result: ``discard`` releases it (a connection, which would otherwise keep its reconnect task
+    running)."""
     running = asyncio.ensure_future(step)
     stopping = asyncio.ensure_future(stop.wait())
     try:
@@ -56,9 +59,13 @@ async def _abandon[T](
 ) -> None:
     if not running.done():
         running.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await running
-    if discard is not None and not running.cancelled() and running.exception() is None:
+        _, pending = await asyncio.wait({running}, timeout=CLOSE_TIMEOUT_SECONDS)
+        if pending:
+            logger.warning("a startup step did not stop in %s s", CLOSE_TIMEOUT_SECONDS)
+            return
+    if running.cancelled() or running.exception() is not None:
+        return
+    if discard is not None:
         await discard(running.result())
 
 
