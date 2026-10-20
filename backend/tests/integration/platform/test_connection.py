@@ -17,7 +17,7 @@ from pydantic import SecretStr
 
 from di1.platform.messaging.connection import connect
 from tests.support.broker import SilentServer
-from tests.support.waits import eventually
+from tests.support.waits import eventually, keeps_hanging
 
 
 def _broker(url: str) -> SecretStr:
@@ -45,7 +45,7 @@ async def test_a_cancelled_first_connection_leaves_no_task(
 ) -> None:
     connecting = asyncio.create_task(connect(_broker(hanging_broker_url), connection_name="test"))
     await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
-    assert not connecting.done()
+    await keeps_hanging(connecting)
 
     connecting.cancel()
     with pytest.raises(asyncio.CancelledError):

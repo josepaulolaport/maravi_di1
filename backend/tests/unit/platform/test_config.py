@@ -9,6 +9,7 @@ declared on the fields, and are not retested here.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -128,3 +129,43 @@ def test_backend_env_file_overrides_the_root_one(env_files_enabled: Path) -> Non
     (env_files_enabled / "backend" / ".env").write_text(f"DATABASE_URL={other}\n", encoding="utf-8")
 
     assert Settings().database_url.get_secret_value() == other
+
+
+ENV_EXAMPLE = Path(__file__).resolve().parents[4] / ".env.example"
+"""The repository root's `.env.example`, which documents every backend setting with its
+default ("every value below is the default")."""
+
+EXAMPLES_NOT_DEFAULTS = {"DATABASE_URL", "RABBITMQ_URL", "HEARTBEAT_FILE"}
+"""Lines that show the form of a value, not a default: the URLs are required or optional with no
+default, and no heartbeat file is written unless one is set."""
+
+DOCUMENTED = {
+    "WORKER_SWEEP_INTERVAL_SECONDS",
+    "OUTBOX_RETENTION_DAYS",
+    "OUTBOX_RETENTION_INTERVAL_SECONDS",
+    "HEARTBEAT_INTERVAL_SECONDS",
+    "HEARTBEAT_MAX_AGE_SECONDS",
+    "RABBITMQ_PUBLISH_TIMEOUT_SECONDS",
+    "OUTBOX_RELAY_BATCH_SIZE",
+}
+"""Defaults the README and compose.yaml also quote (the 5 s sweep, the 7-day retention, ...)."""
+
+
+def _documented_defaults() -> dict[str, str]:
+    lines = ENV_EXAMPLE.read_text(encoding="utf-8").splitlines()
+    pairs = (re.fullmatch(r"# ([A-Z_]+)=(\S+)", line) for line in lines)
+    return {m[1]: m[2] for m in pairs if m and m[1] not in EXAMPLES_NOT_DEFAULTS}
+
+
+def test_the_defaults_are_the_documented_ones(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The expected values come from `.env.example`, not from the code: the settings built from
+    the documented values must equal the defaults, so a default changed in one place and not the
+    other fails here."""
+    documented = _documented_defaults()
+    assert documented.keys() >= DOCUMENTED
+    defaults = Settings()
+
+    for name, value in documented.items():
+        monkeypatch.setenv(name, value)
+
+    assert Settings() == defaults
