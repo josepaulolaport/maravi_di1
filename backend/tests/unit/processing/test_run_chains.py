@@ -43,7 +43,7 @@ def world() -> World:
 
 
 async def positions(
-    w: World, day: date, *, zero_state: bool, other: bool = False
+    w: World, day: date, *, zero_state: bool
 ) -> tuple[list[IssueRecord], RecordingWriter]:
     writer = RecordingWriter()
     issues = await process_positions_day(
@@ -52,7 +52,6 @@ async def positions(
         readers=w.readers(),
         writer=writer,
         uow=FakeUnitOfWork(),
-        other_chain_processed=other,
     )
     return issues, writer
 
@@ -82,11 +81,9 @@ async def test_cash_from_the_zero_state_adds_trades_deposits_and_withdrawals() -
         readers=w.readers(),
         writer=writer,
         uow=FakeUnitOfWork(),
-        other_chain_processed=True,
     )
 
     [written] = writer.cash
-    assert written.other_chain_processed is True
     assert written.day.previous_cash_balance == 0
     assert written.day.trades_cash_flow == Decimal("-950000")
     assert written.day.deposits == Decimal("1000000.00")
@@ -106,11 +103,9 @@ async def test_cash_continues_from_the_published_balance_of_the_day_before() -> 
         readers=w.readers(),
         writer=writer,
         uow=FakeUnitOfWork(),
-        other_chain_processed=False,
     )
 
     assert writer.cash[0].day.cash_balance == Decimal("400.00")
-    assert writer.cash[0].other_chain_processed is False
 
 
 async def test_cash_with_a_processed_day_before_but_no_published_balance_is_a_data_error() -> None:
@@ -121,7 +116,6 @@ async def test_cash_with_a_processed_day_before_but_no_published_balance_is_a_da
             readers=world().readers(),
             writer=RecordingWriter(),
             uow=FakeUnitOfWork(),
-            other_chain_processed=False,
         )
 
 
@@ -143,7 +137,6 @@ async def test_first_trade_from_the_zero_state_has_only_trades_pnl() -> None:
     assert written.asset_pnl[F29].trades_pnl == Decimal("1000")
     assert written.pnl.daily_pnl == Decimal("1000")
     assert written.pnl.cumulative_pnl == Decimal("1000")  # 0 before the first entry
-    assert written.other_chain_processed is False
 
 
 async def test_a_held_position_earns_position_pnl_from_d_minus_1_to_d() -> None:
@@ -152,13 +145,12 @@ async def test_a_held_position_earns_position_pnl_from_d_minus_1_to_d() -> None:
     w.prices.set(F29, D1, "95100.0000000000")
     w.prices.set(F29, D2, "95200.0000000000")
 
-    issues, writer = await positions(w, D2, zero_state=False, other=True)
+    issues, writer = await positions(w, D2, zero_state=False)
 
     assert issues == []
     written = writer.positions[0]
     assert written.asset_pnl[F29].position_pnl == Decimal("1000")
     assert written.pnl.cumulative_pnl == Decimal("2000")
-    assert written.other_chain_processed is True
 
 
 async def test_a_missing_price_on_d_is_an_issue_and_leaves_the_figures_null() -> None:

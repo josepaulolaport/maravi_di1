@@ -6,6 +6,7 @@ import {
   Table,
   Text,
   Title,
+  Tooltip,
   UnstyledButton,
   VisuallyHidden,
 } from '@mantine/core';
@@ -35,6 +36,8 @@ interface Column {
   render: (row: PositionRow) => React.ReactNode;
 }
 
+const PRICE_CHANGED = 'Preço alterado após o processamento — reprocesse';
+
 const unavailable = (text: string) =>
   text === UNAVAILABLE ? <span title="Indisponível">{text}</span> : text;
 
@@ -61,6 +64,15 @@ const columns: Column[] = [
               P&L indisponível
             </Badge>
           )
+        )}
+        {row.reference_price_changed && (
+          // A10: the figures come from the price the run read; the shown price is newer.
+          <Tooltip label={PRICE_CHANGED} withArrow>
+            <Badge color="yellow" variant="light" size="sm" className={table.badge} tabIndex={0}>
+              Preço alterado
+              <VisuallyHidden> após o processamento — reprocesse</VisuallyHidden>
+            </Badge>
+          </Tooltip>
         )}
       </Stack>
     ),

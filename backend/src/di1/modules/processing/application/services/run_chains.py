@@ -107,7 +107,6 @@ async def process_cash_day(
     readers: DayReaders,
     writer: PortfolioResultsWriter,
     uow: UnitOfWork,
-    other_chain_processed: bool,
 ) -> None:
     """``cash[D] = cash[D−1] − Σ(q × PU_exec) + deposits − withdrawals`` (spec §7.3), from the
     zero state or the published D−1 balance. The cash chain raises no Pendência (OQ-31)."""
@@ -121,7 +120,7 @@ async def process_cash_day(
     trades = [trade_of(t) for t in await readers.ledger.get_trades(day, day)]
     deposits, withdrawals = cash_totals(await readers.ledger.get_cash_movements(day, day))
     cash_day = CashCalculator().calculate_day(previous, trades, deposits, withdrawals, day)
-    await writer.write_cash_day(cash_day, uow=uow, other_chain_processed=other_chain_processed)
+    await writer.write_cash_day(cash_day, uow=uow)
 
 
 async def process_positions_day(
@@ -131,7 +130,6 @@ async def process_positions_day(
     readers: DayReaders,
     writer: PortfolioResultsWriter,
     uow: UnitOfWork,
-    other_chain_processed: bool,
 ) -> list[IssueRecord]:
     """Positions, valuation and P&L of D for every expected asset (OQ-10), written through the
     writer; returns D's Pendências: a missing exact-date reference price (D, or D−1 when Q[D−1]
@@ -196,7 +194,6 @@ async def process_positions_day(
         asset_pnl,
         pnl,
         uow=uow,
-        other_chain_processed=other_chain_processed,
     )
     return issues
 

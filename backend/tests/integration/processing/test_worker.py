@@ -231,20 +231,10 @@ async def test_a_cash_run_from_the_zero_state_processes_every_date(worker: Worke
     assert run["progress_date"] == D3
     assert run["finished_at"] is not None
     assert run["error_code"] is None
-    # A CASH run: AUM follows the positions status of each date, here not processed (OQ-38).
-    assert await worker.writes() == [(D1, "CASH", False), (D2, "CASH", False), (D3, "CASH", False)]
+    assert await worker.writes() == [(D1, "CASH"), (D2, "CASH"), (D3, "CASH")]
 
 
-async def test_a_cash_run_counts_positions_processed_by_another_run(worker: Worker) -> None:
-    await seed_statuses(worker.engine, {D1: ("PROCESSED", None)})
-    await worker.enqueue("CASH", D1, D1)
-
-    await worker.ring()
-
-    assert await worker.writes() == [(D1, "CASH", True)]
-
-
-async def test_an_all_run_writes_positions_first_then_cash_with_its_outcome(
+async def test_an_all_run_writes_both_chains_of_each_date(
     worker: Worker,
 ) -> None:
     asset = await priced_asset(worker, D1, D2)
@@ -257,12 +247,11 @@ async def test_an_all_run_writes_positions_first_then_cash_with_its_outcome(
         D1: ("PROCESSED", "PROCESSED"),
         D2: ("PROCESSED", "PROCESSED"),
     }
-    # OQ-38: positions passes False, cash the positions outcome.
     assert await worker.writes() == [
-        (D1, "CASH", True),
-        (D1, "POSITIONS", False),
-        (D2, "CASH", True),
-        (D2, "POSITIONS", False),
+        (D1, "CASH"),
+        (D1, "POSITIONS"),
+        (D2, "CASH"),
+        (D2, "POSITIONS"),
     ]
     assert (await worker.run_row(request_id))["status"] == "COMPLETED"
 
@@ -445,10 +434,10 @@ async def test_a_technical_error_in_one_chain_rolls_back_only_that_chain(worker:
         D3: ("PROCESSED", None),  # the failed chain's later dates are untouched
     }
     assert await worker.writes() == [
-        (D1, "CASH", True),
-        (D1, "POSITIONS", False),
-        (D2, "POSITIONS", False),  # the cash write of D2 rolled back to its savepoint
-        (D3, "POSITIONS", False),  # cash not processed on D3: AUM null
+        (D1, "CASH"),
+        (D1, "POSITIONS"),
+        (D2, "POSITIONS"),  # the cash write of D2 rolled back to its savepoint
+        (D3, "POSITIONS"),  # the cash chain stopped at D2
     ]
     run = await worker.run_row(request_id)
     assert run["status"] == "COMPLETED_WITH_ISSUES"
@@ -647,7 +636,7 @@ async def test_a_technical_error_on_a_single_chain_run_fails_the_run(worker: Wor
     await worker.ring()
 
     assert await worker.statuses() == {D1: (None, "PROCESSED"), D2: (None, "FAILED")}
-    assert await worker.writes() == [(D1, "CASH", False)]
+    assert await worker.writes() == [(D1, "CASH")]
     run = await worker.run_row(request_id)
     assert (run["status"], run["error_code"], run["failed_chain"], run["progress_date"]) == (
         "FAILED",
@@ -670,7 +659,7 @@ async def test_one_chain_failing_its_predecessor_on_the_first_date_lets_the_othe
 
     assert (await worker.statuses())[D1] == ("FAILED", "PROCESSED")
     assert (await worker.statuses())[D2] == (None, "PROCESSED")
-    assert await worker.writes() == [(D1, "CASH", False), (D2, "CASH", False)]
+    assert await worker.writes() == [(D1, "CASH"), (D2, "CASH")]
     run = await worker.run_row(request_id)
     assert (run["status"], run["error_code"], run["failed_date"], run["failed_chain"]) == (
         "COMPLETED_WITH_ISSUES",
@@ -774,7 +763,7 @@ async def test_case_19_a_cash_run_over_failed_positions_leaves_aum_null(worker: 
     await worker.ring()
 
     assert await worker.statuses() == {D1: ("FAILED", "PROCESSED")}
-    assert await worker.writes() == [(D1, "CASH", False)]  # FAILED is not processed (OQ-38)
+    assert await worker.writes() == [(D1, "CASH")]
 
 
 async def test_case_26_an_earlier_failed_status_alone_fails_without_asking_the_ledger(
