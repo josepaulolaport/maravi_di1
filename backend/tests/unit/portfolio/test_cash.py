@@ -86,3 +86,10 @@ def test_a_negative_zero_total_is_stored_unsigned() -> None:
     assert not day.deposits.is_signed()
     assert not day.withdrawals.is_signed()
     assert not day.cash_balance.is_signed()
+
+
+@pytest.mark.parametrize("gap", [2, 0])
+def test_a_day_cannot_be_skipped_or_repeated(gap: int) -> None:
+    # Every calendar day is processed (spec §7.1): a day starts from the day before.
+    with pytest.raises(PortfolioError, match="previous state must be"):
+        calculate_cash_day(CashBalance.zero(DAY - timedelta(days=gap)), [], ZERO, ZERO, DAY)

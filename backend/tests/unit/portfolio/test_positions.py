@@ -135,3 +135,10 @@ def test_a_flat_position_is_never_carried() -> None:
 def test_a_state_holding_the_same_asset_twice_is_rejected() -> None:
     with pytest.raises(PortfolioError):
         _state(position(1, "95000", "0.1"), position(2, "95000", "0.1"))
+
+
+@pytest.mark.parametrize("gap", [2, 0])
+def test_a_day_cannot_be_skipped_or_repeated(gap: int) -> None:
+    # Every calendar day is processed (spec §7.1): a day starts from the day before.
+    with pytest.raises(PortfolioError, match="previous state must be"):
+        calculate_positions_day(PositionState.zero(DAY - timedelta(days=gap)), [], DAY)
