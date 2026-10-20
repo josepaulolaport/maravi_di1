@@ -22,6 +22,7 @@ from di1.modules.ledger.domain.listing import ListOrder
 from di1.modules.pricing.public import Price, Quote
 from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
 from di1.shared.input_kind import InputKind
+from di1.shared.paging import PageParams
 from tests.fakes.clock import FixedClock
 from tests.unit.ledger.fakes import (
     DI1F28,
@@ -40,11 +41,15 @@ class Harness:
         self.assets = FakeAssets()
         self.pricing = FormulaPricing(self.assets)
         self.repository = InMemoryLedgerRepository()
-        self.service = LedgerService(
+
+    def service(self, uow: FakeUnitOfWork) -> LedgerService:
+        """The service on ``uow``, as the composition builds one per request."""
+        return LedgerService(
+            self.repository,
+            uow,
             clock=FixedClock(TODAY),
             assets=self.assets,
             pricing=self.pricing,
-            repository_for=lambda _uow: self.repository,
         )
 
 
@@ -84,7 +89,7 @@ def deposit(**overrides: object) -> EntryDraft:
 async def test_a_rate_typed_trade_gets_its_pu_from_pricing(harness: Harness) -> None:
     uow = FakeUnitOfWork()
 
-    view = await harness.service.create_entry(buy_rate(), uow=uow)
+    view = await harness.service(uow).create_entry(buy_rate())
 
     entry = view.entry
     assert entry.execution_pu == Decimal("89006.4625467350")
@@ -98,7 +103,7 @@ async def test_a_rate_typed_trade_gets_its_pu_from_pricing(harness: Harness) -> 
 
 
 async def test_a_pu_typed_trade_gets_its_rate_from_pricing(harness: Harness) -> None:
-    view = await harness.service.create_entry(
+    view = await harness.service(FakeUnitOfWork()).create_entry(
         buy_rate(
             asset_id=DI1F29.id,
             entry_date=date(2026, 10, 15),
@@ -108,7 +113,6 @@ async def test_a_pu_typed_trade_gets_its_rate_from_pricing(harness: Harness) -> 
             execution_rate=None,
             execution_pu=Decimal("82057.00"),
         ),
-        uow=FakeUnitOfWork(),
     )
 
     assert str(view.entry.execution_pu) == "82057.00"
@@ -117,14 +121,13 @@ async def test_a_pu_typed_trade_gets_its_rate_from_pricing(harness: Harness) -> 
 
 
 async def test_a_sell_at_a_typed_rate_matches_the_golden_fixture(harness: Harness) -> None:
-    view = await harness.service.create_entry(
+    view = await harness.service(FakeUnitOfWork()).create_entry(
         buy_rate(
             entry_date=date(2026, 10, 16),
             entry_time=time(15, 0),
             signed_quantity=-4,
             execution_rate=Decimal("0.0995"),
         ),
-        uow=FakeUnitOfWork(),
     )
 
     assert view.entry.execution_pu == Decimal("89102.2226533433")
@@ -134,7 +137,7 @@ async def test_a_sell_at_a_typed_rate_matches_the_golden_fixture(harness: Harnes
 async def test_a_trade_is_saved_and_committed_once(harness: Harness) -> None:
     uow = FakeUnitOfWork()
 
-    view = await harness.service.create_entry(buy_rate(), uow=uow)
+    view = await harness.service(uow).create_entry(buy_rate())
 
     assert harness.repository.rows == [view.entry]
     assert uow.commits == 1
@@ -143,7 +146,7 @@ async def test_a_trade_is_saved_and_committed_once(harness: Harness) -> None:
 async def test_a_cash_movement_is_saved_without_pricing(harness: Harness) -> None:
     uow = FakeUnitOfWork()
 
-    view = await harness.service.create_entry(deposit(), uow=uow)
+    view = await harness.service(uow).create_entry(deposit())
 
     assert view.entry.cash_amount == Decimal("1500000.00")
     assert view.asset_code is None
@@ -152,8 +155,8 @@ async def test_a_cash_movement_is_saved_without_pricing(harness: Harness) -> Non
 
 
 async def test_trades_and_cash_share_one_seq(harness: Harness) -> None:
-    first = await harness.service.create_entry(deposit(), uow=FakeUnitOfWork())
-    second = await harness.service.create_entry(buy_rate(), uow=FakeUnitOfWork())
+    first = await harness.service(FakeUnitOfWork()).create_entry(deposit())
+    second = await harness.service(FakeUnitOfWork()).create_entry(buy_rate())
 
     assert second.entry.seq == first.entry.seq + 1
 
@@ -163,7 +166,7 @@ async def test_on_the_maturity_date_the_typed_pu_is_kept_and_the_rate_is_zero(
 ) -> None:
     harness.assets.instruments[DI1F28.id] = replace(DI1F28, maturity_date=date(2026, 10, 16))
 
-    view = await harness.service.create_entry(
+    view = await harness.service(FakeUnitOfWork()).create_entry(
         buy_rate(
             entry_date=date(2026, 10, 16),
             signed_quantity=-10,
@@ -171,7 +174,6 @@ async def test_on_the_maturity_date_the_typed_pu_is_kept_and_the_rate_is_zero(
             execution_rate=None,
             execution_pu=Decimal("100000.00"),
         ),
-        uow=FakeUnitOfWork(),
     )
 
     assert str(view.entry.execution_pu) == "100000.00"
@@ -184,7 +186,7 @@ async def test_an_unknown_contract_is_a_validation_error_and_writes_nothing(
     uow = FakeUnitOfWork()
 
     with pytest.raises(DomainError) as error:
-        await harness.service.create_entry(buy_rate(asset_id=uuid4()), uow=uow)
+        await harness.service(uow).create_entry(buy_rate(asset_id=uuid4()))
 
     assert error.value.code is ErrorCode.VALIDATION_ERROR
     assert error.value.errors[0].field == "asset_id"
@@ -196,7 +198,7 @@ async def test_a_future_entry_writes_nothing(harness: Harness) -> None:
     uow = FakeUnitOfWork()
 
     with pytest.raises(DomainError) as error:
-        await harness.service.create_entry(deposit(entry_date=date(2026, 10, 19)), uow=uow)
+        await harness.service(uow).create_entry(deposit(entry_date=date(2026, 10, 19)))
 
     assert error.value.code is ErrorCode.FUTURE_DATE
     assert harness.repository.rows == []
@@ -208,7 +210,7 @@ async def test_a_pricing_refusal_writes_nothing(harness: Harness) -> None:
     # A rate so high that the PU rounds to zero at 10 places: Pricing refuses it on its `rate`,
     # which Ledger reports on the request's `execution_rate`.
     with pytest.raises(DomainError) as error:
-        await harness.service.create_entry(buy_rate(execution_rate=Decimal("1E+40")), uow=uow)
+        await harness.service(uow).create_entry(buy_rate(execution_rate=Decimal("1E+40")))
 
     assert [(e.code, e.field) for e in error.value.errors] == [
         (ErrorCode.VALIDATION_ERROR, "execution_rate")
@@ -242,14 +244,15 @@ async def test_a_pricing_error_names_the_request_field(
 ) -> None:
     # Pricing names its own parameters; the client keys on the request's fields (lane B, PR #52).
     service = LedgerService(
+        harness.repository,
+        FakeUnitOfWork(),
         clock=FixedClock(TODAY),
         assets=harness.assets,
         pricing=RefusingPricing(ErrorDetail(code, "Mensagem do Pricing.", pricing_field)),
-        repository_for=lambda _uow: harness.repository,
     )
 
     with pytest.raises(DomainError) as error:
-        await service.create_entry(buy_rate(), uow=FakeUnitOfWork())
+        await service.create_entry(buy_rate())
 
     assert [(e.code, e.message, e.field) for e in error.value.errors] == [
         (code, "Mensagem do Pricing.", ledger_field)
@@ -262,14 +265,15 @@ async def test_an_instrument_pricing_cannot_find_is_a_validation_error_on_asset_
 ) -> None:
     # A body field never answers 404 (contract-mismatch rule E2).
     service = LedgerService(
+        harness.repository,
+        FakeUnitOfWork(),
         clock=FixedClock(TODAY),
         assets=harness.assets,
         pricing=RefusingPricing(ErrorDetail(ErrorCode.NOT_FOUND, "Instrumento não encontrado.")),
-        repository_for=lambda _uow: harness.repository,
     )
 
     with pytest.raises(DomainError) as error:
-        await service.create_entry(buy_rate(), uow=FakeUnitOfWork())
+        await service.create_entry(buy_rate())
 
     assert [(e.code, e.field) for e in error.value.errors] == [
         (ErrorCode.VALIDATION_ERROR, "asset_id")
@@ -280,27 +284,27 @@ async def test_an_instrument_pricing_cannot_find_is_a_validation_error_on_asset_
 
 
 async def test_a_mixed_batch_deletes_the_entries_in_one_commit(harness: Harness) -> None:
-    cash = await harness.service.create_entry(deposit(), uow=FakeUnitOfWork())
-    sell = await harness.service.create_entry(
-        buy_rate(entry_date=date(2026, 10, 16), signed_quantity=-4), uow=FakeUnitOfWork()
+    cash = await harness.service(FakeUnitOfWork()).create_entry(deposit())
+    sell = await harness.service(FakeUnitOfWork()).create_entry(
+        buy_rate(entry_date=date(2026, 10, 16), signed_quantity=-4),
     )
-    kept = await harness.service.create_entry(
-        buy_rate(entry_date=date(2026, 10, 17)), uow=FakeUnitOfWork()
+    kept = await harness.service(FakeUnitOfWork()).create_entry(
+        buy_rate(entry_date=date(2026, 10, 17)),
     )
     uow = FakeUnitOfWork()
 
-    await harness.service.delete_entries([sell.entry.id, cash.entry.id], uow=uow)
+    await harness.service(uow).delete_entries([sell.entry.id, cash.entry.id])
 
     assert harness.repository.rows == [kept.entry]
     assert uow.commits == 1
 
 
 async def test_an_unknown_id_deletes_nothing(harness: Harness) -> None:
-    kept = await harness.service.create_entry(deposit(), uow=FakeUnitOfWork())
+    kept = await harness.service(FakeUnitOfWork()).create_entry(deposit())
     uow = FakeUnitOfWork()
 
     with pytest.raises(DomainError) as error:
-        await harness.service.delete_entries([kept.entry.id, uuid4()], uow=uow)
+        await harness.service(uow).delete_entries([kept.entry.id, uuid4()])
 
     assert error.value.code is ErrorCode.NOT_FOUND
     assert harness.repository.rows == [kept.entry]
@@ -308,11 +312,11 @@ async def test_an_unknown_id_deletes_nothing(harness: Harness) -> None:
 
 
 async def test_a_deleted_entry_no_longer_exists(harness: Harness) -> None:
-    entry = await harness.service.create_entry(deposit(), uow=FakeUnitOfWork())
-    await harness.service.delete_entries([entry.entry.id], uow=FakeUnitOfWork())
+    entry = await harness.service(FakeUnitOfWork()).create_entry(deposit())
+    await harness.service(FakeUnitOfWork()).delete_entries([entry.entry.id])
 
     with pytest.raises(DomainError) as error:
-        await harness.service.delete_entries([entry.entry.id], uow=FakeUnitOfWork())
+        await harness.service(FakeUnitOfWork()).delete_entries([entry.entry.id])
 
     assert error.value.code is ErrorCode.NOT_FOUND
 
@@ -326,17 +330,15 @@ async def test_the_list_pages_newest_first_across_both_types(harness: Harness) -
         buy_rate(),
         buy_rate(asset_id=DI1F29.id, entry_date=date(2026, 10, 15), entry_time=time(10, 30)),
     ):
-        await harness.service.create_entry(draft, uow=FakeUnitOfWork())
+        await harness.service(FakeUnitOfWork()).create_entry(draft)
 
     async def page(cursor: str | None) -> tuple[list[int], str | None]:
-        result = await harness.service.list_entries(
+        result = await harness.service(FakeUnitOfWork()).list_entries(
             start_date=date(2026, 10, 1),
             end_date=TODAY,
             search=None,
             order=ListOrder.DESC,
-            limit=2,
-            cursor=cursor,
-            uow=FakeUnitOfWork(),
+            page=PageParams(limit=2, cursor=cursor),
         )
         return [item.entry.seq for item in result.items], result.next_cursor
 
@@ -349,22 +351,19 @@ async def test_the_list_pages_newest_first_across_both_types(harness: Harness) -
 
 
 async def test_the_search_matches_contract_codes_and_cash_labels(harness: Harness) -> None:
-    await harness.service.create_entry(deposit(), uow=FakeUnitOfWork())
-    await harness.service.create_entry(buy_rate(), uow=FakeUnitOfWork())
-    await harness.service.create_entry(
+    await harness.service(FakeUnitOfWork()).create_entry(deposit())
+    await harness.service(FakeUnitOfWork()).create_entry(buy_rate())
+    await harness.service(FakeUnitOfWork()).create_entry(
         deposit(cash_amount=Decimal("-50000.00"), entry_date=date(2026, 10, 16)),
-        uow=FakeUnitOfWork(),
     )
 
     async def search(text: str) -> list[str | None]:
-        result = await harness.service.list_entries(
+        result = await harness.service(FakeUnitOfWork()).list_entries(
             start_date=date(2026, 10, 1),
             end_date=TODAY,
             search=text,
             order=ListOrder.ASC,
-            limit=None,
-            cursor=None,
-            uow=FakeUnitOfWork(),
+            page=PageParams(),
         )
         return [item.asset_code or str(item.entry.cash_amount) for item in result.items]
 
@@ -376,13 +375,11 @@ async def test_the_search_matches_contract_codes_and_cash_labels(harness: Harnes
 
 async def test_the_list_writes_nothing(harness: Harness) -> None:
     uow = FakeUnitOfWork()
-    await harness.service.list_entries(
+    await harness.service(uow).list_entries(
         start_date=date(2026, 10, 1),
         end_date=TODAY,
         search=None,
         order=ListOrder.DESC,
-        limit=None,
-        cursor=None,
-        uow=uow,
+        page=PageParams(),
     )
     assert uow.commits == 0

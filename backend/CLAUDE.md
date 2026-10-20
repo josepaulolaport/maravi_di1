@@ -52,7 +52,7 @@ Create only the files and packages that are used. Initially only Processing has 
   - no internal randomness: a calculation that needs it takes an explicit seed or an injected generator (`rng: random.Random`, or `random.Random(seed)`); the module-level `random` functions, `random.seed`, `SystemRandom` and an unseeded `random.Random()` are rejected.
 - **Services:**
   - Services and HTTP may be `async`.
-  - A write receives the Unit of Work (`*, uow`), saves only the fact, then commits once. There is no invalidation and no `FinancialResultInvalidator`: Ledger and Prices never call Processing (OQ-31).
+  - A service is built per request on its Unit of Work (`build_<module>_service(uow, ...)` in the module's `dependencies.py`) and keeps it; its methods never take `uow` (staff review S1; Portfolio and Processing adopt it in later PRs). A write saves only the fact, then commits once. There is no invalidation and no `FinancialResultInvalidator`: Ledger and Prices never call Processing (OQ-31).
   - A write never enqueues processing.
 - **Persistence:**
   - The ORM models mirror `docs/schema.sql` exactly; do not invent columns. A schema change needs the user's decision first (`spec-gap`).

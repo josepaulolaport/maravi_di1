@@ -3,8 +3,9 @@ OQ-24, OQ-26 item 1).
 
 - Order: ``(entry_date, entry_time, seq)`` across both types; ``desc`` (the default) newest first,
   ``asc`` the exact reverse. ``seq`` is unique, so the key is unique and a page boundary is exact.
-- The cursor is opaque to the client: the key of the last entry of the previous page. An empty
-  cursor is the first page; a cursor the API did not write is refused.
+- The page size and the cursor codec are shared (``di1.shared.paging``). The cursor is the key of
+  the last entry of the previous page. An empty cursor is the first page; a cursor the API did not
+  write is refused.
 - Search (frozen frontend contract, mock ``handlers/ledger.ts``): case- and accent-insensitive,
   by substring; a trade matches its contract code, a cash entry the label of its sign, "Aporte"
   (positive) or "Retirada" (negative).
@@ -12,26 +13,23 @@ OQ-24, OQ-26 item 1).
 
 from __future__ import annotations
 
-import base64
-import binascii
 import re
-import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, time
 from enum import StrEnum
 
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
+from di1.modules.ledger.domain.entries import LedgerEntryView
+from di1.shared.errors import ErrorDetail, invalid_cursor, invalid_range
+from di1.shared.paging import PageParams, decode_cursor, encode_cursor
+from di1.shared.text import fold
 
-DEFAULT_PAGE_SIZE = 50
-MAX_PAGE_SIZE = 200
+_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_TIME = re.compile(r"[0-9]{2}:[0-9]{2}:[0-9]{2}")
+_SEQ = re.compile(r"[1-9][0-9]{0,18}")
 
-_CURSOR_KEY = re.compile(
-    r"(?P<date>[0-9]{4}-[0-9]{2}-[0-9]{2})\|(?P<time>[0-9]{2}:[0-9]{2}:[0-9]{2})\|(?P<seq>[1-9][0-9]{0,18})"
-)
-"""``YYYY-MM-DD|HH:MM:SS|seq``: what `EntryCursor.encode` writes."""
-
-_BIGINT_MAX = 2**63 - 1
-"""``seq BIGINT``."""
+_SEQ_MAX = 2**63 - 1
+"""``seq BIGINT``: a larger key could not be compared with the column."""
 
 DEPOSIT_LABEL = "Aporte"
 WITHDRAWAL_LABEL = "Retirada"
@@ -52,30 +50,24 @@ class EntryCursor:
 
     def encode(self) -> str:
         moment = self.entry_time.isoformat(timespec="seconds")
-        raw = f"{self.entry_date.isoformat()}|{moment}|{self.seq}"
-        return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+        return encode_cursor(self.entry_date.isoformat(), moment, str(self.seq))
 
     @classmethod
-    def decode(cls, token: str) -> EntryCursor:
-        """The cursor ``encode`` wrote, and only that: the key must be a valid ``DATE``, a naive
-        whole-second ``TIME`` and a ``seq`` in ``BIGINT``'s positive range, spelled exactly as
-        ``encode`` spells it. Anything else, crafted or corrupted, raises `DomainError`
-        (``VALIDATION_ERROR`` on ``cursor``) before it reaches a query."""
+    def decode(cls, token: str) -> EntryCursor | None:
+        """The cursor ``encode`` wrote, and only that: a valid ``DATE``, a naive whole-second
+        ``TIME`` and a ``seq`` in ``BIGINT``'s positive range, spelled exactly as ``encode``
+        spells it; ``None`` for anything else, crafted or corrupted."""
+        parts = decode_cursor(token, parts=3)
+        if parts is None:
+            return None
+        day, moment, seq = parts
+        if not (_DATE.fullmatch(day) and _TIME.fullmatch(moment) and _SEQ.fullmatch(seq)):
+            return None
         try:
-            raw = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode("ascii")
-            key = _CURSOR_KEY.fullmatch(raw)
-            if key is None:
-                raise ValueError("not a cursor key")
-            cursor = cls(
-                date.fromisoformat(key["date"]),
-                time.fromisoformat(key["time"]),
-                int(key["seq"]),
-            )
-            if cursor.seq > _BIGINT_MAX or cursor.encode() != token:
-                raise ValueError("not a cursor this API wrote")
-            return cursor
-        except (ValueError, binascii.Error, UnicodeDecodeError) as exc:
-            raise DomainError(ErrorDetail.validation("Cursor inválido.", "cursor")) from exc
+            cursor = cls(date.fromisoformat(day), time.fromisoformat(moment), int(seq))
+        except ValueError:
+            return None
+        return cursor if cursor.seq <= _SEQ_MAX and cursor.encode() == token else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,19 +78,19 @@ class EntrySearch:
 
     @classmethod
     def parse(cls, text: str | None) -> EntrySearch | None:
-        folded = _fold(text or "").strip()
+        folded = fold(text or "").strip()
         return cls(folded) if folded else None
 
     def matches_code(self, code: str) -> bool:
-        return self.needle in _fold(code)
+        return self.needle in fold(code)
 
     @property
     def includes_deposits(self) -> bool:
-        return self.needle in _fold(DEPOSIT_LABEL)
+        return self.needle in fold(DEPOSIT_LABEL)
 
     @property
     def includes_withdrawals(self) -> bool:
-        return self.needle in _fold(WITHDRAWAL_LABEL)
+        return self.needle in fold(WITHDRAWAL_LABEL)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,43 +104,43 @@ class PageRequest:
     limit: int
     after: EntryCursor | None
 
+    @classmethod
+    def of(
+        cls,
+        *,
+        start_date: date,
+        end_date: date,
+        search: str | None,
+        order: ListOrder,
+        page: PageParams,
+    ) -> PageRequest:
+        """The request `validate_page_request` accepted. An empty ``?cursor=`` is no cursor: the
+        first page."""
+        return cls(
+            start_date=start_date,
+            end_date=end_date,
+            search=EntrySearch.parse(search),
+            order=order,
+            limit=page.limit,
+            after=EntryCursor.decode(page.cursor) if page.cursor else None,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerEntryPage:
+    items: Sequence[LedgerEntryView]
+    next_cursor: str | None
+
 
 def validate_page_request(
-    *,
-    start_date: date,
-    end_date: date,
-    search: str | None,
-    order: ListOrder,
-    limit: int | None,
-    cursor: str | None,
-) -> PageRequest:
-    """Raises `DomainError` for a range whose start is after its end, a page size outside
-    [1, 200] or a malformed cursor."""
+    *, start_date: date, end_date: date, page: PageParams
+) -> tuple[ErrorDetail, ...]:
+    """A range whose start is after its end, a page size outside [1, 200] or a cursor this API
+    did not write."""
     errors: list[ErrorDetail] = []
     if start_date > end_date:
-        errors.append(
-            ErrorDetail(
-                ErrorCode.INVALID_RANGE,
-                "A data inicial deve ser anterior ou igual à data final.",
-                "start_date",
-            )
-        )
-    page_size = DEFAULT_PAGE_SIZE if limit is None else limit
-    if not 1 <= page_size <= MAX_PAGE_SIZE:
-        errors.append(ErrorDetail.validation(f"Use um limite entre 1 e {MAX_PAGE_SIZE}.", "limit"))
-    if errors:
-        raise DomainError(*errors)
-    return PageRequest(
-        start_date=start_date,
-        end_date=end_date,
-        search=EntrySearch.parse(search),
-        order=order,
-        limit=page_size,
-        # An empty ``?cursor=`` is no cursor: the first page.
-        after=EntryCursor.decode(cursor) if cursor else None,
-    )
-
-
-def _fold(text: str) -> str:
-    decomposed = unicodedata.normalize("NFD", text)
-    return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
+        errors.append(invalid_range())
+    errors.extend(page.errors())
+    if page.cursor and EntryCursor.decode(page.cursor) is None:
+        errors.append(invalid_cursor())
+    return tuple(errors)

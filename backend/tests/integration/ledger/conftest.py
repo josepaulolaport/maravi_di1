@@ -4,7 +4,7 @@ to the real repository with fake Asset/Pricing collaborators."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -14,10 +14,11 @@ from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.ledger.application.services.ledger_service import LedgerService
-from di1.modules.ledger.dependencies import create_ledger_service
+from di1.modules.ledger.dependencies import build_ledger_service
 from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.database.session import create_session_factory
+from di1.platform.database.unit_of_work import UnitOfWork
 from tests.fakes.clock import FixedClock
 from tests.integration.databases import fresh_database_url
 from tests.integration.ledger.support import TODAY, seed_contracts
@@ -56,11 +57,17 @@ def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return create_session_factory(engine)
 
 
+ServiceOn = Callable[[UnitOfWork], LedgerService]
+"""Builds the service on a Unit of Work, as the composition does per request."""
+
+
 @pytest.fixture
-def service() -> LedgerService:
+def service() -> ServiceOn:
     assets = FakeAssets()
-    return create_ledger_service(
-        clock=FixedClock(TODAY),
-        assets=assets,
-        pricing=FormulaPricing(assets),
-    )
+
+    def on(uow: UnitOfWork) -> LedgerService:
+        return build_ledger_service(
+            uow, clock=FixedClock(TODAY), assets=assets, pricing=FormulaPricing(assets)
+        )
+
+    return on

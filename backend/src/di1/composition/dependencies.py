@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from di1.modules.asset.application.services.asset_service import AssetService
 from di1.modules.asset.dependencies import build_asset_reader, build_asset_service
 from di1.modules.ledger.application.services.ledger_service import LedgerService
-from di1.modules.ledger.dependencies import create_ledger_service, ledger_reader
+from di1.modules.ledger.dependencies import build_ledger_reader, build_ledger_service
 from di1.modules.portfolio.dependencies import portfolio_query_service
 from di1.modules.portfolio.public import PortfolioService
 from di1.modules.prices.application.services.price_service import PriceService
@@ -60,7 +60,9 @@ def get_asset_service(uow: RequestUnitOfWork) -> AssetService:
 def get_ledger_service(uow: RequestUnitOfWork, clock: AppClock) -> LedgerService:
     """Ledger over Asset's reader and Pricing, both on the request's session."""
     assets = build_asset_reader(uow.session)
-    return create_ledger_service(clock=clock, assets=assets, pricing=build_pricing_service(assets))
+    return build_ledger_service(
+        uow, clock=clock, assets=assets, pricing=build_pricing_service(assets)
+    )
 
 
 def get_price_reader(uow: RequestUnitOfWork) -> PriceReader:
@@ -95,5 +97,5 @@ def get_processing_service(uow: RequestUnitOfWork, clock: AppClock) -> Processin
     """Processing over Asset's and Ledger's readers on the request's session; the service holds
     no state, so building it per request costs only the objects."""
     return make_processing_service(
-        assets=build_asset_reader(uow.session), ledger=ledger_reader(uow.session), clock=clock
+        assets=build_asset_reader(uow.session), ledger=build_ledger_reader(uow.session), clock=clock
     )

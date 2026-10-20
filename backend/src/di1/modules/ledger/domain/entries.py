@@ -8,9 +8,10 @@
 - Nothing is dated after today (OQ-14). The typed PU or rate, its decimals, its bounds and the
   maturity rules (OQ-1, OQ-3, OQ-14) are Pricing's one quote validation, which the service runs
   next to these rules (``pricing.public.validate_quote``): domain code imports no other module.
-  The other value bounds are only the schema's CHECKs and column ranges (OQ-14).
+  The other value bounds are only the schema's CHECKs and column ranges (OQ-14); the ``INTEGER``
+  range of the quantity is the HTTP schema's.
 - Each validator returns every problem it finds, empty when the draft is valid; the service
-  raises them together.
+  raises them together and then writes a typed `NewTrade` or `NewCashMovement`.
 - A trade's cash effect is not stored: −signed_quantity × execution_pu, computed on read (§7.3).
 - Entries are never edited. A batch delete removes entries of either type for good, all or
   nothing (OQ-24; user decision 2026-10-19: no soft delete).
@@ -28,8 +29,8 @@ from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID
 
-from di1.shared.decimals import financial_context, fits_places
-from di1.shared.errors import DomainError, ErrorCode, ErrorDetail
+from di1.shared.decimals import ZERO, financial_context, fits_places
+from di1.shared.errors import ErrorCode, ErrorDetail, future_date, unknown_asset
 from di1.shared.input_kind import InputKind
 
 CASH_PLACES = 2
@@ -37,11 +38,6 @@ CASH_PLACES = 2
 
 _CASH_LIMIT = Decimal(10) ** (20 - CASH_PLACES)
 """``NUMERIC(20,2)`` holds absolute values below 10^18."""
-
-_INTEGER_MIN, _INTEGER_MAX = -(2**31), 2**31 - 1
-"""``signed_quantity INTEGER``."""
-
-_ZERO = Decimal(0)
 
 
 class EntryType(StrEnum):
@@ -65,6 +61,29 @@ class EntryDraft:
     execution_pu: Decimal | None = None
     execution_rate: Decimal | None = None
     cash_amount: Decimal | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class NewTrade:
+    """A validated and priced trade, as it is written: the typed value as typed, the other as
+    Pricing calculated it."""
+
+    entry_date: date
+    entry_time: time
+    asset_id: UUID
+    signed_quantity: int
+    input_kind: InputKind
+    execution_pu: Decimal
+    execution_rate: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class NewCashMovement:
+    """A validated aporte (positive) or retirada (negative), as it is written."""
+
+    entry_date: date
+    entry_time: time
+    amount: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +120,17 @@ class LedgerEntry:
         assert self.signed_quantity is not None and self.execution_pu is not None
         with financial_context():
             # 0 − q × PU rather than −(q × PU): never a negative zero.
-            return _ZERO - self.signed_quantity * self.execution_pu
+            return ZERO - self.signed_quantity * self.execution_pu
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerEntryView:
+    """An entry as the Lançamentos screen shows it: a trade with its contract's code and
+    instrument type (``None`` for a cash entry)."""
+
+    entry: LedgerEntry
+    asset_code: str | None
+    instrument_type_code: str | None
 
 
 def validate_trade(draft: EntryDraft, *, today: date, known: bool) -> tuple[ErrorDetail, ...]:
@@ -111,12 +140,8 @@ def validate_trade(draft: EntryDraft, *, today: date, known: bool) -> tuple[Erro
         raise ValueError(f"validate_trade expects a TRADE draft, got {draft.type}")
     errors = _date_errors(draft.entry_date, today) + _time_errors(draft.entry_time)
     if draft.asset_id is None or not known:
-        errors.append(ErrorDetail.validation("Selecione um contrato.", "asset_id"))
-    if (
-        draft.signed_quantity is None
-        or draft.signed_quantity == 0
-        or not _INTEGER_MIN <= draft.signed_quantity <= _INTEGER_MAX
-    ):
+        errors.append(unknown_asset())
+    if not draft.signed_quantity:
         errors.append(
             ErrorDetail.validation(
                 "A quantidade deve ser um inteiro diferente de zero.", "signed_quantity"
@@ -148,7 +173,9 @@ def validate_cash_movement(draft: EntryDraft, *, today: date) -> tuple[ErrorDeta
     if amount is None:
         errors.append(ErrorDetail.validation("Informe o valor.", "cash_amount"))
     elif not fits_places(amount, CASH_PLACES):
-        errors.append(_places_error(CASH_PLACES, "cash_amount"))
+        errors.append(
+            ErrorDetail.validation(f"Use no máximo {CASH_PLACES} casas decimais.", "cash_amount")
+        )
     elif amount.is_zero():
         errors.append(ErrorDetail.validation("O valor deve ser diferente de zero.", "cash_amount"))
     elif abs(amount) >= _CASH_LIMIT:
@@ -156,23 +183,21 @@ def validate_cash_movement(draft: EntryDraft, *, today: date) -> tuple[ErrorDeta
     return tuple(errors)
 
 
-def entries_to_delete(
+def validate_deletion(
     requested_ids: Collection[UUID], existing_ids: Collection[UUID]
-) -> tuple[UUID, ...]:
-    """The entries a batch delete removes, each once, given which of ``requested_ids`` exist.
-    All or nothing (OQ-24): an id that names no entry, including one already deleted, raises
-    ``NOT_FOUND`` and nothing is deleted. Deletion is for good (user, 2026-10-19)."""
+) -> tuple[ErrorDetail, ...]:
+    """A batch delete names at least one entry, and only entries that exist: all or nothing
+    (OQ-24), so an id that names no entry, including one already deleted, is ``NOT_FOUND`` and
+    nothing is deleted. Deletion is for good (user, 2026-10-19)."""
     if not requested_ids:
-        raise DomainError(ErrorDetail.validation("Selecione ao menos um lançamento.", "ids"))
+        return (ErrorDetail.validation("Selecione ao menos um lançamento.", "ids"),)
     if any(entry_id not in existing_ids for entry_id in requested_ids):
-        raise DomainError(ErrorDetail(ErrorCode.NOT_FOUND, "Lançamento não encontrado."))
-    return tuple(dict.fromkeys(requested_ids))
+        return (ErrorDetail(ErrorCode.NOT_FOUND, "Lançamento não encontrado."),)
+    return ()
 
 
 def _date_errors(entry_date: date, today: date) -> list[ErrorDetail]:
-    if entry_date > today:
-        return [ErrorDetail(ErrorCode.FUTURE_DATE, "A data não pode ser posterior a hoje.", "date")]
-    return []
+    return [future_date("date")] if entry_date > today else []
 
 
 def _time_errors(entry_time: time) -> list[ErrorDetail]:
@@ -181,7 +206,3 @@ def _time_errors(entry_time: time) -> list[ErrorDetail]:
     if entry_time.microsecond or entry_time.tzinfo is not None:
         return [ErrorDetail.validation("Informe a hora em horas, minutos e segundos.", "time")]
     return []
-
-
-def _places_error(places: int, field: str) -> ErrorDetail:
-    return ErrorDetail.validation(f"Use no máximo {places} casas decimais.", field)

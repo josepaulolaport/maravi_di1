@@ -14,14 +14,15 @@ from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from di1.composition.errors import install_problem_handlers
 from di1.modules.ledger.application.services.ledger_service import LedgerService
-from di1.modules.ledger.presentation.http.router import create_ledger_router
+from di1.modules.ledger.presentation.http.router import create_router
 from di1.platform.database.unit_of_work import SqlAlchemyUnitOfWork, UnitOfWork
+from tests.integration.ledger.conftest import ServiceOn
 from tests.unit.ledger.fakes import DI1F28, DI1F29, DI1V26
 
 PROBLEM_JSON = "application/problem+json"
@@ -124,17 +125,18 @@ RANGE = {"start_date": "2026-10-01", "end_date": "2026-10-18"}
 
 @pytest.fixture
 def client(
-    service: LedgerService, session_factory: async_sessionmaker[AsyncSession]
+    service: ServiceOn, session_factory: async_sessionmaker[AsyncSession]
 ) -> Iterator[TestClient]:
     async def unit_of_work() -> AsyncIterator[UnitOfWork]:
         async with SqlAlchemyUnitOfWork(session_factory) as uow:
             yield uow
 
+    def ledger_service(uow: UnitOfWork = Depends(unit_of_work)) -> LedgerService:  # noqa: B008
+        return service(uow)
+
     app = FastAPI()
     install_problem_handlers(app)
-    app.include_router(
-        create_ledger_router(get_service=lambda: service, get_unit_of_work=unit_of_work)
-    )
+    app.include_router(create_router(get_service=ledger_service))
     with TestClient(app) as test_client:
         yield test_client
 
@@ -375,7 +377,16 @@ def test_a_json_number_for_a_decimal_is_refused(client: TestClient) -> None:
     assert errors[0]["message"] == "Valor inválido."
 
 
-@pytest.mark.parametrize("value", ["25:00", "9:00", "10:30:00.5", ""])
+def test_non_ascii_digits_in_a_decimal_are_refused(client: TestClient) -> None:
+    # Arabic-Indic "123": Decimal() parses it to 123, yet only ASCII [0-9] is a typed decimal.
+    body = {**FIXTURE_REQUESTS[2], "execution_pu": "\u0661\u0662\u0663"}
+
+    assert_problem(
+        client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "execution_pu")
+    )
+
+
+@pytest.mark.parametrize("value", ["25:00", "9:00", "10:30:00.5", "", "\u0661\u0660:\u0663\u0660"])
 def test_a_malformed_time_is_refused(client: TestClient, value: str) -> None:
     body = {**FIXTURE_REQUESTS[0], "time": value}
 
@@ -389,6 +400,26 @@ def test_the_time_is_required(client: TestClient) -> None:
         client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "time")
     )
     assert errors[0]["message"] == "Campo obrigatório."
+
+
+@pytest.mark.parametrize("quantity", [2**31, -(2**31) - 1])
+def test_a_quantity_outside_the_integer_column_is_refused(
+    client: TestClient, quantity: int
+) -> None:
+    # signed_quantity is INTEGER: the HTTP schema refuses what the column cannot hold.
+    body = {**FIXTURE_REQUESTS[2], "signed_quantity": quantity}
+
+    errors = assert_problem(
+        client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", "signed_quantity")
+    )
+    assert errors[0]["message"] == "Valor inválido."
+
+
+@pytest.mark.parametrize("field", ["note", "deleted_at"])
+def test_an_unknown_body_field_is_refused(client: TestClient, field: str) -> None:
+    body = {**FIXTURE_REQUESTS[0], field: "x"}
+
+    assert_problem(client.post("/ledger/entries", json=body), 422, ("VALIDATION_ERROR", field))
 
 
 def test_a_cash_entry_with_trade_fields_is_refused(client: TestClient) -> None:

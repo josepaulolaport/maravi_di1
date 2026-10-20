@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from di1.modules.asset.public import Instrument
-from di1.modules.ledger.domain.entries import EntryDraft, EntryType, LedgerEntry
+from di1.modules.ledger.domain.entries import EntryType, LedgerEntry, NewCashMovement, NewTrade
 from di1.modules.ledger.domain.listing import ListOrder, PageRequest
 from di1.modules.pricing.public import Price, Quote
 from di1.shared.calendar import DAYS_PER_YEAR, calendar_days
@@ -136,32 +136,30 @@ class InMemoryLedgerRepository:
     next_seq: int = 1
     now: datetime = datetime(2026, 10, 18, 12, 0, tzinfo=SAO_PAULO)
 
-    async def add_trade(
-        self, draft: EntryDraft, *, execution_pu: Decimal, execution_rate: Decimal
-    ) -> LedgerEntry:
+    async def add_trade(self, trade: NewTrade) -> LedgerEntry:
         return self._add(
             type=EntryType.TRADE,
-            entry_date=draft.entry_date,
-            entry_time=draft.entry_time,
-            asset_id=draft.asset_id,
-            signed_quantity=draft.signed_quantity,
-            execution_pu=execution_pu,
-            execution_rate=execution_rate,
-            input_kind=draft.input_kind,
+            entry_date=trade.entry_date,
+            entry_time=trade.entry_time,
+            asset_id=trade.asset_id,
+            signed_quantity=trade.signed_quantity,
+            execution_pu=trade.execution_pu,
+            execution_rate=trade.execution_rate,
+            input_kind=trade.input_kind,
             cash_amount=None,
         )
 
-    async def add_cash_movement(self, draft: EntryDraft, *, amount: Decimal) -> LedgerEntry:
+    async def add_cash_movement(self, movement: NewCashMovement) -> LedgerEntry:
         return self._add(
             type=EntryType.CASH,
-            entry_date=draft.entry_date,
-            entry_time=draft.entry_time,
+            entry_date=movement.entry_date,
+            entry_time=movement.entry_time,
             asset_id=None,
             signed_quantity=None,
             execution_pu=None,
             execution_rate=None,
             input_kind=None,
-            cash_amount=amount,
+            cash_amount=movement.amount,
         )
 
     async def lock_existing(self, ids: Collection[UUID]) -> set[UUID]:
@@ -200,12 +198,6 @@ class InMemoryLedgerRepository:
             after = (request.after.entry_date, request.after.entry_time, request.after.seq)
             rows = [r for r in rows if (r.order_key < after if descending else r.order_key > after)]
         return rows[: request.limit + 1]
-
-    async def get_trades(self, start_date: date, end_date: date) -> Sequence[LedgerEntry]:
-        raise NotImplementedError
-
-    async def get_cash_movements(self, start_date: date, end_date: date) -> Sequence[LedgerEntry]:
-        raise NotImplementedError
 
     def _active(self, start_date: date, end_date: date) -> list[LedgerEntry]:
         return [row for row in self.rows if start_date <= row.entry_date <= end_date]
