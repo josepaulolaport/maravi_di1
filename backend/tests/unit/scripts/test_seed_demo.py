@@ -105,19 +105,42 @@ def test_an_empty_ledger_gets_the_demo_and_a_second_run_adds_nothing(
     assert "DEMO DATA ALREADY LOADED" in capsys.readouterr().out
 
 
-def test_a_run_that_died_before_its_last_price_fails_clearly(
+def test_a_failed_run_exits_0_and_says_why_so_the_ui_still_starts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The web service waits for the demo to complete successfully: a failure must never block
+    the UI, so the demo exits 0 and prints why its data is not loaded."""
+    api = FakeApi()
+    api.fail_on_price = 20  # the ledger is complete, the prices are not
+
+    assert run(api) == 0
+    assert "DEMO DATA NOT LOADED: POST /api/reference-prices" in capsys.readouterr().err
+
+
+def test_a_run_that_died_before_its_last_price_is_reported_never_loaded_again(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     api = FakeApi()
-    api.fail_on_price = 20  # the ledger is complete, the prices are not
-    assert run(api) == 1
+    api.fail_on_price = 20
+    run(api)
+    capsys.readouterr()
 
     api.fail_on_price = None
     entries = len(api.entries)
-    assert run(api, TODAY + timedelta(days=1)) == 1  # never "already loaded"
+    assert run(api, TODAY + timedelta(days=1)) == 0  # a later `up`
 
-    assert len(api.entries) == entries  # nothing written twice
-    assert "DEMO DATA INCOMPLETE" in capsys.readouterr().err
+    assert len(api.entries) == entries  # nothing written twice, never "already loaded"
+    err = capsys.readouterr().err
+    assert "DEMO DATA NOT LOADED" in err
+    assert "stopped before its last price" in err
+
+
+def test_an_unreachable_api_exits_0_and_says_why(capsys: pytest.CaptureFixture[str]) -> None:
+    def down(*_: object, **__: object) -> None:
+        raise seed_demo.urllib.error.URLError("connection refused")
+
+    assert int(seed_demo.run(API, call=down, today=TODAY)) == 0
+    assert "DEMO DATA NOT LOADED" in capsys.readouterr().err
 
 
 def test_a_ledger_that_is_not_the_demos_is_left_alone(capsys: pytest.CaptureFixture[str]) -> None:

@@ -135,13 +135,11 @@ automated acceptance tests with a fixed clock (`backend/tests/acceptance/`,
 service runs `scripts/seed_demo.py`, which writes through the HTTP API (so every validation and
 pricing rule applies). The dates are relative to the **first** `up`: data written on day X is dated
 X − 14 to X (São Paulo). Every later `up` finds the demo's last price and adds nothing ("already
-loaded"); a run that stopped part-way makes the `demo` service exit 1 ("incomplete") instead.
+loaded"); a run that stopped part-way is reported instead ("DEMO DATA NOT LOADED").
 `docker compose down -v` and `up` load a fresh copy dated from that day. `DI1_DEMO=0`
-turns it off (`make e2e` does, to keep its ledger empty). The UI does not wait for the demo: if the
-demo fails, the app still starts and works without its data; `docker compose ps -a demo` shows its
-exit status and `docker compose logs demo` says why. Since no service waits on the demo,
-`docker compose up --wait` reports its exit (even exit 0) as a failure; use `up -d` and check the
-demo as above, or add `--scale demo=0` when no demo data is wanted (`make e2e` does).
+turns it off (`make e2e` does, to keep its ledger empty). The demo always exits 0, so a failure never keeps
+the UI from starting: the app works without its data, and `docker compose logs demo` shows
+"DEMO DATA NOT LOADED: <reason>".
 
 - Three contracts: the January DI1 of each of the next three years (DI1F27, DI1F28 and DI1F29 when
   loaded in 2026, maturing 04/01/2027, 03/01/2028 and 02/01/2029).
