@@ -5,6 +5,7 @@
 # management UI on http://127.0.0.1:15672. The host ports come from .env (DI1_WEB_PORT,
 # DI1_API_PORT, DI1_DB_PORT, DI1_RABBITMQ_MANAGEMENT_PORT; user decision OQ-52), always bound to
 # 127.0.0.1; the containers keep their own ports, so the services' URLs never change.
+# PostgreSQL and RabbitMQ restart unless stopped, as the long-running backend services do.
 #
 # The credentials are local development defaults; override them with the DI1_* variables. Each
 # user and password sets the server's account and is also copied, as is, into DATABASE_URL or
@@ -58,6 +59,7 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+    restart: unless-stopped
 
   rabbitmq:
     image: rabbitmq:4.1-management
@@ -75,6 +77,7 @@ services:
       interval: 5s
       timeout: 10s
       retries: 30
+    restart: unless-stopped
 
   migrate:
     <<: *backend
@@ -174,7 +177,9 @@ services:
   # Exactly one processing worker (OQ-45), and no dispatcher (OQ-46): at startup it recovers an
   # interrupted run and sweeps the queued requests; then, on each run message, it takes the oldest
   # queued request, and sweeps after every run and every WORKER_SWEEP_INTERVAL_SECONDS (5 s). It
-  # must never be scaled. It stops on SIGTERM within the default grace period. It exits 1 on
+  # must never be scaled. On SIGTERM it stops consuming, cancels the job in progress and closes the
+# broker and the database, each step bounded at 5 s (di1.workers.lifecycle.CLOSE_TIMEOUT_SECONDS),
+# so a stop can take about 20 s: stop_grace_period gives it 30 s before SIGKILL. It exits 1 on
   # a startup failure, and when a run cannot record its end (the run would stay RUNNING and hold
   # the queue): the restart's recovery then finishes the run. Its heartbeat is touched every 5 s
   # by a task of its event loop, the startup recovery included, so a fresh file means the
@@ -186,6 +191,7 @@ services:
       <<: [*database-env, *broker-env]
       HEARTBEAT_FILE: /tmp/di1-worker.heartbeat
     healthcheck: *heartbeat-check
+    stop_grace_period: 30s
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -199,7 +205,7 @@ services:
     build: ./frontend
     image: di1-web:local
     ports:
-      - "127.0.0.1:${DI1_WEB_PORT:-8080}:80"
+      - "127.0.0.1:${DI1_WEB_PORT:-8080}:8080"
     depends_on:
       api:
         condition: service_healthy
@@ -208,7 +214,7 @@ services:
       demo:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
       interval: 5s
       timeout: 5s
       retries: 12
