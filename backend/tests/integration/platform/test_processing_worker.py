@@ -16,7 +16,7 @@ import os
 import re
 import signal
 import sys
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -44,8 +44,9 @@ from di1.platform.observability.heartbeat import Heartbeat
 from di1.workers import main as worker
 from di1.workers.main import JobFailedError, run_worker
 from tests.integration.platform.support import EFFECT, effects, make_envelope
-from tests.support.broker import close_connections, eventually, queue_spec
+from tests.support.broker import SilentServer, close_connections, queue_spec
 from tests.support.fakes import FakeClock
+from tests.support.waits import eventually
 
 
 @dataclass
@@ -193,6 +194,7 @@ async def test_the_worker_beats_its_heartbeat_from_its_start_until_it_stops(
     stop.set()
     await asyncio.wait_for(running, timeout=10)
     os.utime(path, (1000.0, 1000.0))
+    # A window in which nothing may happen: there is no event to wait for.
     await asyncio.sleep(0.2)
     assert path.stat().st_mtime == 1000.0  # stopped with the worker
 
@@ -352,6 +354,7 @@ async def test_a_dropped_broker_connection_does_not_cancel_the_run(
     await asyncio.wait_for(handler.entered.wait(), timeout=10)
 
     assert await close_connections(management_url, worker.CONNECTION_NAME) >= 1
+    # A window in which nothing may happen: there is no event to wait for.
     await asyncio.sleep(0.5)
     assert not handler.cancelled.is_set()
     handler.release.set()
@@ -401,6 +404,7 @@ async def test_a_message_arriving_during_a_run_is_acked_at_once_and_starts_nothi
 
     await publisher.publish(second)
 
+    # A window in which nothing may happen: there is no event to wait for.
     await asyncio.sleep(0.3)
     assert handler.claimed == [first]
     assert sweeps == []
@@ -473,26 +477,8 @@ async def test_a_failing_sweep_ends_the_worker_with_an_error(
     assert isinstance(raised.value.__cause__, RuntimeError)
 
 
-@pytest.fixture
-async def hanging_database_settings() -> AsyncIterator[Settings]:
-    """A TCP server that accepts connections and never answers: a database that hangs."""
-
-    async def hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        await reader.read()
-        writer.close()
-
-    server = await asyncio.start_server(hold, "127.0.0.1", 0)
-    port = server.sockets[0].getsockname()[1]
-    try:
-        yield Settings(
-            database_url=SecretStr(f"postgresql+psycopg://u:s3cret-pw@127.0.0.1:{port}/db")
-        )
-    finally:
-        server.close()
-
-
 async def test_a_stop_while_the_database_hangs_at_startup_ends_the_worker(
-    hanging_database_settings: Settings, broker_settings: BrokerSettings
+    hanging_database_settings: Settings, broker_settings: BrokerSettings, silent: SilentServer
 ) -> None:
     stop = asyncio.Event()
     running = asyncio.create_task(
@@ -503,7 +489,7 @@ async def test_a_stop_while_the_database_hangs_at_startup_ends_the_worker(
             stop=stop,
         )
     )
-    await asyncio.sleep(0.3)
+    await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
     assert not running.done()
 
     stop.set()
@@ -531,29 +517,8 @@ async def test_an_unreachable_database_ends_the_worker_before_it_consumes(
         )
 
 
-async def _silent_server() -> AsyncIterator[str]:
-    """A TCP server that accepts connections and never answers: a broker that hangs."""
-
-    async def hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        await reader.read()
-        writer.close()
-
-    server = await asyncio.start_server(hold, "127.0.0.1", 0)
-    port = server.sockets[0].getsockname()[1]
-    try:
-        yield f"amqp://guest:s3cret-pw@127.0.0.1:{port}/"
-    finally:
-        server.close()
-
-
-@pytest.fixture
-async def hanging_broker_url() -> AsyncIterator[str]:
-    async for url in _silent_server():
-        yield url
-
-
 async def test_a_stop_while_connecting_to_the_broker_ends_the_worker(
-    settings: Settings, hanging_broker_url: str
+    settings: Settings, hanging_broker_url: str, silent: SilentServer
 ) -> None:
     stop = asyncio.Event()
     running = asyncio.create_task(
@@ -564,7 +529,7 @@ async def test_a_stop_while_connecting_to_the_broker_ends_the_worker(
             stop=stop,
         )
     )
-    await asyncio.sleep(0.3)
+    await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
     assert not running.done()
 
     stop.set()
@@ -761,6 +726,7 @@ async def test_the_startup_hook_runs_once_before_the_first_delivery(
         )
     )
     await eventually(lambda: order == ["startup"])
+    # A window in which nothing may happen: there is no event to wait for.
     await asyncio.sleep(0.3)
     assert order == ["startup"]
 

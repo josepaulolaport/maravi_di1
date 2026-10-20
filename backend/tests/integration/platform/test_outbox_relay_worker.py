@@ -14,7 +14,6 @@ import os
 import re
 import signal
 import sys
-from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +33,8 @@ from di1.platform.messaging.topology import Topology
 from di1.platform.observability.heartbeat import Heartbeat
 from di1.workers import outbox_relay
 from di1.workers.outbox_relay import run_outbox_relay
-from tests.support.broker import eventually, queue_spec
+from tests.support.broker import SilentServer, queue_spec
+from tests.support.waits import eventually
 
 
 async def test_the_relay_declares_the_queues_and_publishes_until_stopped(
@@ -95,49 +95,32 @@ async def _first_message(
     """Wait until the relay has declared the queue and a message is in it. A passive declare of
     a queue that does not exist yet closes its channel, so each try uses a new one; a relay that
     failed ends the wait with its own error."""
-    async with asyncio.timeout(15):
-        while True:
-            if running.done():
-                running.result()
-                raise AssertionError("the relay stopped before publishing")
-            channel = await broker.channel()
-            try:
-                queue = await channel.declare_queue(queue_name, passive=True)
-                message = await queue.get(fail=False)
-                if message is not None:
-                    await message.ack()
-                    return message.body
-            except (ChannelClosed, ChannelInvalidStateError):
-                pass
-            finally:
-                if not channel.is_closed:
-                    await channel.close()
-            await asyncio.sleep(0.05)
+    bodies: list[bytes] = []
 
+    async def published() -> bool:
+        if running.done():
+            running.result()
+            raise AssertionError("the relay stopped before publishing")
+        channel = await broker.channel()
+        try:
+            queue = await channel.declare_queue(queue_name, passive=True)
+            message = await queue.get(fail=False)
+            if message is not None:
+                await message.ack()
+                bodies.append(message.body)
+        except (ChannelClosed, ChannelInvalidStateError):
+            pass
+        finally:
+            if not channel.is_closed:
+                await channel.close()
+        return bool(bodies)
 
-async def _silent_server() -> AsyncIterator[str]:
-    """A TCP server that accepts connections and never answers: a broker that hangs."""
-
-    async def hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        await reader.read()
-        writer.close()
-
-    server = await asyncio.start_server(hold, "127.0.0.1", 0)
-    port = server.sockets[0].getsockname()[1]
-    try:
-        yield f"amqp://guest:s3cret-pw@127.0.0.1:{port}/"
-    finally:
-        server.close()
-
-
-@pytest.fixture
-async def hanging_broker_url() -> AsyncIterator[str]:
-    async for url in _silent_server():
-        yield url
+    await eventually(published, within=15, every=0.05)
+    return bodies[0]
 
 
 async def test_a_stop_while_connecting_to_the_broker_ends_the_relay(
-    settings: Settings, hanging_broker_url: str
+    settings: Settings, hanging_broker_url: str, silent: SilentServer
 ) -> None:
     """SIGTERM must work even when the broker hangs at startup, before Docker's SIGKILL."""
     stop = asyncio.Event()
@@ -149,7 +132,7 @@ async def test_a_stop_while_connecting_to_the_broker_ends_the_relay(
             stop=stop,
         )
     )
-    await asyncio.sleep(0.3)
+    await eventually(lambda: silent.accepted > 0)  # stuck on the silent server
     assert not running.done()
 
     stop.set()

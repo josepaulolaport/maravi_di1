@@ -25,7 +25,8 @@ from di1.platform.messaging.outbox import OutboxRetention, add_outbox_message
 from di1.platform.messaging.outbox_relay import OutboxRelay
 from di1.platform.messaging.publisher import MessagePublisher
 from di1.platform.messaging.topology import Topology, declare_queue
-from tests.support.broker import eventually, queue_spec
+from tests.support.broker import queue_spec
+from tests.support.waits import eventually
 
 
 class _CrashError(BaseException):
@@ -284,13 +285,17 @@ async def test_run_publishes_new_messages_until_stopped(
 
 
 async def _wait_for_message(queue: AbstractQueue) -> bytes:
-    for _ in range(100):
+    bodies: list[bytes] = []
+
+    async def published() -> bool:
         message = await queue.get(timeout=5, fail=False)
         if message is not None:
             await message.ack()
-            return message.body
-        await asyncio.sleep(0.05)
-    raise AssertionError("the relay did not publish the message")
+            bodies.append(message.body)
+        return bool(bodies)
+
+    await eventually(published, every=0.05)
+    return bodies[0]
 
 
 class _FailsOnce:

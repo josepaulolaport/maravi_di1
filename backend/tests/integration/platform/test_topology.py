@@ -13,7 +13,8 @@ import aio_pika
 from aio_pika.abc import AbstractIncomingMessage, AbstractRobustConnection
 
 from di1.platform.messaging.topology import Topology, declare_exchange, declare_queue
-from tests.support.broker import eventually, queue_spec
+from tests.support.broker import queue_spec
+from tests.support.waits import eventually
 
 
 async def test_the_topology_is_a_durable_exchange_and_quorum_queue(
@@ -63,5 +64,6 @@ async def test_a_queue_receives_only_its_message_types(
 
     await work.consume(take)
     await eventually(lambda: bool(received))
+    # A window in which nothing may happen: there is no event to wait for.
     await asyncio.sleep(0.2)
     assert received == [b"test.command"]

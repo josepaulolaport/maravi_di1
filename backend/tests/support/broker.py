@@ -11,17 +11,18 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import inspect
+import contextlib
 import json
 import os
 import urllib.parse
 import urllib.request
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator
 
 import pytest
 from aio_pika.abc import AbstractRobustConnection
 
 from di1.platform.messaging.topology import QueueSpec, Topology
+from tests.support.waits import eventually
 
 
 def broker_url(variable: str = "TEST_RABBITMQ_URL") -> str:
@@ -50,16 +51,6 @@ async def delete_topology(connection: AbstractRobustConnection, topology: Topolo
         await channel.queue_delete(f"{topology.exchange}.{queue}")
     await channel.exchange_delete(topology.exchange)
     await channel.close()
-
-
-async def eventually(condition: Callable[[], bool | Awaitable[bool]], within: float = 10.0) -> None:
-    """Poll state that lives in the broker or the database: there is no event to await."""
-    async with asyncio.timeout(within):
-        while True:
-            result = condition()
-            if await result if inspect.isawaitable(result) else result:
-                return
-            await asyncio.sleep(0.05)
 
 
 def _management(url: str, method: str, path: str) -> object:
@@ -94,5 +85,36 @@ async def close_connections(url: str, connection_name: str) -> int:
         closed = await asyncio.to_thread(close)
         return closed > 0
 
-    await eventually(any_closed, within=15)
+    await eventually(any_closed, within=15, every=0.05)
     return closed
+
+
+class SilentServer:
+    """A TCP server that accepts connections and never answers: a broker or a database that
+    hangs. ``accepted`` counts the connections it took, so a test can wait until a client is
+    stuck on it instead of sleeping."""
+
+    def __init__(self) -> None:
+        self.accepted = 0
+        self.port = 0
+        self._held: list[asyncio.StreamWriter] = []
+
+    async def _hold(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        self.accepted += 1
+        self._held.append(writer)
+        await reader.read()
+        writer.close()
+
+
+@contextlib.asynccontextmanager
+async def silent_server() -> AsyncIterator[SilentServer]:
+    silent = SilentServer()
+    server = await asyncio.start_server(silent._hold, "127.0.0.1", 0)
+    silent.port = server.sockets[0].getsockname()[1]
+    try:
+        yield silent
+    finally:
+        for writer in silent._held:
+            writer.close()
+        server.close()
+        await server.wait_closed()

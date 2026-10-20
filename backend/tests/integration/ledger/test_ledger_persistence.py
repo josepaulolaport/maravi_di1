@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from di1.modules.ledger.application.services.ledger_service import LedgerService
 from di1.modules.ledger.dependencies import build_ledger_reader
@@ -33,6 +33,7 @@ from di1.shared.paging import PageParams
 from tests.integration.ledger.support import CONTRACTS, TODAY, ServiceOn, fetch
 from tests.support.builders import DI1F29, draft_cash, draft_trade
 from tests.support.fakes import FakeAssetReader, FakeClock
+from tests.support.waits import wait_for_a_lock_waiter
 
 Sessions = async_sessionmaker[AsyncSession]
 
@@ -288,7 +289,7 @@ async def test_a_deleted_entry_is_gone_for_good(
 
 
 async def test_an_overlapping_deletion_waits_then_deletes_nothing(
-    service: ServiceOn, session_factory: Sessions
+    service: ServiceOn, session_factory: Sessions, engine: AsyncEngine
 ) -> None:
     a, b, c = [
         await create(service, session_factory, draft_cash(amount=f"{n}.00")) for n in (1, 2, 3)
@@ -315,8 +316,8 @@ async def test_an_overlapping_deletion_waits_then_deletes_nothing(
     first = asyncio.create_task(delete(holding, session_factory, a, b))
     await asyncio.wait_for(first_holds_its_locks.wait(), timeout=5)
     second = asyncio.create_task(delete(service, session_factory, b, c))
-    await asyncio.sleep(0.3)
-    assert not second.done()  # waiting on b, locked by the first batch
+    await wait_for_a_lock_waiter(engine)  # the second batch waits on b, locked by the first
+    assert not second.done()
 
     release_first.set()
     await asyncio.wait_for(first, timeout=10)

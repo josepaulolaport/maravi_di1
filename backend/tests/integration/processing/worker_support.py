@@ -4,7 +4,6 @@ rolled-back savepoint or date leaves no row."""
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -40,6 +39,7 @@ from di1.platform.database.unit_of_work import UnitOfWork, unit_of_work_factory
 from di1.platform.messaging.envelope import Envelope
 from di1.shared.clock import SAO_PAULO
 from tests.integration.processing.support import make_service
+from tests.support.waits import wait_for_a_lock_waiter
 from tests.unit.processing.run_fakes import World
 
 T0 = datetime(2026, 10, 19, 9, 0, tzinfo=SAO_PAULO)
@@ -261,18 +261,7 @@ class Worker:
     async def wait_for_a_lock_waiter(self, count: int = 1) -> None:
         """Returns once ``count`` other sessions of this database wait on a lock (the cancel
         queued behind the run's row lock); fails after 5 seconds."""
-        async with asyncio.timeout(5):
-            while True:
-                async with self.engine.connect() as connection:
-                    waiting = await connection.scalar(
-                        text(
-                            "SELECT count(*) FROM pg_stat_activity"
-                            " WHERE datname = current_database() AND wait_event_type = 'Lock'"
-                        )
-                    )
-                if waiting >= count:
-                    return
-                await asyncio.sleep(0.01)
+        await wait_for_a_lock_waiter(self.engine, count)
 
     async def execute(self, statement: str, **params: Any) -> None:
         async with self.engine.begin() as connection:

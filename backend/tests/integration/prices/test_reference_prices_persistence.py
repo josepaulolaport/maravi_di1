@@ -24,6 +24,7 @@ from di1.shared.input_kind import InputKind
 from tests.integration.prices.support import ServiceOn
 from tests.support.builders import DI1F28, DI1F29, DI1V26
 from tests.support.fakes import CALCULATED_RATE
+from tests.support.waits import wait_for_a_lock_waiter
 
 DAY = date(2026, 10, 16)
 _COUNT_ID = text("SELECT count(*) FROM prices.reference_prices WHERE id = :id")
@@ -124,7 +125,7 @@ class TestOnePerSource:
                     rate=Decimal("0.1"),
                 )
                 first_written.set()
-                await asyncio.sleep(0.3)  # the second write waits on this row's key
+                await wait_for_a_lock_waiter(engine)  # the second write waits on this row's key
                 await uow.commit()
                 return record
 

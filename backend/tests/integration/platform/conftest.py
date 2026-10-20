@@ -16,7 +16,7 @@ from di1.platform.database.engine import create_engine
 from di1.platform.messaging.connection import connect
 from di1.platform.messaging.topology import Topology
 from tests.integration.platform.support import CREATE_EFFECTS
-from tests.support.broker import broker_url, delete_topology
+from tests.support.broker import SilentServer, broker_url, delete_topology, silent_server
 
 
 @pytest.fixture
@@ -66,3 +66,23 @@ async def broker(
     finally:
         await delete_topology(connection, topology)
         await connection.close()
+
+
+@pytest.fixture
+async def silent() -> AsyncIterator[SilentServer]:
+    async with silent_server() as server:
+        yield server
+
+
+@pytest.fixture
+def hanging_broker_url(silent: SilentServer) -> str:
+    """A broker that accepts the connection and never answers."""
+    return f"amqp://guest:s3cret-pw@127.0.0.1:{silent.port}/"
+
+
+@pytest.fixture
+def hanging_database_settings(silent: SilentServer) -> Settings:
+    """A database that accepts the connection and never answers."""
+    return Settings(
+        database_url=SecretStr(f"postgresql+psycopg://u:s3cret-pw@127.0.0.1:{silent.port}/db")
+    )
