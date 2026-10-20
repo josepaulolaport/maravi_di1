@@ -41,6 +41,8 @@ def _values(enum: type[Enum]) -> set[str]:
         ("portfolio.position_metrics", "valuation_status", ValuationStatus),
         ("portfolio.position_metrics", "pnl_status", CalculationCompleteness),
         ("portfolio.portfolio_metrics", "pnl_status", CalculationCompleteness),
+        # The portfolio total's valuation is stored as CalculationCompleteness (repositories.py).
+        ("portfolio.portfolio_metrics", "valuation_status", CalculationCompleteness),
     ],
     ids=lambda value: value if isinstance(value, str) else value.__name__,
 )
