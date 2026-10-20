@@ -25,7 +25,7 @@ from di1.platform.messaging.topology import QueueSpec, Topology
 from tests.support.waits import eventually
 
 
-def broker_url(variable: str = "TEST_RABBITMQ_URL") -> str:
+def broker_env(variable: str = "TEST_RABBITMQ_URL") -> str:
     """The URL in ``variable``; the test is skipped, or failed when broker tests are required,
     without it."""
     url = os.environ.get(variable)

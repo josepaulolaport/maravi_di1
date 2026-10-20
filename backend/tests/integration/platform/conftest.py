@@ -11,12 +11,12 @@ from aio_pika.abc import AbstractRobustConnection
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from di1.platform.config import BrokerSettings, Settings
+from di1.platform.config import Settings
 from di1.platform.database.engine import create_engine
 from di1.platform.messaging.connection import connect
 from di1.platform.messaging.topology import Topology
 from tests.integration.platform.support import CREATE_EFFECTS
-from tests.support.broker import SilentServer, broker_url, delete_topology, silent_server
+from tests.support.broker import SilentServer, broker_env, delete_topology, silent_server
 
 
 @pytest.fixture
@@ -32,21 +32,18 @@ async def engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
 
 
 @pytest.fixture
-def broker_settings() -> BrokerSettings:
+def broker_url() -> SecretStr:
     """``TEST_RABBITMQ_URL`` is a test broker (``amqp://guest:guest@127.0.0.1:5672/``). Without
     it the broker tests are skipped and reported, so **not verified**; with
     ``REQUIRE_BROKER_TESTS=1`` a missing variable fails the run instead."""
-    return BrokerSettings(
-        rabbitmq_url=SecretStr(broker_url()),
-        rabbitmq_publish_timeout_seconds=5,
-    )
+    return SecretStr(broker_env("TEST_RABBITMQ_URL"))
 
 
 @pytest.fixture
 def management_url() -> str:
     """``TEST_RABBITMQ_MANAGEMENT_URL`` (``http://guest:guest@127.0.0.1:15672``): the reconnect
     test closes connections through the management API."""
-    return broker_url("TEST_RABBITMQ_MANAGEMENT_URL")
+    return broker_env("TEST_RABBITMQ_MANAGEMENT_URL")
 
 
 @pytest.fixture
@@ -58,9 +55,9 @@ def topology() -> Topology:
 
 @pytest.fixture
 async def broker(
-    broker_settings: BrokerSettings, topology: Topology
+    broker_url: SecretStr, topology: Topology
 ) -> AsyncIterator[AbstractRobustConnection]:
-    connection = await connect(broker_settings, connection_name=f"{topology.exchange}.test")
+    connection = await connect(broker_url, connection_name=f"{topology.exchange}.test")
     try:
         yield connection
     finally:
