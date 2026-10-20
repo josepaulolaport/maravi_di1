@@ -5,7 +5,7 @@ Pendências' SQL are tested on PostgreSQL (``tests/integration/processing/test_r
 from __future__ import annotations
 
 from datetime import date, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -332,7 +332,15 @@ async def test_12_a_limit_outside_1_to_200_is_refused(harness: Harness, limit: i
 
 @pytest.mark.parametrize(
     "cursor",
-    ["%%%", "bm90LWEta2V5c2V0", RequestCursor(T0, uuid4()).encode()[:-3], "MjAyNi0xMC0xOXx4"],
+    [
+        pytest.param("%%%", id="not-base64"),
+        pytest.param("bm90LWEta2V5c2V0", id="not-a-keyset"),
+        pytest.param(
+            RequestCursor(T0, UUID("00000000-0000-4000-8000-000000000001")).encode()[:-3],
+            id="truncated",
+        ),
+        pytest.param("MjAyNi0xMC0xOXx4", id="bad-uuid"),
+    ],
 )
 async def test_12_an_invalid_cursor_is_refused(harness: Harness, cursor: str) -> None:
     with pytest.raises(DomainError) as raised:
